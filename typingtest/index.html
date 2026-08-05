@@ -1064,6 +1064,30 @@
         let timer = TEST_DURATION;
         let interval = null;
         let isRunning = false;
+        let isPausedByCall = false;
+
+        // Global pause/resume hooks — driven by notifications.js call events.
+        window.addEventListener('ws:call-incoming', () => {
+            if (isRunning && interval) {
+                clearInterval(interval);
+                interval = null;
+                isPausedByCall = true;
+            }
+        });
+        window.addEventListener('ws:call-ended', () => {
+            // Timer will resume when user clicks "Resume session" banner
+        });
+        window.addEventListener('ws:call-resume', () => {
+            if (isPausedByCall && isRunning && !interval) {
+                interval = setInterval(() => {
+                    timer--;
+                    updateTimerDisplay();
+                    updateStats();
+                    if (timer <= 0) endTest();
+                }, 1000);
+            }
+            isPausedByCall = false;
+        });
         let currentPassage = "";
         let currentIndex = 0;
         let errors = 0;
