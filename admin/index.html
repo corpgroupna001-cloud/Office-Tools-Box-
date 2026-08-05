@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Network Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            background: #0b1120;
+            background-image:
+                radial-gradient(at 15% 12%, hsla(258, 90%, 55%, 0.55) 0, transparent 45%),
+                radial-gradient(at 85% 15%, hsla(200, 95%, 55%, 0.45) 0, transparent 45%),
+                radial-gradient(at 50% 90%, hsla(320, 80%, 55%, 0.45) 0, transparent 50%);
+            background-attachment: fixed;
+            color: #f8fafc;
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .glass {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(24px) saturate(180%);
+            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+        }
+        .glass-strong {
+            background: rgba(255, 255, 255, 0.12);
+            backdrop-filter: blur(30px) saturate(200%);
+            -webkit-backdrop-filter: blur(30px) saturate(200%);
+            border: 1px solid rgba(255, 255, 255, 0.22);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+            box-shadow: 0 10px 30px rgba(59, 130, 246, 0.4);
+        }
+        .btn-primary:hover:not(:disabled) { transform: translateY(-2px); }
+        table { border-collapse: separate; border-spacing: 0; }
+        th, td { padding: 12px 16px; text-align: left; }
+        th { font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: #94a3b8; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        tbody tr { border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.15s; }
+        tbody tr:hover { background: rgba(255,255,255,0.04); }
+        select, input { color-scheme: dark; }
+    </style>
+</head>
+<body>
+
+    <!-- Password gate -->
+    <div id="gate" class="fixed inset-0 z-50 flex items-center justify-center p-4" style="background: rgba(11,17,32,0.8); backdrop-filter: blur(20px);">
+        <form id="gate-form" class="glass-strong w-full max-w-md rounded-[2.5rem] p-12 text-center">
+            <div class="w-20 h-20 rounded-3xl mx-auto mb-6 flex items-center justify-center" style="background: linear-gradient(135deg,#f43f5e,#a855f7);">
+                <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <h1 class="text-3xl font-black mb-2">Network Admin</h1>
+            <p class="text-slate-400 mb-8 text-sm">Restricted area. Enter password to continue.</p>
+            <input id="gate-password" type="password" placeholder="Admin password" autocomplete="off"
+                class="glass w-full px-6 py-4 rounded-2xl mb-4 font-bold text-lg text-center focus:outline-none focus:ring-4 focus:ring-blue-400/20 focus:border-blue-400">
+            <p id="gate-error" class="text-rose-300 text-sm font-bold mb-4 hidden">Incorrect password.</p>
+            <button type="submit" id="gate-submit" class="btn-primary w-full text-white font-black py-4 rounded-2xl">Unlock</button>
+        </form>
+    </div>
+
+    <!-- Dashboard (hidden until unlocked) -->
+    <div id="dashboard" class="hidden">
+        <nav class="glass border-b border-white/10 sticky top-0 z-30" style="background: rgba(15,23,42,0.4);">
+            <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background: linear-gradient(135deg,#f43f5e,#a855f7);">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                    </div>
+                    <div>
+                        <div class="font-black text-lg">Network Admin</div>
+                        <div class="text-xs text-slate-400">ZenType Employee Analytics</div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button id="refresh-btn" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/20">Refresh</button>
+                    <button id="logout-btn" class="glass px-4 py-2 rounded-xl text-sm font-bold text-rose-300 hover:bg-rose-500/20">Lock</button>
+                </div>
+            </div>
+        </nav>
+
+        <main class="max-w-7xl mx-auto px-6 py-10">
+            <!-- Stats -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                <div class="glass rounded-2xl p-5">
+                    <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Total Tests</p>
+                    <p id="stat-tests" class="text-3xl font-black">0</p>
+                </div>
+                <div class="glass rounded-2xl p-5">
+                    <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Employees</p>
+                    <p id="stat-employees" class="text-3xl font-black">0</p>
+                </div>
+                <div class="glass rounded-2xl p-5">
+                    <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Avg WPM</p>
+                    <p id="stat-wpm" class="text-3xl font-black text-blue-300">0</p>
+                </div>
+                <div class="glass rounded-2xl p-5">
+                    <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Avg Accuracy</p>
+                    <p id="stat-acc" class="text-3xl font-black text-emerald-300">0%</p>
+                </div>
+            </div>
+
+            <!-- Trend chart -->
+            <div class="glass rounded-2xl p-5 mb-6">
+                <div class="flex justify-between items-center mb-3">
+                    <div>
+                        <h3 class="font-black text-white text-base">Tests per Day</h3>
+                        <p class="text-slate-400 text-[10px] uppercase tracking-widest font-bold">Last 30 days</p>
+                    </div>
+                </div>
+                <div style="height: 180px; position: relative;">
+                    <canvas id="trend-chart"></canvas>
+                </div>
+            </div>
+
+            <!-- Section tabs -->
+            <div class="glass rounded-2xl p-1 mb-6 flex flex-wrap w-fit">
+                <button data-tab="results"   class="admin-tab px-6 py-2.5 rounded-xl font-black text-sm text-white bg-white/10" type="button">⌨️ Typing</button>
+                <button data-tab="quizzes"   class="admin-tab px-6 py-2.5 rounded-xl font-black text-sm text-slate-300" type="button">🧠 Quizzes</button>
+                <button data-tab="employees" class="admin-tab px-6 py-2.5 rounded-xl font-black text-sm text-slate-300" type="button">👥 Employees</button>
+            </div>
+
+            <!-- Filters (RESULTS TAB) -->
+            <div id="results-panel">
+            <div class="glass rounded-2xl p-4 mb-6 flex flex-wrap gap-3 items-center">
+                <input id="search-input" type="text" placeholder="Search by name or email…"
+                    class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
+                <select id="sort-select" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                    <option value="created_at.desc">Newest First</option>
+                    <option value="created_at.asc">Oldest First</option>
+                    <option value="wpm.desc">Highest WPM</option>
+                    <option value="wpm.asc">Lowest WPM</option>
+                    <option value="accuracy.desc">Highest Accuracy</option>
+                </select>
+                <button id="export-btn" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Export CSV</button>
+            </div>
+
+            <!-- Results table -->
+            <div class="glass rounded-2xl overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr>
+                                <th>Employee</th>
+                                <th>Email</th>
+                                <th>WPM</th>
+                                <th>Accuracy</th>
+                                <th>CPM</th>
+                                <th>Errors</th>
+                                <th>Duration</th>
+                                <th>Category</th>
+                                <th>Person</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody id="results-tbody"></tbody>
+                    </table>
+                </div>
+                <div id="empty-state" class="hidden p-16 text-center text-slate-400">
+                    <p class="font-bold text-lg mb-1">No results yet</p>
+                    <p class="text-sm">Employee test results will appear here as they complete assessments.</p>
+                </div>
+            </div>
+            </div><!-- /#results-panel -->
+
+            <!-- QUIZ PANEL -->
+            <div id="quizzes-panel" class="hidden">
+                <!-- Stat cards -->
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                    <div class="glass rounded-2xl p-5">
+                        <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Total Quizzes</p>
+                        <p id="qstat-total" class="text-3xl font-black text-white">0</p>
+                    </div>
+                    <div class="glass rounded-2xl p-5">
+                        <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Avg Score</p>
+                        <p id="qstat-score" class="text-3xl font-black text-orange-300">0</p>
+                    </div>
+                    <div class="glass rounded-2xl p-5">
+                        <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Avg Accuracy</p>
+                        <p id="qstat-acc" class="text-3xl font-black text-emerald-300">0%</p>
+                    </div>
+                    <div class="glass rounded-2xl p-5">
+                        <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Violations</p>
+                        <p id="qstat-violations" class="text-3xl font-black text-rose-300">0</p>
+                    </div>
+                    <div class="glass rounded-2xl p-5">
+                        <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">AI Quizzes</p>
+                        <p id="qstat-ai" class="text-3xl font-black text-purple-300">0</p>
+                    </div>
+                </div>
+
+                <!-- Charts row -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                    <div class="glass rounded-2xl p-5">
+                        <div class="mb-3">
+                            <h3 class="font-black text-white text-base">Quizzes per Day</h3>
+                            <p class="text-slate-400 text-[10px] uppercase tracking-widest font-bold">Last 30 days</p>
+                        </div>
+                        <div style="height: 180px; position: relative;">
+                            <canvas id="quiz-trend-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="glass rounded-2xl p-5">
+                        <div class="mb-3">
+                            <h3 class="font-black text-white text-base">Attempts by Category</h3>
+                            <p class="text-slate-400 text-[10px] uppercase tracking-widest font-bold">All time</p>
+                        </div>
+                        <div style="height: 180px; position: relative;">
+                            <canvas id="quiz-category-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div class="glass rounded-2xl p-4 mb-6 flex flex-wrap gap-3 items-center">
+                    <input id="quiz-search" type="text" placeholder="Search by name or email…"
+                        class="glass flex-1 min-w-[180px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-400/40">
+                    <select id="quiz-cat-filter" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                        <option value="">All categories</option>
+                    </select>
+                    <select id="quiz-sort" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                        <option value="created_at.desc">Newest First</option>
+                        <option value="created_at.asc">Oldest First</option>
+                        <option value="score.desc">Highest Score</option>
+                        <option value="accuracy.desc">Highest Accuracy</option>
+                        <option value="violations.desc">Most Violations</option>
+                    </select>
+                    <label class="glass px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
+                        <input type="checkbox" id="quiz-ai-only" class="accent-purple-500"> AI only
+                    </label>
+                    <label class="glass px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white">
+                        <input type="checkbox" id="quiz-viol-only" class="accent-rose-500"> With strikes
+                    </label>
+                    <button id="quiz-export" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Export CSV</button>
+                </div>
+
+                <!-- Table -->
+                <div class="glass rounded-2xl overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr>
+                                    <th>Employee</th>
+                                    <th>Category</th>
+                                    <th>Difficulty</th>
+                                    <th>Score</th>
+                                    <th>Accuracy</th>
+                                    <th>Time</th>
+                                    <th>Strikes</th>
+                                    <th>Source</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody id="quiz-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div id="quiz-empty" class="hidden p-16 text-center text-slate-400">
+                        <p class="font-bold text-lg mb-1">No quiz results yet</p>
+                        <p class="text-sm">Employees will appear here after they complete MCQ quizzes.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EMPLOYEES PANEL -->
+            <div id="employees-panel" class="hidden">
+                <div class="glass rounded-2xl p-4 mb-6 flex flex-wrap gap-3 items-center">
+                    <input id="emp-search" type="text" placeholder="Search employees…"
+                        class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
+                    <select id="emp-sort" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                        <option value="created_at.desc">Newest Joined</option>
+                        <option value="created_at.asc">Oldest Joined</option>
+                        <option value="tests.desc">Most Tests</option>
+                        <option value="best_wpm.desc">Highest WPM</option>
+                        <option value="last_test_at.desc">Recently Active</option>
+                    </select>
+                    <button id="emp-refresh" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh</button>
+                </div>
+
+                <div class="glass rounded-2xl overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Joined</th>
+                                    <th>⌨️ Tests</th>
+                                    <th>Best WPM</th>
+                                    <th>🧠 Quizzes</th>
+                                    <th>Best Score</th>
+                                    <th>Strikes</th>
+                                    <th>Last Active</th>
+                                    <th class="text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="emp-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div id="emp-empty" class="hidden p-16 text-center text-slate-400">
+                        <p class="font-bold text-lg mb-1">No employees yet</p>
+                        <p class="text-sm">Employees will appear here once they sign up.</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Edit Employee modal -->
+    <div id="edit-emp-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);">
+        <div class="glass-strong w-full max-w-md rounded-3xl p-8">
+            <h3 class="text-2xl font-black text-white mb-1 text-center">Edit Employee</h3>
+            <p id="edit-emp-email" class="text-slate-400 text-sm text-center mb-6">—</p>
+            <label class="text-[10px] uppercase tracking-widest text-slate-400 font-black block mb-2">Full Name</label>
+            <input id="edit-emp-name" type="text" class="glass w-full px-4 py-3 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-400/40 font-bold mb-6">
+            <div class="flex gap-3">
+                <button id="edit-emp-cancel" type="button" class="glass flex-1 text-white font-bold py-3 rounded-xl">Cancel</button>
+                <button id="edit-emp-save" type="button" class="btn-primary flex-1 text-white font-black py-3 rounded-xl">Save</button>
+            </div>
+            <p id="edit-emp-err" class="text-rose-300 text-sm font-bold mt-3 hidden text-center"></p>
+        </div>
+    </div>
+
+    <!-- Delete confirmation modal -->
+    <div id="delete-emp-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);">
+        <div class="glass-strong w-full max-w-md rounded-3xl p-8 text-center">
+            <div class="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center" style="background: linear-gradient(135deg,#f43f5e,#dc2626);">
+                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </div>
+            <h3 class="text-2xl font-black text-white mb-2">Delete Employee?</h3>
+            <p class="text-slate-300 mb-1">This will permanently remove</p>
+            <p id="delete-emp-name" class="text-white font-black text-lg mb-1">—</p>
+            <p class="text-slate-400 text-sm mb-6">and ALL their test results. This cannot be undone.</p>
+            <div class="flex gap-3">
+                <button id="delete-emp-cancel" type="button" class="glass flex-1 text-white font-bold py-3 rounded-xl">Cancel</button>
+                <button id="delete-emp-confirm" type="button" class="flex-1 text-white font-black py-3 rounded-xl" style="background: linear-gradient(135deg,#f43f5e,#dc2626); box-shadow: 0 10px 30px rgba(244,63,94,0.4);">Delete</button>
+            </div>
+            <p id="delete-emp-err" class="text-rose-300 text-sm font-bold mt-3 hidden"></p>
+        </div>
+    </div>
+
+    <script>
+        let adminPassword = '';
+        let allResults = [];
+        let allEmployees = [];
+        let allQuizzes = [];
+        let currentTab = 'results';
+        let editingEmployee = null;
+        let deletingEmployee = null;
+        let quizTrendChart = null;
+        let quizCategoryChart = null;
+
+        const QUIZ_CATEGORIES = {
+            mac: '🍎 MacBook', windows: '🪟 Windows', vscode: '💻 VS Code',
+            chrome: '🌐 Chrome', excel: '📊 Excel',
+            logic: '🧠 Logic', math: '🔢 Math', gk: '📚 GK',
+            aptitude: '🎯 Aptitude', riddles: '🧩 Riddles',
+            ai: '🤖 AI Quiz'
+        };
+
+        const gate = document.getElementById('gate');
+        const dashboard = document.getElementById('dashboard');
+        const gateError = document.getElementById('gate-error');
+        const gateSubmit = document.getElementById('gate-submit');
+        const gatePassword = document.getElementById('gate-password');
+
+        document.getElementById('gate-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const pw = gatePassword.value;
+            if (!pw) return;
+            gateSubmit.disabled = true;
+            gateSubmit.innerText = 'Checking…';
+            gateError.classList.add('hidden');
+            try {
+                const r = await fetch('/api/admin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: pw, action: 'results' })
+                });
+                const data = await r.json();
+                if (!r.ok) {
+                    gateError.innerText = data.error || 'Incorrect password.';
+                    gateError.classList.remove('hidden');
+                    gateSubmit.disabled = false;
+                    gateSubmit.innerText = 'Unlock';
+                    return;
+                }
+                adminPassword = pw;
+                allResults = data.results || [];
+                gate.classList.add('hidden');
+                dashboard.classList.remove('hidden');
+                renderAll();
+            } catch (err) {
+                gateError.innerText = 'Network error. Please try again.';
+                gateError.classList.remove('hidden');
+                gateSubmit.disabled = false;
+                gateSubmit.innerText = 'Unlock';
+            }
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', () => {
+            adminPassword = '';
+            allResults = [];
+            gatePassword.value = '';
+            dashboard.classList.add('hidden');
+            gate.classList.remove('hidden');
+        });
+
+        document.getElementById('refresh-btn').addEventListener('click', async () => {
+            if (!adminPassword) return;
+            const r = await fetch('/api/admin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: adminPassword, action: 'results' })
+            });
+            const data = await r.json();
+            if (r.ok) {
+                allResults = data.results || [];
+                renderAll();
+            }
+        });
+
+        document.getElementById('search-input').addEventListener('input', renderTable);
+        document.getElementById('sort-select').addEventListener('change', renderTable);
+
+        function renderAll() {
+            // Stats
+            document.getElementById('stat-tests').innerText = allResults.length;
+            renderTrendChart();
+            const uniqUsers = new Set(allResults.map(r => r.user_id)).size;
+            document.getElementById('stat-employees').innerText = uniqUsers;
+            const avgWpm = allResults.length ? Math.round(allResults.reduce((s, r) => s + (r.wpm || 0), 0) / allResults.length) : 0;
+            const avgAcc = allResults.length ? Math.round(allResults.reduce((s, r) => s + (r.accuracy || 0), 0) / allResults.length) : 0;
+            document.getElementById('stat-wpm').innerText = avgWpm;
+            document.getElementById('stat-acc').innerText = avgAcc + '%';
+            renderTable();
+        }
+
+        function renderTable() {
+            const search = document.getElementById('search-input').value.trim().toLowerCase();
+            const sort = document.getElementById('sort-select').value;
+            const [sortKey, sortDir] = sort.split('.');
+
+            let filtered = allResults;
+            if (search) {
+                filtered = filtered.filter(r =>
+                    (r.full_name || '').toLowerCase().includes(search) ||
+                    (r.email || '').toLowerCase().includes(search)
+                );
+            }
+            filtered = filtered.slice().sort((a, b) => {
+                const av = a[sortKey], bv = b[sortKey];
+                if (av == null) return 1;
+                if (bv == null) return -1;
+                if (sortKey === 'created_at') return sortDir === 'asc' ? new Date(av) - new Date(bv) : new Date(bv) - new Date(av);
+                return sortDir === 'asc' ? av - bv : bv - av;
+            });
+
+            const tbody = document.getElementById('results-tbody');
+            const empty = document.getElementById('empty-state');
+            if (filtered.length === 0) {
+                tbody.innerHTML = '';
+                empty.classList.remove('hidden');
+                return;
+            }
+            empty.classList.add('hidden');
+            tbody.innerHTML = filtered.map(r => `
+                <tr>
+                    <td class="font-bold">${escapeHtml(r.full_name || '—')}</td>
+                    <td class="text-slate-300 text-xs">${escapeHtml(r.email || '—')}</td>
+                    <td class="mono font-black text-blue-300">${r.wpm ?? '—'}</td>
+                    <td class="mono font-black text-emerald-300">${r.accuracy ?? '—'}%</td>
+                    <td class="mono text-slate-300">${r.cpm ?? '—'}</td>
+                    <td class="mono text-rose-300">${r.errors ?? '—'}</td>
+                    <td class="mono text-slate-300">${r.duration ? Math.round(r.duration / 60) + 'm' : '—'}</td>
+                    <td class="text-slate-300 text-xs">${escapeHtml(r.category || '—')}</td>
+                    <td class="text-slate-300 text-xs">${escapeHtml(r.person || '—')}</td>
+                    <td class="text-slate-400 text-xs">${formatDate(r.created_at)}</td>
+                </tr>
+            `).join('');
+        }
+
+        let trendChart = null;
+        // ============================================================
+        // QUIZ TAB
+        // ============================================================
+        async function loadQuizzes() {
+            if (!adminPassword) return;
+            document.getElementById('quiz-tbody').innerHTML = '<tr><td colspan="9" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading quizzes…</td></tr>';
+            try {
+                const r = await fetch('/api/admin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: adminPassword, action: 'quiz_results' })
+                });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.error || 'Failed');
+                allQuizzes = data.results || [];
+                populateQuizCategoryFilter();
+                renderQuizStats();
+                renderQuizTable();
+                renderQuizTrendChart();
+                renderQuizCategoryChart();
+            } catch (e) {
+                document.getElementById('quiz-tbody').innerHTML = `<tr><td colspan="9" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
+            }
+        }
+
+        function populateQuizCategoryFilter() {
+            const sel = document.getElementById('quiz-cat-filter');
+            const cats = new Set(allQuizzes.map(q => q.category).filter(Boolean));
+            const opts = ['<option value="">All categories</option>'];
+            cats.forEach(c => opts.push(`<option value="${c}">${QUIZ_CATEGORIES[c] || c}</option>`));
+            sel.innerHTML = opts.join('');
+        }
+
+        function renderQuizStats() {
+            const rows = allQuizzes;
+            document.getElementById('qstat-total').innerText = rows.length;
+            if (rows.length > 0) {
+                const avgScore = (rows.reduce((s, r) => s + (r.score || 0), 0) / rows.length).toFixed(1);
+                const avgAcc = Math.round(rows.reduce((s, r) => s + (r.accuracy || 0), 0) / rows.length);
+                const totalViol = rows.reduce((s, r) => s + (r.violations || 0), 0);
+                const aiCount = rows.filter(r => r.ai_generated).length;
+                document.getElementById('qstat-score').innerText = avgScore;
+                document.getElementById('qstat-acc').innerText = avgAcc + '%';
+                document.getElementById('qstat-violations').innerText = totalViol;
+                document.getElementById('qstat-ai').innerText = aiCount;
+            } else {
+                document.getElementById('qstat-score').innerText = 0;
+                document.getElementById('qstat-acc').innerText = '0%';
+                document.getElementById('qstat-violations').innerText = 0;
+                document.getElementById('qstat-ai').innerText = 0;
+            }
+        }
+
+        function renderQuizTable() {
+            const search = document.getElementById('quiz-search').value.trim().toLowerCase();
+            const catFilter = document.getElementById('quiz-cat-filter').value;
+            const aiOnly = document.getElementById('quiz-ai-only').checked;
+            const violOnly = document.getElementById('quiz-viol-only').checked;
+            const sort = document.getElementById('quiz-sort').value;
+            const [sortKey, sortDir] = sort.split('.');
+
+            let filtered = allQuizzes;
+            if (search) filtered = filtered.filter(r =>
+                (r.full_name || '').toLowerCase().includes(search) ||
+                (r.email || '').toLowerCase().includes(search)
+            );
+            if (catFilter) filtered = filtered.filter(r => r.category === catFilter);
+            if (aiOnly) filtered = filtered.filter(r => r.ai_generated);
+            if (violOnly) filtered = filtered.filter(r => (r.violations || 0) > 0);
+
+            filtered = filtered.slice().sort((a, b) => {
+                const av = a[sortKey], bv = b[sortKey];
+                if (av == null) return 1;
+                if (bv == null) return -1;
+                if (sortKey === 'created_at') return sortDir === 'asc' ? new Date(av) - new Date(bv) : new Date(bv) - new Date(av);
+                return sortDir === 'asc' ? av - bv : bv - av;
+            });
+
+            const tbody = document.getElementById('quiz-tbody');
+            const empty = document.getElementById('quiz-empty');
+            if (filtered.length === 0) { tbody.innerHTML = ''; empty.classList.remove('hidden'); return; }
+            empty.classList.add('hidden');
+
+            tbody.innerHTML = filtered.map(r => {
+                const catLabel = r.category_label || QUIZ_CATEGORIES[r.category] || r.category || '—';
+                const violCell = (r.violations || 0) > 0
+                    ? `<span class="text-rose-300 font-black">${r.violations}${r.auto_submitted ? ' 🚨' : ''}</span>`
+                    : '<span class="text-slate-500">·</span>';
+                const source = r.ai_generated
+                    ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-black" style="background:rgba(168,85,247,0.2);color:#d8b4fe;">🤖 AI</span>`
+                    : `<span class="px-2 py-0.5 rounded-full text-[10px] font-black bg-white/10 text-slate-300">Bank</span>`;
+                const scorePct = Math.round(((r.score || 0) / (r.total || 10)) * 100);
+                const scoreCls = scorePct >= 90 ? 'text-emerald-300' : scorePct >= 70 ? 'text-blue-300' : scorePct >= 50 ? 'text-amber-300' : 'text-rose-300';
+                return `<tr>
+                    <td class="font-bold text-white">${escapeHtml(r.full_name || '—')}<div class="text-slate-400 text-[10px]">${escapeHtml(r.email || '')}</div></td>
+                    <td class="text-slate-200 text-xs">${escapeHtml(catLabel)}${r.ai_topic ? `<div class="text-purple-300 text-[10px]">${escapeHtml(r.ai_topic)}</div>` : ''}</td>
+                    <td class="text-slate-300 text-xs">${escapeHtml(r.difficulty || '—')}</td>
+                    <td class="mono font-black ${scoreCls}">${r.score ?? '—'}/${r.total ?? 10}</td>
+                    <td class="mono font-black text-emerald-300">${r.accuracy ?? '—'}%</td>
+                    <td class="mono text-slate-300">${r.time_sec || '—'}s</td>
+                    <td class="text-right pr-4">${violCell}</td>
+                    <td>${source}</td>
+                    <td class="text-slate-400 text-xs">${formatDate(r.created_at)}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function renderQuizTrendChart() {
+            const ctx = document.getElementById('quiz-trend-chart');
+            if (!ctx || !window.Chart) return;
+            const days = [];
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            for (let i = 29; i >= 0; i--) days.push(new Date(today.getTime() - i * 86400000));
+            const dayKey = d => d.toISOString().slice(0, 10);
+            const counts = new Map(days.map(d => [dayKey(d), 0]));
+            allQuizzes.forEach(r => {
+                if (!r.created_at) return;
+                const k = new Date(r.created_at).toISOString().slice(0, 10);
+                if (counts.has(k)) counts.set(k, counts.get(k) + 1);
+            });
+            const labels = days.map(d => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }));
+            const data = days.map(d => counts.get(dayKey(d)));
+            if (quizTrendChart) quizTrendChart.destroy();
+            quizTrendChart = new Chart(ctx, {
+                type: 'bar',
+                data: { labels, datasets: [{ label: 'Quizzes', data, backgroundColor: 'rgba(249, 115, 22, 0.6)', borderColor: '#f97316', borderWidth: 1, borderRadius: 6 }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { backgroundColor: 'rgba(15,23,42,0.95)', titleColor: '#f8fafc', bodyColor: '#e2e8f0' } },
+                    scales: {
+                        x: { ticks: { color: '#94a3b8', font: { size: 10 }, autoSkip: true, maxTicksLimit: 10 }, grid: { display: false } },
+                        y: { ticks: { color: '#94a3b8', precision: 0 }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true }
+                    }
+                }
+            });
+        }
+
+        function renderQuizCategoryChart() {
+            const ctx = document.getElementById('quiz-category-chart');
+            if (!ctx || !window.Chart) return;
+            const counts = {};
+            allQuizzes.forEach(r => {
+                const key = r.category || 'unknown';
+                counts[key] = (counts[key] || 0) + 1;
+            });
+            const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+            const labels = entries.map(([k]) => (QUIZ_CATEGORIES[k] || k).replace(/^\S+\s/, ''));
+            const data = entries.map(([, v]) => v);
+            const palette = ['#f97316', '#ef4444', '#a855f7', '#3b82f6', '#10b981', '#eab308', '#ec4899', '#14b8a6', '#8b5cf6', '#06b6d4', '#f59e0b'];
+            if (quizCategoryChart) quizCategoryChart.destroy();
+            quizCategoryChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: { labels, datasets: [{ data, backgroundColor: palette.slice(0, labels.length), borderColor: 'rgba(15,23,42,0.5)', borderWidth: 2 }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false, cutout: '55%',
+                    plugins: {
+                        legend: { position: 'right', labels: { color: '#e2e8f0', font: { size: 10, weight: 'bold' }, boxWidth: 12, padding: 8 } },
+                        tooltip: { backgroundColor: 'rgba(15,23,42,0.95)', titleColor: '#f8fafc', bodyColor: '#e2e8f0' }
+                    }
+                }
+            });
+        }
+
+        // CSV export for quizzes
+        document.getElementById('quiz-export').addEventListener('click', () => {
+            const rows = [
+                ['Name','Email','Category','Difficulty','Score','Total','Accuracy','Time(s)','Violations','Auto Submitted','AI Generated','AI Topic','Date'],
+                ...allQuizzes.map(r => [
+                    r.full_name||'', r.email||'', QUIZ_CATEGORIES[r.category]||r.category||'',
+                    r.difficulty||'', r.score??'', r.total??'', r.accuracy??'', r.time_sec??'',
+                    r.violations||0, r.auto_submitted?'yes':'no', r.ai_generated?'yes':'no',
+                    r.ai_topic||'', r.created_at||''
+                ])
+            ];
+            const csv = rows.map(row => row.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `mcq-quiz-${new Date().toISOString().slice(0,10)}.csv`;
+            link.click();
+        });
+
+        document.getElementById('quiz-search').addEventListener('input', renderQuizTable);
+        document.getElementById('quiz-cat-filter').addEventListener('change', renderQuizTable);
+        document.getElementById('quiz-sort').addEventListener('change', renderQuizTable);
+        document.getElementById('quiz-ai-only').addEventListener('change', renderQuizTable);
+        document.getElementById('quiz-viol-only').addEventListener('change', renderQuizTable);
+
+        function renderTrendChart() {
+            const ctx = document.getElementById('trend-chart');
+            if (!ctx || !window.Chart) return;
+            // Build the last 30 days axis
+            const days = [];
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            for (let i = 29; i >= 0; i--) {
+                const d = new Date(today.getTime() - i * 86400000);
+                days.push(d);
+            }
+            const dayKey = d => d.toISOString().slice(0, 10);
+            const counts = new Map(days.map(d => [dayKey(d), 0]));
+            allResults.forEach(r => {
+                if (!r.created_at) return;
+                const k = new Date(r.created_at).toISOString().slice(0, 10);
+                if (counts.has(k)) counts.set(k, counts.get(k) + 1);
+            });
+            const labels = days.map(d => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }));
+            const data = days.map(d => counts.get(dayKey(d)));
+
+            if (trendChart) trendChart.destroy();
+            trendChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Tests',
+                        data,
+                        backgroundColor: 'rgba(96, 165, 250, 0.6)',
+                        borderColor: '#60a5fa',
+                        borderWidth: 1,
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(15,23,42,0.95)',
+                            titleColor: '#f8fafc',
+                            bodyColor: '#e2e8f0'
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#94a3b8', font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
+                            grid: { display: false }
+                        },
+                        y: {
+                            ticks: { color: '#94a3b8', precision: 0 },
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+        function formatDate(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        }
+
+        // CSV export
+        document.getElementById('export-btn').addEventListener('click', () => {
+            const rows = [
+                ['Name', 'Email', 'WPM', 'Accuracy', 'CPM', 'Errors', 'Keystrokes', 'Duration(s)', 'Category', 'Theme', 'Person', 'Date'],
+                ...allResults.map(r => [
+                    r.full_name || '', r.email || '', r.wpm ?? '', r.accuracy ?? '', r.cpm ?? '',
+                    r.errors ?? '', r.keystrokes ?? '', r.duration ?? '', r.category || '',
+                    r.theme_label || r.theme || '', r.person || '', r.created_at || ''
+                ])
+            ];
+            const csv = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `zentype-results-${new Date().toISOString().slice(0,10)}.csv`;
+            link.click();
+        });
+
+        // ---------- Tab switching ----------
+        document.querySelectorAll('.admin-tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentTab = btn.dataset.tab;
+                document.querySelectorAll('.admin-tab').forEach(b => {
+                    const active = b.dataset.tab === currentTab;
+                    b.classList.toggle('bg-white/10', active);
+                    b.classList.toggle('text-white', active);
+                    b.classList.toggle('text-slate-300', !active);
+                });
+                document.getElementById('results-panel').classList.toggle('hidden',   currentTab !== 'results');
+                document.getElementById('quizzes-panel').classList.toggle('hidden',   currentTab !== 'quizzes');
+                document.getElementById('employees-panel').classList.toggle('hidden', currentTab !== 'employees');
+                if (currentTab === 'employees' && allEmployees.length === 0) loadEmployees();
+                if (currentTab === 'quizzes'   && allQuizzes.length === 0)   loadQuizzes();
+            });
+        });
+
+        // ---------- Employees ----------
+        async function loadEmployees() {
+            if (!adminPassword) return;
+            document.getElementById('emp-tbody').innerHTML = '<tr><td colspan="8" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading employees…</td></tr>';
+            try {
+                const r = await fetch('/api/admin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: adminPassword, action: 'employees' })
+                });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.error || 'Failed');
+                allEmployees = data.employees || [];
+                renderEmployees();
+            } catch (e) {
+                document.getElementById('emp-tbody').innerHTML = `<tr><td colspan="8" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
+            }
+        }
+
+        function renderEmployees() {
+            const search = document.getElementById('emp-search').value.trim().toLowerCase();
+            const sort = document.getElementById('emp-sort').value;
+            const [sortKey, sortDir] = sort.split('.');
+
+            let filtered = allEmployees;
+            if (search) {
+                filtered = filtered.filter(e =>
+                    (e.full_name || '').toLowerCase().includes(search) ||
+                    (e.email || '').toLowerCase().includes(search)
+                );
+            }
+            filtered = filtered.slice().sort((a, b) => {
+                const av = a[sortKey], bv = b[sortKey];
+                if (av == null && bv == null) return 0;
+                if (av == null) return 1;
+                if (bv == null) return -1;
+                if (sortKey === 'created_at' || sortKey === 'last_test_at') {
+                    return sortDir === 'asc' ? new Date(av) - new Date(bv) : new Date(bv) - new Date(av);
+                }
+                return sortDir === 'asc' ? av - bv : bv - av;
+            });
+
+            const tbody = document.getElementById('emp-tbody');
+            const empty = document.getElementById('emp-empty');
+            if (filtered.length === 0) {
+                tbody.innerHTML = '';
+                empty.classList.remove('hidden');
+                return;
+            }
+            empty.classList.add('hidden');
+            tbody.innerHTML = filtered.map(e => {
+                const strikes = e.quiz_violations || 0;
+                return `
+                <tr>
+                    <td class="font-bold text-white">${escapeHtml(e.full_name || '—')}</td>
+                    <td class="text-slate-300 text-xs">${escapeHtml(e.email || '—')}</td>
+                    <td class="text-slate-400 text-xs">${formatDate(e.created_at)}</td>
+                    <td class="mono font-black text-white">${e.tests || 0}</td>
+                    <td class="mono font-black text-blue-300">${e.best_wpm || 0}</td>
+                    <td class="mono font-black text-orange-300">${e.quiz_attempts || 0}</td>
+                    <td class="mono font-black text-purple-300">${e.best_quiz_score || 0}</td>
+                    <td class="mono ${strikes > 0 ? 'font-black text-rose-300' : 'text-slate-500'}">${strikes > 0 ? strikes : '·'}</td>
+                    <td class="text-slate-400 text-xs">${e.last_test_at ? formatDate(e.last_test_at) : '—'}</td>
+                    <td class="text-right whitespace-nowrap">
+                        <button data-action="edit"   data-id="${e.id}" class="emp-action glass px-3 py-1 rounded-lg text-xs font-bold hover:bg-white/20" title="Edit name">✏️</button>
+                        <button data-action="reset"  data-id="${e.id}" data-email="${escapeHtml(e.email || '')}" class="emp-action glass px-3 py-1 rounded-lg text-xs font-bold hover:bg-white/20" title="Send password reset email">🔑</button>
+                        <button data-action="delete" data-id="${e.id}" class="emp-action glass px-3 py-1 rounded-lg text-xs font-bold text-rose-300 hover:bg-rose-500/20" title="Delete employee">🗑️</button>
+                    </td>
+                </tr>`;
+            }).join('');
+
+            // Wire action buttons
+            tbody.querySelectorAll('.emp-action').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const action = btn.dataset.action;
+                    const id = btn.dataset.id;
+                    const emp = allEmployees.find(x => x.id === id);
+                    if (!emp) return;
+                    if (action === 'edit')   openEditEmployee(emp);
+                    if (action === 'delete') openDeleteEmployee(emp);
+                    if (action === 'reset')  resetPasswordFor(emp);
+                });
+            });
+        }
+
+        // Edit
+        function openEditEmployee(emp) {
+            editingEmployee = emp;
+            document.getElementById('edit-emp-email').innerText = emp.email || '—';
+            document.getElementById('edit-emp-name').value = emp.full_name || '';
+            document.getElementById('edit-emp-err').classList.add('hidden');
+            const m = document.getElementById('edit-emp-modal');
+            m.classList.remove('hidden'); m.classList.add('flex');
+            document.getElementById('edit-emp-name').focus();
+        }
+        document.getElementById('edit-emp-cancel').addEventListener('click', () => {
+            document.getElementById('edit-emp-modal').classList.add('hidden');
+            document.getElementById('edit-emp-modal').classList.remove('flex');
+        });
+        document.getElementById('edit-emp-save').addEventListener('click', async () => {
+            if (!editingEmployee) return;
+            const full_name = document.getElementById('edit-emp-name').value.trim();
+            const err = document.getElementById('edit-emp-err');
+            err.classList.add('hidden');
+            if (full_name.length < 2) { err.innerText = 'Name must be at least 2 characters'; err.classList.remove('hidden'); return; }
+            const btn = document.getElementById('edit-emp-save');
+            const orig = btn.innerText;
+            btn.disabled = true; btn.innerText = 'Saving…';
+            try {
+                const r = await fetch('/api/admin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: adminPassword, action: 'update_employee', id: editingEmployee.id, full_name })
+                });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.error || 'Failed');
+                editingEmployee.full_name = full_name;
+                renderEmployees();
+                document.getElementById('edit-emp-modal').classList.add('hidden');
+                document.getElementById('edit-emp-modal').classList.remove('flex');
+            } catch (e) {
+                err.innerText = e.message; err.classList.remove('hidden');
+            } finally {
+                btn.disabled = false; btn.innerText = orig;
+            }
+        });
+
+        // Delete
+        function openDeleteEmployee(emp) {
+            deletingEmployee = emp;
+            document.getElementById('delete-emp-name').innerText = emp.full_name || emp.email || '—';
+            document.getElementById('delete-emp-err').classList.add('hidden');
+            const m = document.getElementById('delete-emp-modal');
+            m.classList.remove('hidden'); m.classList.add('flex');
+        }
+        document.getElementById('delete-emp-cancel').addEventListener('click', () => {
+            document.getElementById('delete-emp-modal').classList.add('hidden');
+            document.getElementById('delete-emp-modal').classList.remove('flex');
+        });
+        document.getElementById('delete-emp-confirm').addEventListener('click', async () => {
+            if (!deletingEmployee) return;
+            const err = document.getElementById('delete-emp-err');
+            const btn = document.getElementById('delete-emp-confirm');
+            const orig = btn.innerText;
+            btn.disabled = true; btn.innerText = 'Deleting…';
+            err.classList.add('hidden');
+            try {
+                const r = await fetch('/api/admin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: adminPassword, action: 'delete_employee', id: deletingEmployee.id })
+                });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.error || 'Failed');
+                allEmployees = allEmployees.filter(e => e.id !== deletingEmployee.id);
+                allResults  = allResults.filter(r => r.user_id !== deletingEmployee.id);
+                renderEmployees();
+                renderAll();
+                document.getElementById('delete-emp-modal').classList.add('hidden');
+                document.getElementById('delete-emp-modal').classList.remove('flex');
+            } catch (e) {
+                err.innerText = e.message; err.classList.remove('hidden');
+            } finally {
+                btn.disabled = false; btn.innerText = orig;
+            }
+        });
+
+        // Reset password (send recovery email)
+        async function resetPasswordFor(emp) {
+            if (!confirm(`Send a password reset email to ${emp.email}?`)) return;
+            try {
+                const r = await fetch('/api/admin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: adminPassword, action: 'reset_password', id: emp.id, email: emp.email })
+                });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.error || 'Failed');
+                alert('Password reset email sent to ' + emp.email);
+            } catch (e) {
+                alert('Failed: ' + e.message);
+            }
+        }
+
+        document.getElementById('emp-search').addEventListener('input', renderEmployees);
+        document.getElementById('emp-sort').addEventListener('change', renderEmployees);
+        document.getElementById('emp-refresh').addEventListener('click', loadEmployees);
+
+        gatePassword.focus();
+    </script>
+</body>
+</html>
