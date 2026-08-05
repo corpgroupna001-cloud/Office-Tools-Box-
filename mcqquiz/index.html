@@ -890,6 +890,30 @@
         let supabaseClient = null;
         let currentUser = null;
         let quiz = null;
+        let quizPausedByCall = false;
+
+        // Global pause/resume hooks — driven by notifications.js call events.
+        window.addEventListener('ws:call-incoming', () => {
+            if (quiz && quiz.timerInterval) {
+                clearInterval(quiz.timerInterval);
+                quiz.timerInterval = null;
+                quizPausedByCall = true;
+            }
+        });
+        window.addEventListener('ws:call-resume', () => {
+            if (quizPausedByCall && quiz && !quiz.timerInterval) {
+                quiz.timerInterval = setInterval(() => {
+                    quiz.remaining--;
+                    const el = document.getElementById('q-timer');
+                    if (el) el.innerText = quiz.remaining;
+                    if (quiz.remaining <= 0) {
+                        clearInterval(quiz.timerInterval);
+                        selectAnswer(-1);
+                    }
+                }, 1000);
+            }
+            quizPausedByCall = false;
+        });
         let selectedCategory = null;
 
         function loadAttempts() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { return []; } }
