@@ -80,6 +80,88 @@
         .icon-glow-blue { box-shadow: 0 8px 30px rgba(59, 130, 246, 0.5), inset 0 1px 0 rgba(255,255,255,0.3); }
         .icon-glow-emerald { box-shadow: 0 8px 30px rgba(16, 185, 129, 0.5), inset 0 1px 0 rgba(255,255,255,0.3); }
         .content { position: relative; z-index: 1; }
+
+        /* Hero pill with personalized greeting */
+        .hero-eyebrow {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 6px 14px; border-radius: 999px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.15);
+            color: #cbd5e1; font-weight: 700; font-size: 12px;
+            text-transform: uppercase; letter-spacing: 1.5px;
+            backdrop-filter: blur(10px);
+            margin-bottom: 14px;
+        }
+        .hero-eyebrow .live-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #10b981; box-shadow: 0 0 8px rgba(16,185,129,.8);
+            animation: live-pulse 1.8s ease-in-out infinite;
+        }
+        @keyframes live-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
+
+        /* "Team online" horizontal strip */
+        .online-strip {
+            display: flex; align-items: center; gap: 14px;
+            padding: 16px 20px;
+            border-radius: 20px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(16px);
+            margin-bottom: 24px;
+        }
+        .online-strip .label {
+            font-size: 11px; font-weight: 900; letter-spacing: 1px;
+            text-transform: uppercase; color: #94a3b8;
+            display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+        }
+        .online-strip .label .live-dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: #10b981; box-shadow: 0 0 8px rgba(16,185,129,.8);
+            animation: live-pulse 1.8s ease-in-out infinite;
+        }
+        .online-avatars { display: flex; align-items: center; gap: 0; flex: 1; overflow: hidden; }
+        .online-avatar {
+            width: 40px; height: 40px; border-radius: 50%;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-weight: 900; color: #fff; font-size: 14px;
+            border: 2.5px solid #0b1120;
+            box-shadow: 0 4px 12px rgba(0,0,0,.4);
+            margin-left: -10px;
+            transition: transform .15s ease, z-index .15s;
+            overflow: hidden;
+            cursor: pointer;
+            position: relative;
+        }
+        .online-avatar:first-child { margin-left: 0; }
+        .online-avatar:hover { transform: translateY(-3px) scale(1.08); z-index: 5; }
+        .online-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .online-avatar.more {
+            background: rgba(255,255,255,0.1); color: #cbd5e1; font-size: 11px;
+        }
+        .online-strip .empty {
+            font-size: 13px; color: #94a3b8; font-weight: 600;
+        }
+
+        /* Personal stats mini row inside tool cards */
+        .tool-stat {
+            margin-top: 10px; margin-bottom: 10px;
+            padding: 10px 14px;
+            border-radius: 14px;
+            background: rgba(0,0,0,0.25);
+            border: 1px solid rgba(255,255,255,0.06);
+            display: flex; align-items: center; justify-content: space-between;
+            font-size: 12px; font-weight: 700;
+        }
+        .tool-stat .stat-label { color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; font-size: 10px; font-weight: 900; }
+        .tool-stat .stat-value { color: #f1f5f9; font-weight: 900; font-size: 14px; }
+        .tool-stat .stat-value.pending { color: #94a3b8; font-weight: 700; font-size: 12px; }
+        .tool-stat .stat-badge {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 2px 8px; border-radius: 999px;
+            background: rgba(59,130,246,0.2); color: #93c5fd;
+            font-size: 11px; font-weight: 900;
+        }
+        .tool-stat .stat-badge.new { background: rgba(244,63,94,0.2); color: #fda4af; }
     </style>
 </head>
 <body class="min-h-screen flex flex-col">
@@ -303,9 +385,16 @@
     <!-- Main Content -->
     <main class="flex-grow w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 content">
 
-        <div class="mb-14 text-center md:text-left">
-            <h1 class="text-4xl md:text-6xl font-black text-white mb-4 tracking-tight drop-shadow-lg">Welcome to your Hub</h1>
+        <div class="mb-10 text-center md:text-left">
+            <span class="hero-eyebrow"><span class="live-dot"></span><span id="hero-time-of-day">Welcome</span></span>
+            <h1 id="hero-title" class="text-4xl md:text-6xl font-black text-white mb-4 tracking-tight drop-shadow-lg">Welcome to your Hub</h1>
             <p class="text-lg text-slate-200/90 font-medium max-w-2xl">Access all your internal tools, utilities, and assessments from one centralized dashboard.</p>
+        </div>
+
+        <!-- Live "Team online" strip -->
+        <div id="online-strip" class="online-strip" style="display:none;">
+            <div class="label"><span class="live-dot"></span><span>Team online <span id="online-count">0</span></span></div>
+            <div id="online-avatars" class="online-avatars"></div>
         </div>
 
         <!-- Tool Grid -->
@@ -319,7 +408,12 @@
                     </div>
 
                     <h2 class="text-2xl font-black text-white mb-2">ZenType</h2>
-                    <p class="text-slate-200/80 font-medium mb-6">AI-powered typing assessment with dynamic motivational passages and live accuracy tracking.</p>
+                    <p class="text-slate-200/80 font-medium mb-4">AI-powered typing assessment with dynamic motivational passages and live accuracy tracking.</p>
+
+                    <div id="stat-typing" class="tool-stat">
+                        <span class="stat-label">Your Best</span>
+                        <span class="stat-value pending">— Take a test to see your score</span>
+                    </div>
 
                     <div class="flex items-center text-blue-300 font-bold group-hover:gap-2 group-hover:text-blue-200 transition-all">
                         Launch Tool
@@ -334,7 +428,11 @@
                 <div class="relative z-10">
                     <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-white text-3xl mb-6 group-hover:scale-110 transition-transform" style="background: linear-gradient(135deg,#06b6d4,#3b82f6); box-shadow: 0 8px 30px rgba(6,182,212,0.5), inset 0 1px 0 rgba(255,255,255,0.3);">💬</div>
                     <h2 class="text-2xl font-black text-white mb-2">Chat & Calls</h2>
-                    <p class="text-slate-200/80 font-medium mb-6">In-app messaging, audio and video calls with your teammates. Live presence and notifications built in.</p>
+                    <p class="text-slate-200/80 font-medium mb-4">In-app messaging, audio and video calls with your teammates. Live presence and notifications built in.</p>
+                    <div id="stat-chat" class="tool-stat">
+                        <span class="stat-label">Activity</span>
+                        <span class="stat-value pending">— No unread messages</span>
+                    </div>
                     <div class="flex items-center text-cyan-300 font-bold group-hover:gap-2 group-hover:text-cyan-200 transition-all">
                         Launch Tool
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="ml-1"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
@@ -349,7 +447,11 @@
                         🧠
                     </div>
                     <h2 class="text-2xl font-black text-white mb-2">MCQ Quiz</h2>
-                    <p class="text-slate-200/80 font-medium mb-6">Brain-train with 10 categories: shortcuts (Mac/Win/VS Code/Chrome/Excel) + Logic, Math, GK, Aptitude, Riddles.</p>
+                    <p class="text-slate-200/80 font-medium mb-4">Brain-train with 10 categories: shortcuts (Mac/Win/VS Code/Chrome/Excel) + Logic, Math, GK, Aptitude, Riddles.</p>
+                    <div id="stat-quiz" class="tool-stat">
+                        <span class="stat-label">Your Best</span>
+                        <span class="stat-value pending">— Play a quiz to see your score</span>
+                    </div>
                     <div class="flex items-center text-orange-300 font-bold group-hover:gap-2 group-hover:text-orange-200 transition-all">
                         Launch Tool
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="ml-1"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
@@ -627,6 +729,126 @@
 
             // Prompt for company if missing
             checkCompany().catch(() => {});
+
+            // Personalize hero + kick off live team-online + personal stats
+            personalizeHero(name);
+            loadOnlineTeam().catch(() => {});
+            setInterval(() => loadOnlineTeam().catch(() => {}), 20000);
+            loadPersonalStats().catch(() => {});
+        }
+
+        function personalizeHero(name) {
+            const h = new Date().getHours();
+            const greeting = h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : h < 21 ? 'Good evening' : 'Good night';
+            const first = (name || '').split(/[\s@]/)[0] || 'friend';
+            const cap = first.charAt(0).toUpperCase() + first.slice(1);
+            const eyebrow = document.getElementById('hero-time-of-day');
+            if (eyebrow) eyebrow.textContent = greeting;
+            const title = document.getElementById('hero-title');
+            if (title) title.textContent = `Welcome back, ${cap}`;
+        }
+
+        // Reuse the same pickColor helper from other pages
+        function _homePickColor(name) {
+            const colors = ['#3b82f6','#6366f1','#8b5cf6','#ec4899','#f43f5e','#f97316','#eab308','#22c55e','#14b8a6','#0ea5e9'];
+            let h = 0; for (let i = 0; i < (name||'').length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffffffff;
+            return colors[Math.abs(h) % colors.length];
+        }
+        function _homeEscapeHtml(s) {
+            return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        async function loadOnlineTeam() {
+            if (!rootSb || !currentUser) return;
+            try {
+                // "Online" = last_seen_at within 60s (matches presence.js threshold)
+                const cutoff = new Date(Date.now() - 60_000).toISOString();
+                const { data } = await rootSb.from('profiles')
+                    .select('id, full_name, email, avatar_url, last_seen_at')
+                    .gte('last_seen_at', cutoff)
+                    .not('id', 'eq', currentUser.id)
+                    .limit(50);
+                const strip = document.getElementById('online-strip');
+                const countEl = document.getElementById('online-count');
+                const avatars = document.getElementById('online-avatars');
+                if (!data || data.length === 0) {
+                    strip.style.display = 'flex';
+                    countEl.textContent = '0';
+                    avatars.innerHTML = '<span class="empty">No teammates online right now — you\'re holding down the fort 🎯</span>';
+                    return;
+                }
+                strip.style.display = 'flex';
+                countEl.textContent = data.length;
+                const shown = data.slice(0, 10);
+                const extra = data.length - shown.length;
+                avatars.innerHTML = shown.map(p => {
+                    const name = p.full_name || p.email || '?';
+                    const initial = name.charAt(0).toUpperCase();
+                    const bg = _homePickColor(name);
+                    const inner = p.avatar_url
+                        ? `<img src="${_homeEscapeHtml(p.avatar_url)}" alt="">`
+                        : initial;
+                    return `<a href="./chat/#thread=${encodeURIComponent(p.id)}" class="online-avatar" title="${_homeEscapeHtml(name)} — online now" style="background:${bg}">${inner}</a>`;
+                }).join('') + (extra > 0
+                    ? `<span class="online-avatar more" title="${extra} more online">+${extra}</span>`
+                    : '');
+            } catch (e) { console.warn('online team load failed', e); }
+        }
+
+        async function loadPersonalStats() {
+            if (!rootSb || !currentUser) return;
+
+            // 1) Typing best (highest WPM)
+            try {
+                const { data } = await rootSb.from('test_results')
+                    .select('wpm, accuracy, created_at')
+                    .eq('user_id', currentUser.id)
+                    .order('wpm', { ascending: false })
+                    .limit(1);
+                const el = document.querySelector('#stat-typing .stat-value');
+                if (el) {
+                    if (data && data.length) {
+                        const t = data[0];
+                        el.classList.remove('pending');
+                        el.innerHTML = `${t.wpm} <span style="color:#94a3b8;font-size:11px;font-weight:700;">WPM</span> · ${t.accuracy}% <span style="color:#94a3b8;font-size:11px;font-weight:700;">accuracy</span>`;
+                    }
+                }
+            } catch (e) { /* silent */ }
+
+            // 2) Quiz best (highest accuracy)
+            try {
+                const { data } = await rootSb.from('quiz_results')
+                    .select('score, total, accuracy, category_label, created_at')
+                    .eq('user_id', currentUser.id)
+                    .order('accuracy', { ascending: false })
+                    .limit(1);
+                const el = document.querySelector('#stat-quiz .stat-value');
+                if (el) {
+                    if (data && data.length) {
+                        const q = data[0];
+                        el.classList.remove('pending');
+                        el.innerHTML = `${q.score}/${q.total} <span style="color:#94a3b8;font-size:11px;font-weight:700;">in ${_homeEscapeHtml(q.category_label || 'Quiz')}</span>`;
+                    }
+                }
+            } catch (e) { /* silent */ }
+
+            // 3) Chat unread count (messages received, unread)
+            try {
+                const { count } = await rootSb.from('messages')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('recipient_id', currentUser.id)
+                    .is('read_at', null);
+                const el = document.querySelector('#stat-chat .stat-value');
+                if (el) {
+                    if (count && count > 0) {
+                        el.classList.remove('pending');
+                        el.innerHTML = `<span class="stat-badge new">${count} unread</span>`;
+                    } else {
+                        el.classList.add('pending');
+                        el.textContent = '— No unread messages';
+                    }
+                }
+            } catch (e) { /* silent */ }
         }
 
         function showCompanyModal() {
