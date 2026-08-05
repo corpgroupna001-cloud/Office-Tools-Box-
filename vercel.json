@@ -1,0 +1,12 @@
+{
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "redirects": [
+    { "source": "/Network.ADMIN",  "destination": "/admin",         "permanent": false },
+    { "source": "/Network.ADMIN/", "destination": "/admin",         "permanent": false },
+    { "source": "/macshortcuts",   "destination": "/mcqquiz", "permanent": false },
+    { "source": "/macshortcuts/",  "destination": "/mcqquiz", "permanent": false },
+    { "source": "/keyboardninja",  "destination": "/mcqquiz", "permanent": false },
+    { "source": "/keyboardninja/", "destination": "/mcqquiz", "permanent": false }
+  ]
+}

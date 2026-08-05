@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WorkSuite Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            background: #0b1120;
+            background-image:
+                radial-gradient(at 15% 12%, hsla(258, 90%, 55%, 0.55) 0, transparent 45%),
+                radial-gradient(at 85% 15%, hsla(200, 95%, 55%, 0.45) 0, transparent 45%),
+                radial-gradient(at 50% 90%, hsla(320, 80%, 55%, 0.45) 0, transparent 50%),
+                radial-gradient(at 90% 85%, hsla(160, 85%, 45%, 0.35) 0, transparent 45%);
+            background-attachment: fixed;
+            color: #f8fafc;
+            overflow-x: hidden;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
+            background-size: 22px 22px;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .glass {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(24px) saturate(180%);
+            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            box-shadow:
+                0 8px 32px rgba(0, 0, 0, 0.35),
+                inset 0 1px 0 rgba(255, 255, 255, 0.25);
+        }
+        .glass-strong {
+            background: rgba(255, 255, 255, 0.12);
+            backdrop-filter: blur(30px) saturate(200%);
+            -webkit-backdrop-filter: blur(30px) saturate(200%);
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            box-shadow:
+                0 12px 40px rgba(0, 0, 0, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.3);
+        }
+        .glass-nav {
+            background: rgba(15, 23, 42, 0.35);
+            backdrop-filter: blur(28px) saturate(180%);
+            -webkit-backdrop-filter: blur(28px) saturate(180%);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .glass-tool {
+            background: rgba(255, 255, 255, 0.07);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        .glass-tool::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.12) 0%, transparent 50%);
+            pointer-events: none;
+            opacity: 0.6;
+        }
+        .glass-tool:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.3);
+            transform: translateY(-6px);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.1);
+        }
+        .icon-glow-blue { box-shadow: 0 8px 30px rgba(59, 130, 246, 0.5), inset 0 1px 0 rgba(255,255,255,0.3); }
+        .icon-glow-emerald { box-shadow: 0 8px 30px rgba(16, 185, 129, 0.5), inset 0 1px 0 rgba(255,255,255,0.3); }
+        .content { position: relative; z-index: 1; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Top Navigation Bar -->
+    <nav class="glass-nav w-full z-40 sticky top-0 content">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-20">
+                <div class="flex items-center gap-3">
+                    <div class="glass p-2.5 rounded-2xl text-white">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 7h10"/><path d="M7 12h10"/><path d="M7 17h10"/></svg>
+                    </div>
+                    <span class="font-black text-2xl text-white tracking-tight">WorkSuite</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button id="profile-btn" class="hidden items-center gap-2 glass px-2 py-1.5 rounded-full hover:bg-white/10 transition-all">
+                        <span id="nav-avatar" class="w-8 h-8 rounded-full flex items-center justify-center text-white font-black text-sm overflow-hidden" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 4px 12px rgba(59,130,246,0.4);">S</span>
+                        <span id="user-chip" class="text-xs font-bold text-slate-200 pr-2">—</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Auth modal (root gate) -->
+    <div id="auth-modal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" style="background: rgba(11, 17, 32, 0.85); backdrop-filter: blur(20px);">
+        <div class="glass-strong w-full max-w-md rounded-[2.5rem] p-8" style="background: rgba(255,255,255,0.12); backdrop-filter: blur(30px); border: 1px solid rgba(255,255,255,0.22); box-shadow: 0 20px 60px rgba(0,0,0,0.45);">
+            <div class="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-5 text-3xl" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 15px 40px rgba(59,130,246,0.5);">🔐</div>
+            <h2 class="text-3xl font-black text-white mb-1 text-center">WorkSuite</h2>
+            <p class="text-slate-300 mb-6 text-sm font-semibold text-center">Sign in to access your tools</p>
+
+            <div class="rounded-2xl p-1 flex mb-5" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                <button type="button" data-tab="login" onclick="switchAuthTab('login'); return false;" class="auth-tab flex-1 py-2 rounded-xl font-black text-sm text-white bg-white/10" style="cursor: pointer;">Log In</button>
+                <button type="button" data-tab="signup" onclick="switchAuthTab('signup'); return false;" class="auth-tab flex-1 py-2 rounded-xl font-black text-sm text-slate-300" style="cursor: pointer;">Sign Up</button>
+            </div>
+
+            <form id="login-form" class="space-y-3">
+                <input type="email" name="email" placeholder="Email" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                <input type="password" name="password" placeholder="Password" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                <p id="login-error" class="text-rose-300 text-sm font-bold hidden"></p>
+                <button type="submit" class="w-full text-white font-extrabold py-4 rounded-2xl text-lg" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 10px 30px rgba(59,130,246,0.4);">Log In</button>
+            </form>
+
+            <form id="signup-form" class="space-y-3 hidden">
+                <!-- Mandatory profile photo -->
+                <div class="flex items-center gap-4 p-3 rounded-2xl" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                    <label for="signup-photo" class="cursor-pointer relative group">
+                        <div id="signup-photo-preview" class="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl overflow-hidden transition-all group-hover:scale-105" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 8px 20px rgba(59,130,246,0.4);">📷</div>
+                        <input id="signup-photo" type="file" accept="image/*" class="hidden" required>
+                    </label>
+                    <div class="flex-1">
+                        <p class="text-white font-bold text-sm">Profile Photo <span class="text-rose-300">*</span></p>
+                        <p id="signup-photo-hint" class="text-slate-400 text-xs mt-0.5">Tap the icon — required</p>
+                    </div>
+                </div>
+                <input type="text" name="full_name" placeholder="Full Name" required minlength="2" class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                <input type="email" name="email" placeholder="Email" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                <select name="company" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white cursor-pointer" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color-scheme: dark;">
+                    <option value="" disabled selected>Select your company</option>
+                    <option value="Nova Sportsmart Private Limited">Nova Sportsmart Private Limited</option>
+                    <option value="Protathlitis Sportsmart LLP">Protathlitis Sportsmart LLP</option>
+                    <option value="Navyug Raise A Player Foundation">Navyug Raise A Player Foundation</option>
+                    <option value="Jobways Point LLP">Jobways Point LLP</option>
+                    <option value="Genie Lamp Private Limited">Genie Lamp Private Limited</option>
+                    <option value="CORPGROUP">CORPGROUP</option>
+                </select>
+                <input type="password" name="password" placeholder="Password (min 6 chars)" required minlength="6" class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                <p id="signup-error" class="text-rose-300 text-sm font-bold hidden"></p>
+                <p id="signup-success" class="text-emerald-300 text-sm font-bold hidden"></p>
+                <button type="submit" class="w-full text-white font-extrabold py-4 rounded-2xl text-lg" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 10px 30px rgba(59,130,246,0.4);">Create Account</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Universal feedback dialog (success / error / info) -->
+    <div id="feedback-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: rgba(11, 17, 32, 0.85); backdrop-filter: blur(20px);">
+        <div id="feedback-card" class="w-full max-w-sm rounded-[2rem] p-8 text-center transform transition-all" style="background: rgba(255,255,255,0.12); backdrop-filter: blur(30px); border: 1px solid rgba(255,255,255,0.22); box-shadow: 0 20px 60px rgba(0,0,0,0.55); animation: pop-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);">
+            <div id="feedback-icon" class="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-5 text-4xl">✓</div>
+            <h3 id="feedback-title" class="text-2xl font-black text-white mb-2">Success</h3>
+            <p id="feedback-message" class="text-slate-200/90 font-medium mb-6 leading-relaxed">Done.</p>
+            <button id="feedback-ok" type="button" class="w-full text-white font-extrabold py-3.5 rounded-2xl text-base transition-all hover:scale-[1.02]">OK</button>
+        </div>
+    </div>
+
+    <!-- Toast (small corner notification) -->
+    <div id="toast" class="fixed top-24 right-4 z-[80] hidden px-5 py-3 rounded-2xl font-bold text-sm shadow-2xl transform transition-all" style="max-width: 320px;"></div>
+
+    <style>
+        @keyframes pop-in {
+            0% { transform: scale(0.7) translateY(20px); opacity: 0; }
+            100% { transform: scale(1) translateY(0); opacity: 1; }
+        }
+        @keyframes toast-in {
+            0% { transform: translateX(120%); opacity: 0; }
+            100% { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-8px); }
+            40%, 80% { transform: translateX(8px); }
+        }
+        .shake { animation: shake 0.5s ease-in-out; }
+    </style>
+
+    <!-- Photo picker modal (shown to existing users without an avatar) -->
+    <div id="photo-modal" class="fixed inset-0 z-[66] hidden items-center justify-center p-4" style="background: rgba(11, 17, 32, 0.92); backdrop-filter: blur(24px);">
+        <div class="w-full max-w-md rounded-[2.5rem] p-8" style="background: rgba(255,255,255,0.12); backdrop-filter: blur(30px); border: 1px solid rgba(255,255,255,0.22); box-shadow: 0 20px 60px rgba(0,0,0,0.55);">
+            <div class="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-5 text-3xl" style="background: linear-gradient(135deg,#8b5cf6,#6366f1); box-shadow: 0 15px 40px rgba(139,92,246,0.5);">📸</div>
+            <h2 class="text-2xl font-black text-white mb-1 text-center">Add your profile photo</h2>
+            <p class="text-slate-300 mb-6 text-sm text-center">A photo is required so teammates recognise you in chat and calls. You only need to add it once.</p>
+
+            <label for="photo-modal-input" class="cursor-pointer block">
+                <div id="photo-modal-preview" class="w-32 h-32 mx-auto rounded-3xl flex items-center justify-center text-white text-5xl mb-4 overflow-hidden transition-all hover:scale-105" style="background: linear-gradient(135deg,#8b5cf6,#6366f1); box-shadow: 0 10px 30px rgba(139,92,246,0.4); border: 3px dashed rgba(255,255,255,0.35);">
+                    📷
+                </div>
+                <p id="photo-modal-hint" class="text-slate-300 text-center text-sm font-semibold mb-4">Tap the tile to choose a photo</p>
+                <input id="photo-modal-input" type="file" accept="image/*" class="hidden">
+            </label>
+
+            <p id="photo-modal-error" class="text-rose-300 text-sm font-bold hidden mb-3 text-center"></p>
+            <button id="photo-modal-save" type="button" disabled class="w-full text-white font-extrabold py-4 rounded-2xl text-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed" style="background: linear-gradient(135deg,#8b5cf6,#6366f1); box-shadow: 0 10px 30px rgba(139,92,246,0.4);">Save Photo</button>
+        </div>
+    </div>
+
+    <!-- Company picker modal (shown to existing users without a company set) -->
+    <div id="company-modal" class="fixed inset-0 z-[65] hidden items-center justify-center p-4" style="background: rgba(11, 17, 32, 0.9); backdrop-filter: blur(24px);">
+        <div class="w-full max-w-md rounded-[2.5rem] p-8" style="background: rgba(255,255,255,0.12); backdrop-filter: blur(30px); border: 1px solid rgba(255,255,255,0.22); box-shadow: 0 20px 60px rgba(0,0,0,0.45);">
+            <div class="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-5 text-3xl" style="background: linear-gradient(135deg,#f97316,#ef4444); box-shadow: 0 15px 40px rgba(249,115,22,0.5);">🏢</div>
+            <h2 class="text-2xl font-black text-white mb-1 text-center">Select your company</h2>
+            <p class="text-slate-300 mb-6 text-sm text-center">This helps route reports and analytics correctly. You only need to pick this once.</p>
+            <select id="company-picker" class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-orange-400/20 font-bold text-white cursor-pointer mb-4" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color-scheme: dark;">
+                <option value="" disabled selected>Choose your company</option>
+                <option value="Nova Sportsmart Private Limited">Nova Sportsmart Private Limited</option>
+                <option value="Protathlitis Sportsmart LLP">Protathlitis Sportsmart LLP</option>
+                <option value="Navyug Raise A Player Foundation">Navyug Raise A Player Foundation</option>
+                <option value="Jobways Point LLP">Jobways Point LLP</option>
+                <option value="Genie Lamp Private Limited">Genie Lamp Private Limited</option>
+                <option value="CORPGROUP">CORPGROUP</option>
+            </select>
+            <p id="company-error" class="text-rose-300 text-sm font-bold hidden mb-3 text-center"></p>
+            <button id="company-save" type="button" class="w-full text-white font-extrabold py-4 rounded-2xl text-lg" style="background: linear-gradient(135deg,#f97316,#ef4444); box-shadow: 0 10px 30px rgba(249,115,22,0.4);">Save</button>
+        </div>
+    </div>
+
+    <!-- Profile Settings Modal (home-screen version) -->
+    <div id="profile-modal" class="fixed inset-0 z-[62] hidden items-center justify-center p-4" style="background: rgba(11, 17, 32, 0.85); backdrop-filter: blur(20px);">
+        <div class="w-full max-w-md rounded-[2.5rem] p-8 max-h-[92vh] overflow-y-auto" style="background: rgba(255,255,255,0.10); backdrop-filter: blur(30px); border: 1px solid rgba(255,255,255,0.22); box-shadow: 0 20px 60px rgba(0,0,0,0.55);">
+
+            <!-- Avatar + name -->
+            <div class="text-center mb-6">
+                <div class="relative inline-block group">
+                    <div id="profile-avatar" class="w-20 h-20 rounded-3xl flex items-center justify-center text-white font-black text-3xl mx-auto mb-3 overflow-hidden" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 15px 40px rgba(59,130,246,0.5);">S</div>
+                    <label for="profile-photo-input" class="absolute -bottom-1 -right-1 w-8 h-8 rounded-full flex items-center justify-center text-white text-sm cursor-pointer transition-all hover:scale-110" style="background: linear-gradient(135deg,#10b981,#059669); box-shadow: 0 4px 12px rgba(16,185,129,0.5); border: 2px solid #0b1120;" title="Change photo">
+                        ✎
+                        <input id="profile-photo-input" type="file" accept="image/*" class="hidden">
+                    </label>
+                </div>
+                <h3 id="profile-name" class="text-xl font-black text-white">—</h3>
+                <p id="profile-email" class="text-slate-400 text-sm font-semibold">—</p>
+                <p id="profile-company" class="text-slate-300 text-xs font-bold mt-1">—</p>
+            </div>
+
+            <!-- Stats -->
+            <div class="grid grid-cols-3 gap-2 mb-6">
+                <div class="rounded-2xl p-3 text-center" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">
+                    <div class="text-[10px] font-black text-slate-400 tracking-widest mb-1">TESTS</div>
+                    <div id="profile-tests" class="text-2xl font-black text-white">0</div>
+                </div>
+                <div class="rounded-2xl p-3 text-center" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">
+                    <div class="text-[10px] font-black text-slate-400 tracking-widest mb-1">BEST WPM</div>
+                    <div id="profile-best-wpm" class="text-2xl font-black text-blue-300">0</div>
+                </div>
+                <div class="rounded-2xl p-3 text-center" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">
+                    <div class="text-[10px] font-black text-slate-400 tracking-widest mb-1">QUIZZES</div>
+                    <div id="profile-quizzes" class="text-2xl font-black text-orange-300">0</div>
+                </div>
+            </div>
+
+            <!-- Display name -->
+            <label class="text-[10px] font-black text-slate-400 tracking-widest mb-1 block">DISPLAY NAME</label>
+            <div class="flex gap-2 mb-5">
+                <input id="profile-name-input" type="text" class="flex-1 px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                <button id="profile-name-save" class="px-4 py-3 rounded-xl text-white font-black text-sm" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 4px 12px rgba(59,130,246,0.4);">Save</button>
+            </div>
+
+            <!-- Company -->
+            <label class="text-[10px] font-black text-slate-400 tracking-widest mb-1 block">COMPANY</label>
+            <div class="flex gap-2 mb-5">
+                <select id="profile-company-select" class="flex-1 px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-orange-400/20 font-bold text-white cursor-pointer" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color-scheme: dark;">
+                    <option value="" disabled>Select company</option>
+                    <option value="Nova Sportsmart Private Limited">Nova Sportsmart Private Limited</option>
+                    <option value="Protathlitis Sportsmart LLP">Protathlitis Sportsmart LLP</option>
+                    <option value="Navyug Raise A Player Foundation">Navyug Raise A Player Foundation</option>
+                    <option value="Jobways Point LLP">Jobways Point LLP</option>
+                    <option value="Genie Lamp Private Limited">Genie Lamp Private Limited</option>
+                    <option value="CORPGROUP">CORPGROUP</option>
+                </select>
+                <button id="profile-company-save" class="px-4 py-3 rounded-xl text-white font-black text-sm" style="background: linear-gradient(135deg,#f97316,#ef4444); box-shadow: 0 4px 12px rgba(249,115,22,0.4);">Save</button>
+            </div>
+
+            <!-- Change password -->
+            <label class="text-[10px] font-black text-slate-400 tracking-widest mb-1 block">CHANGE PASSWORD</label>
+            <div class="space-y-2 mb-5">
+                <input id="profile-pwd" type="password" placeholder="New password (min 6 chars)" class="w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                <input id="profile-pwd2" type="password" placeholder="Confirm new password" class="w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                <button id="profile-pwd-save" class="w-full text-white font-extrabold py-3 rounded-xl text-sm" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 4px 12px rgba(59,130,246,0.4);">Update Password</button>
+            </div>
+
+            <!-- Preferences -->
+            <div class="rounded-2xl p-4 mb-5" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);">
+                <div class="text-[10px] font-black text-slate-400 tracking-widest mb-3">PREFERENCES</div>
+                <div class="flex justify-between text-sm text-white font-semibold mb-2"><span>Version</span><span class="text-slate-300">v2.4</span></div>
+                <div class="flex justify-between text-sm text-white font-semibold"><span>Member since</span><span id="profile-since" class="text-slate-300">—</span></div>
+            </div>
+
+            <button id="profile-signout" class="w-full py-3 rounded-2xl font-black text-rose-300 mb-2 transition-all hover:bg-white/5" style="background: rgba(244,63,94,0.08); border: 1px solid rgba(244,63,94,0.2);">Sign Out</button>
+            <button id="profile-close" class="w-full py-3 rounded-2xl font-black text-white/80 transition-all hover:bg-white/5" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">Close</button>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="flex-grow w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 content">
+
+        <div class="mb-14 text-center md:text-left">
+            <h1 class="text-4xl md:text-6xl font-black text-white mb-4 tracking-tight drop-shadow-lg">Welcome to your Hub</h1>
+            <p class="text-lg text-slate-200/90 font-medium max-w-2xl">Access all your internal tools, utilities, and assessments from one centralized dashboard.</p>
+        </div>
+
+        <!-- Tool Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+
+            <!-- Tool 1: Typing Test -->
+            <a href="./typingtest/" class="glass-tool group block rounded-[2rem] p-8 relative">
+                <div class="relative z-10">
+                    <div class="bg-gradient-to-br from-blue-500 to-indigo-600 w-16 h-16 rounded-2xl flex items-center justify-center text-white mb-6 icon-glow-blue group-hover:scale-110 transition-transform">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20V14H14V20H19V12H22L12 3L2 12H5V20H10Z"/></svg>
+                    </div>
+
+                    <h2 class="text-2xl font-black text-white mb-2">ZenType</h2>
+                    <p class="text-slate-200/80 font-medium mb-6">AI-powered typing assessment with dynamic motivational passages and live accuracy tracking.</p>
+
+                    <div class="flex items-center text-blue-300 font-bold group-hover:gap-2 group-hover:text-blue-200 transition-all">
+                        Launch Tool
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="ml-1"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                    </div>
+                </div>
+            </a>
+
+            <!-- Tool 2: Email Signature Generator -->
+            <!-- Tool: Chat & Calls -->
+            <a href="./chat/" class="glass-tool group block rounded-[2rem] p-8 relative">
+                <div class="relative z-10">
+                    <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-white text-3xl mb-6 group-hover:scale-110 transition-transform" style="background: linear-gradient(135deg,#06b6d4,#3b82f6); box-shadow: 0 8px 30px rgba(6,182,212,0.5), inset 0 1px 0 rgba(255,255,255,0.3);">💬</div>
+                    <h2 class="text-2xl font-black text-white mb-2">Chat & Calls</h2>
+                    <p class="text-slate-200/80 font-medium mb-6">In-app messaging, audio and video calls with your teammates. Live presence and notifications built in.</p>
+                    <div class="flex items-center text-cyan-300 font-bold group-hover:gap-2 group-hover:text-cyan-200 transition-all">
+                        Launch Tool
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="ml-1"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                    </div>
+                </div>
+            </a>
+
+            <!-- Tool 3: MCQ Quiz -->
+            <a href="./mcqquiz/" class="glass-tool group block rounded-[2rem] p-8 relative">
+                <div class="relative z-10">
+                    <div class="bg-gradient-to-br from-orange-500 to-red-600 w-16 h-16 rounded-2xl flex items-center justify-center text-white text-3xl mb-6 group-hover:scale-110 transition-transform" style="box-shadow: 0 8px 30px rgba(249,115,22,0.5), inset 0 1px 0 rgba(255,255,255,0.3);">
+                        🧠
+                    </div>
+                    <h2 class="text-2xl font-black text-white mb-2">MCQ Quiz</h2>
+                    <p class="text-slate-200/80 font-medium mb-6">Brain-train with 10 categories: shortcuts (Mac/Win/VS Code/Chrome/Excel) + Logic, Math, GK, Aptitude, Riddles.</p>
+                    <div class="flex items-center text-orange-300 font-bold group-hover:gap-2 group-hover:text-orange-200 transition-all">
+                        Launch Tool
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="ml-1"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                    </div>
+                </div>
+            </a>
+
+            <a href="./signature/" class="glass-tool group block rounded-[2rem] p-8 relative">
+                <div class="relative z-10">
+                    <div class="bg-gradient-to-br from-emerald-500 to-teal-600 w-16 h-16 rounded-2xl flex items-center justify-center text-white mb-6 icon-glow-emerald group-hover:scale-110 transition-transform">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.2 8.4c.5.5.8 1.1.8 1.6 0 1.1-.9 2-2 2h-4l-3 3-3-3H6a2 2 0 0 1-2-2 2 2 0 0 1 2-2h4l3-3 3 3h4c.5 0 1.1.3 1.6.8z"/><path d="M2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6"/></svg>
+                    </div>
+
+                    <h2 class="text-2xl font-black text-white mb-2">Signature Gen</h2>
+                    <p class="text-slate-200/80 font-medium mb-6">Standardized corporate email signature generator. Ensure brand consistency across employee comms.</p>
+
+                    <div class="flex items-center text-emerald-300 font-bold group-hover:gap-2 group-hover:text-emerald-200 transition-all">
+                        Launch Tool
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="ml-1"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                    </div>
+                </div>
+            </a>
+
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/presence.js"></script>
+    <script>
+        // ---------- Root auth gate ----------
+        let rootSb = null;
+
+        // ---------- Feedback dialog + toast helpers ----------
+        const FEEDBACK_STYLES = {
+            success: {
+                iconBg: 'linear-gradient(135deg,#10b981,#059669)',
+                iconShadow: '0 15px 40px rgba(16,185,129,0.5)',
+                icon: '✓',
+                buttonBg: 'linear-gradient(135deg,#10b981,#059669)',
+                buttonShadow: '0 10px 30px rgba(16,185,129,0.4)'
+            },
+            error: {
+                iconBg: 'linear-gradient(135deg,#ef4444,#dc2626)',
+                iconShadow: '0 15px 40px rgba(239,68,68,0.5)',
+                icon: '✕',
+                buttonBg: 'linear-gradient(135deg,#ef4444,#dc2626)',
+                buttonShadow: '0 10px 30px rgba(239,68,68,0.4)'
+            },
+            warning: {
+                iconBg: 'linear-gradient(135deg,#f59e0b,#f97316)',
+                iconShadow: '0 15px 40px rgba(245,158,11,0.5)',
+                icon: '!',
+                buttonBg: 'linear-gradient(135deg,#f59e0b,#f97316)',
+                buttonShadow: '0 10px 30px rgba(245,158,11,0.4)'
+            },
+            info: {
+                iconBg: 'linear-gradient(135deg,#3b82f6,#6366f1)',
+                iconShadow: '0 15px 40px rgba(59,130,246,0.5)',
+                icon: 'i',
+                buttonBg: 'linear-gradient(135deg,#3b82f6,#6366f1)',
+                buttonShadow: '0 10px 30px rgba(59,130,246,0.4)'
+            },
+            email: {
+                iconBg: 'linear-gradient(135deg,#8b5cf6,#6366f1)',
+                iconShadow: '0 15px 40px rgba(139,92,246,0.5)',
+                icon: '📧',
+                buttonBg: 'linear-gradient(135deg,#8b5cf6,#6366f1)',
+                buttonShadow: '0 10px 30px rgba(139,92,246,0.4)'
+            }
+        };
+
+        function showDialog({ type = 'info', title, message, buttonText = 'OK', onClose }) {
+            const s = FEEDBACK_STYLES[type] || FEEDBACK_STYLES.info;
+            const modal = document.getElementById('feedback-modal');
+            const card  = document.getElementById('feedback-card');
+            const iconEl = document.getElementById('feedback-icon');
+            const titleEl = document.getElementById('feedback-title');
+            const msgEl = document.getElementById('feedback-message');
+            const btnEl = document.getElementById('feedback-ok');
+
+            iconEl.style.background = s.iconBg;
+            iconEl.style.boxShadow = s.iconShadow;
+            iconEl.innerText = s.icon;
+            titleEl.innerText = title || '';
+            msgEl.innerText = message || '';
+            btnEl.style.background = s.buttonBg;
+            btnEl.style.boxShadow = s.buttonShadow;
+            btnEl.innerText = buttonText;
+
+            // Restart the pop-in animation
+            card.style.animation = 'none';
+            void card.offsetWidth;
+            card.style.animation = 'pop-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)';
+
+            modal.classList.remove('hidden'); modal.classList.add('flex');
+            btnEl.onclick = () => {
+                modal.classList.add('hidden'); modal.classList.remove('flex');
+                if (typeof onClose === 'function') onClose();
+            };
+        }
+
+        function showToast(message, type = 'success') {
+            const t = document.getElementById('toast');
+            const bg = {
+                success: 'linear-gradient(135deg,#10b981,#059669)',
+                error:   'linear-gradient(135deg,#ef4444,#dc2626)',
+                info:    'linear-gradient(135deg,#3b82f6,#6366f1)',
+                warning: 'linear-gradient(135deg,#f59e0b,#f97316)'
+            }[type] || 'linear-gradient(135deg,#3b82f6,#6366f1)';
+            t.style.background = bg;
+            t.style.color = '#fff';
+            t.style.border = '1px solid rgba(255,255,255,0.2)';
+            t.innerText = message;
+            t.classList.remove('hidden');
+            t.style.animation = 'toast-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1)';
+            clearTimeout(t._hideTimer);
+            t._hideTimer = setTimeout(() => t.classList.add('hidden'), 3500);
+        }
+
+        // Translate raw Supabase auth errors into friendly messages
+        function friendlyAuthError(rawMsg, ctx = 'login') {
+            const m = (rawMsg || '').toLowerCase();
+            if (m.includes('invalid login credentials') || m.includes('invalid credentials')) {
+                return { title: 'Incorrect password', message: "The email or password doesn't match our records. Double-check and try again." };
+            }
+            if (m.includes('email not confirmed')) {
+                return { title: 'Email not verified', message: 'Please check your inbox and click the confirmation link before signing in.' };
+            }
+            if (m.includes('user already registered') || m.includes('already registered') || m.includes('user already exists')) {
+                return { title: 'Account already exists', message: 'An account with this email already exists. Try logging in instead.' };
+            }
+            if (m.includes('password should be') || m.includes('password is too short')) {
+                return { title: 'Password too weak', message: 'Your password must be at least 6 characters long.' };
+            }
+            if (m.includes('rate limit') || m.includes('too many')) {
+                return { title: 'Too many attempts', message: 'You are trying too often. Please wait a minute and try again.' };
+            }
+            if (m.includes('unable to validate email') || m.includes('invalid email')) {
+                return { title: 'Invalid email', message: 'Please enter a valid email address.' };
+            }
+            if (m.includes('network') || m.includes('failed to fetch')) {
+                return { title: 'Connection problem', message: "We couldn't reach the server. Check your internet and try again." };
+            }
+            if (m.includes('user not found')) {
+                return { title: 'Account not found', message: "We couldn't find an account with that email. Sign up first?" };
+            }
+            return {
+                title: ctx === 'signup' ? "Couldn't create account" : "Couldn't sign in",
+                message: rawMsg || 'Something went wrong. Please try again.'
+            };
+        }
+        window.showDialog = showDialog;
+        window.showToast = showToast;
+
+        // ---------- Image compression helper ----------
+        // Resizes to max 400x400, JPEG @ 0.85 → keeps data URL around 30-80 KB.
+        function compressImageFile(file, maxSize = 400, quality = 0.85) {
+            return new Promise((resolve, reject) => {
+                if (!file || !file.type.startsWith('image/')) {
+                    reject(new Error('Please pick an image file.')); return;
+                }
+                if (file.size > 10 * 1024 * 1024) {
+                    reject(new Error('Image is too large. Please pick one under 10 MB.')); return;
+                }
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const img = new Image();
+                    img.onload = () => {
+                        let { width, height } = img;
+                        // Square-ish crop keeps avatars looking right
+                        const size = Math.min(width, height);
+                        const sx = (width - size) / 2;
+                        const sy = (height - size) / 2;
+                        const target = Math.min(maxSize, size);
+                        const canvas = document.createElement('canvas');
+                        canvas.width = target; canvas.height = target;
+                        const ctx = canvas.getContext('2d');
+                        ctx.fillStyle = '#0b1120';
+                        ctx.fillRect(0, 0, target, target);
+                        ctx.drawImage(img, sx, sy, size, size, 0, 0, target, target);
+                        try {
+                            resolve(canvas.toDataURL('image/jpeg', quality));
+                        } catch (ex) { reject(ex); }
+                    };
+                    img.onerror = () => reject(new Error("Couldn't read that image."));
+                    img.src = reader.result;
+                };
+                reader.onerror = () => reject(new Error("Couldn't read that file."));
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // ---------- Signup photo picker ----------
+        let signupAvatarDataUrl = '';
+        document.getElementById('signup-photo').addEventListener('change', async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const preview = document.getElementById('signup-photo-preview');
+            const hint = document.getElementById('signup-photo-hint');
+            try {
+                preview.innerHTML = '<div class="text-white text-xs">…</div>';
+                const dataUrl = await compressImageFile(file, 400, 0.85);
+                signupAvatarDataUrl = dataUrl;
+                preview.innerHTML = `<img src="${dataUrl}" class="w-full h-full object-cover" alt="Preview">`;
+                hint.innerText = 'Looks good — you can change it later';
+                hint.className = 'text-emerald-300 text-xs mt-0.5 font-semibold';
+            } catch (ex) {
+                preview.innerHTML = '📷';
+                signupAvatarDataUrl = '';
+                showDialog({ type: 'error', title: "Couldn't use that photo", message: ex.message });
+            }
+        });
+
+
+        window.switchAuthTab = function(tab) {
+            document.querySelectorAll('.auth-tab').forEach(b => {
+                const active = b.dataset.tab === tab;
+                b.classList.toggle('bg-white/10', active);
+                b.classList.toggle('text-white', active);
+                b.classList.toggle('text-slate-300', !active);
+            });
+            document.getElementById('login-form').classList.toggle('hidden', tab !== 'login');
+            document.getElementById('signup-form').classList.toggle('hidden', tab !== 'signup');
+        };
+
+        async function initRootSupabase() {
+            try {
+                const r = await fetch('/api/config');
+                const cfg = await r.json();
+                if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) return false;
+                rootSb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
+                    auth: { persistSession: true, autoRefreshToken: true }
+                });
+                // Expose for presence.js so it doesn't spin up a second client.
+                window.__WS_SB__ = rootSb;
+                return true;
+            } catch { return false; }
+        }
+
+        function showAuthModal() {
+            const m = document.getElementById('auth-modal');
+            m.classList.remove('hidden'); m.classList.add('flex');
+            const emailInput = document.querySelector('#login-form input[name="email"]');
+            if (emailInput) emailInput.focus();
+        }
+        function hideAuthModal() {
+            const m = document.getElementById('auth-modal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+        }
+        let currentUser = null;
+        async function onLoggedIn(session) {
+            currentUser = session.user;
+            const name = session.user.user_metadata?.full_name || session.user.email.split('@')[0];
+            document.getElementById('user-chip').innerText = name;
+
+            // Show the profile button (avatar + name) — hide the plain chip inside it if empty
+            const profileBtn = document.getElementById('profile-btn');
+            profileBtn.classList.remove('hidden');
+            profileBtn.classList.add('flex');
+
+            // Preload avatar for the nav (from metadata first for speed, then profiles table)
+            let avatar = session.user.user_metadata?.avatar_url || '';
+            setNavAvatar(avatar, name);
+            hideAuthModal();
+
+            // Fetch canonical avatar + company from profiles
+            try {
+                if (rootSb) {
+                    const { data: p } = await rootSb.from('profiles').select('avatar_url,full_name').eq('id', currentUser.id).maybeSingle();
+                    if (p?.avatar_url) setNavAvatar(p.avatar_url, p.full_name || name);
+                    if (p?.full_name) document.getElementById('user-chip').innerText = p.full_name;
+                }
+            } catch {}
+
+            // Prompt for company if missing
+            checkCompany().catch(() => {});
+        }
+
+        function showCompanyModal() {
+            const m = document.getElementById('company-modal');
+            m.classList.remove('hidden'); m.classList.add('flex');
+        }
+        function hideCompanyModal() {
+            const m = document.getElementById('company-modal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+        }
+
+        async function checkCompanyAndAvatar() {
+            if (!rootSb || !currentUser) return;
+            try {
+                const { data, error } = await rootSb
+                    .from('profiles')
+                    .select('company, avatar_url')
+                    .eq('id', currentUser.id)
+                    .maybeSingle();
+                if (error) return; // silently ignore (e.g. column not present yet)
+
+                // 1) Company first
+                let company = data?.company;
+                if (!company || !company.trim()) {
+                    const metaCompany = currentUser.user_metadata?.company;
+                    if (metaCompany && metaCompany.trim()) {
+                        await rootSb.from('profiles').update({ company: metaCompany }).eq('id', currentUser.id);
+                        company = metaCompany;
+                    } else {
+                        showCompanyModal();
+                        return; // wait for company save to trigger next check
+                    }
+                }
+
+                // 2) Then avatar
+                let avatar = data?.avatar_url;
+                if (!avatar || !avatar.trim()) {
+                    const metaAvatar = currentUser.user_metadata?.avatar_url;
+                    if (metaAvatar && metaAvatar.trim()) {
+                        await rootSb.from('profiles').update({ avatar_url: metaAvatar }).eq('id', currentUser.id);
+                    } else {
+                        showPhotoModal();
+                    }
+                }
+            } catch {}
+        }
+        // Back-compat name
+        const checkCompany = checkCompanyAndAvatar;
+
+        // Photo modal handlers
+        let photoModalDataUrl = '';
+        function showPhotoModal() {
+            const m = document.getElementById('photo-modal');
+            m.classList.remove('hidden'); m.classList.add('flex');
+        }
+        function hidePhotoModal() {
+            const m = document.getElementById('photo-modal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+        }
+        document.getElementById('photo-modal-input').addEventListener('change', async (e) => {
+            const file = e.target.files?.[0];
+            const err = document.getElementById('photo-modal-error');
+            err.classList.add('hidden');
+            if (!file) return;
+            const preview = document.getElementById('photo-modal-preview');
+            const hint = document.getElementById('photo-modal-hint');
+            const saveBtn = document.getElementById('photo-modal-save');
+            try {
+                preview.innerHTML = '<div class="text-white text-sm">…</div>';
+                const dataUrl = await compressImageFile(file, 400, 0.85);
+                photoModalDataUrl = dataUrl;
+                preview.innerHTML = `<img src="${dataUrl}" class="w-full h-full object-cover" alt="Preview">`;
+                preview.style.border = 'none';
+                hint.innerText = 'Looks great — tap Save Photo below';
+                hint.className = 'text-emerald-300 text-center text-sm font-bold mb-4';
+                saveBtn.disabled = false;
+            } catch (ex) {
+                preview.innerHTML = '📷';
+                preview.style.border = '3px dashed rgba(255,255,255,0.35)';
+                photoModalDataUrl = '';
+                saveBtn.disabled = true;
+                err.innerText = ex.message;
+                err.classList.remove('hidden');
+            }
+        });
+        document.getElementById('photo-modal-save').addEventListener('click', async () => {
+            if (!photoModalDataUrl || !currentUser) return;
+            const btn = document.getElementById('photo-modal-save');
+            btn.disabled = true; const originalTxt = btn.innerText; btn.innerText = 'Saving…';
+            try {
+                const { error: upErr } = await rootSb
+                    .from('profiles')
+                    .upsert({ id: currentUser.id, email: currentUser.email, avatar_url: photoModalDataUrl }, { onConflict: 'id' });
+                if (upErr) {
+                    const { error: e2 } = await rootSb.from('profiles').update({ avatar_url: photoModalDataUrl }).eq('id', currentUser.id);
+                    if (e2) throw e2;
+                }
+                try { await rootSb.auth.updateUser({ data: { avatar_url: photoModalDataUrl } }); } catch {}
+                setNavAvatar(photoModalDataUrl, currentUser.user_metadata?.full_name);
+                hidePhotoModal();
+                showToast('Profile photo saved!', 'success');
+            } catch (ex) {
+                showDialog({ type: 'error', title: "Couldn't save photo", message: ex.message || 'Try again.' });
+                btn.disabled = false; btn.innerText = originalTxt;
+            }
+        });
+
+        document.getElementById('company-save').addEventListener('click', async () => {
+            const err = document.getElementById('company-error');
+            err.classList.add('hidden');
+            const picker = document.getElementById('company-picker');
+            const company = picker.value;
+            if (!company) {
+                showDialog({ type: 'warning', title: 'Please choose one', message: 'Select your company from the dropdown before saving.' });
+                return;
+            }
+            if (!rootSb || !currentUser) {
+                showDialog({ type: 'error', title: 'Not signed in', message: 'Your session expired. Please refresh and log in again.' });
+                return;
+            }
+            const btn = document.getElementById('company-save');
+            btn.disabled = true; const originalTxt = btn.innerText; btn.innerText = 'Saving…';
+            try {
+                const { error: upErr } = await rootSb
+                    .from('profiles')
+                    .upsert({ id: currentUser.id, email: currentUser.email, company }, { onConflict: 'id' });
+                if (upErr) {
+                    const { error: e2 } = await rootSb.from('profiles').update({ company }).eq('id', currentUser.id);
+                    if (e2) throw e2;
+                }
+                try { await rootSb.auth.updateUser({ data: { company } }); } catch {}
+                hideCompanyModal();
+                showToast(`Company saved: ${company}`, 'success');
+                // Now check whether they still need to add a profile photo
+                setTimeout(() => checkCompanyAndAvatar().catch(() => {}), 400);
+            } catch (ex) {
+                showDialog({ type: 'error', title: "Couldn't save", message: ex.message || 'Something went wrong. Please try again.' });
+            } finally {
+                btn.disabled = false; btn.innerText = originalTxt;
+            }
+        });
+        function onLoggedOut() {
+            currentUser = null;
+            const profileBtn = document.getElementById('profile-btn');
+            profileBtn.classList.add('hidden');
+            profileBtn.classList.remove('flex');
+            hideCompanyModal();
+            hidePhotoModal();
+            closeProfileModal();
+            showAuthModal();
+        }
+
+        function shakeForm(formEl) {
+            if (!formEl) return;
+            formEl.classList.remove('shake');
+            void formEl.offsetWidth;
+            formEl.classList.add('shake');
+        }
+
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const err = document.getElementById('login-error');
+            const form = e.target;
+            err.classList.add('hidden');
+            if (!rootSb) {
+                showDialog({ type: 'error', title: 'Auth not ready', message: 'Please refresh the page and try again.' });
+                return;
+            }
+            const email = form.email.value.trim();
+            const password = form.password.value;
+            const btn = form.querySelector('button[type="submit"]');
+            const originalTxt = btn.innerText;
+            btn.disabled = true; btn.innerText = 'Signing in…';
+            try {
+                const { data, error } = await rootSb.auth.signInWithPassword({ email, password });
+                if (error) {
+                    const f = friendlyAuthError(error.message, 'login');
+                    shakeForm(form);
+                    err.innerText = f.message;
+                    err.classList.remove('hidden');
+                    showDialog({ type: 'error', title: f.title, message: f.message, buttonText: 'Try Again' });
+                    return;
+                }
+                showToast('Signed in — welcome back!', 'success');
+                onLoggedIn(data.session);
+            } catch (ex) {
+                const f = friendlyAuthError(ex.message, 'login');
+                shakeForm(form);
+                showDialog({ type: 'error', title: f.title, message: f.message, buttonText: 'Try Again' });
+            }
+            finally { btn.disabled = false; btn.innerText = originalTxt; }
+        });
+
+        document.getElementById('signup-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const err = document.getElementById('signup-error');
+            const ok = document.getElementById('signup-success');
+            const form = e.target;
+            err.classList.add('hidden'); ok.classList.add('hidden');
+            if (!rootSb) {
+                showDialog({ type: 'error', title: 'Auth not ready', message: 'Please refresh the page and try again.' });
+                return;
+            }
+            const full_name = form.full_name.value.trim();
+            const email = form.email.value.trim();
+            const company = form.company.value;
+            const password = form.password.value;
+            if (!signupAvatarDataUrl) {
+                shakeForm(form);
+                showDialog({ type: 'warning', title: 'Photo required', message: 'Please upload a profile photo. Tap the camera icon at the top of the form.' });
+                return;
+            }
+            if (!company) {
+                shakeForm(form);
+                showDialog({ type: 'warning', title: 'Company required', message: 'Please select your company from the dropdown before continuing.' });
+                return;
+            }
+            if (password.length < 6) {
+                shakeForm(form);
+                showDialog({ type: 'warning', title: 'Password too short', message: 'Your password needs to be at least 6 characters long for security.' });
+                return;
+            }
+            const btn = form.querySelector('button[type="submit"]');
+            const originalTxt = btn.innerText;
+            btn.disabled = true; btn.innerText = 'Creating account…';
+            try {
+                const { data, error } = await rootSb.auth.signUp({
+                    email, password, options: { data: { full_name, company, avatar_url: signupAvatarDataUrl } }
+                });
+                if (error) {
+                    const f = friendlyAuthError(error.message, 'signup');
+                    shakeForm(form);
+                    showDialog({ type: 'error', title: f.title, message: f.message, buttonText: 'Try Again' });
+                    return;
+                }
+                if (data.session) {
+                    // Auto-confirmed — go straight in
+                    showDialog({
+                        type: 'success',
+                        title: 'Welcome aboard! 🎉',
+                        message: `Your account has been created, ${full_name.split(' ')[0]}. Let's get started.`,
+                        buttonText: 'Continue',
+                        onClose: () => onLoggedIn(data.session)
+                    });
+                } else {
+                    // Email confirmation required
+                    form.reset();
+                    signupAvatarDataUrl = '';
+                    const p = document.getElementById('signup-photo-preview');
+                    if (p) p.innerHTML = '📷';
+                    const h = document.getElementById('signup-photo-hint');
+                    if (h) { h.innerText = 'Tap the icon — required'; h.className = 'text-slate-400 text-xs mt-0.5'; }
+                    showDialog({
+                        type: 'email',
+                        title: 'Check your email 📬',
+                        message: `We sent a confirmation link to ${email}. Click it to activate your account, then log in.`,
+                        buttonText: 'Got it',
+                        onClose: () => switchAuthTab('login')
+                    });
+                }
+            } catch (ex) {
+                const f = friendlyAuthError(ex.message, 'signup');
+                shakeForm(form);
+                showDialog({ type: 'error', title: f.title, message: f.message, buttonText: 'Try Again' });
+            }
+            finally { btn.disabled = false; btn.innerText = originalTxt; }
+        });
+
+        // (Sign-out is available from the Profile Settings modal now.)
+
+        // ---------- Nav avatar + Profile Settings modal ----------
+        let profileData = null;
+
+        function setNavAvatar(avatarUrl, name) {
+            const el = document.getElementById('nav-avatar');
+            if (avatarUrl) {
+                el.innerHTML = `<img src="${avatarUrl}" class="w-full h-full object-cover" alt="">`;
+            } else {
+                const initial = (name || '?').trim().charAt(0).toUpperCase();
+                el.innerHTML = initial;
+            }
+        }
+
+        async function openProfileModal() {
+            if (!rootSb || !currentUser) return;
+            const m = document.getElementById('profile-modal');
+            m.classList.remove('hidden'); m.classList.add('flex');
+
+            // Load profile row
+            try {
+                const { data: p } = await rootSb.from('profiles').select('*').eq('id', currentUser.id).maybeSingle();
+                profileData = p || {};
+                const name  = p?.full_name || currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
+                const email = p?.email || currentUser.email;
+                const company = p?.company || currentUser.user_metadata?.company || '';
+                const avatar = p?.avatar_url || currentUser.user_metadata?.avatar_url || '';
+
+                document.getElementById('profile-name').innerText = name;
+                document.getElementById('profile-email').innerText = email;
+                document.getElementById('profile-company').innerText = company || 'No company set';
+                document.getElementById('profile-name-input').value = name;
+                document.getElementById('profile-company-select').value = company;
+
+                const av = document.getElementById('profile-avatar');
+                if (avatar) av.innerHTML = `<img src="${avatar}" class="w-full h-full object-cover" alt="">`;
+                else av.innerText = (name || '?').charAt(0).toUpperCase();
+
+                const created = p?.created_at ? new Date(p.created_at) : new Date(currentUser.created_at);
+                document.getElementById('profile-since').innerText = created.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+            } catch {}
+
+            // Load stats
+            try {
+                const [{ count: tests }, { data: bestRows }, { count: quizzes }] = await Promise.all([
+                    rootSb.from('test_results').select('*', { count: 'exact', head: true }).eq('user_id', currentUser.id),
+                    rootSb.from('test_results').select('wpm').eq('user_id', currentUser.id).order('wpm', { ascending: false }).limit(1),
+                    rootSb.from('quiz_results').select('*', { count: 'exact', head: true }).eq('user_id', currentUser.id)
+                ]);
+                document.getElementById('profile-tests').innerText = tests ?? 0;
+                document.getElementById('profile-best-wpm').innerText = bestRows?.[0]?.wpm ?? 0;
+                document.getElementById('profile-quizzes').innerText = quizzes ?? 0;
+            } catch {}
+        }
+        function closeProfileModal() {
+            const m = document.getElementById('profile-modal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+        }
+
+        document.getElementById('profile-btn').addEventListener('click', openProfileModal);
+        document.getElementById('profile-close').addEventListener('click', closeProfileModal);
+
+        // Change photo from profile modal
+        document.getElementById('profile-photo-input').addEventListener('change', async (e) => {
+            const file = e.target.files?.[0];
+            if (!file || !currentUser) return;
+            try {
+                showToast('Compressing photo…', 'info');
+                const dataUrl = await compressImageFile(file, 400, 0.85);
+                const { error } = await rootSb.from('profiles').update({ avatar_url: dataUrl }).eq('id', currentUser.id);
+                if (error) throw error;
+                try { await rootSb.auth.updateUser({ data: { avatar_url: dataUrl } }); } catch {}
+                document.getElementById('profile-avatar').innerHTML = `<img src="${dataUrl}" class="w-full h-full object-cover" alt="">`;
+                setNavAvatar(dataUrl, profileData?.full_name);
+                showToast('Photo updated!', 'success');
+            } catch (ex) {
+                showDialog({ type: 'error', title: "Couldn't update photo", message: ex.message || 'Please try a different image.' });
+            } finally { e.target.value = ''; }
+        });
+
+        // Save display name
+        document.getElementById('profile-name-save').addEventListener('click', async () => {
+            const newName = document.getElementById('profile-name-input').value.trim();
+            if (!newName || newName.length < 2) {
+                showDialog({ type: 'warning', title: 'Name too short', message: 'Your display name needs at least 2 characters.' });
+                return;
+            }
+            try {
+                const { error } = await rootSb.from('profiles').update({ full_name: newName }).eq('id', currentUser.id);
+                if (error) throw error;
+                try { await rootSb.auth.updateUser({ data: { full_name: newName } }); } catch {}
+                document.getElementById('profile-name').innerText = newName;
+                document.getElementById('user-chip').innerText = newName;
+                setNavAvatar(profileData?.avatar_url, newName);
+                showToast('Name updated!', 'success');
+            } catch (ex) {
+                showDialog({ type: 'error', title: "Couldn't save name", message: ex.message });
+            }
+        });
+
+        // Save company
+        document.getElementById('profile-company-save').addEventListener('click', async () => {
+            const c = document.getElementById('profile-company-select').value;
+            if (!c) {
+                showDialog({ type: 'warning', title: 'Pick a company', message: 'Please select a company from the dropdown.' });
+                return;
+            }
+            try {
+                const { error } = await rootSb.from('profiles').update({ company: c }).eq('id', currentUser.id);
+                if (error) throw error;
+                try { await rootSb.auth.updateUser({ data: { company: c } }); } catch {}
+                document.getElementById('profile-company').innerText = c;
+                showToast('Company updated!', 'success');
+            } catch (ex) {
+                showDialog({ type: 'error', title: "Couldn't save company", message: ex.message });
+            }
+        });
+
+        // Change password
+        document.getElementById('profile-pwd-save').addEventListener('click', async () => {
+            const p1 = document.getElementById('profile-pwd').value;
+            const p2 = document.getElementById('profile-pwd2').value;
+            if (p1.length < 6) {
+                showDialog({ type: 'warning', title: 'Password too short', message: 'Your new password needs to be at least 6 characters.' });
+                return;
+            }
+            if (p1 !== p2) {
+                showDialog({ type: 'warning', title: "Passwords don't match", message: 'The two password fields need to match. Try again.' });
+                return;
+            }
+            try {
+                const { error } = await rootSb.auth.updateUser({ password: p1 });
+                if (error) throw error;
+                document.getElementById('profile-pwd').value = '';
+                document.getElementById('profile-pwd2').value = '';
+                showDialog({ type: 'success', title: 'Password updated ✓', message: 'Your password has been changed. You may need to log in again on other devices.' });
+            } catch (ex) {
+                showDialog({ type: 'error', title: "Couldn't update password", message: ex.message });
+            }
+        });
+
+        // Sign out
+        document.getElementById('profile-signout').addEventListener('click', async () => {
+            if (rootSb) await rootSb.auth.signOut();
+            closeProfileModal();
+            showToast('You have been signed out.', 'info');
+            onLoggedOut();
+        });
+
+        window.addEventListener('load', async () => {
+            const ok = await initRootSupabase();
+            if (!ok) { showAuthModal(); return; }
+            const { data: { session } } = await rootSb.auth.getSession();
+            if (session) onLoggedIn(session);
+            else onLoggedOut();
+        });
+    </script>
+</body>
+</html>
