@@ -1,0 +1,1751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCQ Quiz – Shortcut Mastery Quiz</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/presence.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            background: #0b1120;
+            background-image:
+                radial-gradient(at 15% 12%, hsla(258, 90%, 55%, 0.55) 0, transparent 45%),
+                radial-gradient(at 85% 15%, hsla(200, 95%, 55%, 0.45) 0, transparent 45%),
+                radial-gradient(at 50% 90%, hsla(20, 90%, 55%, 0.45) 0, transparent 50%);
+            background-attachment: fixed;
+            color: #f8fafc;
+            overflow-x: hidden;
+        }
+        body::before {
+            content: '';
+            position: fixed; inset: 0;
+            background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
+            background-size: 22px 22px;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .glass {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(24px) saturate(180%);
+            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+        }
+        .glass-strong {
+            background: rgba(255, 255, 255, 0.12);
+            backdrop-filter: blur(30px) saturate(200%);
+            -webkit-backdrop-filter: blur(30px) saturate(200%);
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+        }
+        .glass-subtle {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(18px) saturate(160%);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .glass-nav {
+            background: rgba(15, 23, 42, 0.35);
+            backdrop-filter: blur(28px) saturate(180%);
+            -webkit-backdrop-filter: blur(28px) saturate(180%);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #f97316 0%, #ef4444 100%);
+            box-shadow: 0 10px 30px rgba(249, 115, 22, 0.4), inset 0 1px 0 rgba(255,255,255,0.3);
+            transition: all 0.25s ease;
+        }
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 40px rgba(249, 115, 22, 0.6);
+        }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+        .content { position: relative; z-index: 1; }
+        select, input { color-scheme: dark; }
+        select option { background: #1e293b; color: #f1f5f9; }
+
+        /* Category card */
+        .cat-card {
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        .cat-card:hover { transform: translateY(-4px); }
+        .cat-card.selected {
+            border-color: #f97316;
+            box-shadow: 0 15px 40px rgba(249, 115, 22, 0.4);
+        }
+        .cat-card.selected .cat-check { opacity: 1; transform: scale(1); }
+        .cat-check {
+            position: absolute; top: 12px; right: 12px;
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #f97316, #ef4444);
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; transform: scale(0.4);
+            transition: all 0.2s ease;
+            color: white;
+            font-weight: 900;
+        }
+
+        /* Option card */
+        .opt-card {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 18px 24px;
+            border-radius: 20px;
+            background: rgba(255,255,255,0.05);
+            border: 2px solid rgba(255,255,255,0.1);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .opt-card:hover:not(.locked) {
+            background: rgba(255,255,255,0.1);
+            border-color: rgba(249, 115, 22, 0.5);
+            transform: translateX(4px);
+        }
+        .opt-card.selected { background: rgba(249,115,22,0.15); border-color: #f97316; }
+        .opt-card.correct  { background: rgba(52,211,153,0.15); border-color: #34d399; }
+        .opt-card.incorrect{ background: rgba(244,63,94,0.15); border-color: #f43f5e; }
+        .opt-card.locked { cursor: default; }
+        .opt-letter {
+            width: 36px; height: 36px;
+            border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 900; font-size: 14px;
+            background: rgba(255,255,255,0.1);
+            color: #cbd5e1;
+            flex-shrink: 0;
+        }
+        .opt-card.selected .opt-letter  { background: #f97316; color: white; }
+        .opt-card.correct  .opt-letter  { background: #34d399; color: white; }
+        .opt-card.incorrect .opt-letter { background: #f43f5e; color: white; }
+
+        kbd.key {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.2);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            font-weight: 800;
+            color: #f1f5f9;
+            box-shadow: inset 0 -2px 0 rgba(0,0,0,0.3);
+            margin: 0 2px;
+        }
+
+        #quiz-progress { height: 6px; background: rgba(255,255,255,0.06); border-radius: 999px; overflow: hidden; }
+        #quiz-progress-fill {
+            height: 100%; width: 0%;
+            background: linear-gradient(90deg, #f97316 0%, #ef4444 50%, #ec4899 100%);
+            box-shadow: 0 0 12px rgba(249, 115, 22, 0.6);
+            transition: width 0.35s ease;
+        }
+
+        @keyframes fadeInUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to   { transform: translateY(0);    opacity: 1; }
+        }
+        .fade-in { animation: fadeInUp 0.45s cubic-bezier(0.16, 1, 0.3, 1); }
+
+        #toast-container {
+            position: fixed; bottom: 24px; right: 24px;
+            z-index: 200; display: flex; flex-direction: column; gap: 12px;
+        }
+        .toast {
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 14px 20px;
+            border-radius: 16px;
+            display: flex; align-items: center; gap: 12px;
+            min-width: 280px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes slideIn { from { transform: translateX(400px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        /* --- Anti-cheat: prevent selection during quiz --- */
+        body.quiz-active #q-text,
+        body.quiz-active #q-options,
+        body.quiz-active #q-explanation {
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+        }
+
+        /* --- Violation banner --- */
+        #violation-banner {
+            display: none;
+            position: fixed;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #f43f5e, #ef4444);
+            color: white;
+            font-weight: 900;
+            font-size: 14px;
+            letter-spacing: 0.05em;
+            z-index: 100;
+            box-shadow: 0 10px 30px rgba(244, 63, 94, 0.5);
+            animation: shake 0.5s ease;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(-50%); }
+            25%      { transform: translateX(calc(-50% - 6px)); }
+            75%      { transform: translateX(calc(-50% + 6px)); }
+        }
+
+        /* --- Rules modal violation dot --- */
+        .violation-dot {
+            width: 12px; height: 12px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.15);
+            transition: all 0.3s ease;
+        }
+        .violation-dot.hit {
+            background: #f43f5e;
+            box-shadow: 0 0 12px rgba(244, 63, 94, 0.6);
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center p-4 pt-20">
+
+    <nav class="glass-nav fixed top-0 left-0 w-full z-40 content">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center gap-2 cursor-pointer" onclick="window.location.href='../index.html'">
+                    <div class="p-1.5 rounded-lg text-white shadow-md" style="background: linear-gradient(135deg,#f97316,#ef4444);">
+                        <span class="text-lg">🧠</span>
+                    </div>
+                    <span class="font-black text-xl text-white tracking-tight">MCQ Quiz</span>
+                </div>
+
+                <div class="hidden md:flex items-center space-x-6 h-full">
+                    <a href="#" data-view="practice" class="nav-link text-orange-300 font-bold border-b-2 border-orange-400 h-full flex items-center px-1">Practice</a>
+                    <a href="#" data-view="leaderboard" class="nav-link text-slate-300 hover:text-white font-semibold transition-colors h-full flex items-center px-1">Leaderboard</a>
+                    <a href="#" data-view="history" class="nav-link text-slate-300 hover:text-white font-semibold transition-colors h-full flex items-center px-1">History</a>
+                </div>
+
+                <div class="flex items-center gap-3">
+                    <span id="user-chip" class="hidden glass px-3 py-1.5 rounded-full text-xs font-bold text-slate-300">—</span>
+                    <button id="logout-btn" class="hidden glass px-3 py-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-rose-300">Log Out</button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div id="auth-modal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" style="background: rgba(11, 17, 32, 0.7); backdrop-filter: blur(20px);">
+        <div class="glass-strong w-full max-w-md rounded-[2.5rem] p-8">
+            <div class="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-5 text-3xl" style="background: linear-gradient(135deg,#f97316,#ef4444); box-shadow: 0 15px 40px rgba(249,115,22,0.5);">🥷</div>
+            <h2 class="text-3xl font-black text-white mb-1 text-center">MCQ Quiz</h2>
+            <p class="text-slate-300 mb-6 text-sm font-semibold text-center">Log in to track your quiz progress</p>
+            <form id="login-form" class="space-y-3">
+                <input type="email" name="email" placeholder="Email" required
+                    class="glass-subtle w-full px-5 py-4 rounded-2xl focus:border-orange-400 focus:ring-4 focus:ring-orange-400/20 focus:outline-none font-bold text-white placeholder-slate-400">
+                <input type="password" name="password" placeholder="Password" required
+                    class="glass-subtle w-full px-5 py-4 rounded-2xl focus:border-orange-400 focus:ring-4 focus:ring-orange-400/20 focus:outline-none font-bold text-white placeholder-slate-400">
+                <p id="login-error" class="text-rose-300 text-sm font-bold hidden"></p>
+                <button type="submit" class="btn-primary w-full text-white font-extrabold py-4 rounded-2xl text-lg">Log In</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- WELCOME -->
+    <div id="welcome-screen" class="view w-full max-w-4xl content mt-4 fade-in">
+        <div class="text-center mb-6">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full mb-4" style="background: linear-gradient(135deg, rgba(249,115,22,0.2), rgba(239,68,68,0.2)); border: 1px solid rgba(249,115,22,0.35);">
+                <span>🥷</span>
+                <span class="text-xs font-black uppercase tracking-[0.2em] text-orange-300">Brain Training</span>
+            </div>
+            <h1 class="text-4xl md:text-5xl font-black text-white mb-2 tracking-tighter drop-shadow-lg">MCQ Quiz</h1>
+            <p class="text-slate-300 font-semibold max-w-lg mx-auto">10 categories · shortcuts, logic, math, GK, aptitude, riddles.</p>
+        </div>
+
+        <!-- Personal stats bar -->
+        <div class="grid grid-cols-3 gap-3 md:gap-4 mb-5 max-w-xl mx-auto">
+            <div class="glass rounded-2xl p-4 text-center">
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Total Attempts</p>
+                <p id="stat-attempts" class="text-2xl font-black text-white">0</p>
+            </div>
+            <div class="glass rounded-2xl p-4 text-center">
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Best Score</p>
+                <p id="stat-best" class="text-2xl font-black text-orange-300">0</p>
+            </div>
+            <div class="glass rounded-2xl p-4 text-center">
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Perfect Runs</p>
+                <p id="stat-perfect" class="text-2xl font-black text-emerald-300">0</p>
+            </div>
+        </div>
+
+        <!-- Category picker -->
+        <p class="text-[10px] uppercase tracking-[0.25em] text-slate-400 font-black mb-3 text-center">Choose a Category</p>
+        <div id="cat-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-6"></div>
+
+        <!-- Difficulty + start -->
+        <div class="glass-strong rounded-[2rem] p-5 md:p-6 max-w-2xl mx-auto">
+            <div class="flex flex-col sm:flex-row items-center gap-3">
+                <div class="flex-1 w-full">
+                    <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-2">Difficulty</p>
+                    <select id="difficulty-select" class="glass w-full text-white rounded-2xl focus:outline-none block px-5 py-3 font-extrabold cursor-pointer">
+                        <option value="mixed" selected>🎯 Mixed</option>
+                        <option value="easy">🟢 Easy Only</option>
+                        <option value="medium">🟡 Medium Only</option>
+                        <option value="hard">🔴 Hard Only</option>
+                    </select>
+                </div>
+                <button id="start-btn" disabled class="btn-primary text-white font-black px-8 py-4 rounded-2xl text-lg whitespace-nowrap w-full sm:w-auto">
+                    🚀 Start Quiz
+                </button>
+            </div>
+            <p class="text-slate-400 text-xs mt-3 text-center">10 questions · 30 seconds each · press 1-4 to answer</p>
+        </div>
+
+        <!-- Recent attempts -->
+        <div id="history-panel" class="glass-strong rounded-[2rem] p-6 mt-4 hidden">
+            <h3 class="font-black text-white text-lg mb-3">Your Recent Attempts</h3>
+            <div id="history-body" class="space-y-2"></div>
+        </div>
+    </div>
+
+    <!-- QUIZ SCREEN -->
+    <div id="quiz-screen" class="w-full max-w-3xl content mt-4 hidden">
+        <div class="mb-4 flex justify-between items-center gap-3 flex-wrap">
+            <div class="flex items-center gap-3">
+                <span id="q-cat-badge" class="glass px-3 py-1.5 rounded-full text-xs font-black text-white">—</span>
+                <div>
+                    <p class="text-xs text-slate-300 uppercase tracking-widest font-black">Question <span id="q-num">1</span> of <span id="q-total">10</span></p>
+                    <p id="q-difficulty" class="text-[10px] font-black uppercase tracking-widest mt-0.5">—</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <div class="glass px-3 py-2 rounded-xl flex items-center gap-2" title="Violations (3 = auto-submit)">
+                    <span class="text-[10px] font-black uppercase tracking-widest text-slate-400">Strikes</span>
+                    <div id="violation-dots" class="flex gap-1">
+                        <div class="violation-dot"></div>
+                        <div class="violation-dot"></div>
+                        <div class="violation-dot"></div>
+                    </div>
+                </div>
+                <div class="glass-strong px-5 py-2 rounded-2xl mono text-xl font-black flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <span id="q-timer">30</span>s
+                </div>
+            </div>
+        </div>
+
+        <div id="quiz-progress" class="mb-6"><div id="quiz-progress-fill"></div></div>
+
+        <div class="glass-strong rounded-[2rem] p-6 md:p-8">
+            <h2 id="q-text" class="text-2xl md:text-3xl font-black text-white mb-8 leading-snug">—</h2>
+            <div id="q-options" class="space-y-3"></div>
+
+            <div id="q-explanation" class="hidden mt-6 p-5 rounded-2xl glass-subtle">
+                <p class="text-xs uppercase tracking-widest text-orange-300 font-black mb-2">💡 Explanation</p>
+                <p id="q-explanation-text" class="text-slate-200"></p>
+            </div>
+
+            <div class="flex justify-between items-center mt-6">
+                <button id="quit-btn" class="glass px-5 py-2 rounded-xl text-xs font-bold text-slate-300 hover:text-rose-300">Quit</button>
+                <button id="next-btn" class="btn-primary text-white font-black px-8 py-3 rounded-2xl hidden">Next →</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- RESULT SCREEN -->
+    <div id="result-screen" class="w-full max-w-3xl content mt-4 hidden">
+        <div class="glass-strong rounded-[2.5rem] p-8 md:p-10">
+            <div id="result-emoji" class="text-6xl text-center mb-3">🎉</div>
+            <h2 id="result-title" class="text-4xl font-black text-white text-center mb-2">Quiz Complete!</h2>
+            <p id="result-subtitle" class="text-slate-300 text-center mb-8">Here's how you did.</p>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-8">
+                <div class="glass-subtle rounded-2xl p-5 text-center">
+                    <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Score</p>
+                    <p id="result-score" class="text-3xl font-black text-orange-300">0/10</p>
+                </div>
+                <div class="glass-subtle rounded-2xl p-5 text-center">
+                    <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Accuracy</p>
+                    <p id="result-acc" class="text-3xl font-black text-emerald-300">0%</p>
+                </div>
+                <div class="glass-subtle rounded-2xl p-5 text-center">
+                    <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Time</p>
+                    <p id="result-time" class="text-3xl font-black text-blue-300">0s</p>
+                </div>
+                <div class="glass-subtle rounded-2xl p-5 text-center">
+                    <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Category</p>
+                    <p id="result-category" class="text-3xl font-black text-purple-300">—</p>
+                </div>
+            </div>
+
+            <details class="glass-subtle rounded-2xl p-4 mb-6">
+                <summary class="cursor-pointer font-black text-white text-sm">📖 Review your answers</summary>
+                <div id="result-review" class="mt-4 space-y-3"></div>
+            </details>
+
+            <div class="flex flex-col sm:flex-row gap-3">
+                <button id="home-btn" class="glass flex-1 text-white font-bold py-4 rounded-2xl hover:bg-white/15">🏠 Home</button>
+                <button id="again-btn" class="btn-primary flex-1 text-white font-black py-4 rounded-2xl">🔁 Try Again</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- LEADERBOARD VIEW -->
+    <div id="view-leaderboard" class="view w-full max-w-5xl content mt-4 hidden">
+        <div class="mb-6 px-2 flex flex-col md:flex-row md:justify-between md:items-end gap-3">
+            <div>
+                <h1 class="text-3xl font-black text-white tracking-tighter drop-shadow-lg">Leaderboard</h1>
+                <p class="text-slate-300 text-sm font-bold uppercase tracking-[0.2em] mt-1">Best MCQ score per employee</p>
+            </div>
+            <div class="flex gap-2 items-center flex-wrap">
+                <select id="lb-category-filter" class="glass text-white text-sm rounded-2xl px-3 py-2 font-bold focus:outline-none">
+                    <option value="">All Categories</option>
+                </select>
+                <button id="lb-refresh" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/20">Refresh</button>
+            </div>
+        </div>
+        <div class="glass-strong rounded-[2rem] overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-slate-400 text-[10px] uppercase tracking-[0.2em] font-black border-b border-white/10">
+                            <th class="px-6 py-4 text-left">Rank</th>
+                            <th class="px-4 py-4 text-left">Employee</th>
+                            <th class="px-4 py-4 text-right">Best Score</th>
+                            <th class="px-4 py-4 text-right">Best Acc</th>
+                            <th class="px-4 py-4 text-right">Attempts</th>
+                            <th class="px-6 py-4 text-right">Last Active</th>
+                        </tr>
+                    </thead>
+                    <tbody id="lb-body"></tbody>
+                </table>
+            </div>
+            <div id="lb-empty" class="hidden p-16 text-center text-slate-400">
+                <p class="font-bold text-lg mb-1">No results yet</p>
+                <p class="text-sm">Complete a quiz to see the leaderboard fill up.</p>
+            </div>
+            <div id="lb-loading" class="p-16 text-center text-slate-400 font-bold animate-pulse">Loading leaderboard…</div>
+        </div>
+    </div>
+
+    <!-- HISTORY VIEW -->
+    <div id="view-history" class="view w-full max-w-5xl content mt-4 hidden">
+        <div class="mb-6 px-2 flex justify-between items-end">
+            <div>
+                <h1 class="text-3xl font-black text-white tracking-tighter drop-shadow-lg">Your History</h1>
+                <p class="text-slate-300 text-sm font-bold uppercase tracking-[0.2em] mt-1">Every quiz you've taken</p>
+            </div>
+            <button id="hist-refresh" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/20">Refresh</button>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="glass rounded-2xl p-5 text-center">
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Total Quizzes</p>
+                <p id="hist-total" class="text-3xl font-black text-white">0</p>
+            </div>
+            <div class="glass rounded-2xl p-5 text-center">
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Best Score</p>
+                <p id="hist-best" class="text-3xl font-black text-orange-300">0</p>
+            </div>
+            <div class="glass rounded-2xl p-5 text-center">
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Avg Accuracy</p>
+                <p id="hist-avg-acc" class="text-3xl font-black text-emerald-300">0%</p>
+            </div>
+            <div class="glass rounded-2xl p-5 text-center">
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Perfect Runs</p>
+                <p id="hist-perfect" class="text-3xl font-black text-purple-300">0</p>
+            </div>
+        </div>
+
+        <div class="glass-strong rounded-[2rem] overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-slate-400 text-[10px] uppercase tracking-[0.2em] font-black border-b border-white/10">
+                            <th class="px-6 py-4 text-left">Date</th>
+                            <th class="px-4 py-4 text-left">Category</th>
+                            <th class="px-4 py-4 text-left">Difficulty</th>
+                            <th class="px-4 py-4 text-right">Score</th>
+                            <th class="px-4 py-4 text-right">Acc</th>
+                            <th class="px-4 py-4 text-right">Time</th>
+                            <th class="px-4 py-4 text-right">Strikes</th>
+                        </tr>
+                    </thead>
+                    <tbody id="hist-body"></tbody>
+                </table>
+            </div>
+            <div id="hist-empty" class="hidden p-16 text-center text-slate-400">
+                <p class="font-bold text-lg mb-1">No quizzes yet</p>
+                <p class="text-sm">Take a quiz on the Practice tab to build your history.</p>
+            </div>
+            <div id="hist-loading" class="p-16 text-center text-slate-400 font-bold animate-pulse">Loading history…</div>
+        </div>
+    </div>
+
+    <div id="toast-container"></div>
+
+    <!-- Violation banner (shown briefly on each infraction) -->
+    <div id="violation-banner">⚠️ Warning — tab switching is not allowed during the quiz</div>
+
+    <!-- Rules modal (shown before quiz starts) -->
+    <div id="rules-modal" class="fixed inset-0 z-[65] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(20px);">
+        <div class="glass-strong w-full max-w-md rounded-[2rem] p-7">
+            <div class="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center text-white text-2xl" style="background: linear-gradient(135deg,#f97316,#ef4444); box-shadow: 0 10px 30px rgba(249,115,22,0.5);">📜</div>
+            <h2 class="text-2xl font-black text-white mb-2 text-center">Quiz Rules</h2>
+            <p class="text-slate-300 text-sm text-center mb-5">Please read these before starting.</p>
+            <ul class="space-y-3 mb-6">
+                <li class="flex gap-3 items-start">
+                    <span class="text-lg">🚫</span>
+                    <div>
+                        <p class="text-white font-bold text-sm">No tab switching</p>
+                        <p class="text-slate-400 text-xs">Leaving this tab counts as a violation. 3 violations auto-submit your quiz.</p>
+                    </div>
+                </li>
+                <li class="flex gap-3 items-start">
+                    <span class="text-lg">📋</span>
+                    <div>
+                        <p class="text-white font-bold text-sm">No copy/paste</p>
+                        <p class="text-slate-400 text-xs">Copying, right-clicking, and text selection are disabled.</p>
+                    </div>
+                </li>
+                <li class="flex gap-3 items-start">
+                    <span class="text-lg">⏱️</span>
+                    <div>
+                        <p class="text-white font-bold text-sm">30 seconds per question</p>
+                        <p class="text-slate-400 text-xs">Timer auto-locks your answer when it hits zero.</p>
+                    </div>
+                </li>
+                <li class="flex gap-3 items-start">
+                    <span class="text-lg">🎯</span>
+                    <div>
+                        <p class="text-white font-bold text-sm">Answer with keys 1-4</p>
+                        <p class="text-slate-400 text-xs">Then press Enter to move to the next question.</p>
+                    </div>
+                </li>
+            </ul>
+            <button id="rules-accept" type="button" class="btn-primary w-full text-white font-black py-4 rounded-2xl">I agree — Start Quiz</button>
+            <button id="rules-cancel" type="button" class="w-full text-slate-400 font-bold py-2 mt-2 text-sm">Cancel</button>
+        </div>
+    </div>
+
+    <!-- AI topic modal -->
+    <div id="ai-modal" class="fixed inset-0 z-[65] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(20px);">
+        <div class="glass-strong w-full max-w-md rounded-[2rem] p-7">
+            <div class="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center text-white text-2xl" style="background: linear-gradient(135deg,#a855f7,#3b82f6); box-shadow: 0 10px 30px rgba(168,85,247,0.5);">🤖</div>
+            <h2 class="text-2xl font-black text-white mb-1 text-center">AI Quiz</h2>
+            <p class="text-slate-300 text-sm text-center mb-5">Type any topic — the AI will generate 10 fresh MCQs about it.</p>
+            <label class="text-[10px] uppercase tracking-widest text-slate-400 font-black block mb-2">Topic</label>
+            <input id="ai-topic" type="text" placeholder="e.g. Ancient Rome, JavaScript, Cricket rules..."
+                class="glass w-full px-4 py-3 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-400/40 font-bold mb-4">
+            <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-2">Popular topics</p>
+            <div id="ai-suggest" class="flex flex-wrap gap-2 mb-5">
+                <button type="button" data-t="World Geography" class="ai-sug glass-subtle px-3 py-1.5 rounded-full text-xs font-bold text-slate-200 hover:bg-white/15">🌍 World Geography</button>
+                <button type="button" data-t="JavaScript basics" class="ai-sug glass-subtle px-3 py-1.5 rounded-full text-xs font-bold text-slate-200 hover:bg-white/15">💻 JavaScript</button>
+                <button type="button" data-t="Cricket rules and history" class="ai-sug glass-subtle px-3 py-1.5 rounded-full text-xs font-bold text-slate-200 hover:bg-white/15">🏏 Cricket</button>
+                <button type="button" data-t="Human body and biology" class="ai-sug glass-subtle px-3 py-1.5 rounded-full text-xs font-bold text-slate-200 hover:bg-white/15">🧬 Biology</button>
+                <button type="button" data-t="Space and astronomy" class="ai-sug glass-subtle px-3 py-1.5 rounded-full text-xs font-bold text-slate-200 hover:bg-white/15">🚀 Space</button>
+                <button type="button" data-t="Bollywood movies" class="ai-sug glass-subtle px-3 py-1.5 rounded-full text-xs font-bold text-slate-200 hover:bg-white/15">🎬 Bollywood</button>
+                <button type="button" data-t="World history 1900s" class="ai-sug glass-subtle px-3 py-1.5 rounded-full text-xs font-bold text-slate-200 hover:bg-white/15">📜 History</button>
+            </div>
+            <p id="ai-error" class="text-rose-300 text-sm font-bold hidden mb-3"></p>
+            <div class="flex gap-2">
+                <button id="ai-cancel" type="button" class="glass flex-1 text-white font-bold py-3 rounded-xl">Cancel</button>
+                <button id="ai-generate" type="button" class="flex-1 text-white font-black py-3 rounded-xl" style="background: linear-gradient(135deg,#a855f7,#3b82f6); box-shadow: 0 10px 30px rgba(168,85,247,0.4);">🤖 Generate</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        // Question banks — 5 categories, ~170 questions total
+        // ============================================================
+        const QUESTION_BANKS = {
+            mac: {
+                key: 'mac', name: 'MacBook', icon: '🍎',
+                gradient: 'from-slate-500 to-slate-700',
+                iconBg: 'linear-gradient(135deg,#64748b,#334155)',
+                questions: [
+                    // ==== EASY ====
+                    { q: 'Which shortcut copies the selected text?', options: ['⌘ + C', '⌘ + V', '⌘ + X', '⌘ + Z'], correct: 0, difficulty: 'easy', ex: '⌘ + C copies the current selection to the clipboard.' },
+                    { q: 'Which shortcut pastes the clipboard content?', options: ['⌘ + C', '⌘ + V', '⌘ + X', '⌘ + P'], correct: 1, difficulty: 'easy', ex: '⌘ + V pastes whatever is currently on the clipboard.' },
+                    { q: 'Which shortcut cuts the selection?', options: ['⌘ + C', '⌘ + V', '⌘ + X', '⌘ + Del'], correct: 2, difficulty: 'easy', ex: '⌘ + X removes the selection and places it on the clipboard.' },
+                    { q: 'How do you undo an action on macOS?', options: ['⌘ + Y', '⌘ + Z', '⌘ + U', '⌘ + Del'], correct: 1, difficulty: 'easy', ex: '⌘ + Z steps backward through your action history.' },
+                    { q: 'Which shortcut saves the current document?', options: ['⌘ + N', '⌘ + O', '⌘ + S', '⌘ + Return'], correct: 2, difficulty: 'easy', ex: '⌘ + S saves. Get in the habit of pressing it often.' },
+                    { q: 'Which shortcut selects everything?', options: ['⌘ + A', '⌘ + E', '⌘ + S', '⌘ + F'], correct: 0, difficulty: 'easy', ex: '⌘ + A selects all items in the current window or field.' },
+                    { q: 'Which shortcut opens the Find dialog?', options: ['⌘ + F', '⌘ + G', '⌘ + K', '⌘ + L'], correct: 0, difficulty: 'easy', ex: '⌘ + F opens Find. ⌘ + G jumps to the next match.' },
+                    { q: 'Which shortcut opens a new tab in browsers?', options: ['⌘ + N', '⌘ + T', '⌘ + W', '⌘ + Tab'], correct: 1, difficulty: 'easy', ex: '⌘ + T opens a new tab. ⌘ + N opens a whole new window.' },
+                    { q: 'Which shortcut closes the current tab or window?', options: ['⌘ + W', '⌘ + Q', '⌘ + T', 'Esc'], correct: 0, difficulty: 'easy', ex: '⌘ + W closes the tab or window. ⌘ + Q quits the whole app.' },
+                    { q: 'Which shortcut opens Spotlight search?', options: ['⌘ + Space', '⌘ + F', 'Ctrl + Space', '⌘ + S'], correct: 0, difficulty: 'easy', ex: '⌘ + Space opens Spotlight — search apps, files, math, definitions.' },
+                    { q: 'Which shortcut quits the current app?', options: ['⌘ + W', '⌘ + Q', '⌘ + H', '⌘ + M'], correct: 1, difficulty: 'easy', ex: '⌘ + Q fully quits an app. ⌘ + W just closes the window.' },
+                    { q: 'How do you switch between open apps?', options: ['⌘ + Tab', '⌘ + `', 'Ctrl + Tab', 'Fn + Tab'], correct: 0, difficulty: 'easy', ex: '⌘ + Tab cycles apps. Hold ⌘ and press Tab repeatedly.' },
+                    { q: 'Which shortcut opens the print dialog?', options: ['⌘ + P', '⌘ + I', '⌘ + K', '⌘ + Alt + P'], correct: 0, difficulty: 'easy', ex: '⌘ + P opens Print for the current document or page.' },
+                    // ==== MEDIUM ====
+                    { q: 'Which shortcut takes a screenshot of the entire screen?', options: ['⌘ + Shift + 3', '⌘ + Shift + 4', '⌘ + Shift + 5', '⌘ + P'], correct: 0, difficulty: 'medium', ex: '⌘ + Shift + 3 captures the whole screen to the desktop.' },
+                    { q: 'Which shortcut captures a selected area of the screen?', options: ['⌘ + Shift + 3', '⌘ + Shift + 4', '⌘ + Shift + 5', '⌘ + Alt + 4'], correct: 1, difficulty: 'medium', ex: '⌘ + Shift + 4 gives you crosshairs to drag over an area.' },
+                    { q: 'How do you take a screenshot of a specific window?', options: ['⌘ + Shift + 3', '⌘ + Shift + 4 then Space', 'Ctrl + Shift + W', '⌘ + Shift + W'], correct: 1, difficulty: 'medium', ex: 'Press ⌘ + Shift + 4, then Space, then click the window.' },
+                    { q: 'Which shortcut opens the Force Quit dialog?', options: ['⌘ + Alt + Esc', '⌘ + Q', 'Ctrl + Alt + Del', 'Ctrl + ⌘ + Esc'], correct: 0, difficulty: 'medium', ex: '⌘ + Option + Esc opens Force Quit for frozen apps.' },
+                    { q: 'How do you switch between windows of the same app?', options: ['⌘ + Tab', '⌘ + `', 'Ctrl + Tab', 'Alt + Tab'], correct: 1, difficulty: 'medium', ex: '⌘ + ` (backtick) switches between windows inside the current app.' },
+                    { q: 'Which shortcut hides the current app?', options: ['⌘ + H', '⌘ + M', '⌘ + W', '⌘ + Q'], correct: 0, difficulty: 'medium', ex: '⌘ + H hides. ⌘ + M minimizes to the Dock.' },
+                    { q: 'Which shortcut minimizes the current window?', options: ['⌘ + H', '⌘ + M', '⌘ + Space', '⌘ + D'], correct: 1, difficulty: 'medium', ex: '⌘ + M minimizes the front window to the Dock.' },
+                    { q: 'Which shortcut redoes an action?', options: ['⌘ + Y', '⌘ + Shift + Z', '⌘ + R', '⌘ + Alt + Z'], correct: 1, difficulty: 'medium', ex: '⌘ + Shift + Z redoes what ⌘ + Z just undid.' },
+                    { q: 'Which shortcut moves a file to Trash in Finder?', options: ['Delete', '⌘ + Del', '⌘ + Shift + Del', 'Alt + Del'], correct: 1, difficulty: 'medium', ex: '⌘ + Delete moves selected files to Trash.' },
+                    { q: 'Which shortcut empties the Trash?', options: ['⌘ + Del', '⌘ + Shift + Del', '⌘ + Alt + Del', 'Alt + Shift + Del'], correct: 1, difficulty: 'medium', ex: '⌘ + Shift + Delete empties the Trash after confirmation.' },
+                    { q: 'Which shortcut opens Preferences in most apps?', options: ['⌘ + ,', '⌘ + .', '⌘ + P', '⌘ + K'], correct: 0, difficulty: 'medium', ex: '⌘ + , (comma) opens the current app Preferences.' },
+                    { q: 'Which shortcut reopens the last closed browser tab?', options: ['⌘ + Shift + T', '⌘ + Alt + T', 'Ctrl + Shift + T', '⌘ + R'], correct: 0, difficulty: 'medium', ex: '⌘ + Shift + T reopens tabs you accidentally closed.' },
+                    { q: 'How do you create a new folder in Finder?', options: ['⌘ + N', '⌘ + Shift + N', '⌘ + F', '⌘ + Alt + N'], correct: 1, difficulty: 'medium', ex: '⌘ + Shift + N creates a new folder in the current Finder location.' },
+                    { q: 'How do you show/hide hidden files in Finder?', options: ['⌘ + .', '⌘ + Shift + .', 'Alt + H', 'Ctrl + Shift + H'], correct: 1, difficulty: 'medium', ex: '⌘ + Shift + . (period) toggles visibility of hidden files.' },
+                    // ==== HARD ====
+                    { q: 'Which shortcut locks the screen immediately?', options: ['⌘ + Q', 'Ctrl + ⌘ + Q', '⌘ + Alt + L', 'Fn + F5'], correct: 1, difficulty: 'hard', ex: 'Ctrl + ⌘ + Q locks your Mac immediately.' },
+                    { q: 'Which shortcut opens the Emoji & Symbols picker?', options: ['⌘ + E', 'Ctrl + ⌘ + Space', '⌘ + Shift + E', 'Fn + E'], correct: 1, difficulty: 'hard', ex: 'Ctrl + ⌘ + Space opens the emoji and symbols picker.' },
+                    { q: 'How do you move the cursor to the beginning of a line?', options: ['⌘ + Left', 'Alt + Left', 'Home', 'Fn + Left'], correct: 0, difficulty: 'hard', ex: '⌘ + Left jumps to the start of the current line.' },
+                    { q: 'How do you delete the word to the left of the cursor?', options: ['Alt + Del', '⌘ + Del', 'Ctrl + Del', 'Fn + Del'], correct: 0, difficulty: 'hard', ex: 'Option + Delete removes the previous word in one shot.' },
+                    { q: 'How do you take a screenshot to the clipboard (not saved as file)?', options: ['⌘ + Shift + 3', 'Ctrl + ⌘ + Shift + 3', '⌘ + C after screenshot', '⌘ + Alt + Shift + 3'], correct: 1, difficulty: 'hard', ex: 'Add Ctrl to any screenshot shortcut to copy to clipboard instead of saving.' },
+                    { q: 'How do you jump to the Applications folder in Finder?', options: ['⌘ + Shift + A', '⌘ + A', '⌘ + Alt + A', 'Ctrl + Shift + A'], correct: 0, difficulty: 'hard', ex: '⌘ + Shift + A opens the Applications folder anywhere in Finder.' },
+                    { q: 'How do you jump to the Downloads folder in Finder?', options: ['⌘ + Shift + D', '⌘ + Alt + L', '⌘ + Shift + L', '⌘ + L'], correct: 2, difficulty: 'hard', ex: '⌘ + Shift + L opens the Downloads folder.' },
+                    { q: 'Which shortcut toggles auto-hide of the Dock?', options: ['⌘ + Alt + D', '⌘ + Shift + D', 'Ctrl + Alt + D', 'Fn + D'], correct: 0, difficulty: 'hard', ex: '⌘ + Option + D toggles the Dock auto-hide behavior.' },
+                    { q: 'In Finder, which shortcut shows the path bar?', options: ['⌘ + /', '⌘ + Alt + P', '⌘ + P', 'Ctrl + P'], correct: 1, difficulty: 'hard', ex: '⌘ + Option + P toggles the path bar at the bottom of Finder.' },
+                    { q: 'How do you paste while matching destination formatting?', options: ['⌘ + V', '⌘ + Shift + V', '⌘ + Alt + Shift + V', 'Ctrl + V'], correct: 2, difficulty: 'hard', ex: '⌘ + Option + Shift + V pastes and matches the destination style.' }
+                ]
+            },
+
+            windows: {
+                key: 'windows', name: 'Windows', icon: '🪟',
+                gradient: 'from-blue-500 to-cyan-600',
+                iconBg: 'linear-gradient(135deg,#3b82f6,#0891b2)',
+                questions: [
+                    { q: 'Which shortcut copies text on Windows?', options: ['Ctrl + C', 'Ctrl + V', 'Ctrl + X', 'Ctrl + Z'], correct: 0, difficulty: 'easy', ex: 'Ctrl + C is the universal copy shortcut on Windows.' },
+                    { q: 'Which shortcut pastes on Windows?', options: ['Ctrl + C', 'Ctrl + V', 'Ctrl + X', 'Ctrl + P'], correct: 1, difficulty: 'easy', ex: 'Ctrl + V pastes clipboard content.' },
+                    { q: 'How do you undo on Windows?', options: ['Ctrl + Z', 'Ctrl + Y', 'Ctrl + U', 'Ctrl + Del'], correct: 0, difficulty: 'easy', ex: 'Ctrl + Z reverses the last action.' },
+                    { q: 'Which shortcut saves a document?', options: ['Ctrl + S', 'Ctrl + O', 'Ctrl + N', 'Ctrl + P'], correct: 0, difficulty: 'easy', ex: 'Ctrl + S saves the current file.' },
+                    { q: 'How do you select everything on Windows?', options: ['Ctrl + A', 'Ctrl + E', 'Ctrl + S', 'Ctrl + F'], correct: 0, difficulty: 'easy', ex: 'Ctrl + A selects all content in the active window.' },
+                    { q: 'Which shortcut prints on Windows?', options: ['Ctrl + P', 'Ctrl + I', 'Ctrl + K', 'Alt + P'], correct: 0, difficulty: 'easy', ex: 'Ctrl + P opens the print dialog.' },
+                    { q: 'How do you switch between open apps on Windows?', options: ['Alt + Tab', 'Ctrl + Tab', 'Win + Tab', 'Alt + Shift'], correct: 0, difficulty: 'easy', ex: 'Alt + Tab cycles through open windows.' },
+                    { q: 'Which key opens the Start menu?', options: ['Win', 'Ctrl + Esc', 'Alt + S', 'Both Win and Ctrl + Esc'], correct: 3, difficulty: 'easy', ex: 'Both the Windows key and Ctrl + Esc open Start.' },
+                    { q: 'How do you close the current window?', options: ['Alt + F4', 'Ctrl + W', 'Ctrl + Q', 'Alt + W'], correct: 0, difficulty: 'easy', ex: 'Alt + F4 closes the current window or app.' },
+                    { q: 'Which shortcut opens Task Manager?', options: ['Ctrl + Alt + Del', 'Ctrl + Shift + Esc', 'Win + T', 'Alt + Shift + T'], correct: 1, difficulty: 'medium', ex: 'Ctrl + Shift + Esc opens Task Manager directly.' },
+                    { q: 'How do you lock the screen on Windows?', options: ['Win + L', 'Ctrl + Alt + L', 'Win + Q', 'Alt + F4'], correct: 0, difficulty: 'medium', ex: 'Win + L locks your PC immediately.' },
+                    { q: 'Which shortcut shows the desktop?', options: ['Win + D', 'Win + M', 'Alt + D', 'Ctrl + D'], correct: 0, difficulty: 'medium', ex: 'Win + D minimizes everything to show the desktop.' },
+                    { q: 'How do you open File Explorer?', options: ['Win + E', 'Win + F', 'Alt + E', 'Ctrl + E'], correct: 0, difficulty: 'medium', ex: 'Win + E opens File Explorer.' },
+                    { q: 'Which shortcut opens the Snipping Tool for area screenshot?', options: ['Print Screen', 'Win + Shift + S', 'Alt + Print Screen', 'Win + Print'], correct: 1, difficulty: 'medium', ex: 'Win + Shift + S opens Snip & Sketch for area capture.' },
+                    { q: 'How do you snap a window to the left half of the screen?', options: ['Win + Left', 'Alt + Left', 'Ctrl + Left', 'Win + Shift + Left'], correct: 0, difficulty: 'medium', ex: 'Win + Left snaps the window to the left half.' },
+                    { q: 'Which shortcut opens the Emoji picker on Windows?', options: ['Win + .', 'Win + E', 'Alt + E', 'Ctrl + ;'], correct: 0, difficulty: 'medium', ex: 'Win + . (period) or Win + ; opens the emoji panel.' },
+                    { q: 'How do you open Settings on Windows?', options: ['Win + I', 'Win + S', 'Win + O', 'Alt + S'], correct: 0, difficulty: 'medium', ex: 'Win + I opens the Windows Settings app.' },
+                    { q: 'Which shortcut opens Windows Search?', options: ['Win + S', 'Win + F', 'Ctrl + Space', 'Win + I'], correct: 0, difficulty: 'medium', ex: 'Win + S opens the search bar.' },
+                    { q: 'How do you rename a file in File Explorer?', options: ['F2', 'F3', 'F4', 'Ctrl + R'], correct: 0, difficulty: 'medium', ex: 'F2 renames the selected file or folder.' },
+                    { q: 'Which shortcut opens Clipboard History on Windows 10/11?', options: ['Win + V', 'Ctrl + V', 'Win + C', 'Alt + V'], correct: 0, difficulty: 'hard', ex: 'Win + V opens Clipboard History (must be enabled first).' },
+                    { q: 'How do you create a new virtual desktop?', options: ['Win + Ctrl + D', 'Win + Alt + D', 'Win + Shift + D', 'Ctrl + Shift + D'], correct: 0, difficulty: 'hard', ex: 'Win + Ctrl + D creates a new virtual desktop.' },
+                    { q: 'How do you switch between virtual desktops?', options: ['Win + Ctrl + Arrow', 'Win + Alt + Arrow', 'Ctrl + Alt + Arrow', 'Alt + Arrow'], correct: 0, difficulty: 'hard', ex: 'Win + Ctrl + Left/Right switches between virtual desktops.' },
+                    { q: 'Which shortcut opens the Quick Link menu (Power User)?', options: ['Win + X', 'Win + Q', 'Alt + X', 'Ctrl + Shift + X'], correct: 0, difficulty: 'hard', ex: 'Win + X opens Quick Links for admin tools.' },
+                    { q: 'How do you take a full-screen screenshot on Windows?', options: ['Print Screen', 'Win + Print Screen', 'Alt + Print Screen', 'Both Print Screen and Win + Print Screen work'], correct: 3, difficulty: 'hard', ex: 'Print Screen copies to clipboard; Win + Print Screen also saves to Pictures/Screenshots.' },
+                    { q: 'Which shortcut opens the Game Bar for screen recording?', options: ['Win + G', 'Win + R', 'Ctrl + G', 'Alt + R'], correct: 0, difficulty: 'hard', ex: 'Win + G opens the Game Bar with screen recording.' },
+                    { q: 'How do you jump the cursor to the address bar in File Explorer?', options: ['Alt + D', 'Ctrl + L', 'F4', 'All of the above'], correct: 3, difficulty: 'hard', ex: 'Alt + D, Ctrl + L, and F4 all move focus to the address bar.' },
+                    { q: 'Which shortcut opens the Run dialog?', options: ['Win + R', 'Win + X', 'Ctrl + R', 'Alt + R'], correct: 0, difficulty: 'hard', ex: 'Win + R opens the Run dialog for quick commands.' }
+                ]
+            },
+
+            vscode: {
+                key: 'vscode', name: 'VS Code', icon: '💻',
+                gradient: 'from-purple-500 to-blue-600',
+                iconBg: 'linear-gradient(135deg,#8b5cf6,#3b82f6)',
+                questions: [
+                    { q: 'Which shortcut opens the Command Palette in VS Code?', options: ['Cmd/Ctrl + Shift + P', 'Cmd/Ctrl + P', 'Cmd/Ctrl + Shift + O', 'F1'], correct: 0, difficulty: 'easy', ex: 'Cmd/Ctrl + Shift + P (also F1) opens the Command Palette.' },
+                    { q: 'How do you quick-open a file by name?', options: ['Cmd/Ctrl + P', 'Cmd/Ctrl + O', 'Cmd/Ctrl + F', 'Cmd/Ctrl + N'], correct: 0, difficulty: 'easy', ex: 'Cmd/Ctrl + P opens Quick Open — start typing a filename.' },
+                    { q: 'Which shortcut toggles the integrated terminal?', options: ['Ctrl + `', 'Ctrl + T', 'Ctrl + Shift + T', 'Ctrl + Alt + T'], correct: 0, difficulty: 'easy', ex: 'Ctrl + ` (backtick) toggles the built-in terminal.' },
+                    { q: 'How do you comment or uncomment the current line?', options: ['Cmd/Ctrl + /', 'Cmd/Ctrl + \\', 'Cmd/Ctrl + ;', 'Alt + /'], correct: 0, difficulty: 'easy', ex: 'Cmd/Ctrl + / toggles a line comment.' },
+                    { q: 'Which shortcut saves the current file?', options: ['Cmd/Ctrl + S', 'Cmd/Ctrl + Shift + S', 'Alt + S', 'F2'], correct: 0, difficulty: 'easy', ex: 'Cmd/Ctrl + S saves the current file.' },
+                    { q: 'How do you find text in the current file?', options: ['Cmd/Ctrl + F', 'Cmd/Ctrl + Shift + F', 'Cmd/Ctrl + G', 'F3'], correct: 0, difficulty: 'easy', ex: 'Cmd/Ctrl + F opens Find. Shift + F searches across all files.' },
+                    { q: 'Which shortcut opens Find and Replace?', options: ['Cmd/Ctrl + H', 'Cmd/Ctrl + R', 'Cmd/Ctrl + Alt + F', 'F4'], correct: 0, difficulty: 'easy', ex: 'Cmd/Ctrl + H opens Find and Replace.' },
+                    { q: 'Which shortcut formats the entire document?', options: ['Shift + Alt + F', 'Cmd/Ctrl + F', 'Alt + F', 'Cmd/Ctrl + Shift + F'], correct: 0, difficulty: 'easy', ex: 'Shift + Alt + F (or Shift + Option + F on Mac) formats the whole document.' },
+                    { q: 'How do you split the editor?', options: ['Cmd/Ctrl + \\', 'Cmd/Ctrl + /', 'Cmd/Ctrl + Shift + \\', 'Cmd/Ctrl + Alt + \\'], correct: 0, difficulty: 'easy', ex: 'Cmd/Ctrl + \\ splits the editor vertically.' },
+                    { q: 'Which shortcut Go To Definition?', options: ['F12', 'F2', 'F5', 'Cmd/Ctrl + G'], correct: 0, difficulty: 'medium', ex: 'F12 jumps to the definition of the symbol under the cursor.' },
+                    { q: 'How do you rename a symbol across the file?', options: ['F2', 'F12', 'Cmd/Ctrl + R', 'Alt + R'], correct: 0, difficulty: 'medium', ex: 'F2 opens the rename dialog and renames all occurrences.' },
+                    { q: 'How do you go to a specific line number?', options: ['Cmd/Ctrl + G', 'Cmd/Ctrl + L', 'Cmd/Ctrl + P then :N', 'Both Cmd/Ctrl + G and Cmd/Ctrl + P then :N'], correct: 3, difficulty: 'medium', ex: 'Cmd/Ctrl + G opens Go to Line. In Quick Open, prefix with : to jump.' },
+                    { q: 'How do you toggle the sidebar?', options: ['Cmd/Ctrl + B', 'Cmd/Ctrl + S', 'Cmd/Ctrl + \\', 'Alt + S'], correct: 0, difficulty: 'medium', ex: 'Cmd/Ctrl + B toggles the sidebar.' },
+                    { q: 'Which shortcut adds a multi-cursor at next occurrence?', options: ['Cmd/Ctrl + D', 'Cmd/Ctrl + F', 'Alt + Click', 'Cmd/Ctrl + Shift + D'], correct: 0, difficulty: 'medium', ex: 'Cmd/Ctrl + D selects the next occurrence — press repeatedly for multi-cursors.' },
+                    { q: 'How do you duplicate the current line down?', options: ['Shift + Alt + Down', 'Cmd/Ctrl + D', 'Alt + Shift + D', 'Cmd/Ctrl + Shift + Down'], correct: 0, difficulty: 'medium', ex: 'Shift + Alt + Down copies the current line below.' },
+                    { q: 'How do you move the current line up or down?', options: ['Alt + Up / Down', 'Ctrl + Up / Down', 'Cmd + Up / Down', 'Shift + Up / Down'], correct: 0, difficulty: 'medium', ex: 'Alt + Up/Down moves the current line up or down.' },
+                    { q: 'Which shortcut deletes the current line?', options: ['Cmd/Ctrl + Shift + K', 'Cmd/Ctrl + Del', 'Alt + Del', 'Cmd/Ctrl + K'], correct: 0, difficulty: 'medium', ex: 'Cmd/Ctrl + Shift + K deletes the current line.' },
+                    { q: 'How do you fold all code regions?', options: ['Cmd/Ctrl + K then Cmd/Ctrl + 0', 'Cmd/Ctrl + Shift + F', 'Alt + F', 'Cmd/Ctrl + Alt + 0'], correct: 0, difficulty: 'medium', ex: 'Cmd/Ctrl + K then 0 folds all regions. K + J unfolds all.' },
+                    { q: 'Which shortcut opens Quick Fix suggestions?', options: ['Cmd/Ctrl + .', 'Cmd/Ctrl + /', 'Alt + Enter', 'F8'], correct: 0, difficulty: 'hard', ex: 'Cmd/Ctrl + . shows Quick Fix and refactor options.' },
+                    { q: 'How do you toggle word wrap?', options: ['Alt + Z', 'Cmd/Ctrl + W', 'Alt + W', 'Cmd/Ctrl + Shift + Z'], correct: 0, difficulty: 'hard', ex: 'Alt + Z toggles word wrap on/off.' },
+                    { q: 'Which shortcut opens the Extensions view?', options: ['Cmd/Ctrl + Shift + X', 'Cmd/Ctrl + E', 'Cmd/Ctrl + X', 'Alt + X'], correct: 0, difficulty: 'hard', ex: 'Cmd/Ctrl + Shift + X opens Extensions.' },
+                    { q: 'How do you open the Source Control (Git) panel?', options: ['Ctrl + Shift + G', 'Cmd/Ctrl + G', 'Alt + G', 'F7'], correct: 0, difficulty: 'hard', ex: 'Ctrl + Shift + G opens the Source Control panel.' },
+                    { q: 'Which key starts debugging?', options: ['F5', 'F9', 'F10', 'F11'], correct: 0, difficulty: 'hard', ex: 'F5 starts or continues debugging.' },
+                    { q: 'Which shortcut toggles a breakpoint?', options: ['F9', 'F5', 'F10', 'Shift + F9'], correct: 0, difficulty: 'hard', ex: 'F9 toggles a breakpoint on the current line.' },
+                    { q: 'How do you Peek Definition without leaving the file?', options: ['Alt + F12', 'F12', 'Shift + F12', 'Cmd/Ctrl + F12'], correct: 0, difficulty: 'hard', ex: 'Alt + F12 shows Peek Definition in an inline popup.' }
+                ]
+            },
+
+            chrome: {
+                key: 'chrome', name: 'Chrome', icon: '🌐',
+                gradient: 'from-yellow-500 to-red-500',
+                iconBg: 'linear-gradient(135deg,#eab308,#ef4444)',
+                questions: [
+                    { q: 'Which shortcut opens a new tab in Chrome?', options: ['Cmd/Ctrl + T', 'Cmd/Ctrl + N', 'Cmd/Ctrl + Tab', 'F5'], correct: 0, difficulty: 'easy', ex: 'Cmd/Ctrl + T opens a new tab.' },
+                    { q: 'How do you close the current tab in Chrome?', options: ['Cmd/Ctrl + W', 'Cmd/Ctrl + Q', 'Alt + F4', 'Cmd/Ctrl + T'], correct: 0, difficulty: 'easy', ex: 'Cmd/Ctrl + W closes the current tab.' },
+                    { q: 'How do you reopen the last closed tab?', options: ['Cmd/Ctrl + Shift + T', 'Cmd/Ctrl + Alt + T', 'Cmd/Ctrl + T', 'F6'], correct: 0, difficulty: 'easy', ex: 'Cmd/Ctrl + Shift + T reopens closed tabs one at a time.' },
+                    { q: 'How do you open a new incognito window?', options: ['Cmd/Ctrl + Shift + N', 'Cmd/Ctrl + N', 'Cmd/Ctrl + I', 'Cmd/Ctrl + Alt + N'], correct: 0, difficulty: 'easy', ex: 'Cmd/Ctrl + Shift + N opens Incognito.' },
+                    { q: 'Which shortcut jumps to the address bar?', options: ['Cmd/Ctrl + L', 'F6', 'Alt + D', 'All of the above'], correct: 3, difficulty: 'easy', ex: 'Cmd/Ctrl + L, F6, and Alt + D all focus the address bar.' },
+                    { q: 'How do you bookmark the current page?', options: ['Cmd/Ctrl + D', 'Cmd/Ctrl + B', 'Cmd/Ctrl + Shift + D', 'Alt + B'], correct: 0, difficulty: 'easy', ex: 'Cmd/Ctrl + D bookmarks the current page.' },
+                    { q: 'Which shortcut reloads the current page?', options: ['Cmd/Ctrl + R', 'F5', 'Cmd/Ctrl + F5', 'Both Cmd/Ctrl + R and F5'], correct: 3, difficulty: 'easy', ex: 'Both Cmd/Ctrl + R and F5 reload the page.' },
+                    { q: 'How do you hard reload (bypass cache) in Chrome?', options: ['Cmd/Ctrl + Shift + R', 'Cmd/Ctrl + Alt + R', 'Ctrl + F5', 'Both Cmd/Ctrl + Shift + R and Ctrl + F5'], correct: 3, difficulty: 'medium', ex: 'Cmd/Ctrl + Shift + R or Ctrl + F5 force a full reload.' },
+                    { q: 'Which shortcut opens DevTools?', options: ['Cmd/Ctrl + Alt + I', 'F12', 'Cmd/Ctrl + Shift + I', 'All of the above'], correct: 3, difficulty: 'medium', ex: 'F12, Cmd/Ctrl + Alt + I, or Cmd/Ctrl + Shift + I open DevTools.' },
+                    { q: 'How do you zoom in on a page?', options: ['Cmd/Ctrl + +', 'Cmd/Ctrl + =', 'Both Cmd/Ctrl + + and Cmd/Ctrl + =', 'Cmd/Ctrl + Shift + +'], correct: 2, difficulty: 'medium', ex: 'Cmd/Ctrl + + (or =) zooms in. Cmd/Ctrl + 0 resets zoom.' },
+                    { q: 'How do you view the Downloads page?', options: ['Cmd/Ctrl + Shift + J', 'Cmd/Ctrl + D', 'Cmd/Ctrl + J', 'Alt + D'], correct: 2, difficulty: 'medium', ex: 'Cmd/Ctrl + J opens Downloads (Cmd + Shift + J on Mac).' },
+                    { q: 'Which shortcut opens History?', options: ['Cmd/Ctrl + Y', 'Cmd/Ctrl + H', 'Both Cmd/Ctrl + Y and Cmd/Ctrl + H', 'Alt + H'], correct: 2, difficulty: 'medium', ex: 'Cmd/Ctrl + H (Cmd + Y on Mac) opens History.' },
+                    { q: 'How do you view page source?', options: ['Cmd/Ctrl + U', 'Cmd/Ctrl + Alt + U', 'Cmd/Ctrl + Shift + U', 'Alt + U'], correct: 0, difficulty: 'medium', ex: 'Cmd/Ctrl + U shows the page source in a new tab.' },
+                    { q: 'How do you jump to a specific tab (e.g. tab 3)?', options: ['Cmd/Ctrl + 3', 'Alt + 3', 'Cmd/Ctrl + Shift + 3', 'F3'], correct: 0, difficulty: 'medium', ex: 'Cmd/Ctrl + 1-8 jumps to the tab at that position. Cmd/Ctrl + 9 jumps to the last tab.' },
+                    { q: 'How do you cycle to the next tab?', options: ['Ctrl + Tab', 'Cmd/Ctrl + Alt + Right', 'Cmd/Ctrl + Page Down', 'All of the above'], correct: 3, difficulty: 'hard', ex: 'Multiple shortcuts work: Ctrl + Tab, Cmd/Ctrl + Alt + Right, Cmd/Ctrl + Page Down.' },
+                    { q: 'Which shortcut toggles full screen in Chrome?', options: ['F11', 'Cmd + Ctrl + F', 'Both F11 (Win) and Cmd + Ctrl + F (Mac)', 'Cmd/Ctrl + Shift + F'], correct: 2, difficulty: 'hard', ex: 'F11 on Windows, Cmd + Ctrl + F on Mac toggles full screen.' },
+                    { q: 'Which shortcut toggles the bookmark bar?', options: ['Cmd/Ctrl + Shift + B', 'Cmd/Ctrl + B', 'Alt + B', 'Cmd/Ctrl + Alt + B'], correct: 0, difficulty: 'hard', ex: 'Cmd/Ctrl + Shift + B shows or hides the bookmark bar.' },
+                    { q: 'How do you clear browsing data?', options: ['Cmd/Ctrl + Shift + Delete', 'Cmd/Ctrl + Alt + Del', 'Cmd/Ctrl + Del', 'Alt + Del'], correct: 0, difficulty: 'hard', ex: 'Cmd/Ctrl + Shift + Delete opens Clear Browsing Data.' },
+                    { q: 'How do you search within your bookmarks?', options: ['Cmd/Ctrl + Alt + B', 'Cmd/Ctrl + Shift + O', 'Cmd/Ctrl + B', 'Alt + B'], correct: 1, difficulty: 'hard', ex: 'Cmd/Ctrl + Shift + O opens the Bookmark Manager where you can search.' }
+                ]
+            },
+
+            excel: {
+                key: 'excel', name: 'Excel', icon: '📊',
+                gradient: 'from-green-500 to-emerald-600',
+                iconBg: 'linear-gradient(135deg,#10b981,#059669)',
+                questions: [
+                    { q: 'Which shortcut inserts an AutoSum formula?', options: ['Alt + = (Win) / Cmd + Shift + T (Mac)', 'Ctrl + S', 'F2', 'Alt + Enter'], correct: 0, difficulty: 'easy', ex: 'Alt + = on Windows or Cmd + Shift + T on Mac inserts SUM.' },
+                    { q: 'How do you select an entire column?', options: ['Ctrl + Space', 'Shift + Space', 'Ctrl + A', 'Alt + Space'], correct: 0, difficulty: 'easy', ex: 'Ctrl + Space selects the entire column of the active cell.' },
+                    { q: 'How do you select an entire row?', options: ['Shift + Space', 'Ctrl + Space', 'Ctrl + Shift + Space', 'Alt + Space'], correct: 0, difficulty: 'easy', ex: 'Shift + Space selects the entire row.' },
+                    { q: 'Which shortcut opens a new workbook?', options: ['Ctrl + N', 'Ctrl + O', 'Ctrl + W', 'Ctrl + B'], correct: 0, difficulty: 'easy', ex: 'Ctrl + N creates a new workbook.' },
+                    { q: 'How do you make text bold in Excel?', options: ['Ctrl + B', 'Ctrl + I', 'Ctrl + U', 'Alt + B'], correct: 0, difficulty: 'easy', ex: 'Ctrl + B toggles bold on the current selection.' },
+                    { q: 'Which shortcut opens the Format Cells dialog?', options: ['Ctrl + 1', 'Ctrl + F', 'Ctrl + Shift + F', 'F4'], correct: 0, difficulty: 'easy', ex: 'Ctrl + 1 opens Format Cells.' },
+                    { q: 'How do you insert the current date into a cell?', options: ['Ctrl + ;', 'Ctrl + Shift + ;', 'Alt + D', 'Ctrl + D'], correct: 0, difficulty: 'medium', ex: 'Ctrl + ; inserts the current date. Ctrl + Shift + ; inserts the current time.' },
+                    { q: 'Which shortcut fills down from the cell above?', options: ['Ctrl + D', 'Ctrl + R', 'Ctrl + F', 'Alt + D'], correct: 0, difficulty: 'medium', ex: 'Ctrl + D fills content down. Ctrl + R fills to the right.' },
+                    { q: 'How do you go to a specific cell (e.g. B15)?', options: ['F5', 'Ctrl + G', 'Both F5 and Ctrl + G', 'Alt + G'], correct: 2, difficulty: 'medium', ex: 'F5 or Ctrl + G opens Go To.' },
+                    { q: 'Which shortcut opens Find and Replace?', options: ['Ctrl + H', 'Ctrl + F', 'Ctrl + R', 'Alt + F'], correct: 0, difficulty: 'medium', ex: 'Ctrl + H opens Find and Replace. Ctrl + F is Find only.' },
+                    { q: 'How do you insert a new row above the current one?', options: ['Ctrl + Shift + +', 'Ctrl + +', 'Ctrl + I', 'Alt + I'], correct: 0, difficulty: 'medium', ex: 'Ctrl + Shift + + (plus) inserts a row when the whole row is selected.' },
+                    { q: 'Which shortcut deletes the selected row?', options: ['Ctrl + -', 'Ctrl + Del', 'Delete', 'Alt + D'], correct: 0, difficulty: 'medium', ex: 'Ctrl + - (minus) deletes the selected row or column.' },
+                    { q: 'How do you toggle absolute reference ($A$1) while editing a formula?', options: ['F4', 'F2', 'F5', 'Ctrl + $'], correct: 0, difficulty: 'medium', ex: 'F4 cycles through $A$1 → A$1 → $A1 → A1.' },
+                    { q: 'Which shortcut edits the active cell in place?', options: ['F2', 'F4', 'Enter', 'Alt + Enter'], correct: 0, difficulty: 'medium', ex: 'F2 puts you into edit mode on the active cell.' },
+                    { q: 'How do you add a line break inside a cell?', options: ['Alt + Enter', 'Shift + Enter', 'Ctrl + Enter', 'Enter'], correct: 0, difficulty: 'medium', ex: 'Alt + Enter creates a line break inside the current cell.' },
+                    { q: 'Which shortcut adds AutoFilter to a range?', options: ['Ctrl + Shift + L', 'Ctrl + L', 'Alt + F', 'Ctrl + F'], correct: 0, difficulty: 'hard', ex: 'Ctrl + Shift + L toggles AutoFilter on the current range.' },
+                    { q: 'How do you toggle showing formulas vs values in cells?', options: ['Ctrl + `', 'Ctrl + F', 'Alt + F', 'Ctrl + \''], correct: 0, difficulty: 'hard', ex: 'Ctrl + ` (backtick, next to 1) toggles formula view.' },
+                    { q: 'Which shortcut extends selection to the last used cell?', options: ['Ctrl + Shift + End', 'Ctrl + End', 'Shift + End', 'Ctrl + Shift + Arrow'], correct: 0, difficulty: 'hard', ex: 'Ctrl + Shift + End selects from the current cell to the last used cell.' },
+                    { q: 'How do you jump to the last cell in a data direction?', options: ['Ctrl + Arrow', 'Alt + Arrow', 'Shift + Arrow', 'Fn + Arrow'], correct: 0, difficulty: 'hard', ex: 'Ctrl + Arrow jumps to the edge of the data range in that direction.' },
+                    { q: 'Which shortcut inserts a table?', options: ['Ctrl + T', 'Ctrl + L', 'Both Ctrl + T and Ctrl + L', 'Alt + T'], correct: 2, difficulty: 'hard', ex: 'Both Ctrl + T and Ctrl + L convert a range into a Table.' },
+                    { q: 'How do you group selected rows or columns?', options: ['Alt + Shift + Right', 'Ctrl + G', 'Ctrl + Shift + G', 'Alt + G'], correct: 0, difficulty: 'hard', ex: 'Alt + Shift + Right groups selected rows/columns.' },
+                    { q: 'Which shortcut opens the Function Arguments dialog?', options: ['Shift + F3', 'F3', 'Ctrl + F3', 'Alt + F3'], correct: 0, difficulty: 'hard', ex: 'Shift + F3 opens Insert Function.' }
+                ]
+            },
+
+            // ============================================================
+            // BRAIN TRAINING CATEGORIES
+            // ============================================================
+            logic: {
+                key: 'logic', name: 'Logic', icon: '🧠',
+                gradient: 'from-violet-500 to-fuchsia-600',
+                iconBg: 'linear-gradient(135deg,#8b5cf6,#c026d3)',
+                questions: [
+                    { q: 'What comes next: 2, 4, 8, 16, ?', options: ['20', '24', '32', '36'], correct: 2, difficulty: 'easy', ex: 'Each term doubles: 16 × 2 = 32.' },
+                    { q: 'Complete the series: 1, 4, 9, 16, ?', options: ['20', '24', '25', '30'], correct: 2, difficulty: 'easy', ex: 'Perfect squares: 1², 2², 3², 4², 5² = 25.' },
+                    { q: 'Odd one out: 3, 5, 11, 15, 17', options: ['3', '11', '15', '17'], correct: 2, difficulty: 'easy', ex: '15 is not a prime number; the others are.' },
+                    { q: 'What letter comes next: A, C, E, G, ?', options: ['H', 'I', 'J', 'K'], correct: 1, difficulty: 'easy', ex: 'Every other letter of the alphabet: A, C, E, G, I.' },
+                    { q: 'Complete the pattern: 5, 11, 23, 47, ?', options: ['71', '85', '95', '105'], correct: 2, difficulty: 'medium', ex: 'Each term doubles then adds 1: 5×2+1=11, 11×2+1=23, 23×2+1=47, 47×2+1=95.' },
+                    { q: 'Complete: 1, 1, 2, 3, 5, 8, ?', options: ['11', '12', '13', '14'], correct: 2, difficulty: 'medium', ex: 'Fibonacci sequence — sum of the previous two: 5+8 = 13.' },
+                    { q: 'Odd one out: Elephant, Lion, Tiger, Cat', options: ['Elephant', 'Lion', 'Tiger', 'Cat'], correct: 0, difficulty: 'medium', ex: 'Elephant is not a cat family member; the others are felines.' },
+                    { q: 'If 2 + 3 = 10, 4 + 5 = 36, 5 + 6 = 55, then 6 + 7 = ?', options: ['64', '78', '80', '91'], correct: 1, difficulty: 'medium', ex: 'Pattern: a + b equals a × (a + b). Check: 2×5=10, 4×9=36, 5×11=55. So 6×(6+7) = 6×13 = 78.' },
+                    { q: 'What number replaces the ?: 8, 12, 18, 27, ?', options: ['33', '36', '40', '40.5'], correct: 3, difficulty: 'hard', ex: 'Each term is multiplied by 1.5: 8→12→18→27→40.5.' },
+                    { q: 'Which comes next: JFMAM?', options: ['A (August)', 'J (June)', 'M (May)', 'S (September)'], correct: 1, difficulty: 'hard', ex: 'First letters of months: Jan, Feb, Mar, Apr, May, June.' },
+                    { q: 'If CAT = 24, DOG = 26, what does BAT equal? (A=1..Z=26)', options: ['23', '24', '26', '28'], correct: 0, difficulty: 'hard', ex: 'B(2)+A(1)+T(20) = 23.' },
+                    { q: 'A is B\'s father. B is C\'s mother. How is A related to C?', options: ['Uncle', 'Brother', 'Grandfather', 'Cousin'], correct: 2, difficulty: 'medium', ex: 'A is B\'s father and B is C\'s parent, so A is C\'s grandfather.' },
+                    { q: 'Which does not belong: Guitar, Piano, Violin, Football', options: ['Guitar', 'Piano', 'Violin', 'Football'], correct: 3, difficulty: 'easy', ex: 'Football is a sport; the others are musical instruments.' },
+                    { q: 'Complete: Z, Y, X, W, ?', options: ['U', 'V', 'T', 'S'], correct: 1, difficulty: 'easy', ex: 'Alphabet in reverse: Z, Y, X, W, V.' },
+                    { q: 'If today is Wednesday, what day will it be 100 days from now?', options: ['Wednesday', 'Thursday', 'Friday', 'Saturday'], correct: 2, difficulty: 'hard', ex: '100 ÷ 7 = 14 remainder 2. Wed + 2 days = Friday.' },
+                    { q: 'What is the missing number: 3, 6, 9, ?, 15', options: ['10', '11', '12', '13'], correct: 2, difficulty: 'easy', ex: 'Multiples of 3.' },
+                    { q: 'Odd one out: 121, 144, 169, 189, 225', options: ['121', '144', '169', '189'], correct: 3, difficulty: 'medium', ex: '189 is not a perfect square; 121=11², 144=12², 169=13², 225=15².' }
+                ]
+            },
+
+            math: {
+                key: 'math', name: 'Math', icon: '🔢',
+                gradient: 'from-pink-500 to-rose-600',
+                iconBg: 'linear-gradient(135deg,#ec4899,#e11d48)',
+                questions: [
+                    { q: 'What is 15% of 200?', options: ['15', '25', '30', '40'], correct: 2, difficulty: 'easy', ex: '15% of 200 = 0.15 × 200 = 30.' },
+                    { q: 'What is 7 × 8?', options: ['54', '56', '58', '64'], correct: 1, difficulty: 'easy', ex: '7 × 8 = 56.' },
+                    { q: 'What is 144 ÷ 12?', options: ['10', '11', '12', '14'], correct: 2, difficulty: 'easy', ex: '144 ÷ 12 = 12.' },
+                    { q: 'Square root of 169?', options: ['11', '12', '13', '17'], correct: 2, difficulty: 'easy', ex: '13 × 13 = 169.' },
+                    { q: 'What is 3⁴ (three to the fourth power)?', options: ['12', '27', '64', '81'], correct: 3, difficulty: 'easy', ex: '3 × 3 × 3 × 3 = 81.' },
+                    { q: 'Sum of angles in a triangle?', options: ['90°', '180°', '270°', '360°'], correct: 1, difficulty: 'easy', ex: 'The three interior angles of any triangle sum to 180°.' },
+                    { q: 'What is 25% of 80?', options: ['15', '20', '25', '30'], correct: 1, difficulty: 'medium', ex: '25% = 1/4. 80 ÷ 4 = 20.' },
+                    { q: 'If a book costs ₹120 after a 25% discount, what was the original price?', options: ['₹140', '₹150', '₹160', '₹180'], correct: 2, difficulty: 'medium', ex: '120 = 0.75 × original. Original = 120 ÷ 0.75 = 160.' },
+                    { q: 'Average of 10, 20, 30, 40, 50?', options: ['25', '30', '35', '40'], correct: 1, difficulty: 'medium', ex: 'Sum = 150. Average = 150 ÷ 5 = 30.' },
+                    { q: 'What is 1/4 + 1/3?', options: ['1/7', '2/7', '5/12', '7/12'], correct: 3, difficulty: 'medium', ex: 'Common denominator 12: 3/12 + 4/12 = 7/12.' },
+                    { q: 'A car travels 60 km in 45 minutes. What is its speed in km/h?', options: ['60', '75', '80', '90'], correct: 2, difficulty: 'medium', ex: '45 min = 0.75 hr. 60 ÷ 0.75 = 80 km/h.' },
+                    { q: 'What is the LCM of 12 and 18?', options: ['24', '30', '36', '54'], correct: 2, difficulty: 'medium', ex: '12 = 2²×3, 18 = 2×3². LCM = 2² × 3² = 36.' },
+                    { q: 'Compound interest on ₹1000 at 10% p.a. for 2 years?', options: ['₹200', '₹210', '₹220', '₹230'], correct: 1, difficulty: 'hard', ex: 'A = 1000 × 1.1² = 1210. CI = 210.' },
+                    { q: 'What is the value of x if 3x + 7 = 22?', options: ['3', '5', '7', '15'], correct: 1, difficulty: 'medium', ex: '3x = 15, so x = 5.' },
+                    { q: 'A father is 3 times as old as his son. In 10 years he will be twice as old. Son\'s age now?', options: ['5', '8', '10', '15'], correct: 2, difficulty: 'hard', ex: 'Let son = x, father = 3x. 3x + 10 = 2(x + 10), so x = 10.' },
+                    { q: 'How many minutes are in a full day?', options: ['1200', '1440', '1620', '2880'], correct: 1, difficulty: 'easy', ex: '24 × 60 = 1440 minutes.' },
+                    { q: 'If 5 workers finish a job in 12 days, how many days for 10 workers?', options: ['6', '8', '10', '24'], correct: 0, difficulty: 'medium', ex: 'Twice the workers = half the time. 12 ÷ 2 = 6 days.' },
+                    { q: 'A shopkeeper marks price 25% above cost and gives 20% discount. Profit %?', options: ['0%', '5%', '10%', '15%'], correct: 0, difficulty: 'hard', ex: 'Cost 100 → marked 125 → sold at 100 (20% off 125). Profit = 0.' }
+                ]
+            },
+
+            gk: {
+                key: 'gk', name: 'General Knowledge', icon: '📚',
+                gradient: 'from-amber-500 to-yellow-600',
+                iconBg: 'linear-gradient(135deg,#f59e0b,#ca8a04)',
+                questions: [
+                    { q: 'Which planet is known as the Red Planet?', options: ['Venus', 'Mars', 'Jupiter', 'Mercury'], correct: 1, difficulty: 'easy', ex: 'Mars appears red because of iron oxide (rust) on its surface.' },
+                    { q: 'Capital of Australia?', options: ['Sydney', 'Melbourne', 'Canberra', 'Perth'], correct: 2, difficulty: 'easy', ex: 'Canberra is the capital, not Sydney (which is more famous).' },
+                    { q: 'How many continents are there?', options: ['5', '6', '7', '8'], correct: 2, difficulty: 'easy', ex: 'Africa, Antarctica, Asia, Australia/Oceania, Europe, North America, South America.' },
+                    { q: 'Who wrote "Romeo and Juliet"?', options: ['Charles Dickens', 'William Shakespeare', 'Mark Twain', 'Jane Austen'], correct: 1, difficulty: 'easy', ex: 'William Shakespeare wrote the play around 1594-96.' },
+                    { q: 'Largest ocean on Earth?', options: ['Atlantic', 'Indian', 'Arctic', 'Pacific'], correct: 3, difficulty: 'easy', ex: 'The Pacific covers about 46% of the world\'s water surface.' },
+                    { q: 'Chemical symbol for gold?', options: ['Go', 'Gd', 'Au', 'Ag'], correct: 2, difficulty: 'easy', ex: 'Au comes from the Latin word "aurum".' },
+                    { q: 'Which is the smallest prime number?', options: ['0', '1', '2', '3'], correct: 2, difficulty: 'easy', ex: '2 is the only even prime number.' },
+                    { q: 'National currency of Japan?', options: ['Yuan', 'Yen', 'Won', 'Rupee'], correct: 1, difficulty: 'easy', ex: 'The Japanese yen (¥) is Japan\'s official currency.' },
+                    { q: 'How many bones are in the adult human body?', options: ['186', '206', '226', '246'], correct: 1, difficulty: 'medium', ex: 'Adults have 206 bones. Babies are born with about 270 that fuse over time.' },
+                    { q: 'Who invented the telephone?', options: ['Thomas Edison', 'Alexander Graham Bell', 'Nikola Tesla', 'Guglielmo Marconi'], correct: 1, difficulty: 'medium', ex: 'Bell was awarded the first US patent for the telephone in 1876.' },
+                    { q: 'Which is the longest river in the world?', options: ['Amazon', 'Nile', 'Yangtze', 'Mississippi'], correct: 1, difficulty: 'medium', ex: 'The Nile at ~6,650 km is generally considered the longest.' },
+                    { q: 'The Mona Lisa was painted by?', options: ['Michelangelo', 'Leonardo da Vinci', 'Vincent van Gogh', 'Picasso'], correct: 1, difficulty: 'medium', ex: 'Leonardo da Vinci painted it between 1503 and 1519.' },
+                    { q: 'Which vitamin is produced by sunlight on skin?', options: ['A', 'B12', 'C', 'D'], correct: 3, difficulty: 'medium', ex: 'UV light triggers Vitamin D synthesis in the skin.' },
+                    { q: 'The Great Wall of China is visible from?', options: ['The Moon', 'Space (low orbit) — barely', 'Mars', 'None of the above'], correct: 1, difficulty: 'hard', ex: 'Astronauts have reported it is barely visible from low Earth orbit under ideal conditions — NOT from the Moon.' },
+                    { q: 'Who was the first person to walk on the Moon?', options: ['Buzz Aldrin', 'Neil Armstrong', 'Yuri Gagarin', 'John Glenn'], correct: 1, difficulty: 'easy', ex: 'Neil Armstrong stepped onto the Moon on July 20, 1969.' },
+                    { q: 'Fastest land animal?', options: ['Lion', 'Cheetah', 'Horse', 'Antelope'], correct: 1, difficulty: 'easy', ex: 'Cheetahs can reach 110-120 km/h in short bursts.' },
+                    { q: 'Currency of the United Kingdom?', options: ['Euro', 'Pound Sterling', 'Dollar', 'Franc'], correct: 1, difficulty: 'easy', ex: 'The UK uses the Pound Sterling (£).' },
+                    { q: 'Which element has atomic number 1?', options: ['Helium', 'Oxygen', 'Hydrogen', 'Carbon'], correct: 2, difficulty: 'medium', ex: 'Hydrogen — the lightest element in the periodic table.' },
+                    { q: 'Which country hosts the FIFA World Cup in 2026?', options: ['Qatar', 'Russia', 'USA, Canada & Mexico', 'Brazil'], correct: 2, difficulty: 'hard', ex: 'The 2026 tournament is jointly hosted by the USA, Canada and Mexico — the first three-nation edition.' },
+                    { q: 'Which is the largest desert (by area) in the world?', options: ['Sahara', 'Gobi', 'Antarctica', 'Arabian'], correct: 2, difficulty: 'hard', ex: 'Antarctica is technically the largest desert — a "polar desert".' }
+                ]
+            },
+
+            aptitude: {
+                key: 'aptitude', name: 'Aptitude', icon: '🎯',
+                gradient: 'from-teal-500 to-cyan-600',
+                iconBg: 'linear-gradient(135deg,#14b8a6,#0891b2)',
+                questions: [
+                    { q: 'A train 120 m long crosses a pole in 6 seconds. Its speed?', options: ['60 km/h', '72 km/h', '80 km/h', '90 km/h'], correct: 1, difficulty: 'medium', ex: 'Speed = 120 ÷ 6 = 20 m/s = 20 × 18/5 = 72 km/h.' },
+                    { q: 'If SP = 240 and profit = 20%, then CP = ?', options: ['180', '190', '200', '210'], correct: 2, difficulty: 'easy', ex: 'SP = CP × 1.2, so CP = 240 ÷ 1.2 = 200.' },
+                    { q: 'Simple interest on ₹800 at 5% for 3 years?', options: ['₹100', '₹120', '₹150', '₹180'], correct: 1, difficulty: 'easy', ex: 'SI = (800 × 5 × 3) ÷ 100 = 120.' },
+                    { q: 'Ratio 3:5 means if total is 40, larger part is?', options: ['15', '20', '24', '25'], correct: 3, difficulty: 'easy', ex: '5/(3+5) × 40 = 5/8 × 40 = 25.' },
+                    { q: 'A can do a job in 10 days, B in 15 days. Together?', options: ['5 days', '6 days', '7 days', '8 days'], correct: 1, difficulty: 'medium', ex: 'Rates: 1/10 + 1/15 = 3/30 + 2/30 = 5/30 = 1/6. So 6 days.' },
+                    { q: 'Distance = 240 km at 60 km/h takes how many hours?', options: ['2', '3', '4', '5'], correct: 2, difficulty: 'easy', ex: '240 ÷ 60 = 4 hours.' },
+                    { q: 'A shopkeeper sells at 20% loss for ₹800. Cost price?', options: ['₹880', '₹960', '₹1000', '₹1050'], correct: 2, difficulty: 'medium', ex: 'SP = CP × 0.8. CP = 800 ÷ 0.8 = 1000.' },
+                    { q: 'The average of 5 numbers is 20. If one is removed, the average becomes 18. What was removed?', options: ['20', '25', '28', '30'], correct: 2, difficulty: 'hard', ex: 'Sum was 100. New sum = 18 × 4 = 72. Removed = 100 - 72 = 28.' },
+                    { q: 'Ratio 2:3:5 dividing ₹500. Middle share?', options: ['₹100', '₹125', '₹150', '₹200'], correct: 2, difficulty: 'medium', ex: '3/10 × 500 = 150.' },
+                    { q: 'A pipe fills a tank in 6 hrs. In 3 hrs it fills?', options: ['1/3', '1/2', '2/3', '3/4'], correct: 1, difficulty: 'easy', ex: '3 hours is half the fill time, so half the tank.' },
+                    { q: 'Two cars start toward each other 300 km apart at 40 and 60 km/h. Time to meet?', options: ['2 hr', '2.5 hr', '3 hr', '4 hr'], correct: 2, difficulty: 'medium', ex: 'Relative speed = 100 km/h. Time = 300 ÷ 100 = 3 hours.' },
+                    { q: 'What is 5% of 5% of ₹4000?', options: ['₹5', '₹10', '₹20', '₹100'], correct: 1, difficulty: 'medium', ex: '5% × 5% = 0.25%. 0.25% × 4000 = 10.' },
+                    { q: 'A pole 15 m casts a shadow of 20 m. What is angle of elevation of sun?', options: ['30°', 'about 37°', '45°', '60°'], correct: 1, difficulty: 'hard', ex: 'tan θ = 15/20 = 0.75, θ ≈ 36.87°.' },
+                    { q: 'Which is greater: 3/4 or 5/7?', options: ['3/4', '5/7', 'Equal', 'Cannot compare'], correct: 0, difficulty: 'medium', ex: '3/4 = 0.75, 5/7 ≈ 0.714. So 3/4 is greater.' },
+                    { q: 'If x:y = 2:3 and y:z = 4:5, then x:z = ?', options: ['4:15', '8:15', '2:5', '5:8'], correct: 1, difficulty: 'hard', ex: 'x = 2k, y = 3k = 4m → k = 4m/3, so x = 8m/3, z = 5m. Ratio x:z = 8:15.' }
+                ]
+            },
+
+            riddles: {
+                key: 'riddles', name: 'Riddles', icon: '🧩',
+                gradient: 'from-emerald-500 to-teal-600',
+                iconBg: 'linear-gradient(135deg,#10b981,#0d9488)',
+                questions: [
+                    { q: 'What has keys but cannot open locks?', options: ['A door', 'A piano', 'A safe', 'A map'], correct: 1, difficulty: 'easy', ex: 'A piano has keys, but they play notes, not open locks.' },
+                    { q: 'What gets wetter the more it dries?', options: ['A towel', 'A sponge', 'Grass', 'Skin'], correct: 0, difficulty: 'easy', ex: 'A towel absorbs water as it dries something else, getting wetter itself.' },
+                    { q: 'The more you take, the more you leave behind. What am I?', options: ['Memories', 'Footsteps', 'Time', 'Breath'], correct: 1, difficulty: 'easy', ex: 'Each footstep leaves a mark behind as you walk forward.' },
+                    { q: 'I speak without a mouth and hear without ears. I have no body but come alive with the wind. What am I?', options: ['A shadow', 'An echo', 'The sun', 'Music'], correct: 1, difficulty: 'medium', ex: 'An echo repeats sound without a mouth or body — carried by air.' },
+                    { q: 'What has a heart that doesn\'t beat?', options: ['A watch', 'An artichoke', 'A statue', 'A book'], correct: 1, difficulty: 'medium', ex: 'The artichoke has a "heart" — a soft edible core in the center.' },
+                    { q: 'What can travel around the world while staying in a corner?', options: ['A ship', 'A stamp', 'A satellite', 'A photograph'], correct: 1, difficulty: 'medium', ex: 'A postage stamp travels on a letter\'s corner all over the world.' },
+                    { q: 'What has hands but cannot clap?', options: ['A statue', 'A clock', 'A tree', 'A window'], correct: 1, difficulty: 'easy', ex: 'The hour and minute hands of a clock.' },
+                    { q: 'I have cities but no houses, forests but no trees, water but no fish. What am I?', options: ['A dream', 'A map', 'A book', 'A painting'], correct: 1, difficulty: 'medium', ex: 'A map shows all these things without containing them.' },
+                    { q: 'The more of me you take, the more you leave behind. I have no hands but I lead. What am I?', options: ['Wisdom', 'A path', 'Footsteps', 'A river'], correct: 2, difficulty: 'medium', ex: 'Same idea as footsteps — leading forward while marks stay behind.' },
+                    { q: 'A father and son are in a car crash. The son is rushed to hospital. The surgeon says: "I cannot operate on him, he is my son." How?', options: ['The surgeon is the son\'s uncle', 'The surgeon is the boy\'s mother', 'The son was adopted', 'It is a mistake'], correct: 1, difficulty: 'hard', ex: 'The surgeon is the boy\'s mother — a classic riddle about implicit gender assumptions.' },
+                    { q: 'What word becomes shorter when you add two letters to it?', options: ['Long', 'Short', 'Small', 'Little'], correct: 1, difficulty: 'medium', ex: 'The word "short" becomes "shorter" by adding "er".' },
+                    { q: 'Which word in the dictionary is spelled incorrectly?', options: ['Definitely', 'Incorrectly', 'Rhythm', 'Necessary'], correct: 1, difficulty: 'medium', ex: 'The literal word "incorrectly" is spelled "i-n-c-o-r-r-e-c-t-l-y" — it is the one spelled "incorrectly".' },
+                    { q: 'I am tall when I am young, and short when I am old. What am I?', options: ['A tree', 'A candle', 'A shadow', 'A person'], correct: 1, difficulty: 'easy', ex: 'A candle gets shorter as it burns down.' },
+                    { q: 'What has 88 keys but cannot open a single lock?', options: ['A vault', 'A piano', 'A keyboard', 'A phone'], correct: 1, difficulty: 'easy', ex: 'A standard piano has 88 keys.' },
+                    { q: 'What breaks when you say its name?', options: ['A promise', 'Silence', 'A rule', 'A heart'], correct: 1, difficulty: 'medium', ex: 'The moment you say the word "silence" aloud, silence is broken.' }
+                ]
+            },
+
+            // AI-generated — questions are fetched from /api/quiz at runtime.
+            ai: {
+                key: 'ai', name: 'AI Quiz', icon: '🤖',
+                gradient: 'from-purple-500 to-blue-600',
+                iconBg: 'linear-gradient(135deg,#a855f7,#3b82f6)',
+                isAI: true,
+                questions: []   // populated on demand
+            }
+        };
+
+        // ============================================================
+        // State
+        // ============================================================
+        const STORAGE_KEY = 'mcqquiz_attempts';
+        let supabaseClient = null;
+        let currentUser = null;
+        let quiz = null;
+        let selectedCategory = null;
+
+        function loadAttempts() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { return []; } }
+        function saveAttempt(attempt) {
+            const attempts = loadAttempts();
+            attempts.push(attempt);
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(attempts.slice(-100))); } catch {}
+        }
+        // Migrate any older storage keys on first load
+        (function migrate() {
+            try {
+                if (localStorage.getItem(STORAGE_KEY)) return;
+                const kn = localStorage.getItem('keyboardninja_attempts');
+                if (kn) { localStorage.setItem(STORAGE_KEY, kn); return; }
+                const ms = localStorage.getItem('macshortcuts_attempts');
+                if (ms) { localStorage.setItem(STORAGE_KEY, ms); }
+            } catch {}
+        })();
+
+        function shuffle(arr) {
+            const a = arr.slice();
+            for (let i = a.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [a[i], a[j]] = [a[j], a[i]];
+            }
+            return a;
+        }
+
+        async function initSupabase() {
+            try {
+                const r = await fetch('/api/config');
+                const cfg = await r.json();
+                if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) return false;
+                supabaseClient = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
+                    auth: { persistSession: true, autoRefreshToken: true }
+                });
+                window.__WS_SB__ = supabaseClient; // share with presence.js
+                return true;
+            } catch { return false; }
+        }
+
+        function showToast(icon, title, desc) {
+            const c = document.getElementById('toast-container');
+            const t = document.createElement('div');
+            t.className = 'toast';
+            t.innerHTML = `<div class="text-3xl">${icon}</div><div><div class="text-white font-black text-sm">${title}</div><div class="text-slate-300 text-xs">${desc}</div></div>`;
+            c.appendChild(t);
+            setTimeout(() => t.remove(), 4500);
+        }
+
+        function escapeHtml(s) {
+            return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+
+        // ============================================================
+        // Welcome screen
+        // ============================================================
+        function renderCategoryCards() {
+            const grid = document.getElementById('cat-grid');
+            grid.innerHTML = Object.values(QUESTION_BANKS).map(bank => `
+                <div class="cat-card glass-strong rounded-3xl p-4 text-center" data-cat="${bank.key}">
+                    <div class="cat-check">✓</div>
+                    <div class="w-14 h-14 mx-auto rounded-2xl flex items-center justify-center text-2xl mb-3" style="background: ${bank.iconBg}; box-shadow: 0 6px 20px rgba(0,0,0,0.35);">${bank.icon}</div>
+                    <h3 class="font-black text-white">${bank.name}</h3>
+                    <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mt-1">${bank.questions.length} qs</p>
+                </div>
+            `).join('');
+            grid.querySelectorAll('.cat-card').forEach(el => {
+                el.addEventListener('click', () => selectCategory(el.dataset.cat));
+            });
+        }
+
+        function selectCategory(key) {
+            selectedCategory = key;
+            document.querySelectorAll('.cat-card').forEach(c => c.classList.toggle('selected', c.dataset.cat === key));
+            document.getElementById('start-btn').disabled = false;
+            // For AI category, prompt for topic on Start click (not here).
+        }
+
+        function updateWelcomeStats() {
+            const attempts = loadAttempts();
+            document.getElementById('stat-attempts').innerText = attempts.length;
+            const best = attempts.reduce((m, a) => Math.max(m, a.score || 0), 0);
+            document.getElementById('stat-best').innerText = best;
+            const perfect = attempts.filter(a => (a.score || 0) >= 10).length;
+            document.getElementById('stat-perfect').innerText = perfect;
+
+            const panel = document.getElementById('history-panel');
+            const body = document.getElementById('history-body');
+            if (attempts.length === 0) { panel.classList.add('hidden'); return; }
+            panel.classList.remove('hidden');
+            const recent = attempts.slice(-6).reverse();
+            body.innerHTML = recent.map(a => {
+                const emoji = a.score >= 9 ? '🏆' : a.score >= 7 ? '🎉' : a.score >= 5 ? '👍' : '💪';
+                const date = new Date(a.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+                const catLabel = a.category ? (QUESTION_BANKS[a.category]?.name || a.category) : '—';
+                const catIcon  = a.category ? (QUESTION_BANKS[a.category]?.icon || '') : '';
+                return `<div class="flex justify-between items-center py-2 border-b border-white/5">
+                    <div class="flex items-center gap-3">
+                        <div class="text-2xl">${emoji}</div>
+                        <div>
+                            <p class="text-white font-black">${a.score}/${a.total} <span class="text-slate-400 text-xs font-medium">${catIcon} ${escapeHtml(catLabel)}</span></p>
+                            <p class="text-slate-400 text-xs">${date} · ${a.difficulty || 'mixed'}</p>
+                        </div>
+                    </div>
+                    <p class="text-emerald-300 font-black">${Math.round((a.score / a.total) * 100)}%</p>
+                </div>`;
+            }).join('');
+        }
+
+        // ============================================================
+        // Quiz flow
+        // ============================================================
+        // --- Pending state saved across the rules modal ---
+        let pendingStart = null;
+
+        function requestStart() {
+            if (!selectedCategory) return;
+            const bank = QUESTION_BANKS[selectedCategory];
+            const difficulty = document.getElementById('difficulty-select').value;
+            pendingStart = { bank, difficulty, aiQuestions: null, aiTopic: null };
+
+            if (bank.isAI) {
+                // Open topic modal — AI generation happens after user hits Generate.
+                openAIModal();
+                return;
+            }
+            openRulesModal();
+        }
+
+        function openRulesModal() {
+            const m = document.getElementById('rules-modal');
+            m.classList.remove('hidden'); m.classList.add('flex');
+        }
+        function closeRulesModal() {
+            const m = document.getElementById('rules-modal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+        }
+
+        function openAIModal() {
+            const m = document.getElementById('ai-modal');
+            document.getElementById('ai-topic').value = '';
+            document.getElementById('ai-error').classList.add('hidden');
+            m.classList.remove('hidden'); m.classList.add('flex');
+            setTimeout(() => document.getElementById('ai-topic').focus(), 100);
+        }
+        function closeAIModal() {
+            const m = document.getElementById('ai-modal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+        }
+
+        async function generateAIQuiz() {
+            const topic = document.getElementById('ai-topic').value.trim();
+            const err = document.getElementById('ai-error');
+            err.classList.add('hidden');
+            if (topic.length < 2) {
+                err.innerText = 'Please enter a topic first.';
+                err.classList.remove('hidden');
+                return;
+            }
+            const btn = document.getElementById('ai-generate');
+            const orig = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = '⏳ Generating…';
+            try {
+                const r = await fetch('/api/quiz', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ topic, difficulty: pendingStart.difficulty })
+                });
+                const data = await r.json();
+                if (!r.ok || !data.questions || data.questions.length < 5) {
+                    err.innerText = data.message || 'AI could not build a quiz on that topic. Try another.';
+                    err.classList.remove('hidden');
+                    return;
+                }
+                pendingStart.aiQuestions = data.questions;
+                pendingStart.aiTopic = topic;
+                closeAIModal();
+                openRulesModal();
+            } catch (e) {
+                err.innerText = 'Network error: ' + (e.message || e);
+                err.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.innerText = orig;
+            }
+        }
+
+        function actuallyStartQuiz() {
+            closeRulesModal();
+            const { bank, difficulty, aiQuestions, aiTopic } = pendingStart;
+            let questions;
+            if (bank.isAI) {
+                questions = aiQuestions.slice(0, 10);
+            } else {
+                let pool = bank.questions;
+                if (difficulty !== 'mixed') pool = pool.filter(q => q.difficulty === difficulty);
+                if (pool.length < 10) pool = bank.questions;
+                questions = shuffle(pool).slice(0, 10);
+            }
+
+            quiz = {
+                bank, questions,
+                answers: new Array(questions.length).fill(null),
+                current: 0, score: 0,
+                startedAt: Date.now(),
+                questionStartTime: Date.now(),
+                timerInterval: null, remaining: 30,
+                difficulty, category: bank.key,
+                aiTopic: aiTopic || null,
+                violations: 0,
+                autoSubmitted: false
+            };
+            document.getElementById('welcome-screen').classList.add('hidden');
+            document.getElementById('result-screen').classList.add('hidden');
+            document.getElementById('quiz-screen').classList.remove('hidden');
+            document.getElementById('q-cat-badge').innerHTML = `${bank.icon} ${bank.name}${aiTopic ? ': ' + escapeHtml(aiTopic) : ''}`;
+            document.body.classList.add('quiz-active');
+            enableAntiCheat();
+            renderQuestion();
+            renderViolationDots();
+        }
+
+        // ---------- ANTI-CHEAT ----------
+        function renderViolationDots() {
+            const dots = document.querySelectorAll('#violation-dots .violation-dot');
+            dots.forEach((d, i) => d.classList.toggle('hit', i < (quiz?.violations || 0)));
+        }
+        function showViolationBanner(msg) {
+            const b = document.getElementById('violation-banner');
+            b.innerText = msg;
+            b.style.display = 'block';
+            b.style.animation = 'none';
+            void b.offsetWidth;
+            b.style.animation = 'shake 0.5s ease';
+            setTimeout(() => { b.style.display = 'none'; }, 3500);
+        }
+        function recordViolation(reason) {
+            if (!quiz || quiz.autoSubmitted) return;
+            quiz.violations = (quiz.violations || 0) + 1;
+            renderViolationDots();
+            const left = 3 - quiz.violations;
+            if (left > 0) {
+                showViolationBanner(`⚠️ ${reason} · Strike ${quiz.violations}/3 — ${left} left before auto-submit`);
+            } else {
+                showViolationBanner(`❌ Auto-submitted: 3 violations detected`);
+                quiz.autoSubmitted = true;
+                setTimeout(finishQuiz, 1500);
+            }
+        }
+
+        const antiCheatHandlers = {
+            visibility: null, blur: null, contextmenu: null,
+            copy: null, cut: null, keydown: null
+        };
+
+        function enableAntiCheat() {
+            antiCheatHandlers.visibility = () => {
+                if (document.hidden && quiz && !quiz.autoSubmitted) recordViolation('Tab switched');
+            };
+            document.addEventListener('visibilitychange', antiCheatHandlers.visibility);
+
+            antiCheatHandlers.blur = () => {
+                // Small delay so accidental focus swaps within our own window don't count.
+                setTimeout(() => {
+                    if (!document.hasFocus() && quiz && !quiz.autoSubmitted && !document.hidden) {
+                        recordViolation('Window unfocused');
+                    }
+                }, 200);
+            };
+            window.addEventListener('blur', antiCheatHandlers.blur);
+
+            antiCheatHandlers.contextmenu = (e) => { e.preventDefault(); showViolationBanner('Right-click is disabled'); };
+            document.addEventListener('contextmenu', antiCheatHandlers.contextmenu);
+
+            antiCheatHandlers.copy = (e) => { e.preventDefault(); showViolationBanner('Copying is disabled'); };
+            document.addEventListener('copy', antiCheatHandlers.copy);
+            antiCheatHandlers.cut  = (e) => { e.preventDefault(); showViolationBanner('Cutting is disabled'); };
+            document.addEventListener('cut', antiCheatHandlers.cut);
+
+            antiCheatHandlers.keydown = (e) => {
+                // Block common cheat shortcuts
+                const meta = e.metaKey || e.ctrlKey;
+                if (meta && ['c','a','p','s','u','f','g'].includes(e.key.toLowerCase())) {
+                    e.preventDefault();
+                    showViolationBanner('Shortcut disabled during quiz');
+                }
+                // Block F12 (DevTools shortcut hint — actually opens DevTools regardless, but flag it)
+                if (e.key === 'F12') {
+                    // Can't actually prevent DevTools opening this way, but we log intent
+                }
+            };
+            document.addEventListener('keydown', antiCheatHandlers.keydown, true);
+        }
+
+        function disableAntiCheat() {
+            document.body.classList.remove('quiz-active');
+            if (antiCheatHandlers.visibility) document.removeEventListener('visibilitychange', antiCheatHandlers.visibility);
+            if (antiCheatHandlers.blur) window.removeEventListener('blur', antiCheatHandlers.blur);
+            if (antiCheatHandlers.contextmenu) document.removeEventListener('contextmenu', antiCheatHandlers.contextmenu);
+            if (antiCheatHandlers.copy) document.removeEventListener('copy', antiCheatHandlers.copy);
+            if (antiCheatHandlers.cut) document.removeEventListener('cut', antiCheatHandlers.cut);
+            if (antiCheatHandlers.keydown) document.removeEventListener('keydown', antiCheatHandlers.keydown, true);
+        }
+
+        function renderQuestion() {
+            clearInterval(quiz.timerInterval);
+            const q = quiz.questions[quiz.current];
+            document.getElementById('q-num').innerText = quiz.current + 1;
+            document.getElementById('q-total').innerText = quiz.questions.length;
+            document.getElementById('q-text').innerText = q.q;
+            const diffColors = { easy: 'text-emerald-300', medium: 'text-amber-300', hard: 'text-rose-300' };
+            const diffEl = document.getElementById('q-difficulty');
+            diffEl.innerText = q.difficulty.toUpperCase();
+            diffEl.className = `text-[10px] font-black uppercase tracking-widest mt-0.5 ${diffColors[q.difficulty] || 'text-slate-400'}`;
+            document.getElementById('q-explanation').classList.add('hidden');
+            document.getElementById('next-btn').classList.add('hidden');
+            document.getElementById('quiz-progress-fill').style.width = `${(quiz.current / quiz.questions.length) * 100}%`;
+
+            const container = document.getElementById('q-options');
+            const letters = ['A', 'B', 'C', 'D'];
+            container.innerHTML = q.options.map((opt, i) => `
+                <div class="opt-card fade-in" data-idx="${i}">
+                    <div class="opt-letter">${letters[i]}</div>
+                    <div class="flex-1 text-white font-bold text-lg">${formatOption(opt)}</div>
+                </div>
+            `).join('');
+            container.querySelectorAll('.opt-card').forEach(el => {
+                el.addEventListener('click', () => selectAnswer(parseInt(el.dataset.idx)));
+            });
+
+            quiz.remaining = 30;
+            quiz.questionStartTime = Date.now();
+            document.getElementById('q-timer').innerText = quiz.remaining;
+            quiz.timerInterval = setInterval(() => {
+                quiz.remaining--;
+                document.getElementById('q-timer').innerText = quiz.remaining;
+                if (quiz.remaining <= 0) {
+                    clearInterval(quiz.timerInterval);
+                    selectAnswer(-1);
+                }
+            }, 1000);
+        }
+
+        function formatOption(opt) {
+            const t = opt.trim();
+            // Plain-text options (puzzles, GK, math) don't get kbd formatting.
+            // Keyboard-shortcut options do — detect by presence of + or common modifier symbols.
+            const isShortcut = /[⌘⌥⇧⌃]|\+/.test(t) && !/^(both|all|none|neither)/i.test(t);
+            if (isShortcut) {
+                if (/^(both|all)/i.test(t)) return t.replace(/\+/g, ' + ');
+                return t.split('+').map(p => `<kbd class="key">${p.trim()}</kbd>`).join(' + ');
+            }
+            return escapeHtml(t);
+        }
+
+        function selectAnswer(idx) {
+            clearInterval(quiz.timerInterval);
+            const q = quiz.questions[quiz.current];
+            quiz.answers[quiz.current] = idx;
+
+            const cards = document.querySelectorAll('.opt-card');
+            cards.forEach(c => c.classList.add('locked'));
+            if (idx === q.correct) quiz.score++;
+            cards.forEach((c, i) => {
+                if (i === q.correct) c.classList.add('correct');
+                else if (i === idx) c.classList.add('incorrect');
+            });
+
+            document.getElementById('q-explanation-text').innerText = q.ex;
+            document.getElementById('q-explanation').classList.remove('hidden');
+            const nextBtn = document.getElementById('next-btn');
+            nextBtn.classList.remove('hidden');
+            nextBtn.innerText = quiz.current === quiz.questions.length - 1 ? 'See Results →' : 'Next →';
+            nextBtn.focus();
+        }
+
+        function nextQuestion() {
+            quiz.current++;
+            if (quiz.current >= quiz.questions.length) return finishQuiz();
+            renderQuestion();
+        }
+
+        function finishQuiz() {
+            clearInterval(quiz.timerInterval);
+            disableAntiCheat();
+            const timeTotal = Math.round((Date.now() - quiz.startedAt) / 1000);
+            const attempt = {
+                score: quiz.score, total: quiz.questions.length,
+                timeSec: timeTotal, difficulty: quiz.difficulty,
+                category: quiz.category, at: Date.now(),
+                violations: quiz.violations || 0,
+                autoSubmitted: !!quiz.autoSubmitted,
+                aiGenerated: !!quiz.bank.isAI,
+                aiTopic: quiz.aiTopic || null
+            };
+            saveAttempt(attempt);
+            saveResultToSupabase(attempt);
+
+            document.getElementById('quiz-screen').classList.add('hidden');
+            document.getElementById('result-screen').classList.remove('hidden');
+
+            const pct = Math.round((quiz.score / quiz.questions.length) * 100);
+            const emoji = pct >= 90 ? '🏆' : pct >= 70 ? '🎉' : pct >= 50 ? '👍' : '💪';
+            const title = pct >= 90 ? 'MCQ Quiz!' : pct >= 70 ? 'Well done!' : pct >= 50 ? 'Solid try' : 'Keep practicing';
+            document.getElementById('result-emoji').innerText = emoji;
+            document.getElementById('result-title').innerText = title;
+            let subtitle = `You scored ${quiz.score} out of ${quiz.questions.length} in ${quiz.bank.name}.`;
+            if (quiz.autoSubmitted) subtitle = '⚠️ Auto-submitted after 3 violations. ' + subtitle;
+            else if (quiz.violations > 0) subtitle += ` (${quiz.violations} violation${quiz.violations > 1 ? 's' : ''})`;
+            document.getElementById('result-subtitle').innerText = subtitle;
+            document.getElementById('result-score').innerText = `${quiz.score}/${quiz.questions.length}`;
+            document.getElementById('result-acc').innerText = pct + '%';
+            document.getElementById('result-time').innerText = timeTotal + 's';
+            document.getElementById('result-category').innerText = quiz.bank.icon + ' ' + quiz.bank.name;
+
+            const review = document.getElementById('result-review');
+            const letters = ['A', 'B', 'C', 'D'];
+            review.innerHTML = quiz.questions.map((q, i) => {
+                const userIdx = quiz.answers[i];
+                const isCorrect = userIdx === q.correct;
+                return `<div class="glass-subtle rounded-xl p-3">
+                    <div class="flex items-start gap-2 mb-2">
+                        <div class="text-lg">${isCorrect ? '✅' : '❌'}</div>
+                        <div class="font-bold text-sm text-white flex-1">${escapeHtml(q.q)}</div>
+                    </div>
+                    <div class="text-xs text-slate-300 pl-7">
+                        <div>Correct: <span class="font-black text-emerald-300">${letters[q.correct]}. ${formatOption(q.options[q.correct])}</span></div>
+                        ${!isCorrect && userIdx >= 0 ? `<div class="mt-0.5">Your answer: <span class="text-rose-300 font-bold">${letters[userIdx]}. ${formatOption(q.options[userIdx])}</span></div>` : ''}
+                        ${userIdx === -1 ? '<div class="mt-0.5 text-amber-300 font-bold">(Timed out)</div>' : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        async function saveResultToSupabase(attempt) {
+            if (!supabaseClient || !currentUser) return;
+            const pct = Math.round((attempt.score / attempt.total) * 100);
+            const catName = QUESTION_BANKS[attempt.category]?.name || attempt.category;
+            const label = attempt.aiTopic ? `AI: ${attempt.aiTopic}` : catName;
+            const fullName = currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
+
+            // Prefer the dedicated quiz_results table (create it via supabase-quiz-migration.sql).
+            try {
+                const { error } = await supabaseClient.from('quiz_results').insert({
+                    user_id: currentUser.id,
+                    full_name: fullName,
+                    email: currentUser.email,
+                    category: attempt.category,
+                    category_label: label,
+                    score: attempt.score,
+                    total: attempt.total,
+                    accuracy: pct,
+                    time_sec: attempt.timeSec,
+                    difficulty: attempt.difficulty,
+                    violations: attempt.violations || 0,
+                    auto_submitted: !!attempt.autoSubmitted,
+                    ai_generated: !!attempt.aiGenerated,
+                    ai_topic: attempt.aiTopic || null
+                });
+                if (!error) return;
+                // If the table doesn't exist yet, fall through to test_results as a fallback.
+                console.warn('quiz_results insert failed, falling back to test_results', error);
+            } catch (e) { console.warn('quiz_results insert exception', e); }
+
+            // Fallback: write to test_results with a marker category so admin sees it
+            try {
+                await supabaseClient.from('test_results').insert({
+                    user_id: currentUser.id,
+                    full_name: fullName,
+                    email: currentUser.email,
+                    wpm: attempt.score,
+                    accuracy: pct,
+                    cpm: attempt.total,
+                    keystrokes: attempt.total,
+                    errors: attempt.total - attempt.score,
+                    duration: attempt.timeSec,
+                    theme: 'quiz_' + attempt.category + '_' + attempt.difficulty,
+                    theme_label: 'MCQ Quiz: ' + label,
+                    category: 'MCQ Quiz',
+                    person: null
+                });
+            } catch (e) { console.error('save failed', e); }
+        }
+
+        // ============================================================
+        // Auth
+        // ============================================================
+        function onLoggedIn(session) {
+            currentUser = session.user;
+            const name = currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
+            const chip = document.getElementById('user-chip');
+            chip.innerText = name;
+            chip.classList.remove('hidden');
+            document.getElementById('logout-btn').classList.remove('hidden');
+            document.getElementById('auth-modal').classList.add('hidden');
+            document.getElementById('auth-modal').classList.remove('flex');
+        }
+        function onLoggedOut() {
+            currentUser = null;
+            document.getElementById('user-chip').classList.add('hidden');
+            document.getElementById('logout-btn').classList.add('hidden');
+            const m = document.getElementById('auth-modal');
+            m.classList.remove('hidden'); m.classList.add('flex');
+        }
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const err = document.getElementById('login-error');
+            err.classList.add('hidden');
+            if (!supabaseClient) return;
+            const email = e.target.email.value.trim();
+            const password = e.target.password.value;
+            const btn = e.target.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            try {
+                const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+                if (error) { err.innerText = error.message; err.classList.remove('hidden'); return; }
+                onLoggedIn(data.session);
+            } finally { btn.disabled = false; }
+        });
+        document.getElementById('logout-btn').addEventListener('click', async () => {
+            if (supabaseClient) await supabaseClient.auth.signOut();
+            onLoggedOut();
+        });
+
+        // ============================================================
+        // Wire up
+        // ============================================================
+        // ============================================================
+        // NAV — Practice / Leaderboard / History
+        // ============================================================
+        function isQuizRunning() {
+            return quiz && !document.getElementById('quiz-screen').classList.contains('hidden');
+        }
+
+        function showView(name) {
+            if (isQuizRunning()) {
+                showToast('🚫', 'Finish the quiz first', 'You can navigate after the current attempt.');
+                return;
+            }
+            // Ensure quiz + result screens don't linger
+            document.getElementById('quiz-screen').classList.add('hidden');
+            document.getElementById('result-screen').classList.add('hidden');
+            document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+            const target = name === 'practice' ? 'welcome-screen' : 'view-' + name;
+            const el = document.getElementById(target);
+            if (el) el.classList.remove('hidden');
+
+            document.querySelectorAll('.nav-link').forEach(a => {
+                const active = a.dataset.view === name;
+                a.classList.toggle('text-orange-300', active);
+                a.classList.toggle('border-b-2', active);
+                a.classList.toggle('border-orange-400', active);
+                a.classList.toggle('font-bold', active);
+                a.classList.toggle('text-slate-300', !active);
+                a.classList.toggle('font-semibold', !active);
+            });
+
+            if (name === 'leaderboard') loadLeaderboard();
+            if (name === 'history')     loadUserHistory();
+            if (name === 'practice')    updateWelcomeStats();
+        }
+        window.showView = showView;
+
+        document.querySelectorAll('.nav-link').forEach(a => {
+            a.addEventListener('click', (e) => { e.preventDefault(); showView(a.dataset.view); });
+        });
+
+        // Populate category filter for leaderboard
+        (function initLbCategoryFilter() {
+            const sel = document.getElementById('lb-category-filter');
+            if (!sel) return;
+            const opts = Object.values(QUESTION_BANKS).map(b =>
+                `<option value="${b.key}">${b.icon} ${b.name}</option>`
+            ).join('');
+            sel.insertAdjacentHTML('beforeend', opts);
+            sel.addEventListener('change', loadLeaderboard);
+        })();
+
+        // ============================================================
+        // LEADERBOARD (reads from quiz_results, falls back to test_results)
+        // ============================================================
+        async function loadLeaderboard() {
+            const body = document.getElementById('lb-body');
+            const empty = document.getElementById('lb-empty');
+            const loading = document.getElementById('lb-loading');
+            body.innerHTML = '';
+            empty.classList.add('hidden');
+            loading.classList.remove('hidden');
+
+            if (!supabaseClient) {
+                loading.classList.add('hidden');
+                empty.classList.remove('hidden');
+                empty.querySelector('p.font-bold').innerText = 'Auth not ready';
+                return;
+            }
+
+            const catFilter = document.getElementById('lb-category-filter').value;
+
+            try {
+                // Try quiz_results first
+                let query = supabaseClient.from('quiz_results')
+                    .select('user_id, full_name, score, accuracy, total, category, created_at')
+                    .order('score', { ascending: false })
+                    .limit(500);
+                if (catFilter) query = query.eq('category', catFilter);
+                let { data, error } = await query;
+
+                if (error) {
+                    // Fallback to test_results (marker category='MCQ Quiz')
+                    console.warn('quiz_results missing, falling back to test_results', error);
+                    const q2 = supabaseClient.from('test_results')
+                        .select('user_id, full_name, wpm, accuracy, cpm, theme, created_at')
+                        .eq('category', 'MCQ Quiz')
+                        .order('wpm', { ascending: false })
+                        .limit(500);
+                    const res = await q2;
+                    if (res.error) throw res.error;
+                    data = (res.data || []).map(r => ({
+                        user_id: r.user_id,
+                        full_name: r.full_name,
+                        score: r.wpm,
+                        accuracy: r.accuracy,
+                        total: r.cpm || 10,
+                        category: (r.theme || '').split('_')[1] || null,
+                        created_at: r.created_at
+                    }));
+                    if (catFilter) data = data.filter(r => r.category === catFilter);
+                }
+
+                loading.classList.add('hidden');
+
+                // Aggregate best score per user
+                const best = new Map();
+                (data || []).forEach(r => {
+                    const p = best.get(r.user_id);
+                    if (!p || (r.score || 0) > (p.best_score || 0) || (r.score === p.best_score && (r.accuracy || 0) > p.best_accuracy)) {
+                        best.set(r.user_id, {
+                            user_id: r.user_id,
+                            full_name: r.full_name,
+                            best_score: r.score,
+                            total: r.total,
+                            best_accuracy: r.accuracy,
+                            attempts: (p?.attempts || 0) + 1,
+                            last_test_at: r.created_at
+                        });
+                    } else {
+                        p.attempts += 1;
+                        if (!p.last_test_at || new Date(r.created_at) > new Date(p.last_test_at)) p.last_test_at = r.created_at;
+                    }
+                });
+                const rows = Array.from(best.values()).sort((a, b) =>
+                    (b.best_score - a.best_score) || (b.best_accuracy - a.best_accuracy)
+                ).slice(0, 50);
+
+                if (rows.length === 0) { empty.classList.remove('hidden'); return; }
+
+                body.innerHTML = rows.map((r, i) => {
+                    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}`;
+                    const isMe = currentUser && r.user_id === currentUser.id;
+                    return `<tr class="border-b border-white/5 hover:bg-white/5 ${isMe ? 'bg-orange-500/10' : ''}">
+                        <td class="px-6 py-4 font-black text-lg">${medal}</td>
+                        <td class="px-4 py-4 font-bold text-white">${escapeHtml(r.full_name || '—')}${isMe ? ' <span class="text-orange-300 text-xs">(You)</span>' : ''}</td>
+                        <td class="px-4 py-4 text-right mono font-black text-orange-300">${r.best_score ?? '—'}/${r.total ?? 10}</td>
+                        <td class="px-4 py-4 text-right mono font-black text-emerald-300">${r.best_accuracy ?? '—'}%</td>
+                        <td class="px-4 py-4 text-right text-slate-300">${r.attempts}</td>
+                        <td class="px-6 py-4 text-right text-slate-400 text-xs">${formatShort(r.last_test_at)}</td>
+                    </tr>`;
+                }).join('');
+            } catch (e) {
+                console.error('Leaderboard load failed', e);
+                loading.classList.add('hidden');
+                empty.classList.remove('hidden');
+                empty.querySelector('p.font-bold').innerText = 'Could not load leaderboard';
+                empty.querySelector('p.text-sm').innerText = e.message || '';
+            }
+        }
+
+        // ============================================================
+        // HISTORY (reads from quiz_results for current user, plus local)
+        // ============================================================
+        async function loadUserHistory() {
+            const body = document.getElementById('hist-body');
+            const empty = document.getElementById('hist-empty');
+            const loading = document.getElementById('hist-loading');
+            body.innerHTML = '';
+            empty.classList.add('hidden');
+            loading.classList.remove('hidden');
+
+            if (!supabaseClient || !currentUser) {
+                loading.classList.add('hidden');
+                // Fall back to localStorage only
+                const rows = loadAttempts().slice().reverse().map(a => ({
+                    created_at: new Date(a.at).toISOString(),
+                    category: a.category, difficulty: a.difficulty,
+                    score: a.score, total: a.total,
+                    accuracy: Math.round((a.score / a.total) * 100),
+                    time_sec: a.timeSec, violations: a.violations || 0,
+                    ai_topic: a.aiTopic || null
+                }));
+                renderHistoryRows(rows);
+                return;
+            }
+
+            try {
+                let { data, error } = await supabaseClient.from('quiz_results')
+                    .select('*')
+                    .eq('user_id', currentUser.id)
+                    .order('created_at', { ascending: false })
+                    .limit(200);
+                if (error) {
+                    // Fallback to test_results MCQ entries
+                    console.warn('quiz_results missing, using test_results', error);
+                    const res = await supabaseClient.from('test_results')
+                        .select('*')
+                        .eq('user_id', currentUser.id)
+                        .eq('category', 'MCQ Quiz')
+                        .order('created_at', { ascending: false })
+                        .limit(200);
+                    if (res.error) throw res.error;
+                    data = (res.data || []).map(r => ({
+                        created_at: r.created_at,
+                        category: (r.theme || '').split('_')[1] || null,
+                        category_label: r.theme_label,
+                        difficulty: (r.theme || '').split('_')[2] || null,
+                        score: r.wpm, total: r.cpm || 10,
+                        accuracy: r.accuracy, time_sec: r.duration,
+                        violations: 0
+                    }));
+                }
+
+                loading.classList.add('hidden');
+                renderHistoryRows(data || []);
+            } catch (e) {
+                console.error('History load failed', e);
+                loading.classList.add('hidden');
+                empty.classList.remove('hidden');
+                empty.querySelector('p.font-bold').innerText = 'Could not load history';
+                empty.querySelector('p.text-sm').innerText = e.message || '';
+            }
+        }
+
+        function renderHistoryRows(rows) {
+            document.getElementById('hist-total').innerText = rows.length;
+            if (rows.length > 0) {
+                const bestScore = Math.max(...rows.map(r => r.score || 0));
+                const avgAcc = Math.round(rows.reduce((s, r) => s + (r.accuracy || 0), 0) / rows.length);
+                const perfect = rows.filter(r => (r.score || 0) === (r.total || 10)).length;
+                document.getElementById('hist-best').innerText = bestScore;
+                document.getElementById('hist-avg-acc').innerText = avgAcc + '%';
+                document.getElementById('hist-perfect').innerText = perfect;
+            } else {
+                document.getElementById('hist-best').innerText = 0;
+                document.getElementById('hist-avg-acc').innerText = '0%';
+                document.getElementById('hist-perfect').innerText = 0;
+            }
+
+            const body = document.getElementById('hist-body');
+            const empty = document.getElementById('hist-empty');
+            if (rows.length === 0) { empty.classList.remove('hidden'); return; }
+            empty.classList.add('hidden');
+
+            body.innerHTML = rows.map(r => {
+                const bank = QUESTION_BANKS[r.category];
+                const catLabel = r.category_label || (bank ? `${bank.icon} ${bank.name}` : (r.category || '—'));
+                const scorePct = Math.round(((r.score || 0) / (r.total || 10)) * 100);
+                const scoreCls = scorePct >= 90 ? 'text-emerald-300' : scorePct >= 70 ? 'text-blue-300' : scorePct >= 50 ? 'text-amber-300' : 'text-rose-300';
+                const violations = r.violations || 0;
+                return `<tr class="border-b border-white/5 hover:bg-white/5">
+                    <td class="px-6 py-4 text-slate-300 text-xs">${formatLong(r.created_at)}</td>
+                    <td class="px-4 py-4 text-slate-200 text-xs">${escapeHtml(catLabel)}</td>
+                    <td class="px-4 py-4 text-slate-300 text-xs">${escapeHtml(r.difficulty || 'mixed')}</td>
+                    <td class="px-4 py-4 text-right mono font-black ${scoreCls}">${r.score ?? '—'}/${r.total ?? 10}</td>
+                    <td class="px-4 py-4 text-right mono font-black text-emerald-300">${r.accuracy ?? '—'}%</td>
+                    <td class="px-4 py-4 text-right mono text-slate-300">${r.time_sec || '—'}s</td>
+                    <td class="px-4 py-4 text-right ${violations > 0 ? 'text-rose-300 font-black' : 'text-slate-500'}">${violations || '·'}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function formatShort(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        }
+        function formatLong(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        }
+
+        document.getElementById('lb-refresh').addEventListener('click', loadLeaderboard);
+        document.getElementById('hist-refresh').addEventListener('click', loadUserHistory);
+
+        document.getElementById('start-btn').addEventListener('click', requestStart);
+        document.getElementById('rules-accept').addEventListener('click', actuallyStartQuiz);
+        document.getElementById('rules-cancel').addEventListener('click', () => { closeRulesModal(); pendingStart = null; });
+        document.getElementById('ai-cancel').addEventListener('click', () => { closeAIModal(); pendingStart = null; });
+        document.getElementById('ai-generate').addEventListener('click', generateAIQuiz);
+        document.querySelectorAll('.ai-sug').forEach(b => {
+            b.addEventListener('click', () => { document.getElementById('ai-topic').value = b.dataset.t; });
+        });
+        document.getElementById('ai-topic').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') generateAIQuiz();
+        });
+        document.getElementById('again-btn').addEventListener('click', () => {
+            document.getElementById('result-screen').classList.add('hidden');
+            document.getElementById('welcome-screen').classList.remove('hidden');
+            updateWelcomeStats();
+        });
+        document.getElementById('home-btn').addEventListener('click', () => {
+            document.getElementById('result-screen').classList.add('hidden');
+            document.getElementById('welcome-screen').classList.remove('hidden');
+            selectedCategory = null;
+            document.querySelectorAll('.cat-card').forEach(c => c.classList.remove('selected'));
+            document.getElementById('start-btn').disabled = true;
+            updateWelcomeStats();
+        });
+        document.getElementById('next-btn').addEventListener('click', nextQuestion);
+        document.getElementById('quit-btn').addEventListener('click', () => {
+            if (confirm('Quit this quiz? Your progress will be lost.')) {
+                clearInterval(quiz.timerInterval);
+                disableAntiCheat();
+                document.getElementById('quiz-screen').classList.add('hidden');
+                document.getElementById('welcome-screen').classList.remove('hidden');
+                updateWelcomeStats();
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (document.getElementById('quiz-screen').classList.contains('hidden')) return;
+            if (['1','2','3','4'].includes(e.key)) {
+                const idx = parseInt(e.key) - 1;
+                if (quiz && quiz.answers[quiz.current] === null) selectAnswer(idx);
+            } else if (e.key === 'Enter') {
+                const nextBtn = document.getElementById('next-btn');
+                if (!nextBtn.classList.contains('hidden')) nextQuestion();
+            }
+        });
+
+        // Boot
+        window.addEventListener('load', async () => {
+            renderCategoryCards();
+            updateWelcomeStats();
+            const ok = await initSupabase();
+            if (!ok) {
+                document.getElementById('auth-modal').classList.remove('hidden');
+                document.getElementById('auth-modal').classList.add('flex');
+                document.getElementById('login-error').innerText = 'Auth not configured on server.';
+                document.getElementById('login-error').classList.remove('hidden');
+                return;
+            }
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session) onLoggedIn(session);
+            else onLoggedOut();
+        });
+    </script>
+</body>
+</html>
