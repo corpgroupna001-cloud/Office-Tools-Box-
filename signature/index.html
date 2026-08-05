@@ -5,130 +5,192 @@
 <title>Email Signature Generator</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
+<link rel="stylesheet" href="/design-system.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
 <style>
-*{
-  box-sizing:border-box;
-  font-family:Segoe UI, Arial, sans-serif;
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'Inter', system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ws-text);
+  background: var(--ws-bg);
+  background-image:
+    radial-gradient(at 15% 12%, hsla(258, 90%, 55%, 0.45) 0, transparent 45%),
+    radial-gradient(at 85% 15%, hsla(200, 95%, 55%, 0.40) 0, transparent 45%),
+    radial-gradient(at 50% 90%, hsla(320, 80%, 55%, 0.35) 0, transparent 50%);
+  background-attachment: fixed;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 80px 24px 40px;
+}
+body::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none;
+  background-image: radial-gradient(rgba(255,255,255,0.04) 1px, transparent 1px);
+  background-size: 22px 22px;
 }
 
-body{
-  margin:0;
-  min-height:100vh;
-  background:linear-gradient(135deg,#6d28d9,#9333ea,#0ea5e9);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding:40px;
+.container {
+  width: 100%;
+  max-width: 1200px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  position: relative;
+  animation: ws-fade-in-up 0.35s ease-out both;
 }
 
-.container{
-  width:100%;
-  max-width:1200px;
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:35px;
+.glass {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border-radius: var(--ws-r-xl);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 32px;
+  box-shadow: var(--ws-shadow-lg);
 }
 
-.glass{
-  background:rgba(255,255,255,0.15);
-  backdrop-filter:blur(20px);
-  border-radius:20px;
-  border:1px solid rgba(255,255,255,0.2);
-  padding:28px;
-  box-shadow:0 15px 40px rgba(0,0,0,0.2);
+h2 {
+  color: var(--ws-text);
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+h2 + .section-sub {
+  color: var(--ws-text-muted);
+  font-size: 12px; font-weight: 700;
+  margin-bottom: 20px;
+  text-transform: uppercase; letter-spacing: 1.5px;
 }
 
-h2{
-  color:white;
-  margin-bottom:18px;
+label.field-label {
+  display: block;
+  color: var(--ws-text-muted);
+  font-size: 10px; font-weight: 900;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  margin: 14px 0 6px 4px;
 }
 
-input,
-select{
-  width:100%;
-  padding:12px 14px;
-  border-radius:10px;
-  border:none;
-  margin-bottom:12px;
-  background:rgba(255,255,255,0.25);
-  color:white;
-  font-size:14px;
-  outline:none;
+input, select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: var(--ws-r-md);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--ws-border);
+  color: var(--ws-text);
+  font-family: inherit; font-size: 14px; font-weight: 600;
+  margin-bottom: 10px;
+  outline: none;
+  transition: border-color var(--ws-motion), background var(--ws-motion), box-shadow var(--ws-motion);
+}
+input::placeholder { color: var(--ws-text-dim); }
+input:focus, select:focus {
+  border-color: var(--ws-primary);
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.18);
 }
 
-input::placeholder{
-  color:rgba(255,255,255,0.7);
+select { appearance: none; cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat; background-position: right 14px center;
+  padding-right: 40px;
+}
+select option { background: #1e293b; color: var(--ws-text); }
+
+input[type="file"] { padding: 10px; font-size: 12px; }
+input[type="file"]::file-selector-button {
+  padding: 8px 14px; margin-right: 12px;
+  border-radius: var(--ws-r-sm);
+  border: none;
+  background: var(--ws-grad-primary); color: white;
+  font-family: inherit; font-weight: 800; font-size: 12px;
+  cursor: pointer;
+  transition: transform var(--ws-motion);
+}
+input[type="file"]::file-selector-button:hover { transform: translateY(-1px); }
+
+button {
+  width: 100%;
+  padding: 14px;
+  border-radius: var(--ws-r-md);
+  border: none;
+  background: var(--ws-grad-primary);
+  color: white;
+  font-family: inherit; font-size: 14px; font-weight: 900;
+  cursor: pointer;
+  transition: transform var(--ws-motion), box-shadow var(--ws-motion);
+  box-shadow: var(--ws-primary-glow);
+  margin-top: 4px;
+  letter-spacing: 0.02em;
+}
+button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(59, 130, 246, 0.65);
+}
+button:active { transform: translateY(0); }
+
+.mode-switch {
+  display: flex;
+  gap: 0;
+  margin-bottom: 18px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--ws-border);
+  border-radius: var(--ws-r-md);
+}
+.mode-switch button {
+  flex: 1; width: auto;
+  background: transparent;
+  color: var(--ws-text-muted);
+  padding: 8px 12px;
+  font-size: 12px; font-weight: 800;
+  border-radius: var(--ws-r-sm);
+  box-shadow: none;
+  margin: 0;
+  border: none;
+  transition: background var(--ws-motion), color var(--ws-motion);
+}
+.mode-switch button:hover { color: var(--ws-text); background: rgba(255,255,255,0.05); transform: none; box-shadow: none; }
+.mode-switch button.active {
+  background: var(--ws-grad-primary);
+  color: white;
+  box-shadow: 0 4px 14px rgba(59,130,246,0.4);
 }
 
-select{
-  appearance:none;
-  cursor:pointer;
+.preview-shell {
+  border-radius: var(--ws-r-md);
+  padding: 24px;
+  transition: background var(--ws-motion), border-color var(--ws-motion);
+  overflow: auto;
+  border: 1px solid var(--ws-border);
 }
-
-select option{
-  background:#6d28d9;
-  color:white;
-}
-
-button{
-  width:100%;
-  padding:12px;
-  border-radius:10px;
-  border:none;
-  background:white;
-  color:#6d28d9;
-  font-weight:600;
-  cursor:pointer;
-  transition:0.25s;
-}
-
-button:hover{
-  transform:scale(1.03);
-  box-shadow:0 10px 20px rgba(0,0,0,0.25);
-}
-
-.mode-switch{
-  display:flex;
-  gap:10px;
-  margin-bottom:14px;
-}
-
-.mode-switch button{
-  width:50%;
-  background:rgba(255,255,255,0.22);
-  color:white;
-  border:1px solid rgba(255,255,255,0.25);
-}
-
-.mode-switch button.active{
-  background:white;
-  color:#6d28d9;
-}
-
-.preview-shell{
-  border-radius:12px;
-  padding:20px;
-  transition:0.25s ease;
-  overflow:auto;
-}
-
-.preview-shell.light{
-  background:white;
-}
-
-.preview-shell.dark{
-  background:#111827;
-}
+.preview-shell.light { background: #ffffff; color: #111; }
+.preview-shell.dark  { background: #111827; }
 
 #signature-preview,
-#signature-preview *{
-  font-family:"Arial Rounded MT Bold", Arial, sans-serif !important;
+#signature-preview * {
+  font-family: "Arial Rounded MT Bold", Arial, sans-serif !important;
 }
 
-@media(max-width:900px){
-  .container{
-    grid-template-columns:1fr;
-  }
+.page-title {
+  position: absolute; top: -56px; left: 4px;
+  color: var(--ws-text);
+  font-size: 24px; font-weight: 900;
+  letter-spacing: -0.01em;
+  display: flex; align-items: center; gap: 10px;
+}
+.page-title .page-title-icon {
+  width: 36px; height: 36px; border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--ws-grad-emerald);
+  box-shadow: 0 8px 20px rgba(16,185,129,0.4);
+}
+
+@media (max-width: 900px) {
+  .container { grid-template-columns: 1fr; }
+  .page-title { position: static; margin-bottom: 20px; }
+  body { padding-top: 60px; }
 }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -140,10 +202,18 @@ button:hover{
 
 <div class="container">
 
+  <div class="page-title">
+    <span class="page-title-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.2 8.4c.5.5.8 1.1.8 1.6 0 1.1-.9 2-2 2h-4l-3 3-3-3H6a2 2 0 0 1-2-2 2 2 0 0 1 2-2h4l3-3 3 3h4c.5 0 1.1.3 1.6.8z"/><path d="M2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6"/></svg>
+    </span>
+    <span>Signature Generator</span>
+  </div>
+
   <!-- FORM -->
   <div class="glass">
 
     <h2>Employee Details</h2>
+    <p class="section-sub">Fill out your info — the preview updates live</p>
 
     <input id="name" placeholder="Full Name">
     <input id="title" placeholder="Job Title">
@@ -204,6 +274,7 @@ button:hover{
   <div class="glass">
 
     <h2>Signature Preview</h2>
+    <p class="section-sub">Copy the block below and paste into Gmail / Outlook / Apple Mail</p>
 
     <div class="mode-switch">
       <button
