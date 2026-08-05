@@ -1,0 +1,2941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZenType - AI Motivational Typing Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/presence.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            background: #0b1120;
+            background-image:
+                radial-gradient(at 15% 12%, hsla(258, 90%, 55%, 0.55) 0, transparent 45%),
+                radial-gradient(at 85% 15%, hsla(200, 95%, 55%, 0.45) 0, transparent 45%),
+                radial-gradient(at 50% 90%, hsla(320, 80%, 55%, 0.45) 0, transparent 50%),
+                radial-gradient(at 90% 85%, hsla(160, 85%, 45%, 0.35) 0, transparent 45%);
+            background-attachment: fixed;
+            color: #f8fafc;
+            overflow-x: hidden;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
+            background-size: 22px 22px;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* --- Glass primitives --- */
+        .glass {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(24px) saturate(180%);
+            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+        }
+        .glass-strong {
+            background: rgba(255, 255, 255, 0.12);
+            backdrop-filter: blur(30px) saturate(200%);
+            -webkit-backdrop-filter: blur(30px) saturate(200%);
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+        }
+        .glass-subtle {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(18px) saturate(160%);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .glass-nav {
+            background: rgba(15, 23, 42, 0.35);
+            backdrop-filter: blur(28px) saturate(180%);
+            -webkit-backdrop-filter: blur(28px) saturate(180%);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .content { position: relative; z-index: 1; }
+
+        /* --- Typing area --- */
+        #text-container {
+            height: 290px;
+            overflow-y: hidden;
+            position: relative;
+            padding: 24px 24px 32px 24px;
+            border-radius: 1.5rem;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            font-size: 20px;
+            line-height: 1.6;
+            letter-spacing: 0.01em;
+        }
+        @media (min-width: 768px) {
+            #text-container {
+                font-size: 24px;
+                line-height: 1.55;
+            }
+        }
+        .char {
+            font-size: inherit;
+            line-height: inherit;
+        }
+        #ai-theme-badge, #ai-category-badge, #ai-level-badge, #ai-words-badge, #ai-person-badge {
+            display: inline-flex;
+            align-items: center;
+            font-size: 9px;
+            font-weight: 900;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            padding: 3px 8px;
+            border-radius: 999px;
+            border: 1px solid;
+            line-height: 1;
+            white-space: nowrap;
+        }
+        #ai-category-badge {
+            background: rgba(251, 146, 60, 0.15);
+            color: #fdba74;
+            border-color: rgba(251, 146, 60, 0.35);
+        }
+        #ai-person-badge {
+            background: rgba(244, 114, 182, 0.18);
+            color: #f9a8d4;
+            border-color: rgba(244, 114, 182, 0.4);
+            letter-spacing: 0.1em;
+        }
+        #ai-theme-badge {
+            background: rgba(96, 165, 250, 0.18);
+            color: #93c5fd;
+            border-color: rgba(96, 165, 250, 0.35);
+        }
+        #ai-level-badge {
+            background: rgba(168, 85, 247, 0.18);
+            color: #d8b4fe;
+            border-color: rgba(168, 85, 247, 0.35);
+        }
+        #ai-words-badge {
+            background: rgba(52, 211, 153, 0.15);
+            color: #6ee7b7;
+            border-color: rgba(52, 211, 153, 0.3);
+        }
+
+        /* Progress bar */
+        #progress-track {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.06);
+            border-top-left-radius: 2rem;
+            border-top-right-radius: 2rem;
+            overflow: hidden;
+            z-index: 5;
+        }
+        #progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #60a5fa 0%, #a78bfa 50%, #f472b6 100%);
+            box-shadow: 0 0 12px rgba(139, 92, 246, 0.6);
+            transition: width 0.2s ease-out;
+        }
+
+        /* New passage / skip button */
+        .icon-btn {
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 14px;
+            transition: all 0.2s ease;
+        }
+        .icon-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
+        .char {
+            position: relative;
+            display: inline-block;
+            border-bottom: 3px solid transparent;
+            transition: all 0.05s ease;
+            white-space: pre;
+            padding: 0 1px;
+            color: rgba(226, 232, 240, 0.45);
+        }
+        .char.current {
+            background-color: rgba(96, 165, 250, 0.25);
+            border-bottom: 3px solid #60a5fa;
+            border-radius: 4px;
+            color: #f1f5f9;
+        }
+        .char.correct { color: #6ee7b7; }
+        .char.incorrect {
+            color: #ffffff;
+            background-color: rgba(244, 63, 94, 0.7);
+            border-radius: 4px;
+        }
+        #text-container::-webkit-scrollbar { width: 0px; }
+        .word {
+            display: inline-block;
+            white-space: nowrap;
+        }
+
+        .stats-card { transition: all 0.2s ease; }
+
+        /* --- Buttons --- */
+        .btn-primary {
+            background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+            box-shadow: 0 10px 30px rgba(59, 130, 246, 0.4), inset 0 1px 0 rgba(255,255,255,0.3);
+            transition: all 0.25s ease;
+        }
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 40px rgba(59, 130, 246, 0.55), inset 0 1px 0 rgba(255,255,255,0.35);
+        }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        select, input {
+            color-scheme: dark;
+        }
+        select option {
+            background: #1e293b;
+            color: #f1f5f9;
+        }
+
+        /* --- Font size support (feature: font-size selector) --- */
+        body.font-sm #text-container { font-size: 18px; }
+        body.font-lg #text-container { font-size: 30px; }
+        @media (min-width: 768px) {
+            body.font-sm #text-container { font-size: 22px; }
+            body.font-lg #text-container { font-size: 34px; }
+        }
+
+        /* --- 3-2-1 Countdown --- */
+        #countdown-overlay {
+            position: absolute;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 15;
+            background: rgba(11, 17, 32, 0.6);
+            backdrop-filter: blur(8px);
+            border-radius: 2rem;
+        }
+        #countdown-num {
+            font-size: 180px;
+            font-weight: 900;
+            color: #fff;
+            text-shadow: 0 0 60px rgba(96, 165, 250, 0.8);
+            animation: pop 1s ease-out;
+        }
+        @keyframes pop {
+            0%   { transform: scale(0.3); opacity: 0; }
+            30%  { transform: scale(1.1); opacity: 1; }
+            80%  { transform: scale(1); opacity: 1; }
+            100% { transform: scale(1.4); opacity: 0; }
+        }
+
+        /* --- Focus loss warning banner --- */
+        #focus-loss-banner {
+            position: fixed;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #f43f5e, #ec4899);
+            color: white;
+            font-weight: 900;
+            font-size: 14px;
+            letter-spacing: 0.05em;
+            z-index: 100;
+            box-shadow: 0 10px 30px rgba(244, 63, 94, 0.5);
+            display: none;
+        }
+
+        /* --- Toast notification (achievements) --- */
+        #toast-container {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            z-index: 200;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .toast {
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 14px 20px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 280px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes slideIn {
+            from { transform: translateX(400px); opacity: 0; }
+            to   { transform: translateX(0); opacity: 1; }
+        }
+        .toast.leaving { animation: slideOut 0.3s ease-in forwards; }
+        @keyframes slideOut {
+            to { transform: translateX(400px); opacity: 0; }
+        }
+
+        /* --- Loading tips carousel --- */
+        #loading-tip {
+            margin-top: 16px;
+            max-width: 380px;
+            font-size: 12px;
+            color: #cbd5e1;
+            text-align: center;
+            font-style: italic;
+            opacity: 0;
+            transition: opacity 0.4s ease;
+            padding: 0 20px;
+        }
+        #loading-tip.visible { opacity: 1; }
+
+        /* --- Friday Challenge banner --- */
+        #friday-banner {
+            display: none;
+            margin-bottom: 16px;
+            padding: 20px 24px;
+            border-radius: 24px;
+            border: 1px solid rgba(251, 191, 36, 0.45);
+            position: relative;
+            overflow: hidden;
+        }
+        #friday-banner.active {
+            background: linear-gradient(135deg, rgba(251,191,36,0.35) 0%, rgba(239,68,68,0.25) 100%);
+            box-shadow: 0 20px 60px rgba(251,191,36,0.35);
+        }
+        #friday-banner.upcoming {
+            background: linear-gradient(135deg, rgba(139,92,246,0.2) 0%, rgba(59,130,246,0.15) 100%);
+            border-color: rgba(139,92,246,0.35);
+        }
+        #friday-banner::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 200px;
+            height: 200px;
+            background: radial-gradient(circle, rgba(255,255,255,0.15), transparent 70%);
+            pointer-events: none;
+        }
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 20px 60px rgba(251,191,36,0.35); }
+            50%      { box-shadow: 0 20px 80px rgba(251,191,36,0.55); }
+        }
+        #friday-banner.active { animation: pulseGlow 2.5s ease-in-out infinite; }
+
+        /* --- Streak-at-risk banner --- */
+        #streak-risk-banner {
+            display: none;
+            margin-bottom: 16px;
+            padding: 12px 20px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, rgba(249,115,22,0.2), rgba(220,38,38,0.15));
+            border: 1px solid rgba(249,115,22,0.4);
+            text-align: center;
+            font-weight: 700;
+            color: #fed7aa;
+            font-size: 14px;
+        }
+
+        /* --- Header pills (rank + daily) share the same base sizing --- */
+        #daily-badge, .rank-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 10px;
+            font-weight: 900;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            line-height: 1;
+            white-space: nowrap;
+        }
+        #daily-badge {
+            background: linear-gradient(135deg, #f59e0b, #ef4444);
+            color: white;
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+            border: 1px solid transparent;
+        }
+        .rank-pill {
+            background: rgba(96, 165, 250, 0.15);
+            border: 1px solid rgba(96, 165, 250, 0.35);
+            color: #93c5fd;
+        }
+
+        /* --- Hide scrollbars on scrollable modals for a clean look --- */
+        #profile-modal .glass-strong,
+        #whats-new-modal .glass-strong {
+            scrollbar-width: none;                    /* Firefox */
+            -ms-overflow-style: none;                 /* IE/Edge */
+        }
+        #profile-modal .glass-strong::-webkit-scrollbar,
+        #whats-new-modal .glass-strong::-webkit-scrollbar {
+            display: none;                            /* WebKit */
+        }
+
+        /* --- Keyboard shortcut key style --- */
+        kbd.key {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 6px;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.2);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            font-weight: 700;
+            color: #f1f5f9;
+            box-shadow: inset 0 -1px 0 rgba(0,0,0,0.3);
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center p-4 pt-20">
+
+    <nav class="glass-nav fixed top-0 left-0 w-full z-40 content">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center gap-2 cursor-pointer" onclick="window.location.href='../index.html'">
+                    <div class="glass p-1.5 rounded-lg text-white">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    </div>
+                    <span class="font-black text-xl text-white tracking-tight">ZenType</span>
+                </div>
+
+                <div class="hidden md:flex items-center space-x-8 h-full">
+                    <a href="#" data-view="practice" class="nav-link text-blue-300 font-bold border-b-2 border-blue-400 h-full flex items-center px-1">Practice</a>
+                    <a href="#" data-view="leaderboard" class="nav-link text-slate-300 hover:text-white font-semibold transition-colors h-full flex items-center px-1">Leaderboard</a>
+                    <a href="#" data-view="history" class="nav-link text-slate-300 hover:text-white font-semibold transition-colors h-full flex items-center px-1">History</a>
+                </div>
+
+                <div class="flex items-center gap-3">
+                    <button id="logout-btn" class="glass px-3 py-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-rose-300 hover:bg-rose-500/10 hidden">Log Out</button>
+                    <div id="nav-profile-avatar" title="Profile settings" class="glass h-9 w-9 rounded-full flex items-center justify-center text-slate-300 font-black cursor-pointer transition-all hover:bg-white/20 hover:ring-2 hover:ring-blue-400/40">
+                        ?
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Auth Modal (Login / Signup) -->
+    <div id="auth-modal" class="fixed inset-0 z-[60] flex items-center justify-center p-4 transition-opacity duration-300" style="background: rgba(11, 17, 32, 0.7); backdrop-filter: blur(20px);">
+        <div class="glass-strong w-full max-w-md rounded-[2.5rem] p-10 relative overflow-hidden">
+            <div class="bg-gradient-to-br from-blue-500 to-indigo-600 w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-5 text-white shadow-2xl relative z-10" style="box-shadow: 0 15px 40px rgba(59, 130, 246, 0.5);">
+                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <h2 class="text-3xl font-black text-white mb-1 text-center">ZenType</h2>
+            <p class="text-slate-300 mb-6 text-sm font-semibold text-center">Sign in to track your progress</p>
+
+            <!-- Tabs -->
+            <div id="auth-tabs" class="glass-subtle rounded-2xl p-1 flex mb-6" style="position: relative; z-index: 10;">
+                <button type="button" data-tab="login" onclick="switchAuthTab('login'); return false;" class="auth-tab flex-1 py-2 rounded-xl font-black text-sm text-white bg-white/10" style="cursor: pointer;">Log In</button>
+                <button type="button" data-tab="signup" onclick="switchAuthTab('signup'); return false;" class="auth-tab flex-1 py-2 rounded-xl font-black text-sm text-slate-300" style="cursor: pointer;">Sign Up</button>
+            </div>
+
+            <!-- Login Form -->
+            <form id="login-form" class="space-y-3">
+                <input type="email" name="email" placeholder="Email" required
+                    class="glass-subtle w-full px-5 py-4 rounded-2xl focus:border-blue-400 focus:ring-4 focus:ring-blue-400/20 focus:outline-none font-bold text-white placeholder-slate-400">
+                <input type="password" name="password" placeholder="Password" required minlength="6"
+                    class="glass-subtle w-full px-5 py-4 rounded-2xl focus:border-blue-400 focus:ring-4 focus:ring-blue-400/20 focus:outline-none font-bold text-white placeholder-slate-400">
+                <p id="login-error" class="text-rose-300 text-sm font-bold hidden"></p>
+                <button type="submit" class="btn-primary w-full text-white font-extrabold py-4 rounded-2xl text-lg mt-2">Log In</button>
+            </form>
+
+            <!-- Signup Form -->
+            <form id="signup-form" class="space-y-3 hidden">
+                <input type="text" name="full_name" placeholder="Full Name" required minlength="2"
+                    class="glass-subtle w-full px-5 py-4 rounded-2xl focus:border-blue-400 focus:ring-4 focus:ring-blue-400/20 focus:outline-none font-bold text-white placeholder-slate-400">
+                <input type="email" name="email" placeholder="Email" required
+                    class="glass-subtle w-full px-5 py-4 rounded-2xl focus:border-blue-400 focus:ring-4 focus:ring-blue-400/20 focus:outline-none font-bold text-white placeholder-slate-400">
+                <input type="password" name="password" placeholder="Password (min 6 chars)" required minlength="6"
+                    class="glass-subtle w-full px-5 py-4 rounded-2xl focus:border-blue-400 focus:ring-4 focus:ring-blue-400/20 focus:outline-none font-bold text-white placeholder-slate-400">
+                <p id="signup-error" class="text-rose-300 text-sm font-bold hidden"></p>
+                <p id="signup-success" class="text-emerald-300 text-sm font-bold hidden"></p>
+                <button type="submit" class="btn-primary w-full text-white font-extrabold py-4 rounded-2xl text-lg mt-2">Create Account</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Friday Challenge banner (above Practice) -->
+    <div id="friday-banner-wrap" class="w-full max-w-4xl content mx-auto"><div id="friday-banner"></div></div>
+
+    <!-- Streak-at-risk banner (shown above Practice header) -->
+    <div id="streak-risk-banner-wrap" class="w-full max-w-4xl content mb-2 mx-auto"><div id="streak-risk-banner"></div></div>
+
+    <div id="view-practice" class="view w-full max-w-4xl flex flex-col items-center content">
+        <header class="w-full flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-4 px-2">
+            <div class="min-w-0">
+                <div class="flex items-center gap-3 flex-wrap">
+                    <h1 class="text-2xl md:text-3xl font-black text-white tracking-tighter drop-shadow-lg">AI Assessment</h1>
+                    <span id="rank-pill" class="rank-pill hidden">🏆 Rank #-</span>
+                    <span id="daily-badge" style="display: none;">✨ Daily</span>
+                </div>
+                <p id="header-name" class="text-slate-300 font-bold text-[10px] uppercase tracking-[0.25em] mt-0.5"></p>
+            </div>
+            <div class="flex items-center gap-3 flex-wrap">
+                <select id="category-selector" class="glass text-white rounded-2xl focus:ring-4 focus:ring-purple-400/20 focus:border-purple-400 block px-4 py-3 font-extrabold outline-none cursor-pointer transition-all" title="Passage category">
+                    <option value="">🎲 Random</option>
+                    <option value="Motivation">Motivation</option>
+                    <option value="Commitment">Commitment</option>
+                    <option value="Mindset">Mindset</option>
+                    <option value="Self-Development">Self-Development</option>
+                    <option value="Success Habits">Success Habits</option>
+                    <option value="Leadership">Leadership</option>
+                    <option value="Character">Character Values</option>
+                    <option value="Performance">Performance</option>
+                </select>
+                <select id="time-selector" class="glass text-white rounded-2xl focus:ring-4 focus:ring-blue-400/20 focus:border-blue-400 block px-4 py-3 font-extrabold outline-none cursor-pointer transition-all">
+                    <option value="60">1 Min</option>
+                    <option value="180">3 Min</option>
+                    <option value="300" selected>5 Min</option>
+                </select>
+                <button id="new-passage-btn" class="glass icon-btn text-slate-300" title="New passage (N)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+                </button>
+                <select id="font-size-selector" class="glass text-white rounded-2xl focus:outline-none block px-3 py-3 font-extrabold cursor-pointer text-xs" title="Font size">
+                    <option value="sm">A-</option>
+                    <option value="md" selected>A</option>
+                    <option value="lg">A+</option>
+                </select>
+                <button id="shortcuts-btn" class="glass icon-btn text-slate-300" title="Keyboard shortcuts (?)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01"/><path d="M10 8h.01"/><path d="M14 8h.01"/><path d="M18 8h.01"/><path d="M6 12h.01"/><path d="M10 12h.01"/><path d="M14 12h.01"/><path d="M18 12h.01"/><path d="M7 16h10"/></svg>
+                </button>
+                <button id="sound-toggle" class="glass icon-btn text-slate-300 hover:text-blue-300 transition-colors">
+                    <svg id="sound-on-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                    <svg id="sound-off-icon" class="hidden" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+                </button>
+                <div id="timer-display" class="glass-strong text-white px-6 py-2.5 rounded-2xl mono text-xl font-black tracking-tighter">05:00</div>
+            </div>
+        </header>
+
+        <main class="glass-strong w-full rounded-[2rem] p-5 md:p-7 relative overflow-hidden">
+            <div id="progress-track"><div id="progress-fill"></div></div>
+
+            <div class="grid grid-cols-3 gap-2 md:gap-4 mb-5">
+                <div class="stats-card glass-subtle py-3 px-2 rounded-2xl text-center">
+                    <p class="text-[9px] md:text-[10px] uppercase tracking-[0.2em] text-blue-300 font-black mb-0.5">Words / Min</p>
+                    <p id="live-wpm" class="text-3xl md:text-4xl font-black text-blue-300">0</p>
+                </div>
+                <div class="stats-card glass-subtle py-3 px-2 rounded-2xl text-center">
+                    <p class="text-[9px] md:text-[10px] uppercase tracking-[0.2em] text-emerald-300 font-black mb-0.5">Accuracy</p>
+                    <p id="live-accuracy" class="text-3xl md:text-4xl font-black text-emerald-300">100%</p>
+                </div>
+                <div class="stats-card glass-subtle py-3 px-2 rounded-2xl text-center">
+                    <p class="text-[9px] md:text-[10px] uppercase tracking-[0.2em] text-rose-300 font-black mb-0.5">Mistakes</p>
+                    <p id="live-errors" class="text-3xl md:text-4xl font-black text-rose-300">0</p>
+                </div>
+            </div>
+
+            <div id="ai-tip" class="text-xs font-bold text-slate-200 mb-4 flex flex-wrap items-center gap-2 hidden py-2 px-3 rounded-xl glass-subtle"></div>
+
+            <div id="text-container" class="mono select-none">
+                <div class="flex items-center justify-center h-full text-slate-300 font-bold text-lg tracking-wide">Waiting for AI passage…</div>
+            </div>
+
+            <input type="text" id="typing-input" class="fixed -top-full opacity-0" autocomplete="off">
+
+            <div id="focus-overlay" class="absolute inset-0 flex flex-col items-center justify-center cursor-pointer z-10 transition-all duration-500 rounded-[2rem]" style="background: rgba(11, 17, 32, 0.68); backdrop-filter: blur(6px);">
+                <div class="glass-strong px-6 py-3 rounded-2xl mb-3 flex items-center gap-3">
+                    <div class="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></div>
+                    <span class="text-white font-black text-sm tracking-[0.2em] uppercase">Click or type to start</span>
+                </div>
+                <p id="overlay-subtitle" class="text-slate-300 font-semibold text-xs tracking-wide">AI motivational passage</p>
+                <p id="loading-tip"></p>
+            </div>
+
+            <!-- 3-2-1 Countdown overlay -->
+            <div id="countdown-overlay"><div id="countdown-num">3</div></div>
+
+            <!-- Error state (shown when API fails) -->
+            <div id="error-overlay" class="absolute inset-0 hidden flex-col items-center justify-center z-20 rounded-[2rem] p-8 text-center" style="background: rgba(11, 17, 32, 0.85); backdrop-filter: blur(16px);">
+                <div class="glass w-16 h-16 rounded-2xl flex items-center justify-center text-amber-300 mb-5">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+                </div>
+                <h3 class="text-2xl font-black text-white mb-2">Please refresh the page</h3>
+                <p class="text-slate-300 font-medium mb-2 max-w-md">The AI is busy for a moment. A quick refresh will fix it.</p>
+                <p class="text-slate-400 text-sm mb-6 max-w-md">
+                    Press <kbd class="glass px-2 py-1 rounded-md text-xs text-white mx-1">⌘ + Shift + R</kbd> on Mac
+                    or <kbd class="glass px-2 py-1 rounded-md text-xs text-white mx-1">Ctrl + Shift + R</kbd> on Windows
+                </p>
+                <div class="flex gap-3">
+                    <button id="retry-btn" class="glass text-white font-bold px-6 py-3 rounded-2xl hover:bg-white/20 transition-all">Try Again</button>
+                    <button id="refresh-btn" class="btn-primary text-white font-black px-6 py-3 rounded-2xl">Refresh Page</button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- LEADERBOARD VIEW -->
+    <div id="view-leaderboard" class="view w-full max-w-5xl content hidden mt-4">
+        <div class="mb-6 px-2 flex flex-col md:flex-row justify-between md:items-end gap-3">
+            <div>
+                <h1 class="text-3xl font-black text-white tracking-tighter drop-shadow-lg">Leaderboard</h1>
+                <p class="text-slate-300 text-sm font-bold uppercase tracking-[0.2em] mt-1">Best score per employee</p>
+            </div>
+            <div class="flex gap-2 items-center">
+                <div class="glass-subtle rounded-2xl p-1 flex flex-wrap">
+                    <button data-lb-range="all"     class="lb-range-btn px-4 py-2 rounded-xl font-black text-xs text-white bg-white/10" type="button">All Time</button>
+                    <button data-lb-range="week"    class="lb-range-btn px-4 py-2 rounded-xl font-black text-xs text-slate-300" type="button">This Week</button>
+                    <button data-lb-range="friday"  class="lb-range-btn px-4 py-2 rounded-xl font-black text-xs text-slate-300" type="button">🔥 Friday</button>
+                </div>
+                <button id="lb-refresh" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/20">Refresh</button>
+            </div>
+        </div>
+        <div class="glass-strong rounded-[2rem] overflow-hidden">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-slate-400 text-[10px] uppercase tracking-[0.2em] font-black border-b border-white/10">
+                        <th class="px-6 py-4 text-left">Rank</th>
+                        <th class="px-4 py-4 text-left">Employee</th>
+                        <th class="px-4 py-4 text-right">Best WPM</th>
+                        <th class="px-4 py-4 text-right">Best Acc</th>
+                        <th class="px-4 py-4 text-right">Tests</th>
+                        <th class="px-6 py-4 text-right">Last Test</th>
+                    </tr>
+                </thead>
+                <tbody id="lb-body"></tbody>
+            </table>
+            <div id="lb-empty" class="hidden p-16 text-center text-slate-400">
+                <p class="font-bold text-lg mb-1">No results yet</p>
+                <p class="text-sm">Complete a typing test to see the leaderboard fill up.</p>
+            </div>
+            <div id="lb-loading" class="p-16 text-center text-slate-400 font-bold animate-pulse">Loading leaderboard…</div>
+        </div>
+    </div>
+
+    <!-- HISTORY VIEW -->
+    <div id="view-history" class="view w-full max-w-5xl content hidden mt-4">
+        <div class="mb-6 px-2 flex justify-between items-end">
+            <div>
+                <h1 class="text-3xl font-black text-white tracking-tighter drop-shadow-lg">Your History</h1>
+                <p id="history-subtitle" class="text-slate-300 text-sm font-bold uppercase tracking-[0.2em] mt-1">All your past tests</p>
+            </div>
+            <button id="hist-refresh" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/20">Refresh</button>
+        </div>
+        <!-- Personal stats -->
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+            <div class="glass rounded-2xl p-5">
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Tests Taken</p>
+                <p id="hist-count" class="text-3xl font-black text-white">0</p>
+            </div>
+            <div class="glass rounded-2xl p-5">
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Best WPM</p>
+                <p id="hist-best-wpm" class="text-3xl font-black text-blue-300">0</p>
+            </div>
+            <div class="glass rounded-2xl p-5">
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Avg WPM</p>
+                <p id="hist-avg-wpm" class="text-3xl font-black text-purple-300">0</p>
+            </div>
+            <div class="glass rounded-2xl p-5">
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Avg Accuracy</p>
+                <p id="hist-avg-acc" class="text-3xl font-black text-emerald-300">0%</p>
+            </div>
+            <div class="rounded-2xl p-5" style="background: linear-gradient(135deg, rgba(249,115,22,0.25), rgba(220,38,38,0.2)); border: 1px solid rgba(249,115,22,0.35);">
+                <p class="text-[10px] uppercase tracking-widest text-orange-200 font-black mb-1">🔥 Streak</p>
+                <p id="hist-streak" class="text-3xl font-black text-orange-300">0<span class="text-sm text-orange-200 font-bold ml-1">days</span></p>
+            </div>
+            <div class="rounded-2xl p-5" style="background: linear-gradient(135deg, rgba(59,130,246,0.25), rgba(124,58,237,0.2)); border: 1px solid rgba(96,165,250,0.35);">
+                <p class="text-[10px] uppercase tracking-widest text-blue-200 font-black mb-1">This Week</p>
+                <p class="text-3xl font-black text-blue-200"><span id="hist-week-tests">0</span><span class="text-sm text-blue-100 font-bold ml-1">tests</span></p>
+                <p class="text-[11px] font-bold text-slate-300 mt-1"><span id="hist-week-avg">0</span> avg WPM</p>
+            </div>
+        </div>
+
+        <!-- Insight cards row (best category + comparison) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div class="glass rounded-2xl p-5">
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-2">Your Best Category</p>
+                <p id="hist-best-cat" class="text-2xl font-black text-orange-300">—</p>
+                <p id="hist-best-cat-wpm" class="text-xs text-slate-400 font-bold mt-1">Take more tests to unlock</p>
+            </div>
+            <div class="glass rounded-2xl p-5">
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-2">You vs Company Avg</p>
+                <div class="flex items-baseline gap-3">
+                    <p id="hist-my-avg" class="text-2xl font-black text-blue-300">—</p>
+                    <p class="text-slate-500 font-bold">vs</p>
+                    <p id="hist-company-avg" class="text-xl font-black text-slate-300">—</p>
+                </div>
+                <p id="hist-diff-note" class="text-xs text-slate-400 font-bold mt-1">WPM comparison</p>
+            </div>
+        </div>
+
+        <!-- Progression chart -->
+        <div class="glass-strong rounded-[2rem] p-6 mb-6">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h3 class="font-black text-white text-lg">Your Progression</h3>
+                    <p class="text-slate-400 text-xs uppercase tracking-widest font-bold">WPM & accuracy over time</p>
+                </div>
+            </div>
+            <div style="height: 260px; position: relative;">
+                <canvas id="progression-chart"></canvas>
+            </div>
+            <div id="chart-empty" class="hidden text-center py-12 text-slate-400 font-bold">
+                Take a few tests to see your progression chart appear here.
+            </div>
+        </div>
+
+        <!-- Achievements -->
+        <div class="glass-strong rounded-[2rem] p-6 mb-6">
+            <div class="mb-4">
+                <h3 class="font-black text-white text-lg">Achievements</h3>
+                <p class="text-slate-400 text-xs uppercase tracking-widest font-bold">Milestones as you improve</p>
+            </div>
+            <div id="achievements-grid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3"></div>
+        </div>
+        <div class="glass-strong rounded-[2rem] overflow-hidden">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-slate-400 text-[10px] uppercase tracking-[0.2em] font-black border-b border-white/10">
+                        <th class="px-6 py-4 text-left">Date</th>
+                        <th class="px-4 py-4 text-right">WPM</th>
+                        <th class="px-4 py-4 text-right">Acc</th>
+                        <th class="px-4 py-4 text-right">CPM</th>
+                        <th class="px-4 py-4 text-right">Errors</th>
+                        <th class="px-4 py-4 text-right">Dur</th>
+                        <th class="px-6 py-4 text-left">Category / Person</th>
+                    </tr>
+                </thead>
+                <tbody id="hist-body"></tbody>
+            </table>
+            <div id="hist-empty" class="hidden p-16 text-center text-slate-400">
+                <p class="font-bold text-lg mb-1">No tests yet</p>
+                <p class="text-sm">Take your first typing test in the Practice tab.</p>
+            </div>
+            <div id="hist-loading" class="p-16 text-center text-slate-400 font-bold animate-pulse">Loading history…</div>
+        </div>
+    </div>
+
+    <!-- Off-screen export card — purpose-built for html2canvas snapshot -->
+    <div id="export-card" style="position: absolute; left: -10000px; top: 0; width: 640px; padding: 48px 40px; background: linear-gradient(160deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%); color: #f8fafc; font-family: Inter, sans-serif; border-radius: 32px;">
+        <!-- Brand row -->
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="width: 44px; height: 44px; border-radius: 12px; background: linear-gradient(135deg, #3b82f6, #6366f1); display: flex; align-items: center; justify-content: center; font-weight: 900; color: #fff; font-size: 22px;">Z</div>
+                <div>
+                    <div style="font-weight: 900; font-size: 22px; letter-spacing: -0.02em;">ZenType</div>
+                    <div style="font-size: 10px; color: #94a3b8; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 700;">AI Typing Assessment</div>
+                </div>
+            </div>
+            <div id="export-date" style="font-size: 11px; color: #64748b; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;"></div>
+        </div>
+
+        <!-- Employee name -->
+        <div style="text-align: center; margin-bottom: 8px;">
+            <div style="font-size: 11px; color: #94a3b8; letter-spacing: 0.3em; text-transform: uppercase; font-weight: 800; margin-bottom: 8px;">Assessment Report</div>
+            <div id="export-name" style="font-size: 34px; font-weight: 900; letter-spacing: -0.02em; color: #fff;">—</div>
+        </div>
+
+        <!-- Divider -->
+        <div style="width: 60px; height: 3px; background: linear-gradient(90deg, #60a5fa, #a78bfa); margin: 20px auto 32px; border-radius: 2px;"></div>
+
+        <!-- Big stats -->
+        <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+            <div style="flex: 1; padding: 28px 20px; border-radius: 24px; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(96, 165, 250, 0.3); text-align: center;">
+                <div style="font-size: 10px; color: #93c5fd; letter-spacing: 0.25em; font-weight: 900; margin-bottom: 6px;">WORDS / MIN</div>
+                <div id="export-wpm" style="font-size: 68px; font-weight: 900; color: #60a5fa; line-height: 1;">0</div>
+            </div>
+            <div style="flex: 1; padding: 28px 20px; border-radius: 24px; background: linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(20, 184, 166, 0.25)); border: 1px solid rgba(110, 231, 183, 0.4); text-align: center;">
+                <div style="font-size: 10px; color: #a7f3d0; letter-spacing: 0.25em; font-weight: 900; margin-bottom: 6px;">NET ACCURACY</div>
+                <div id="export-acc" style="font-size: 68px; font-weight: 900; color: #fff; line-height: 1;">0%</div>
+            </div>
+        </div>
+
+        <!-- Small stats row -->
+        <div style="display: flex; gap: 12px; margin-bottom: 28px;">
+            <div style="flex: 1; padding: 16px 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); text-align: center;">
+                <div style="font-size: 9px; color: #94a3b8; letter-spacing: 0.2em; font-weight: 900; margin-bottom: 4px;">RAW CPM</div>
+                <div id="export-cpm" style="font-size: 22px; font-weight: 900; color: #cbd5e1;">0</div>
+            </div>
+            <div style="flex: 1; padding: 16px 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); text-align: center;">
+                <div style="font-size: 9px; color: #94a3b8; letter-spacing: 0.2em; font-weight: 900; margin-bottom: 4px;">KEYSTROKES</div>
+                <div id="export-keys" style="font-size: 22px; font-weight: 900; color: #cbd5e1;">0</div>
+            </div>
+            <div style="flex: 1; padding: 16px 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(244, 63, 94, 0.2); text-align: center;">
+                <div style="font-size: 9px; color: #fda4af; letter-spacing: 0.2em; font-weight: 900; margin-bottom: 4px;">ERRORS</div>
+                <div id="export-errors" style="font-size: 22px; font-weight: 900; color: #f43f5e;">0</div>
+            </div>
+            <div style="flex: 1; padding: 16px 12px; border-radius: 16px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); text-align: center;">
+                <div style="font-size: 9px; color: #94a3b8; letter-spacing: 0.2em; font-weight: 900; margin-bottom: 4px;">DURATION</div>
+                <div id="export-dur" style="font-size: 22px; font-weight: 900; color: #cbd5e1;">—</div>
+            </div>
+        </div>
+
+        <!-- Category / person meta -->
+        <div id="export-meta" style="text-align: center; padding: 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); margin-bottom: 20px;">
+            <span id="export-category" style="display: inline-block; padding: 4px 10px; border-radius: 999px; background: rgba(251, 146, 60, 0.15); color: #fdba74; font-size: 10px; font-weight: 900; letter-spacing: 0.15em; text-transform: uppercase; margin-right: 6px;">—</span>
+            <span id="export-person" style="display: inline-block; padding: 4px 10px; border-radius: 999px; background: rgba(244, 114, 182, 0.15); color: #f9a8d4; font-size: 10px; font-weight: 900; letter-spacing: 0.1em; text-transform: uppercase;"></span>
+        </div>
+
+        <!-- Footer -->
+        <div style="text-align: center; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.06);">
+            <div style="font-size: 10px; color: #64748b; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; margin-top: 12px;">work-suite-mauve.vercel.app</div>
+        </div>
+    </div>
+
+    <!-- Focus loss warning -->
+    <div id="focus-loss-banner">⚠️ Test paused — return to this tab to continue</div>
+
+    <!-- Toast container (achievements) -->
+    <div id="toast-container"></div>
+
+    <!-- Keyboard shortcuts modal -->
+    <div id="shortcuts-modal" class="fixed inset-0 z-[55] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.8); backdrop-filter: blur(20px);">
+        <div class="glass-strong w-full max-w-md rounded-[2rem] p-8">
+            <h2 class="text-2xl font-black text-white mb-1 text-center">Keyboard Shortcuts</h2>
+            <p class="text-slate-400 text-xs uppercase tracking-widest font-bold text-center mb-6">Type faster with these</p>
+            <div class="space-y-3 mb-6">
+                <div class="flex justify-between items-center py-2"><span class="text-slate-200">Start typing</span><kbd class="key">Any letter</kbd></div>
+                <div class="flex justify-between items-center py-2 border-t border-white/5"><span class="text-slate-200">New passage</span><kbd class="key">N</kbd></div>
+                <div class="flex justify-between items-center py-2 border-t border-white/5"><span class="text-slate-200">Retake (after results)</span><kbd class="key">R</kbd></div>
+                <div class="flex justify-between items-center py-2 border-t border-white/5"><span class="text-slate-200">Toggle sound</span><kbd class="key">M</kbd></div>
+                <div class="flex justify-between items-center py-2 border-t border-white/5"><span class="text-slate-200">Show these shortcuts</span><kbd class="key">?</kbd></div>
+                <div class="flex justify-between items-center py-2 border-t border-white/5"><span class="text-slate-200">Close a modal</span><kbd class="key">Esc</kbd></div>
+            </div>
+            <button id="shortcuts-close" class="btn-primary w-full text-white font-black py-3 rounded-2xl">Got it</button>
+        </div>
+    </div>
+
+    <!-- Profile Settings modal -->
+    <div id="profile-modal" class="fixed inset-0 z-[55] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.8); backdrop-filter: blur(20px);">
+        <div class="glass-strong w-full max-w-md rounded-[2.5rem] p-6 max-h-[92vh] overflow-y-auto">
+            <!-- Header: avatar + name + email -->
+            <div class="text-center mb-4">
+                <div id="profile-avatar" class="w-16 h-16 mx-auto rounded-2xl flex items-center justify-center text-white text-2xl font-black mb-3"
+                     style="background: linear-gradient(135deg, #3b82f6, #6366f1); box-shadow: 0 10px 30px rgba(59,130,246,0.5);">?</div>
+                <h2 id="profile-name-display" class="text-xl font-black text-white">—</h2>
+                <p id="profile-email-display" class="text-slate-400 text-xs mt-1">—</p>
+            </div>
+
+            <!-- Quick stats row -->
+            <div class="grid grid-cols-3 gap-3 mb-6">
+                <div class="glass-subtle rounded-xl p-3 text-center">
+                    <p class="text-[9px] uppercase tracking-widest text-slate-400 font-black">Tests</p>
+                    <p id="profile-stat-tests" class="text-xl font-black text-white">0</p>
+                </div>
+                <div class="glass-subtle rounded-xl p-3 text-center">
+                    <p class="text-[9px] uppercase tracking-widest text-slate-400 font-black">Best WPM</p>
+                    <p id="profile-stat-wpm" class="text-xl font-black text-blue-300">0</p>
+                </div>
+                <div class="glass-subtle rounded-xl p-3 text-center">
+                    <p class="text-[9px] uppercase tracking-widest text-slate-400 font-black">Streak</p>
+                    <p id="profile-stat-streak" class="text-xl font-black text-orange-300">0</p>
+                </div>
+            </div>
+
+            <!-- Update name -->
+            <div class="mb-4">
+                <label class="text-[10px] uppercase tracking-widest text-slate-400 font-black block mb-2">Display Name</label>
+                <div class="flex gap-2">
+                    <input id="profile-name-input" type="text" placeholder="Your name"
+                        class="glass-subtle flex-1 px-4 py-3 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-400/40 font-bold">
+                    <button id="profile-name-save" type="button" class="btn-primary text-white font-black px-5 rounded-xl">Save</button>
+                </div>
+            </div>
+
+            <!-- Change password -->
+            <div class="mb-4">
+                <label class="text-[10px] uppercase tracking-widest text-slate-400 font-black block mb-2">Change Password</label>
+                <div class="space-y-2">
+                    <input id="profile-pw-new" type="password" placeholder="New password (min 6 chars)"
+                        class="glass-subtle w-full px-4 py-3 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-400/40 font-bold">
+                    <input id="profile-pw-confirm" type="password" placeholder="Confirm new password"
+                        class="glass-subtle w-full px-4 py-3 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-400/40 font-bold">
+                    <button id="profile-pw-save" type="button" class="btn-primary w-full text-white font-black py-3 rounded-xl">Update Password</button>
+                </div>
+            </div>
+
+            <!-- Preferences summary -->
+            <div class="mb-4 glass-subtle rounded-xl p-3">
+                <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-2">Preferences</p>
+                <div class="flex justify-between text-sm">
+                    <span class="text-slate-300">Version</span>
+                    <span id="profile-version" class="text-white font-bold mono">v?</span>
+                </div>
+                <div class="flex justify-between text-sm mt-1">
+                    <span class="text-slate-300">Font size</span>
+                    <span id="profile-font" class="text-white font-bold">Medium</span>
+                </div>
+                <div class="flex justify-between text-sm mt-1">
+                    <span class="text-slate-300">Sound</span>
+                    <span id="profile-sound" class="text-white font-bold">On</span>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex flex-col gap-2">
+                <button id="profile-signout" type="button" class="glass w-full text-rose-300 font-black py-3 rounded-xl hover:bg-rose-500/10">
+                    Sign Out
+                </button>
+                <button id="profile-close" type="button" class="glass w-full text-white font-bold py-3 rounded-xl hover:bg-white/15">Close</button>
+            </div>
+
+            <p id="profile-msg" class="text-center text-emerald-300 text-sm font-bold mt-3 hidden"></p>
+            <p id="profile-err" class="text-center text-rose-300 text-sm font-bold mt-3 hidden"></p>
+        </div>
+    </div>
+
+    <!-- Custom-passage modal (Practice Mode) -->
+    <div id="custom-modal" class="fixed inset-0 z-[55] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.8); backdrop-filter: blur(20px);">
+        <div class="glass-strong w-full max-w-2xl rounded-[2rem] p-8">
+            <h2 class="text-2xl font-black text-white mb-1 text-center">Custom Passage</h2>
+            <p class="text-slate-400 text-sm text-center mb-4">Paste any text to practice with it instead of the AI passage.</p>
+            <textarea id="custom-text" rows="8" placeholder="Paste 40+ words of text here..." class="glass-subtle w-full p-4 rounded-2xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-400/40 mb-4 mono text-sm"></textarea>
+            <div class="flex gap-3">
+                <button id="custom-cancel" class="glass flex-1 text-white font-bold py-3 rounded-2xl">Cancel</button>
+                <button id="custom-use" class="btn-primary flex-1 text-white font-black py-3 rounded-2xl">Use This Passage</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- What's New modal -->
+    <div id="whats-new-modal" class="fixed inset-0 z-[55] hidden items-center justify-center p-4" style="background: rgba(11, 17, 32, 0.8); backdrop-filter: blur(20px);">
+        <div class="glass-strong w-full max-w-lg rounded-[2.5rem] p-8 relative overflow-hidden max-h-[85vh] overflow-y-auto">
+            <div class="text-center mb-6">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full mb-4" style="background: linear-gradient(135deg, rgba(96,165,250,0.2), rgba(168,85,247,0.2)); border: 1px solid rgba(96,165,250,0.35);">
+                    <span class="text-lg">🎁</span>
+                    <span id="wn-version" class="text-xs font-black uppercase tracking-[0.2em] text-blue-300"></span>
+                </div>
+                <h2 class="text-3xl font-black text-white mb-1">What's New</h2>
+                <p id="wn-date" class="text-slate-400 text-xs uppercase tracking-widest font-bold"></p>
+            </div>
+            <div id="wn-content" class="space-y-3 mb-8"></div>
+            <button id="wn-dismiss" class="btn-primary w-full text-white font-black py-4 rounded-2xl text-lg">Got it — let me try!</button>
+        </div>
+    </div>
+
+    <div id="results-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4" style="background: rgba(11, 17, 32, 0.75); backdrop-filter: blur(20px);">
+        <div class="glass-strong w-full max-w-2xl rounded-[3rem] p-12 transform transition-all duration-500">
+            <!-- Personal best banner (shown only when this test beats previous best) -->
+            <div id="personal-best-banner" class="hidden mb-8 p-5 rounded-2xl text-center" style="background: linear-gradient(135deg, rgba(251,191,36,0.25) 0%, rgba(249,115,22,0.25) 100%); border: 1px solid rgba(251,191,36,0.5); box-shadow: 0 0 30px rgba(251,191,36,0.35);">
+                <div class="text-3xl mb-1">🎉</div>
+                <div class="text-amber-300 font-black text-lg uppercase tracking-[0.2em]">New Personal Best!</div>
+                <p id="pb-message" class="text-slate-200 text-sm font-semibold mt-1">You beat your previous record.</p>
+            </div>
+            <div class="text-center mb-12">
+                <div class="glass inline-flex items-center justify-center w-20 h-20 rounded-3xl mb-6 text-blue-300">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+                </div>
+                <h2 class="text-5xl font-black text-white mb-2">Test Complete</h2>
+                <div class="h-1 w-24 bg-blue-400 mx-auto mb-6 rounded-full"></div>
+                <p id="result-employee-name" class="text-blue-300 font-black text-2xl uppercase tracking-[0.2em] mb-1"></p>
+                <p class="text-slate-400 font-bold text-sm uppercase">Typing Speed Assessment Report</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-6 md:gap-8 mb-8">
+                <div class="glass-subtle p-8 md:p-10 rounded-[2rem] text-center">
+                    <p class="text-xs font-black uppercase tracking-[0.3em] text-slate-300 mb-3">Words / Min</p>
+                    <p id="final-wpm" class="text-6xl md:text-7xl font-black text-blue-300">0</p>
+                </div>
+                <div class="p-8 md:p-10 rounded-[2rem] text-center text-white" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.35) 0%, rgba(20, 184, 166, 0.35) 100%); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.2);">
+                    <p class="text-xs font-black uppercase tracking-[0.3em] text-emerald-100 mb-3">Net Accuracy</p>
+                    <p id="final-accuracy" class="text-6xl md:text-7xl font-black">0%</p>
+                </div>
+            </div>
+            <div class="grid grid-cols-3 gap-3 md:gap-4 mb-12">
+                <div class="glass-subtle p-5 rounded-2xl text-center">
+                    <p class="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Raw CPM</p>
+                    <p id="final-cpm" class="text-2xl font-black text-white">0</p>
+                </div>
+                <div class="glass-subtle p-5 rounded-2xl text-center">
+                    <p class="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Keystrokes</p>
+                    <p id="final-keys" class="text-2xl font-black text-white">0</p>
+                </div>
+                <div class="glass-subtle p-5 rounded-2xl text-center">
+                    <p class="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Errors</p>
+                    <p id="final-errors" class="text-2xl font-black text-rose-300">0</p>
+                </div>
+            </div>
+
+            <div class="flex flex-col md:flex-row gap-3 mb-3">
+                <button id="download-btn" class="glass text-white font-black py-5 rounded-3xl transition-all flex-1 flex items-center justify-center gap-3 text-lg hover:bg-white/15">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Download Image
+                </button>
+                <button id="share-btn" class="glass text-white font-black py-5 rounded-3xl transition-all flex-1 flex items-center justify-center gap-3 text-lg hover:bg-white/15">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                    Copy Result
+                </button>
+            </div>
+            <button id="retake-btn" onclick="resetTest()" class="btn-primary w-full text-white font-black py-5 rounded-3xl transition-all flex items-center justify-center gap-3 text-lg">
+                Retake Assessment
+                <kbd class="key ml-2">R</kbd>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        // WHAT'S NEW — bump APP_VERSION and add a new entry to CHANGELOG
+        // whenever you deploy something users should notice.
+        // The popup shows once per user per version, then remembers dismissal.
+        // ============================================================
+        const APP_VERSION = 'v2.3';
+        const CHANGELOG = {
+            'v2.3': {
+                date: 'August 3, 2026',
+                title: 'Weekly Friday Challenge',
+                items: [
+                    { icon: '🔥', title: 'Friday Challenge event',        desc: 'Every Friday from 7:00 to 8:00 PM local time, a special 1-minute sprint goes live.' },
+                    { icon: '⏰', title: 'Countdown banner',              desc: 'Practice tab shows a live countdown to the next Friday Challenge (within 3 days).' },
+                    { icon: '🏆', title: 'Friday leaderboard',            desc: 'New "🔥 Friday" filter on the Leaderboard shows only Friday Challenge results.' },
+                    { icon: '🎯', title: 'One-tap start',                 desc: 'When the event is live, hit "Start Challenge" — duration auto-locks to 1 minute.' }
+                ]
+            },
+            'v2.2': {
+                date: 'August 3, 2026',
+                title: 'Profile Settings + polish',
+                items: [
+                    { icon: '👤', title: 'Profile Settings',   desc: 'Click your avatar (top-right) to open settings — update your name, change password, sign out.' },
+                    { icon: '📊', title: 'Quick stats in profile', desc: 'See your total tests, best WPM, and current streak at a glance.' },
+                    { icon: '🖼️', title: 'Cleaner exported image', desc: 'The Download Image button now hides itself from the snapshot so your saved result looks polished.' },
+                    { icon: '📥', title: 'Save confirmation toast', desc: 'A little toast confirms when your image or clipboard action succeeded.' }
+                ]
+            },
+            'v2.1': {
+                date: 'August 1, 2026',
+                title: '15 new features',
+                items: [
+                    { icon: '⏱️', title: '3-2-1 countdown', desc: 'Ready-set-go before the timer starts, so you never mistype the first letter.' },
+                    { icon: '⚠️', title: 'Focus loss detection', desc: 'Test auto-pauses if you switch tabs mid-run. No more penalized interruptions.' },
+                    { icon: '🔒', title: 'Copy-paste disabled', desc: 'Keeps scores clean and fair.' },
+                    { icon: '⌨️', title: 'Keyboard shortcuts', desc: 'Press ? for the full list. R to retake, N for new passage, C for custom text.' },
+                    { icon: '⚙️', title: 'Settings remembered', desc: 'Duration, category, sound, and font size persist between sessions.' },
+                    { icon: '🔤', title: 'Font size selector', desc: 'A- / A / A+ in the header for comfortable reading.' },
+                    { icon: '🏆', title: 'Live rank pill', desc: 'See your leaderboard position on the Practice screen.' },
+                    { icon: '📅', title: 'Weekly leaderboard', desc: 'Toggle between all-time and this-week rankings.' },
+                    { icon: '⭐', title: 'Best category insight', desc: 'History shows the category where you type fastest.' },
+                    { icon: '📈', title: 'Company average comparison', desc: 'See how you stack up against the average WPM in your org.' },
+                    { icon: '🔥', title: 'Streak-at-risk warning', desc: 'Banner appears if your streak needs a test today to stay alive.' },
+                    { icon: '🏅', title: 'Achievement toasts', desc: 'Slide-in notifications the moment you unlock a badge.' },
+                    { icon: '💡', title: 'Typing tips during load', desc: 'Rotating advice while the AI generates your passage.' },
+                    { icon: '📝', title: 'Custom passages', desc: 'Press C or open the modal to type your own text.' },
+                    { icon: '🔗', title: 'Copy result to clipboard', desc: 'One-tap share your WPM/accuracy anywhere.' }
+                ]
+            },
+            'v2.0': {
+                date: 'August 1, 2026',
+                title: 'Big update: accounts, dashboard, leaderboard',
+                items: [
+                    { icon: '🔐', title: 'Sign in with your email', desc: 'Track your progress across sessions and devices.' },
+                    { icon: '🏆', title: 'Leaderboard', desc: 'See how you rank against every employee by best WPM.' },
+                    { icon: '📊', title: 'Personal history + WPM chart', desc: 'Full test history with a progression chart of your improvement.' },
+                    { icon: '🏅', title: '12 achievement badges', desc: 'Milestones for speed, volume, accuracy, and variety.' },
+                    { icon: '🔥', title: 'Streak counter', desc: 'Days-in-a-row you\'ve typed. Keep it alive!' },
+                    { icon: '🎉', title: 'Personal best celebration', desc: 'Confetti burst when you beat your record.' },
+                    { icon: '🖼️', title: 'Download result as image', desc: 'Save your test result card as a PNG to share.' },
+                    { icon: '🎯', title: '80 themes × 150+ real figures', desc: 'Passages about Kalam, Edison, Kohli, Curie, and many more.' }
+                ]
+            }
+            // Add newer versions above this line. Example:
+            // 'v2.1': { date: '...', title: '...', items: [ { icon, title, desc }, ... ] }
+        };
+
+        // Supabase client — initialized after fetching public config
+        let sb = null;  // renamed from 'supabase' to avoid collision with the SDK global window.supabase
+        let currentUser = null;
+        let currentAIData = null;  // latest passage metadata for saving results
+
+        // NO DEFAULT PASSAGE — test requires successful AI generation.
+        let TEST_DURATION = 300;
+        let employeeName = "";
+        let timer = TEST_DURATION;
+        let interval = null;
+        let isRunning = false;
+        let currentPassage = "";
+        let currentIndex = 0;
+        let errors = 0;
+        let totalTyped = 0;
+        let correctTyped = 0;
+        let soundEnabled = true;
+        // Track recent themes and people so the API can rotate through fresh content.
+        let recentThemes = [];
+        let recentPeople = [];
+        const RECENT_THEME_LIMIT = 8;
+        const RECENT_PEOPLE_LIMIT = 15;
+
+        let audioCtx = null;
+        function playTickSound() {
+            if (!soundEnabled) return;
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(2000, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.02);
+            gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.02);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.02);
+        }
+
+        const textContainer = document.getElementById('text-container');
+        const typingInput = document.getElementById('typing-input');
+        const timerDisplay = document.getElementById('timer-display');
+        const liveWpm = document.getElementById('live-wpm');
+        const liveAccuracy = document.getElementById('live-accuracy');
+        const liveErrors = document.getElementById('live-errors');
+        const focusOverlay = document.getElementById('focus-overlay');
+        const errorOverlay = document.getElementById('error-overlay');
+        const errorMessage = document.getElementById('error-message');
+        const retryBtn = document.getElementById('retry-btn');
+        const resultsModal = document.getElementById('results-modal');
+        const authModal = document.getElementById('auth-modal');
+        const navAvatar = document.getElementById('nav-profile-avatar');
+        const soundToggle = document.getElementById('sound-toggle');
+        const timeSelector = document.getElementById('time-selector');
+        const aiTip = document.getElementById('ai-tip');
+
+        timeSelector.addEventListener('change', (e) => {
+            TEST_DURATION = parseInt(e.target.value);
+            if (!isRunning) {
+                timer = TEST_DURATION;
+                updateTimerDisplay();
+            }
+            typingInput.focus();
+        });
+
+        soundToggle.onclick = () => {
+            soundEnabled = !soundEnabled;
+            document.getElementById('sound-on-icon').classList.toggle('hidden');
+            document.getElementById('sound-off-icon').classList.toggle('hidden');
+            soundToggle.classList.toggle('text-blue-300');
+            soundToggle.classList.toggle('text-slate-300');
+            if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+            saveSettings({ sound: soundEnabled });
+        };
+
+        async function fetchAIPassage(wpm, acc) {
+            const categorySel = document.getElementById('category-selector');
+            const category = categorySel ? categorySel.value : '';
+            const response = await fetch('/api/groq', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    wpm,
+                    acc,
+                    duration: TEST_DURATION,
+                    excludeThemes: recentThemes,
+                    excludePeople: recentPeople,
+                    category: category || undefined
+                })
+            });
+            const data = await response.json();
+            if (!response.ok || data.error || !data.passage) {
+                // Log full details to console for debugging, but throw a clean message for UI.
+                console.error('AI passage error:', data);
+                throw new Error('refresh');
+            }
+            if (data.theme) {
+                recentThemes.push(data.theme);
+                if (recentThemes.length > RECENT_THEME_LIMIT) recentThemes.shift();
+            }
+            if (data.person) {
+                recentPeople.push(data.person);
+                if (recentPeople.length > RECENT_PEOPLE_LIMIT) recentPeople.shift();
+            }
+            return data;
+        }
+
+        // ---------- SUPABASE AUTH ----------
+        async function initSupabase() {
+            // Check that the Supabase SDK loaded from the CDN.
+            if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+                return { ok: false, reason: 'Supabase SDK failed to load. Check your internet connection and refresh.' };
+            }
+            try {
+                const r = await fetch('/api/config');
+                if (!r.ok) {
+                    return { ok: false, reason: `/api/config returned HTTP ${r.status}. Check that api/config.js is deployed.` };
+                }
+                const cfg = await r.json();
+                if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
+                    return { ok: false, reason: 'SUPABASE_URL and SUPABASE_ANON_KEY are not set in Vercel. Add them in Vercel → Settings → Environment Variables and redeploy.' };
+                }
+                sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
+                    auth: { persistSession: true, autoRefreshToken: true }
+                });
+                window.__WS_SB__ = sb; // share with presence.js
+                return { ok: true };
+            } catch (e) {
+                console.error('Supabase init failed', e);
+                return { ok: false, reason: 'Could not reach /api/config: ' + (e.message || e) };
+            }
+        }
+
+        function onLoggedIn(session) {
+            currentUser = session.user;
+            const meta = currentUser.user_metadata || {};
+            employeeName = meta.full_name || currentUser.email.split('@')[0];
+            document.getElementById('header-name').innerText = `Typing: ${employeeName}`;
+            navAvatar.innerText = employeeName.charAt(0).toUpperCase();
+            navAvatar.classList.add('text-blue-200');
+            navAvatar.classList.remove('text-slate-300');
+            document.getElementById('logout-btn').classList.remove('hidden');
+            applySettings();
+            showDailyChallengeBadge();
+            updateRankPill();
+            startFridayPoll();
+            // Fire background streak-at-risk check for Practice tab
+            fetchRowsForStreak();
+            // Show What's New popup if there's a version the user hasn't seen yet.
+            // Slight delay so it appears after the auth modal transitions out.
+            setTimeout(maybeShowWhatsNew, 400);
+        }
+
+        async function fetchRowsForStreak() {
+            if (!sb || !currentUser) return;
+            try {
+                const { data } = await sb.from('test_results').select('created_at').eq('user_id', currentUser.id).order('created_at', { ascending: false }).limit(90);
+                checkStreakAtRisk(data || []);
+            } catch {}
+        }
+
+        function onLoggedOut() {
+            currentUser = null;
+            employeeName = '';
+            document.getElementById('header-name').innerText = '';
+            navAvatar.innerText = '?';
+            navAvatar.classList.remove('text-blue-200');
+            navAvatar.classList.add('text-slate-300');
+            document.getElementById('logout-btn').classList.add('hidden');
+            authModal.classList.remove('hidden');
+        }
+
+        // Tab switching — GLOBAL so inline onclick handlers can reach it.
+        window.switchAuthTab = function(tab) {
+            document.querySelectorAll('.auth-tab').forEach(b => {
+                const active = b.dataset.tab === tab;
+                b.classList.toggle('bg-white/10', active);
+                b.classList.toggle('text-white', active);
+                b.classList.toggle('text-slate-300', !active);
+            });
+            const loginForm = document.getElementById('login-form');
+            const signupForm = document.getElementById('signup-form');
+            if (loginForm) loginForm.classList.toggle('hidden', tab !== 'login');
+            if (signupForm) signupForm.classList.toggle('hidden', tab !== 'signup');
+        };
+        const switchAuthTab = window.switchAuthTab;
+
+        // Helper: show an error in the correct form
+        function showAuthError(formType, msg) {
+            const el = document.getElementById(formType + '-error');
+            if (!el) return;
+            el.innerText = msg;
+            el.classList.remove('hidden');
+        }
+
+        // Login form
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const err = document.getElementById('login-error');
+            err.classList.add('hidden');
+
+            if (!sb) {
+                showAuthError('login', 'Auth service is not ready. Please refresh (Cmd/Ctrl + Shift + R) or set SUPABASE_URL and SUPABASE_ANON_KEY in Vercel.');
+                return;
+            }
+
+            const form = e.target;
+            const email = form.email.value.trim();
+            const password = form.password.value;
+            if (!email || !password) {
+                showAuthError('login', 'Please enter both email and password.');
+                return;
+            }
+
+            const btn = form.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            const origText = btn.innerText;
+            btn.innerText = 'Signing in…';
+
+            try {
+                const { data, error } = await sb.auth.signInWithPassword({ email, password });
+                if (error) {
+                    showAuthError('login', error.message || 'Login failed.');
+                    return;
+                }
+                if (!data || !data.session) {
+                    showAuthError('login', 'Login returned no session. Please try again.');
+                    return;
+                }
+                onLoggedIn(data.session);
+                authModal.classList.add('hidden');
+                await initTest(true);
+            } catch (ex) {
+                console.error('Login exception', ex);
+                showAuthError('login', 'Unexpected error: ' + (ex.message || ex));
+            } finally {
+                btn.disabled = false;
+                btn.innerText = origText;
+            }
+        });
+
+        // Signup form
+        document.getElementById('signup-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const err = document.getElementById('signup-error');
+            const ok = document.getElementById('signup-success');
+            err.classList.add('hidden');
+            ok.classList.add('hidden');
+
+            if (!sb) {
+                showAuthError('signup', 'Auth service is not ready. Please refresh (Cmd/Ctrl + Shift + R) or set SUPABASE_URL and SUPABASE_ANON_KEY in Vercel.');
+                return;
+            }
+
+            const form = e.target;
+            const full_name = form.full_name.value.trim();
+            const email = form.email.value.trim();
+            const password = form.password.value;
+            if (!full_name || full_name.length < 2) {
+                showAuthError('signup', 'Please enter your full name.');
+                return;
+            }
+            if (!email || !password) {
+                showAuthError('signup', 'Please fill in email and password.');
+                return;
+            }
+            if (password.length < 6) {
+                showAuthError('signup', 'Password must be at least 6 characters.');
+                return;
+            }
+
+            const btn = form.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            const origText = btn.innerText;
+            btn.innerText = 'Creating account…';
+
+            try {
+                const { data, error } = await sb.auth.signUp({
+                    email, password,
+                    options: { data: { full_name } }
+                });
+                if (error) {
+                    showAuthError('signup', error.message || 'Signup failed.');
+                    return;
+                }
+                if (data && data.session) {
+                    // Auto-signed-in (email confirmation off)
+                    onLoggedIn(data.session);
+                    authModal.classList.add('hidden');
+                    await initTest(true);
+                } else {
+                    // Email confirmation required
+                    ok.innerText = 'Account created! Check your email to confirm, then log in.';
+                    ok.classList.remove('hidden');
+                    form.reset();
+                    setTimeout(() => switchAuthTab('login'), 800);
+                }
+            } catch (ex) {
+                console.error('Signup exception', ex);
+                showAuthError('signup', 'Unexpected error: ' + (ex.message || ex));
+            } finally {
+                btn.disabled = false;
+                btn.innerText = origText;
+            }
+        });
+
+        // Logout
+        document.getElementById('logout-btn').addEventListener('click', async () => {
+            if (sb) await sb.auth.signOut();
+            onLoggedOut();
+        });
+
+        function showError() {
+            errorOverlay.classList.remove('hidden');
+            errorOverlay.classList.add('flex');
+            focusOverlay.classList.add('hidden');
+            aiTip.classList.add('hidden');
+            textContainer.innerHTML = '<div class="flex items-center justify-center h-full text-slate-400 font-bold text-lg tracking-wide">— refresh the page to continue —</div>';
+        }
+
+        function hideError() {
+            errorOverlay.classList.add('hidden');
+            errorOverlay.classList.remove('flex');
+        }
+
+        retryBtn.addEventListener('click', async () => {
+            hideError();
+            await initTest(true);
+        });
+
+        document.getElementById('refresh-btn').addEventListener('click', () => {
+            // Hard refresh (bypasses cache)
+            window.location.reload(true);
+        });
+
+        async function initTest(isFirst = false) {
+            hideError();
+            focusOverlay.classList.add('hidden');
+            aiTip.classList.add('hidden');
+            textContainer.innerHTML = '<div class="flex items-center justify-center h-full text-blue-300 font-bold animate-pulse text-xl tracking-wide">Generating custom motivational passage...</div>';
+            startLoadingTips();
+
+            const wpmToUse = isFirst ? 0 : calculateWPM();
+            const accToUse = isFirst ? 100 : calculateAccuracy();
+
+            let aiData;
+            try {
+                aiData = await fetchAIPassage(wpmToUse, accToUse);
+            } catch (e) {
+                console.error('AI passage fetch failed', e);
+                showError();
+                return false;
+            }
+
+            currentPassage = aiData.passage;
+            currentAIData = aiData;
+
+            const themeLabel = aiData.themeLabel || (aiData.theme || '').replace(/_/g, ' ');
+            const safe = s => String(s || '').replace(/</g, '&lt;');
+            const badges = [];
+            if (aiData.category) badges.push(`<span id="ai-category-badge">${safe(aiData.category)}</span>`);
+            if (themeLabel) badges.push(`<span id="ai-theme-badge">${safe(themeLabel)}</span>`);
+            if (aiData.person) badges.push(`<span id="ai-person-badge">✦ ${safe(aiData.person)}</span>`);
+            if (aiData.level) badges.push(`<span id="ai-level-badge">${safe(aiData.level)}</span>`);
+            if (aiData.wordCount) badges.push(`<span id="ai-words-badge">${aiData.wordCount}w</span>`);
+            aiTip.innerHTML = `${badges.join('')}<span class="text-slate-200 font-semibold">💡 ${safe(aiData.tip)}</span>`;
+            aiTip.classList.remove('hidden');
+
+            // Render character-by-character but group non-space chars into .word wrappers
+            // so whole words wrap to the next line instead of splitting mid-word.
+            textContainer.innerHTML = '';
+            let charIdx = 0;
+            let currentWordEl = null;
+            currentPassage.split('').forEach((char) => {
+                const span = document.createElement('span');
+                span.innerText = char;
+                span.classList.add('char');
+                if (charIdx === 0) span.classList.add('current');
+                if (/\s/.test(char)) {
+                    // Whitespace = a valid line-break point. End any open word.
+                    currentWordEl = null;
+                    textContainer.appendChild(span);
+                } else {
+                    if (!currentWordEl) {
+                        currentWordEl = document.createElement('span');
+                        currentWordEl.className = 'word';
+                        textContainer.appendChild(currentWordEl);
+                    }
+                    currentWordEl.appendChild(span);
+                }
+                charIdx++;
+            });
+
+            currentIndex = 0;
+            errors = 0;
+            totalTyped = 0;
+            correctTyped = 0;
+            timer = TEST_DURATION;
+            isRunning = false;
+
+            updateStats();
+            updateTimerDisplay();
+            textContainer.scrollTop = 0;
+
+            typingInput.value = '';
+            timeSelector.disabled = false;
+            resultsModal.classList.add('hidden');
+            resultsModal.classList.remove('flex');
+            focusOverlay.classList.remove('hidden');
+            focusOverlay.style.opacity = "1";
+            stopLoadingTips();
+            updateProgress();
+            // Prime the input focus so the very next keypress starts the test.
+            setTimeout(() => typingInput.focus(), 100);
+            return true;
+        }
+
+        let starting = false;
+        function startTest() {
+            if (isRunning || starting) return;
+            if (!currentPassage) return;
+            starting = true;
+            timeSelector.disabled = true;
+            focusOverlay.style.opacity = "0";
+            setTimeout(() => focusOverlay.classList.add('hidden'), 500);
+
+            // Countdown before the timer actually starts. Test is not officially "running" until GO!
+            runCountdown(() => {
+                starting = false;
+                isRunning = true;
+                interval = setInterval(() => {
+                    timer--;
+                    updateTimerDisplay();
+                    updateStats();
+                    if (timer <= 0) endTest();
+                }, 1000);
+            });
+        }
+
+        function endTest() {
+            clearInterval(interval);
+            isRunning = false;
+            typingInput.blur();
+            timeSelector.disabled = false;
+
+            const wpmFinal = calculateWPM();
+            const accFinal = calculateAccuracy();
+            const cpmFinal = calculateCPM();
+
+            document.getElementById('result-employee-name').innerText = employeeName;
+            document.getElementById('final-wpm').innerText = wpmFinal;
+            document.getElementById('final-accuracy').innerText = accFinal + '%';
+            document.getElementById('final-cpm').innerText = cpmFinal;
+            document.getElementById('final-keys').innerText = totalTyped;
+            document.getElementById('final-errors').innerText = errors;
+
+            resultsModal.classList.remove('hidden');
+            resultsModal.classList.add('flex');
+
+            // Save to Supabase (fire-and-forget; log errors)
+            saveResultToSupabase({ wpm: wpmFinal, accuracy: accFinal, cpm: cpmFinal });
+
+            // Personal-best check runs in parallel — banner appears if this beats prior best.
+            checkPersonalBest(wpmFinal, accFinal);
+        }
+
+        async function checkPersonalBest(newWpm, newAcc) {
+            const banner = document.getElementById('personal-best-banner');
+            const msg = document.getElementById('pb-message');
+            banner.classList.add('hidden');
+            if (!sb || !currentUser) return;
+            try {
+                const { data, error } = await sb
+                    .from('test_results')
+                    .select('wpm, accuracy')
+                    .eq('user_id', currentUser.id)
+                    .order('created_at', { ascending: false })
+                    .limit(200);
+                if (error || !data || data.length <= 1) return;
+                // Exclude the row just inserted (most recent); compare against everything else.
+                // Since save is async, we compare against all rows and check strict >.
+                const prior = data.slice(1); // may include the just-saved row too; harmless if strict >
+                if (prior.length === 0) return;
+                const priorBestWpm = Math.max(...prior.map(r => r.wpm || 0));
+                const priorBestAcc = Math.max(...prior.map(r => r.accuracy || 0));
+                const beatWpm = newWpm > priorBestWpm;
+                const beatAcc = newAcc > priorBestAcc && newAcc >= 95;
+                if (beatWpm && beatAcc) {
+                    msg.innerText = `${newWpm} WPM at ${newAcc}% — a double record. Previous best was ${priorBestWpm} WPM at ${priorBestAcc}%.`;
+                    banner.classList.remove('hidden');
+                    fireConfetti();
+                } else if (beatWpm) {
+                    msg.innerText = `${newWpm} WPM — up from ${priorBestWpm}. Keep going.`;
+                    banner.classList.remove('hidden');
+                    fireConfetti();
+                } else if (beatAcc) {
+                    msg.innerText = `${newAcc}% accuracy — cleanest run yet. Previous best was ${priorBestAcc}%.`;
+                    banner.classList.remove('hidden');
+                    fireConfetti();
+                }
+            } catch (e) {
+                console.error('PB check failed', e);
+            }
+        }
+
+        async function saveResultToSupabase({ wpm, accuracy, cpm }) {
+            if (!sb || !currentUser) return;
+            const wasChallenge = fridayChallengeMode;
+            fridayChallengeMode = false;  // consume the flag
+            try {
+                const { error } = await sb.from('test_results').insert({
+                    user_id: currentUser.id,
+                    full_name: employeeName,
+                    email: currentUser.email,
+                    wpm, accuracy, cpm,
+                    keystrokes: totalTyped,
+                    errors,
+                    duration: TEST_DURATION,
+                    theme: wasChallenge ? 'friday_challenge' : (currentAIData?.theme || null),
+                    theme_label: wasChallenge ? 'Friday Challenge' : (currentAIData?.themeLabel || null),
+                    category: wasChallenge ? 'Friday Challenge' : (currentAIData?.category || null),
+                    person: currentAIData?.person || null
+                });
+                if (error) console.error('Save result failed', error);
+                if (wasChallenge) {
+                    showToast('🏆', 'Friday Challenge submitted!', `${wpm} WPM at ${accuracy}%. Check the Leaderboard.`);
+                }
+            } catch (e) {
+                console.error('Save result exception', e);
+            }
+        }
+
+        // ---------- DOWNLOAD RESULT AS IMAGE ----------
+        // Uses a dedicated off-screen #export-card element built with inline styles
+        // (no glass/backdrop-filter) so html2canvas renders cleanly with no artifacts.
+        function populateExportCard() {
+            const wpm = document.getElementById('final-wpm').innerText;
+            const acc = document.getElementById('final-accuracy').innerText;
+            const cpm = document.getElementById('final-cpm').innerText;
+            const keys = document.getElementById('final-keys').innerText;
+            const errs = document.getElementById('final-errors').innerText;
+            const dur = TEST_DURATION >= 60 ? (TEST_DURATION / 60) + 'm' : TEST_DURATION + 's';
+
+            document.getElementById('export-name').innerText = employeeName || 'Anonymous';
+            document.getElementById('export-wpm').innerText = wpm;
+            document.getElementById('export-acc').innerText = acc;
+            document.getElementById('export-cpm').innerText = cpm;
+            document.getElementById('export-keys').innerText = keys;
+            document.getElementById('export-errors').innerText = errs;
+            document.getElementById('export-dur').innerText = dur;
+
+            const dateStr = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+            document.getElementById('export-date').innerText = dateStr;
+
+            const category = currentAIData?.category || 'Random';
+            const person = currentAIData?.person || '';
+            document.getElementById('export-category').innerText = category;
+            const personEl = document.getElementById('export-person');
+            if (person) {
+                personEl.innerText = '✦ ' + person;
+                personEl.style.display = 'inline-block';
+            } else {
+                personEl.style.display = 'none';
+            }
+        }
+
+        document.getElementById('download-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('download-btn');
+            const orig = btn.innerHTML;
+            btn.innerHTML = '<span>Preparing image…</span>';
+            btn.disabled = true;
+
+            try {
+                populateExportCard();
+                const exportCard = document.getElementById('export-card');
+                // Small paint delay so the DOM values are painted before snapshot.
+                await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+                const canvas = await html2canvas(exportCard, {
+                    backgroundColor: null,
+                    scale: 2.5,
+                    useCORS: true,
+                    logging: false,
+                    windowWidth: 800,
+                    windowHeight: 1200
+                });
+                const link = document.createElement('a');
+                const safeName = (employeeName || 'result').replace(/[^\w-]/g, '_');
+                link.download = `zentype-${safeName}-${new Date().toISOString().slice(0,10)}.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+                showToast('📥', 'Image saved', 'Check your Downloads folder.');
+            } catch (e) {
+                console.error('Download failed', e);
+                alert('Could not create image. Please take a screenshot instead.');
+            } finally {
+                btn.innerHTML = orig;
+                btn.disabled = false;
+            }
+        });
+
+        function updateTimerDisplay() {
+            const mins = Math.floor(timer / 60);
+            const secs = timer % 60;
+            timerDisplay.innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function calculateWPM() {
+            const timeElapsedInMinutes = (TEST_DURATION - timer) / 60;
+            if (timeElapsedInMinutes <= 0) return 0;
+            const wpm = Math.round((correctTyped / 5) / timeElapsedInMinutes);
+            return Math.max(0, wpm);
+        }
+
+        function calculateAccuracy() {
+            if (totalTyped === 0) return 100;
+            return Math.round((correctTyped / totalTyped) * 100);
+        }
+
+        function updateStats() {
+            liveWpm.innerText = calculateWPM();
+            liveAccuracy.innerText = calculateAccuracy() + '%';
+            liveErrors.innerText = errors;
+            updateProgress();
+        }
+
+        function updateProgress() {
+            const fill = document.getElementById('progress-fill');
+            if (!fill) return;
+            // Progress = characters typed / passage length (never time-based, so it feels earned)
+            const pct = currentPassage.length > 0
+                ? Math.min(100, (currentIndex / currentPassage.length) * 100)
+                : 0;
+            fill.style.width = pct + '%';
+        }
+
+        function calculateCPM() {
+            const timeElapsedInMinutes = (TEST_DURATION - timer) / 60;
+            if (timeElapsedInMinutes <= 0) return 0;
+            return Math.round(totalTyped / timeElapsedInMinutes);
+        }
+
+        typingInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Tab') { e.preventDefault(); return; }
+            if (timer <= 0) return;
+            if (!currentPassage) return;
+            if (countdownActive) { e.preventDefault(); return; }  // block keys during 3-2-1
+
+            if (e.key.length === 1 || e.key === 'Backspace' || e.key === ' ') {
+                playTickSound();
+            }
+
+            if (!isRunning && e.key.length === 1) startTest();
+            if (!isRunning && e.key !== 'Backspace') return;
+
+            const charSpans = textContainer.querySelectorAll('.char');
+
+            if (e.key === 'Backspace') {
+                if (currentIndex > 0) {
+                    charSpans[currentIndex].classList.remove('current', 'correct', 'incorrect');
+                    currentIndex--;
+                    charSpans[currentIndex].classList.add('current');
+                    charSpans[currentIndex].classList.remove('correct', 'incorrect');
+                }
+                handleScrolling(charSpans[currentIndex]);
+                return;
+            }
+
+            if (e.key.length !== 1) return;
+
+            const expectedChar = currentPassage[currentIndex];
+            totalTyped++;
+
+            if (e.key === expectedChar) {
+                charSpans[currentIndex].classList.add('correct');
+                correctTyped++;
+            } else {
+                charSpans[currentIndex].classList.add('incorrect');
+                errors++;
+            }
+
+            charSpans[currentIndex].classList.remove('current');
+            currentIndex++;
+
+            if (currentIndex < charSpans.length) {
+                const nextChar = charSpans[currentIndex];
+                nextChar.classList.add('current');
+                handleScrolling(nextChar);
+            } else {
+                endTest();
+            }
+
+            updateStats();
+        });
+
+        function handleScrolling(element) {
+            if (!element) return;
+            const container = document.getElementById('text-container');
+            const elementTop = element.offsetTop;
+            const containerHeight = container.offsetHeight;
+            const targetScroll = elementTop - (containerHeight / 2) + (element.offsetHeight / 2);
+            container.scrollTo({ top: targetScroll, behavior: 'smooth' });
+        }
+
+        async function resetTest() {
+            clearInterval(interval);
+            const btn = document.getElementById('retake-btn');
+            const origText = btn.innerText;
+            btn.innerText = 'Generating New AI Passage...';
+            btn.disabled = true;
+
+            resultsModal.classList.add('hidden');
+            resultsModal.classList.remove('flex');
+            document.getElementById('personal-best-banner').classList.add('hidden');
+            await initTest(false);
+
+            btn.innerText = origText;
+            btn.disabled = false;
+            typingInput.focus();
+        }
+
+        focusOverlay.addEventListener('click', () => {
+            if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+            typingInput.focus();
+        });
+
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('button, select, a, input:not(#typing-input)')) return;
+            if (resultsModal.classList.contains('hidden') &&
+                authModal.classList.contains('hidden') &&
+                errorOverlay.classList.contains('hidden')) {
+                typingInput.focus();
+            }
+        });
+
+        // New Passage / skip current — fetch a fresh AI passage without ending the session.
+        document.getElementById('new-passage-btn').addEventListener('click', async () => {
+            if (authModal && !authModal.classList.contains('hidden')) return;
+            clearInterval(interval);
+            isRunning = false;
+            await initTest(true);
+        });
+
+        // ---------- NAV: Practice / Leaderboard / History ----------
+        function showView(name) {
+            document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+            const el = document.getElementById('view-' + name);
+            if (el) el.classList.remove('hidden');
+
+            // Update nav highlight
+            document.querySelectorAll('.nav-link').forEach(a => {
+                const active = a.dataset.view === name;
+                a.classList.toggle('text-blue-300', active);
+                a.classList.toggle('border-b-2', active);
+                a.classList.toggle('border-blue-400', active);
+                a.classList.toggle('font-bold', active);
+                a.classList.toggle('text-slate-300', !active);
+                a.classList.toggle('font-semibold', !active);
+            });
+
+            if (name === 'leaderboard') loadLeaderboard();
+            if (name === 'history') loadHistory();
+        }
+        window.showView = showView;
+
+        document.querySelectorAll('.nav-link').forEach(a => {
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                showView(a.dataset.view);
+            });
+        });
+
+        // ---------- LEADERBOARD ----------
+        async function loadLeaderboard() {
+            const body = document.getElementById('lb-body');
+            const empty = document.getElementById('lb-empty');
+            const loading = document.getElementById('lb-loading');
+            body.innerHTML = '';
+            empty.classList.add('hidden');
+            loading.classList.remove('hidden');
+
+            if (!sb) {
+                loading.classList.add('hidden');
+                empty.querySelector('p.font-bold').innerText = 'Auth not ready';
+                empty.classList.remove('hidden');
+                return;
+            }
+
+            try {
+                let data, error;
+                if (lbRange === 'friday') {
+                    // Friday Challenge results only, best score per user
+                    const { data: raw, error: err } = await sb
+                        .from('test_results')
+                        .select('user_id, full_name, wpm, accuracy, created_at')
+                        .eq('category', 'Friday Challenge')
+                        .order('wpm', { ascending: false })
+                        .limit(500);
+                    if (err) throw err;
+                    const best = new Map();
+                    (raw || []).forEach(r => {
+                        const p = best.get(r.user_id);
+                        if (!p || (r.wpm || 0) > (p.best_wpm || 0)) {
+                            best.set(r.user_id, {
+                                user_id: r.user_id, full_name: r.full_name,
+                                best_wpm: r.wpm, best_accuracy: r.accuracy,
+                                last_test_at: r.created_at,
+                                tests_taken: (p?.tests_taken || 0) + 1
+                            });
+                        } else { p.tests_taken += 1; }
+                    });
+                    data = Array.from(best.values()).sort((a, b) => (b.best_wpm || 0) - (a.best_wpm || 0)).slice(0, 50);
+                    error = null;
+                } else if (lbRange === 'week') {
+                    // Weekly: query test_results in the last 7 days, aggregate client-side
+                    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+                    const { data: raw, error: err } = await sb
+                        .from('test_results')
+                        .select('user_id, full_name, wpm, accuracy, created_at')
+                        .gte('created_at', weekAgo)
+                        .order('wpm', { ascending: false })
+                        .limit(500);
+                    if (err) throw err;
+                    const best = new Map();
+                    (raw || []).forEach(r => {
+                        const p = best.get(r.user_id);
+                        if (!p || (r.wpm || 0) > (p.best_wpm || 0)) {
+                            best.set(r.user_id, {
+                                user_id: r.user_id, full_name: r.full_name,
+                                best_wpm: r.wpm, best_accuracy: r.accuracy,
+                                last_test_at: r.created_at,
+                                tests_taken: (p?.tests_taken || 0) + 1
+                            });
+                        } else { p.tests_taken += 1; }
+                    });
+                    data = Array.from(best.values()).sort((a, b) => (b.best_wpm || 0) - (a.best_wpm || 0)).slice(0, 50);
+                    error = null;
+                } else {
+                    // All-time: use the aggregate view
+                    const res = await sb
+                        .from('leaderboard')
+                        .select('*')
+                        .order('best_wpm', { ascending: false })
+                        .limit(50);
+                    data = res.data;
+                    error = res.error;
+                }
+
+                // Fallback: if the view doesn't exist yet, aggregate client-side from raw results
+                if (error) {
+                    console.warn('leaderboard view missing, computing client-side', error);
+                    const { data: raw, error: err2 } = await sb
+                        .from('test_results')
+                        .select('user_id, full_name, wpm, accuracy, created_at')
+                        .order('wpm', { ascending: false })
+                        .limit(500);
+                    if (err2) throw err2;
+                    const bestByUser = new Map();
+                    (raw || []).forEach(r => {
+                        const prev = bestByUser.get(r.user_id);
+                        if (!prev || (r.wpm || 0) > (prev.best_wpm || 0)) {
+                            bestByUser.set(r.user_id, {
+                                user_id: r.user_id,
+                                full_name: r.full_name,
+                                best_wpm: r.wpm,
+                                best_accuracy: r.accuracy,
+                                last_test_at: r.created_at,
+                                tests_taken: (prev?.tests_taken || 0) + 1
+                            });
+                        } else {
+                            prev.tests_taken += 1;
+                        }
+                    });
+                    data = Array.from(bestByUser.values())
+                        .sort((a, b) => (b.best_wpm || 0) - (a.best_wpm || 0))
+                        .slice(0, 50);
+                }
+
+                loading.classList.add('hidden');
+                if (!data || data.length === 0) {
+                    empty.classList.remove('hidden');
+                    return;
+                }
+
+                body.innerHTML = data.map((r, i) => {
+                    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}`;
+                    const isMe = currentUser && r.user_id === currentUser.id;
+                    return `
+                        <tr class="border-b border-white/5 hover:bg-white/5 ${isMe ? 'bg-blue-500/10' : ''}">
+                            <td class="px-6 py-4 font-black text-lg">${medal}</td>
+                            <td class="px-4 py-4 font-bold text-white">${escapeHtml(r.full_name || '—')}${isMe ? ' <span class="text-blue-300 text-xs">(You)</span>' : ''}</td>
+                            <td class="px-4 py-4 text-right mono font-black text-blue-300">${r.best_wpm ?? '—'}</td>
+                            <td class="px-4 py-4 text-right mono font-black text-emerald-300">${r.best_accuracy ?? '—'}%</td>
+                            <td class="px-4 py-4 text-right text-slate-300">${r.tests_taken ?? '—'}</td>
+                            <td class="px-6 py-4 text-right text-slate-400 text-xs">${formatShortDate(r.last_test_at)}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.error('Leaderboard load failed', e);
+                loading.classList.add('hidden');
+                empty.querySelector('p.font-bold').innerText = 'Could not load leaderboard';
+                empty.querySelector('p.text-sm').innerText = e.message || '';
+                empty.classList.remove('hidden');
+            }
+        }
+
+        // ---------- HISTORY ----------
+        async function loadHistory() {
+            const body = document.getElementById('hist-body');
+            const empty = document.getElementById('hist-empty');
+            const loading = document.getElementById('hist-loading');
+            body.innerHTML = '';
+            empty.classList.add('hidden');
+            loading.classList.remove('hidden');
+
+            if (!sb || !currentUser) {
+                loading.classList.add('hidden');
+                empty.querySelector('p.font-bold').innerText = 'Please log in to see your history';
+                empty.classList.remove('hidden');
+                return;
+            }
+
+            try {
+                const { data, error } = await sb
+                    .from('test_results')
+                    .select('*')
+                    .eq('user_id', currentUser.id)
+                    .order('created_at', { ascending: false })
+                    .limit(200);
+                if (error) throw error;
+
+                loading.classList.add('hidden');
+
+                // Personal stats
+                const rows = data || [];
+                document.getElementById('hist-count').innerText = rows.length;
+                if (rows.length > 0) {
+                    const bestWpm = Math.max(...rows.map(r => r.wpm || 0));
+                    const avgWpm = Math.round(rows.reduce((s, r) => s + (r.wpm || 0), 0) / rows.length);
+                    const avgAcc = Math.round(rows.reduce((s, r) => s + (r.accuracy || 0), 0) / rows.length);
+                    document.getElementById('hist-best-wpm').innerText = bestWpm;
+                    document.getElementById('hist-avg-wpm').innerText = avgWpm;
+                    document.getElementById('hist-avg-acc').innerText = avgAcc + '%';
+                } else {
+                    document.getElementById('hist-best-wpm').innerText = 0;
+                    document.getElementById('hist-avg-wpm').innerText = 0;
+                    document.getElementById('hist-avg-acc').innerText = '0%';
+                }
+
+                // Streak + This Week
+                document.getElementById('hist-streak').innerHTML =
+                    calculateStreak(rows) + '<span class="text-sm text-orange-200 font-bold ml-1">days</span>';
+                const wk = calculateThisWeek(rows);
+                document.getElementById('hist-week-tests').innerText = wk.tests;
+                document.getElementById('hist-week-avg').innerText = wk.avgWpm;
+
+                // Always render achievements (even for 0 rows so user sees the goals)
+                renderAchievements(rows);
+                checkNewAchievements(rows);
+                computeInsights(rows);
+                if (rows.length > 0) {
+                    const avgWpm = rows.reduce((s, r) => s + (r.wpm || 0), 0) / rows.length;
+                    loadCompanyComparison(avgWpm);
+                }
+                checkStreakAtRisk(rows);
+
+                if (rows.length === 0) {
+                    document.getElementById('chart-empty').classList.remove('hidden');
+                    const canvas = document.getElementById('progression-chart');
+                    if (canvas) canvas.style.display = 'none';
+                    empty.classList.remove('hidden');
+                    return;
+                }
+
+                document.getElementById('chart-empty').classList.add('hidden');
+                document.getElementById('progression-chart').style.display = 'block';
+                renderProgressionChart(rows);
+
+                body.innerHTML = rows.map(r => `
+                    <tr class="border-b border-white/5 hover:bg-white/5">
+                        <td class="px-6 py-4 text-slate-300 text-xs">${formatLongDate(r.created_at)}</td>
+                        <td class="px-4 py-4 text-right mono font-black text-blue-300">${r.wpm ?? '—'}</td>
+                        <td class="px-4 py-4 text-right mono font-black text-emerald-300">${r.accuracy ?? '—'}%</td>
+                        <td class="px-4 py-4 text-right mono text-slate-300">${r.cpm ?? '—'}</td>
+                        <td class="px-4 py-4 text-right mono text-rose-300">${r.errors ?? '—'}</td>
+                        <td class="px-4 py-4 text-right text-slate-300">${r.duration ? Math.round(r.duration / 60) + 'm' : '—'}</td>
+                        <td class="px-6 py-4 text-slate-300 text-xs">
+                            <span class="text-orange-300">${escapeHtml(r.category || '')}</span>
+                            ${r.person ? '<span class="text-pink-300 ml-2">' + escapeHtml(r.person) + '</span>' : ''}
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (e) {
+                console.error('History load failed', e);
+                loading.classList.add('hidden');
+                empty.querySelector('p.font-bold').innerText = 'Could not load history';
+                empty.querySelector('p.text-sm').innerText = e.message || '';
+                empty.classList.remove('hidden');
+            }
+        }
+
+        document.getElementById('lb-refresh').addEventListener('click', loadLeaderboard);
+        document.getElementById('hist-refresh').addEventListener('click', loadHistory);
+
+        // ---------- ACHIEVEMENTS ----------
+        const ACHIEVEMENTS = [
+            { id: 'first_test',   icon: '🎯', label: 'First Test',       desc: 'Complete your first test',        check: r => r.length >= 1 },
+            { id: 'five_tests',   icon: '🔥', label: '5 Tests',          desc: 'Take 5 typing tests',             check: r => r.length >= 5 },
+            { id: 'ten_tests',    icon: '⚡', label: '10 Tests',         desc: 'Take 10 typing tests',            check: r => r.length >= 10 },
+            { id: 'fifty_tests',  icon: '💯', label: '50 Tests',         desc: 'Take 50 typing tests',            check: r => r.length >= 50 },
+            { id: 'wpm_30',       icon: '🚀', label: '30 WPM',           desc: 'Hit 30 words per minute',         check: r => r.some(x => (x.wpm||0) >= 30) },
+            { id: 'wpm_45',       icon: '💨', label: '45 WPM',           desc: 'Hit 45 words per minute',         check: r => r.some(x => (x.wpm||0) >= 45) },
+            { id: 'wpm_60',       icon: '⚡', label: '60 WPM',           desc: 'Hit 60 words per minute',         check: r => r.some(x => (x.wpm||0) >= 60) },
+            { id: 'wpm_80',       icon: '🌪️', label: '80 WPM',          desc: 'Hit 80 words per minute',         check: r => r.some(x => (x.wpm||0) >= 80) },
+            { id: 'wpm_100',      icon: '👑', label: '100 WPM',          desc: 'Hit 100 words per minute',        check: r => r.some(x => (x.wpm||0) >= 100) },
+            { id: 'acc_95',       icon: '🎯', label: 'Sharpshooter',     desc: 'Score 95%+ accuracy',             check: r => r.some(x => (x.accuracy||0) >= 95) },
+            { id: 'acc_100',      icon: '💎', label: 'Flawless',         desc: 'Score 100% accuracy',             check: r => r.some(x => (x.accuracy||0) >= 100) },
+            { id: 'all_cats',     icon: '🎨', label: 'Explorer',         desc: 'Test on 5+ categories',           check: r => new Set(r.map(x => x.category).filter(Boolean)).size >= 5 }
+        ];
+
+        function renderAchievements(rows) {
+            const grid = document.getElementById('achievements-grid');
+            grid.innerHTML = ACHIEVEMENTS.map(a => {
+                const earned = a.check(rows);
+                return `
+                    <div class="p-4 rounded-2xl text-center transition-all ${earned ? 'glass-strong' : 'glass-subtle opacity-40'}" title="${a.desc}">
+                        <div class="text-3xl mb-1" style="filter: ${earned ? 'none' : 'grayscale(1)'};">${a.icon}</div>
+                        <div class="text-xs font-black ${earned ? 'text-white' : 'text-slate-400'} uppercase tracking-wider">${a.label}</div>
+                        ${earned ? '<div class="text-[9px] text-emerald-300 font-black mt-1">EARNED</div>' : '<div class="text-[9px] text-slate-500 font-black mt-1">LOCKED</div>'}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // ---------- PROGRESSION CHART ----------
+        let progressionChart = null;
+        function renderProgressionChart(rows) {
+            const ctx = document.getElementById('progression-chart');
+            if (!ctx || !window.Chart) return;
+            // Chart.js oldest → newest
+            const ordered = rows.slice().reverse();
+            const labels = ordered.map(r => formatShortDate(r.created_at));
+            const wpmData = ordered.map(r => r.wpm || 0);
+            const accData = ordered.map(r => r.accuracy || 0);
+
+            if (progressionChart) progressionChart.destroy();
+
+            progressionChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'WPM',
+                            data: wpmData,
+                            borderColor: '#60a5fa',
+                            backgroundColor: 'rgba(96, 165, 250, 0.15)',
+                            borderWidth: 3,
+                            tension: 0.35,
+                            fill: true,
+                            pointBackgroundColor: '#60a5fa',
+                            pointRadius: 4,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Accuracy %',
+                            data: accData,
+                            borderColor: '#6ee7b7',
+                            backgroundColor: 'rgba(110, 231, 183, 0.1)',
+                            borderWidth: 2,
+                            borderDash: [4, 4],
+                            tension: 0.3,
+                            pointBackgroundColor: '#6ee7b7',
+                            pointRadius: 3,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: {
+                            labels: { color: '#e2e8f0', font: { weight: 'bold', size: 12 } }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(15,23,42,0.95)',
+                            titleColor: '#f8fafc',
+                            bodyColor: '#e2e8f0',
+                            borderColor: 'rgba(255,255,255,0.15)',
+                            borderWidth: 1
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#94a3b8', font: { size: 11 } },
+                            grid: { color: 'rgba(255,255,255,0.05)' }
+                        },
+                        y: {
+                            type: 'linear',
+                            position: 'left',
+                            title: { display: true, text: 'WPM', color: '#93c5fd', font: { weight: 'bold' } },
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            beginAtZero: true
+                        },
+                        y1: {
+                            type: 'linear',
+                            position: 'right',
+                            title: { display: true, text: 'Accuracy %', color: '#6ee7b7', font: { weight: 'bold' } },
+                            ticks: { color: '#94a3b8' },
+                            grid: { drawOnChartArea: false },
+                            min: 0,
+                            max: 100
+                        }
+                    }
+                }
+            });
+        }
+
+        // ---------- STREAK ----------
+        function calculateStreak(rows) {
+            if (!rows || rows.length === 0) return 0;
+            const dayKey = (iso) => {
+                const d = new Date(iso);
+                d.setHours(0, 0, 0, 0);
+                return d.getTime();
+            };
+            const days = new Set(rows.map(r => dayKey(r.created_at)));
+            const oneDay = 86400000;
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            const todayMs = today.getTime();
+            let streak = 0;
+            let cur = todayMs;
+            // If no test today, start counting from yesterday (still a valid streak while grace period is active)
+            if (!days.has(cur)) cur -= oneDay;
+            while (days.has(cur)) {
+                streak++;
+                cur -= oneDay;
+            }
+            return streak;
+        }
+
+        function calculateThisWeek(rows) {
+            const cutoff = Date.now() - 7 * 86400000;
+            const recent = (rows || []).filter(r => new Date(r.created_at).getTime() > cutoff);
+            return {
+                tests: recent.length,
+                avgWpm: recent.length ? Math.round(recent.reduce((s, r) => s + (r.wpm || 0), 0) / recent.length) : 0
+            };
+        }
+
+        // ---------- CONFETTI ----------
+        function fireConfetti() {
+            if (!window.confetti) return;
+            const end = Date.now() + 1500;
+            const colors = ['#60a5fa', '#a78bfa', '#f472b6', '#fbbf24', '#6ee7b7'];
+            (function frame() {
+                window.confetti({
+                    particleCount: 4, angle: 60, spread: 55, origin: { x: 0, y: 0.7 }, colors
+                });
+                window.confetti({
+                    particleCount: 4, angle: 120, spread: 55, origin: { x: 1, y: 0.7 }, colors
+                });
+                if (Date.now() < end) requestAnimationFrame(frame);
+            })();
+        }
+
+        // Helpers
+        function escapeHtml(s) {
+            return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+        function formatShortDate(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        }
+        function formatLongDate(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        }
+
+        // ============================================================
+        // NEW FEATURES BATCH — settings, countdown, focus loss, toasts,
+        // shortcuts, tips, custom passages, share, weekly LB, insights.
+        // ============================================================
+
+        // ---------- SETTINGS PERSISTENCE (Feature 1) ----------
+        const SETTINGS_KEY = 'zentype_settings';
+        function loadSettings() {
+            try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'); }
+            catch { return {}; }
+        }
+        function saveSettings(patch) {
+            const s = { ...loadSettings(), ...patch };
+            try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
+        }
+        function applySettings() {
+            const s = loadSettings();
+            if (s.duration) {
+                const el = document.getElementById('time-selector');
+                if (el) el.value = String(s.duration);
+                TEST_DURATION = Number(s.duration);
+            }
+            if (s.category !== undefined) {
+                const el = document.getElementById('category-selector');
+                if (el) el.value = s.category;
+            }
+            if (typeof s.sound === 'boolean') {
+                soundEnabled = s.sound;
+                if (!soundEnabled) {
+                    document.getElementById('sound-on-icon').classList.add('hidden');
+                    document.getElementById('sound-off-icon').classList.remove('hidden');
+                }
+            }
+            const fs = s.fontSize || 'md';
+            document.body.classList.remove('font-sm', 'font-md', 'font-lg');
+            document.body.classList.add('font-' + fs);
+            const fse = document.getElementById('font-size-selector');
+            if (fse) fse.value = fs;
+        }
+
+        // Save on change for each setting-bearing control
+        document.getElementById('time-selector').addEventListener('change', (e) => saveSettings({ duration: Number(e.target.value) }));
+        const _catSel = document.getElementById('category-selector');
+        if (_catSel) _catSel.addEventListener('change', (e) => saveSettings({ category: e.target.value }));
+        document.getElementById('font-size-selector').addEventListener('change', (e) => {
+            const v = e.target.value;
+            document.body.classList.remove('font-sm', 'font-md', 'font-lg');
+            document.body.classList.add('font-' + v);
+            saveSettings({ fontSize: v });
+        });
+
+        // ---------- 3-2-1 COUNTDOWN (Feature 2) ----------
+        let countdownActive = false;
+        function runCountdown(callback) {
+            const overlay = document.getElementById('countdown-overlay');
+            const num = document.getElementById('countdown-num');
+            overlay.style.display = 'flex';
+            countdownActive = true;
+            const seq = ['3', '2', '1', 'GO!'];
+            let i = 0;
+            num.innerText = seq[i];
+            num.style.animation = 'none';
+            void num.offsetWidth;  // reflow to restart animation
+            num.style.animation = 'pop 0.9s ease-out';
+            const tick = setInterval(() => {
+                i++;
+                if (i >= seq.length) {
+                    clearInterval(tick);
+                    overlay.style.display = 'none';
+                    countdownActive = false;
+                    callback();
+                    return;
+                }
+                num.innerText = seq[i];
+                num.style.animation = 'none';
+                void num.offsetWidth;
+                num.style.animation = 'pop 0.9s ease-out';
+            }, 900);
+        }
+
+        // ---------- FOCUS LOSS DETECTION (Feature 3) ----------
+        let pausedForFocus = false;
+        let pausedRemaining = 0;
+        document.addEventListener('visibilitychange', () => {
+            if (!isRunning) return;
+            const banner = document.getElementById('focus-loss-banner');
+            if (document.hidden) {
+                // Pause the timer
+                clearInterval(interval);
+                pausedForFocus = true;
+                pausedRemaining = timer;
+                banner.style.display = 'block';
+            } else if (pausedForFocus) {
+                // Resume
+                banner.style.display = 'none';
+                pausedForFocus = false;
+                timer = pausedRemaining;
+                interval = setInterval(() => {
+                    timer--;
+                    updateTimerDisplay();
+                    updateStats();
+                    if (timer <= 0) endTest();
+                }, 1000);
+            }
+        });
+
+        // ---------- COPY-PASTE PREVENTION (Feature 4) ----------
+        typingInput.addEventListener('paste', (e) => { e.preventDefault(); showToast('📋', 'Nice try', 'Paste is disabled during tests.'); });
+        typingInput.addEventListener('copy',  (e) => { e.preventDefault(); });
+        typingInput.addEventListener('cut',   (e) => { e.preventDefault(); });
+
+        // ---------- KEYBOARD SHORTCUTS (Feature 5) ----------
+        document.getElementById('shortcuts-btn').addEventListener('click', () => {
+            const m = document.getElementById('shortcuts-modal');
+            m.classList.remove('hidden'); m.classList.add('flex');
+        });
+        document.getElementById('shortcuts-close').addEventListener('click', () => {
+            const m = document.getElementById('shortcuts-modal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+        });
+        document.addEventListener('keydown', (e) => {
+            // Don't hijack keys when a text input has focus (except our special typing input)
+            const inField = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT';
+            if (e.key === 'Escape') {
+                // Close any open modal
+                ['shortcuts-modal', 'custom-modal', 'whats-new-modal', 'results-modal'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el && !el.classList.contains('hidden')) {
+                        el.classList.add('hidden');
+                        el.classList.remove('flex');
+                    }
+                });
+                return;
+            }
+            if (e.key === '?' && !inField) {
+                e.preventDefault();
+                const m = document.getElementById('shortcuts-modal');
+                m.classList.remove('hidden'); m.classList.add('flex');
+                return;
+            }
+            if (inField && e.target.id !== 'typing-input') return;
+            // 'R' during results modal = retake
+            if ((e.key === 'r' || e.key === 'R') && !resultsModal.classList.contains('hidden') && e.target.id !== 'typing-input') {
+                e.preventDefault();
+                resetTest();
+                return;
+            }
+            // 'N' = new passage (not during typing)
+            if ((e.key === 'n' || e.key === 'N') && !isRunning && authModal.classList.contains('hidden') && e.target.id !== 'typing-input') {
+                e.preventDefault();
+                document.getElementById('new-passage-btn').click();
+                return;
+            }
+            // 'M' = mute toggle (not during typing to avoid interfering with typing)
+            if ((e.key === 'm' || e.key === 'M') && e.target.id !== 'typing-input' && !isRunning) {
+                e.preventDefault();
+                soundToggle.click();
+                return;
+            }
+        });
+
+        // ---------- ACHIEVEMENT TOASTS (Feature 6) ----------
+        function showToast(icon, title, desc) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.innerHTML = `
+                <div class="text-3xl">${icon}</div>
+                <div class="flex-1">
+                    <div class="text-white font-black text-sm">${escapeHtml(title)}</div>
+                    <div class="text-slate-300 text-xs">${escapeHtml(desc)}</div>
+                </div>
+            `;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.classList.add('leaving');
+                setTimeout(() => toast.remove(), 350);
+            }, 4500);
+        }
+
+        const ACHIEVEMENTS_SEEN_KEY = 'zentype_seen_achievements';
+        function getSeenAchievements() {
+            try { return new Set(JSON.parse(localStorage.getItem(ACHIEVEMENTS_SEEN_KEY) || '[]')); }
+            catch { return new Set(); }
+        }
+        function saveSeenAchievement(id) {
+            const set = getSeenAchievements();
+            set.add(id);
+            try { localStorage.setItem(ACHIEVEMENTS_SEEN_KEY, JSON.stringify([...set])); } catch {}
+        }
+        function checkNewAchievements(rows) {
+            const seen = getSeenAchievements();
+            ACHIEVEMENTS.forEach(a => {
+                if (a.check(rows) && !seen.has(a.id)) {
+                    showToast(a.icon, 'Achievement unlocked!', a.label + ' — ' + a.desc);
+                    saveSeenAchievement(a.id);
+                }
+            });
+        }
+
+        // ---------- LOADING TIPS CAROUSEL (Feature 7) ----------
+        const LOADING_TIPS = [
+            'Keep your fingers on the home row (asdf jkl;)',
+            'Look at the screen, not at your keyboard',
+            'Steady rhythm beats bursts of speed',
+            'Accuracy first, speed comes naturally',
+            'Take a deep breath before you start',
+            'Trust your muscle memory',
+            'Small consistent practice beats occasional marathons',
+            'Slow down on mistakes — then speed up again',
+            'Every keystroke is a step forward'
+        ];
+        let tipInterval = null;
+        function startLoadingTips() {
+            const el = document.getElementById('loading-tip');
+            if (!el) return;
+            let i = Math.floor(Math.random() * LOADING_TIPS.length);
+            const show = () => {
+                el.classList.remove('visible');
+                setTimeout(() => {
+                    el.innerText = '💡 ' + LOADING_TIPS[i];
+                    el.classList.add('visible');
+                    i = (i + 1) % LOADING_TIPS.length;
+                }, 400);
+            };
+            show();
+            clearInterval(tipInterval);
+            tipInterval = setInterval(show, 3500);
+        }
+        function stopLoadingTips() {
+            clearInterval(tipInterval);
+            const el = document.getElementById('loading-tip');
+            if (el) { el.classList.remove('visible'); el.innerText = ''; }
+        }
+
+        // ---------- CUSTOM PASSAGE (Feature 8) ----------
+        // (Small button injected via keyboard shortcut C in future; for now available via API)
+        window.openCustomPassage = () => {
+            const m = document.getElementById('custom-modal');
+            m.classList.remove('hidden'); m.classList.add('flex');
+            document.getElementById('custom-text').focus();
+        };
+        document.getElementById('custom-cancel').addEventListener('click', () => {
+            const m = document.getElementById('custom-modal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+        });
+        document.getElementById('custom-use').addEventListener('click', async () => {
+            const txt = document.getElementById('custom-text').value.trim().replace(/\s+/g, ' ');
+            if (txt.split(' ').length < 20) {
+                alert('Please paste at least 20 words.');
+                return;
+            }
+            const m = document.getElementById('custom-modal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+            // Bypass AI — use the custom text as the passage
+            currentPassage = txt;
+            currentAIData = { theme: 'custom', themeLabel: 'Custom', category: 'Custom', person: null, level: 'custom', wordCount: txt.split(' ').length };
+            renderCustomPassage(txt);
+        });
+        function renderCustomPassage(passage) {
+            document.getElementById('focus-overlay').classList.add('hidden');
+            const aiTip = document.getElementById('ai-tip');
+            aiTip.innerHTML = '<span id="ai-category-badge">Custom</span>💡 Your passage — good luck!';
+            aiTip.classList.remove('hidden');
+            textContainer.innerHTML = '';
+            let charIdx = 0;
+            let currentWordEl = null;
+            passage.split('').forEach((char) => {
+                const span = document.createElement('span');
+                span.innerText = char; span.classList.add('char');
+                if (charIdx === 0) span.classList.add('current');
+                if (/\s/.test(char)) { currentWordEl = null; textContainer.appendChild(span); }
+                else {
+                    if (!currentWordEl) {
+                        currentWordEl = document.createElement('span');
+                        currentWordEl.className = 'word';
+                        textContainer.appendChild(currentWordEl);
+                    }
+                    currentWordEl.appendChild(span);
+                }
+                charIdx++;
+            });
+            currentIndex = 0; errors = 0; totalTyped = 0; correctTyped = 0;
+            timer = TEST_DURATION; isRunning = false;
+            updateStats(); updateTimerDisplay();
+            typingInput.value = '';
+            focusOverlay.classList.remove('hidden');
+            typingInput.focus();
+        }
+        // Keyboard shortcut 'C' opens custom passage
+        document.addEventListener('keydown', (e) => {
+            if ((e.key === 'c' || e.key === 'C') && !isRunning && authModal.classList.contains('hidden') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+                if (resultsModal.classList.contains('hidden')) {
+                    window.openCustomPassage();
+                }
+            }
+        });
+
+        // ---------- SHARE RESULT AS TEXT (Feature 9) ----------
+        document.getElementById('share-btn').addEventListener('click', async () => {
+            const wpm = document.getElementById('final-wpm').innerText;
+            const acc = document.getElementById('final-accuracy').innerText;
+            const cpm = document.getElementById('final-cpm').innerText;
+            const errs = document.getElementById('final-errors').innerText;
+            const text = `🎯 ZenType Assessment\n\n${employeeName}\n\n⚡ ${wpm} WPM\n🎯 ${acc} accuracy\n⌨️ ${cpm} CPM\n❌ ${errs} errors\n\n#ZenType`;
+            try {
+                await navigator.clipboard.writeText(text);
+                showToast('✅', 'Copied to clipboard', 'Paste it anywhere to share your result.');
+            } catch {
+                alert('Copy failed. Please screenshot instead.');
+            }
+        });
+
+        // ---------- WEEKLY LEADERBOARD TOGGLE (Feature 10) ----------
+        let lbRange = 'all';  // 'all' | 'week'
+        document.querySelectorAll('.lb-range-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                lbRange = btn.dataset.lbRange;
+                document.querySelectorAll('.lb-range-btn').forEach(b => {
+                    const active = b.dataset.lbRange === lbRange;
+                    b.classList.toggle('bg-white/10', active);
+                    b.classList.toggle('text-white', active);
+                    b.classList.toggle('text-slate-300', !active);
+                });
+                loadLeaderboard();
+            });
+        });
+
+        // ---------- STREAK-AT-RISK BANNER (Feature 11) ----------
+        function checkStreakAtRisk(rows) {
+            const banner = document.getElementById('streak-risk-banner');
+            const streak = calculateStreak(rows);
+            if (!banner) return;
+            if (streak >= 2) {
+                // Check if user has already typed today
+                const today = new Date(); today.setHours(0, 0, 0, 0);
+                const hasToday = (rows || []).some(r => {
+                    const d = new Date(r.created_at); d.setHours(0, 0, 0, 0);
+                    return d.getTime() === today.getTime();
+                });
+                if (!hasToday) {
+                    banner.innerHTML = `🔥 <strong>${streak}-day streak</strong> — take one test today to keep it alive!`;
+                    banner.style.display = 'block';
+                } else {
+                    banner.style.display = 'none';
+                }
+            } else {
+                banner.style.display = 'none';
+            }
+        }
+
+        // ---------- RANK IN PRACTICE HEADER (Feature 12) ----------
+        async function updateRankPill() {
+            const pill = document.getElementById('rank-pill');
+            if (!pill || !sb || !currentUser) return;
+            try {
+                const { data, error } = await sb.from('leaderboard').select('user_id, best_wpm').order('best_wpm', { ascending: false }).limit(500);
+                if (error || !data) return;
+                const idx = data.findIndex(r => r.user_id === currentUser.id);
+                if (idx >= 0) {
+                    pill.innerText = `🏆 Rank #${idx + 1} of ${data.length}`;
+                    pill.classList.remove('hidden');
+                }
+            } catch {}
+        }
+
+        // ---------- BEST CATEGORY & COMPARISON (Feature 13, 14) ----------
+        function computeInsights(rows) {
+            if (!rows || rows.length === 0) return;
+            // Best category by avg WPM
+            const byCat = {};
+            rows.forEach(r => {
+                if (!r.category) return;
+                if (!byCat[r.category]) byCat[r.category] = { sum: 0, n: 0 };
+                byCat[r.category].sum += (r.wpm || 0);
+                byCat[r.category].n++;
+            });
+            const cats = Object.entries(byCat).map(([k, v]) => ({ name: k, avg: v.sum / v.n, n: v.n }));
+            if (cats.length > 0) {
+                const best = cats.sort((a, b) => b.avg - a.avg)[0];
+                document.getElementById('hist-best-cat').innerText = best.name;
+                document.getElementById('hist-best-cat-wpm').innerText = `${Math.round(best.avg)} avg WPM across ${best.n} tests`;
+            }
+        }
+
+        async function loadCompanyComparison(userAvgWpm) {
+            const my = document.getElementById('hist-my-avg');
+            const co = document.getElementById('hist-company-avg');
+            const note = document.getElementById('hist-diff-note');
+            if (!sb) return;
+            try {
+                my.innerText = Math.round(userAvgWpm);
+                const { data, error } = await sb.from('test_results').select('wpm');
+                if (error || !data || data.length === 0) return;
+                const companyAvg = Math.round(data.reduce((s, r) => s + (r.wpm || 0), 0) / data.length);
+                co.innerText = companyAvg;
+                const diff = Math.round(userAvgWpm) - companyAvg;
+                if (diff > 0) note.innerHTML = `<span class="text-emerald-300 font-black">+${diff} above average</span>`;
+                else if (diff < 0) note.innerHTML = `<span class="text-rose-300 font-black">${diff} below average</span>`;
+                else note.innerText = 'right on the average';
+            } catch {}
+        }
+
+        // ---------- FRIDAY CHALLENGE (weekly 1-min sprint at 7:00 PM local) ----------
+        let fridayChallengeMode = false;   // set true only when user actively starts the challenge
+        let fridayPollTimer = null;
+
+        function getFridayChallengeState() {
+            // Event window: every Friday from 19:00 to 20:00 local time (1 hour window).
+            const now = new Date();
+            const day = now.getDay();           // 0=Sun ... 5=Fri
+            const isFriday = day === 5;
+            const hour = now.getHours();
+            const active = isFriday && hour >= 19 && hour < 20;
+
+            // Compute next Friday 7 PM
+            const next = new Date(now);
+            const daysAhead = (5 - day + 7) % 7;
+            next.setDate(now.getDate() + daysAhead);
+            next.setHours(19, 0, 0, 0);
+            if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 7);
+
+            const endsAt = new Date(now);
+            const daysToFri = ((5 - day) % 7 + 7) % 7;
+            endsAt.setDate(now.getDate() + daysToFri);
+            endsAt.setHours(20, 0, 0, 0);
+
+            return { active, next, endsAt };
+        }
+
+        function formatCountdown(ms) {
+            if (ms <= 0) return '0s';
+            const s = Math.floor(ms / 1000);
+            const d = Math.floor(s / 86400);
+            const h = Math.floor((s % 86400) / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            const sec = s % 60;
+            if (d > 0) return `${d}d ${h}h ${m}m`;
+            if (h > 0) return `${h}h ${m}m`;
+            if (m > 0) return `${m}m ${sec}s`;
+            return `${sec}s`;
+        }
+
+        function updateFridayBanner() {
+            const banner = document.getElementById('friday-banner');
+            if (!banner) return;
+            const state = getFridayChallengeState();
+            const now = new Date();
+
+            if (state.active) {
+                const timeLeft = state.endsAt.getTime() - now.getTime();
+                banner.className = 'active';
+                banner.style.display = 'block';
+                banner.innerHTML = `
+                    <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 relative z-10">
+                        <div>
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="text-2xl">🔥</span>
+                                <span class="text-amber-200 font-black uppercase tracking-[0.2em] text-xs">Friday Challenge · LIVE</span>
+                            </div>
+                            <h3 class="text-white font-black text-lg">1-Minute Weekly Sprint</h3>
+                            <p class="text-amber-100 text-sm font-semibold mt-0.5">Ends in <span class="mono font-black">${formatCountdown(timeLeft)}</span> · every employee typing the same challenge!</p>
+                        </div>
+                        <button id="friday-start-btn" type="button" class="btn-primary text-white font-black px-6 py-3 rounded-2xl whitespace-nowrap flex-shrink-0">
+                            🎯 Start Challenge
+                        </button>
+                    </div>
+                `;
+                document.getElementById('friday-start-btn').addEventListener('click', startFridayChallenge);
+            } else {
+                const timeLeft = state.next.getTime() - now.getTime();
+                // Only show upcoming banner when it's within 3 days, else hide (too noisy)
+                if (timeLeft < 3 * 86400000) {
+                    banner.className = 'upcoming';
+                    banner.style.display = 'block';
+                    banner.innerHTML = `
+                        <div class="flex items-center justify-between gap-3 relative z-10">
+                            <div>
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="text-lg">📅</span>
+                                    <span class="text-purple-200 font-black uppercase tracking-[0.2em] text-xs">Upcoming: Friday Challenge</span>
+                                </div>
+                                <p class="text-white font-semibold">1-minute sprint goes live in <span class="mono font-black text-purple-200">${formatCountdown(timeLeft)}</span></p>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    banner.style.display = 'none';
+                }
+            }
+        }
+
+        async function startFridayChallenge() {
+            // Force 1-minute duration, clear category filter, mark session as challenge
+            TEST_DURATION = 60;
+            document.getElementById('time-selector').value = '60';
+            const cs = document.getElementById('category-selector');
+            if (cs) cs.value = '';
+            fridayChallengeMode = true;
+            // Fresh test
+            clearInterval(interval);
+            isRunning = false;
+            await initTest(true);
+            showToast('🔥', 'Friday Challenge!', '60 seconds. Go go go!');
+        }
+
+        function startFridayPoll() {
+            updateFridayBanner();
+            clearInterval(fridayPollTimer);
+            // Update once every 30 seconds so countdown stays fresh
+            fridayPollTimer = setInterval(updateFridayBanner, 30 * 1000);
+        }
+
+        // ---------- DAILY CHALLENGE (Feature 15) ----------
+        function getDailyChallenge() {
+            // Seed by today's date so it's the same across all users for the day.
+            const today = new Date();
+            const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+            // Show a Daily Challenge badge in the header. Persist which category was chosen.
+            return {
+                seed,
+                dateStr: today.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })
+            };
+        }
+        function showDailyChallengeBadge() {
+            const badge = document.getElementById('daily-badge');
+            const dc = getDailyChallenge();
+            badge.title = `Today: ${dc.dateStr}`;
+            badge.style.display = 'inline-flex';
+        }
+
+        // ---------- PROFILE SETTINGS (Feature 16) ----------
+        const profileModal = document.getElementById('profile-modal');
+        function openProfile() {
+            if (!currentUser) return;
+            const meta = currentUser.user_metadata || {};
+            const name = meta.full_name || currentUser.email.split('@')[0];
+            document.getElementById('profile-avatar').innerText = name.charAt(0).toUpperCase();
+            document.getElementById('profile-name-display').innerText = name;
+            document.getElementById('profile-email-display').innerText = currentUser.email;
+            document.getElementById('profile-name-input').value = name;
+            document.getElementById('profile-pw-new').value = '';
+            document.getElementById('profile-pw-confirm').value = '';
+            document.getElementById('profile-msg').classList.add('hidden');
+            document.getElementById('profile-err').classList.add('hidden');
+
+            // Preferences summary
+            document.getElementById('profile-version').innerText = APP_VERSION;
+            const s = loadSettings();
+            const fontLabel = { sm: 'Small', md: 'Medium', lg: 'Large' }[s.fontSize || 'md'];
+            document.getElementById('profile-font').innerText = fontLabel;
+            document.getElementById('profile-sound').innerText = soundEnabled ? 'On' : 'Off';
+
+            // Stats — reuse history load
+            loadProfileStats();
+
+            profileModal.classList.remove('hidden');
+            profileModal.classList.add('flex');
+        }
+        function closeProfile() {
+            profileModal.classList.add('hidden');
+            profileModal.classList.remove('flex');
+        }
+        async function loadProfileStats() {
+            if (!sb || !currentUser) return;
+            try {
+                const { data } = await sb.from('test_results').select('wpm, created_at').eq('user_id', currentUser.id).limit(500);
+                const rows = data || [];
+                document.getElementById('profile-stat-tests').innerText = rows.length;
+                document.getElementById('profile-stat-wpm').innerText = rows.length ? Math.max(...rows.map(r => r.wpm || 0)) : 0;
+                document.getElementById('profile-stat-streak').innerText = calculateStreak(rows);
+            } catch {}
+        }
+        function showProfileMsg(text, isError) {
+            const msg = document.getElementById(isError ? 'profile-err' : 'profile-msg');
+            const other = document.getElementById(isError ? 'profile-msg' : 'profile-err');
+            msg.innerText = text;
+            msg.classList.remove('hidden');
+            other.classList.add('hidden');
+            setTimeout(() => msg.classList.add('hidden'), 4000);
+        }
+
+        // Open profile on avatar click (only if logged in)
+        navAvatar.addEventListener('click', () => {
+            if (currentUser) openProfile();
+        });
+
+        document.getElementById('profile-close').addEventListener('click', closeProfile);
+
+        document.getElementById('profile-name-save').addEventListener('click', async () => {
+            const newName = document.getElementById('profile-name-input').value.trim();
+            if (newName.length < 2) { showProfileMsg('Name must be at least 2 characters', true); return; }
+            if (!sb) return;
+            try {
+                const { error } = await sb.auth.updateUser({ data: { full_name: newName } });
+                if (error) { showProfileMsg(error.message, true); return; }
+                // Also update profiles table if it exists
+                try { await sb.from('profiles').update({ full_name: newName }).eq('id', currentUser.id); } catch {}
+                // Refresh session
+                const { data: { user } } = await sb.auth.getUser();
+                if (user) currentUser = user;
+                employeeName = newName;
+                document.getElementById('header-name').innerText = `Typing: ${employeeName}`;
+                navAvatar.innerText = employeeName.charAt(0).toUpperCase();
+                document.getElementById('profile-name-display').innerText = newName;
+                document.getElementById('profile-avatar').innerText = newName.charAt(0).toUpperCase();
+                showProfileMsg('Name updated', false);
+                showToast('✅', 'Profile updated', 'Your display name is now ' + newName);
+            } catch (e) { showProfileMsg(e.message || 'Update failed', true); }
+        });
+
+        document.getElementById('profile-pw-save').addEventListener('click', async () => {
+            const pw = document.getElementById('profile-pw-new').value;
+            const pwc = document.getElementById('profile-pw-confirm').value;
+            if (pw.length < 6) { showProfileMsg('Password must be at least 6 characters', true); return; }
+            if (pw !== pwc) { showProfileMsg('Passwords do not match', true); return; }
+            if (!sb) return;
+            try {
+                const { error } = await sb.auth.updateUser({ password: pw });
+                if (error) { showProfileMsg(error.message, true); return; }
+                document.getElementById('profile-pw-new').value = '';
+                document.getElementById('profile-pw-confirm').value = '';
+                showProfileMsg('Password changed', false);
+                showToast('🔐', 'Password updated', 'Use the new password next time you log in.');
+            } catch (e) { showProfileMsg(e.message || 'Update failed', true); }
+        });
+
+        document.getElementById('profile-signout').addEventListener('click', async () => {
+            closeProfile();
+            if (sb) await sb.auth.signOut();
+            onLoggedOut();
+        });
+
+        // ---------- WHAT'S NEW POPUP ----------
+        function maybeShowWhatsNew() {
+            try {
+                const seen = localStorage.getItem('zentype_seen_version');
+                if (seen === APP_VERSION) return;
+                const entry = CHANGELOG[APP_VERSION];
+                if (!entry) return;
+                document.getElementById('wn-version').innerText = APP_VERSION + ' • Latest';
+                document.getElementById('wn-date').innerText = entry.date + (entry.title ? ' — ' + entry.title : '');
+                const container = document.getElementById('wn-content');
+                container.innerHTML = entry.items.map(it => `
+                    <div class="glass-subtle rounded-2xl p-4 flex gap-3">
+                        <div class="text-2xl leading-none">${it.icon}</div>
+                        <div class="flex-1">
+                            <div class="font-black text-white">${escapeHtml(it.title)}</div>
+                            <div class="text-slate-300 text-sm mt-0.5">${escapeHtml(it.desc)}</div>
+                        </div>
+                    </div>
+                `).join('');
+                document.getElementById('whats-new-modal').classList.remove('hidden');
+                document.getElementById('whats-new-modal').classList.add('flex');
+            } catch (e) {
+                console.warn('whats-new popup failed', e);
+            }
+        }
+
+        document.getElementById('wn-dismiss').addEventListener('click', () => {
+            try { localStorage.setItem('zentype_seen_version', APP_VERSION); } catch (e) {}
+            const modal = document.getElementById('whats-new-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        });
+
+        // ---------- BOOT ----------
+        window.addEventListener('load', async () => {
+            updateTimerDisplay();
+            applySettings();  // load persisted font size, sound, etc. before showing anything
+            showDailyChallengeBadge();
+            const result = await initSupabase();
+            if (!result.ok) {
+                // Show the same message on both tabs so it's visible no matter which one the user is on.
+                const loginErr = document.getElementById('login-error');
+                const signupErr = document.getElementById('signup-error');
+                loginErr.innerText = result.reason;
+                loginErr.classList.remove('hidden');
+                signupErr.innerText = result.reason;
+                signupErr.classList.remove('hidden');
+                return;
+            }
+            try {
+                const { data: { session } } = await sb.auth.getSession();
+                if (session) {
+                    onLoggedIn(session);
+                    authModal.classList.add('hidden');
+                    await initTest(true);
+                } else {
+                    const emailInput = document.querySelector('#login-form input[name="email"]');
+                    if (emailInput) emailInput.focus();
+                }
+            } catch (e) {
+                console.error('Session restore failed', e);
+                const emailInput = document.querySelector('#login-form input[name="email"]');
+                if (emailInput) emailInput.focus();
+            }
+        });
+    </script>
+</body>
+</html>
