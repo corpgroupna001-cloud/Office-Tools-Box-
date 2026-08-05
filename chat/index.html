@@ -260,6 +260,14 @@
             padding: 24px;
             background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
         }
+        .call-btn-wrap {
+            display: flex; flex-direction: column; align-items: center; gap: 6px;
+        }
+        .call-btn-wrap .call-btn-label {
+            font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.85);
+            text-transform: uppercase; letter-spacing: 0.5px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+        }
         .call-btn {
             width: 56px; height: 56px;
             border-radius: 50%;
@@ -269,10 +277,12 @@
             cursor: pointer;
             transition: all 0.2s ease;
             backdrop-filter: blur(10px);
+            border: none;
         }
         .call-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.05); }
-        .call-btn.off { background: rgba(244,63,94,0.4); }
+        .call-btn.off { background: rgba(244,63,94,0.6); }
         .call-btn.end { background: linear-gradient(135deg,#f43f5e,#dc2626); box-shadow: 0 8px 20px rgba(244,63,94,0.5); }
+        .call-btn.end:hover { background: linear-gradient(135deg,#dc2626,#b91c1c); }
         .call-status {
             position: absolute;
             top: 20px; left: 20px;
@@ -621,18 +631,30 @@
             <div id="call-status" class="call-status">Connecting…</div>
         </div>
         <div class="call-controls">
-            <button id="toggle-mute" class="call-btn" title="Mute">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-            </button>
-            <button id="toggle-video" class="call-btn" title="Video off">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-            </button>
-            <button id="screen-share-btn" class="call-btn" title="Share screen">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-            </button>
-            <button id="end-call" class="call-btn end" title="End call">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="23" y1="1" x2="1" y2="23"/></svg>
-            </button>
+            <div class="call-btn-wrap">
+                <button id="toggle-mute" class="call-btn" title="Mute microphone" aria-label="Toggle mute">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                </button>
+                <span class="call-btn-label">Mute</span>
+            </div>
+            <div class="call-btn-wrap">
+                <button id="toggle-video" class="call-btn" title="Turn camera off" aria-label="Toggle camera">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                </button>
+                <span class="call-btn-label">Camera</span>
+            </div>
+            <div class="call-btn-wrap">
+                <button id="screen-share-btn" class="call-btn" title="Share your screen" aria-label="Share screen">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                </button>
+                <span class="call-btn-label">Share</span>
+            </div>
+            <div class="call-btn-wrap">
+                <button id="end-call" class="call-btn end" title="Hang up" aria-label="Hang up">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="23" y1="1" x2="1" y2="23"/></svg>
+                </button>
+                <span class="call-btn-label">Hang Up</span>
+            </div>
         </div>
     </div>
 
@@ -1485,7 +1507,18 @@
             document.getElementById('call-container').classList.remove('active');
             document.getElementById('local-video').srcObject = null;
             document.getElementById('remote-video').srcObject = null;
-            document.getElementById('screen-share-btn').classList.remove('off');
+            // Reset all call-control buttons to default state
+            const resetBtn = (id, defaultLabel, defaultTitle) => {
+                const btn = document.getElementById(id);
+                if (!btn) return;
+                btn.classList.remove('off');
+                btn.title = defaultTitle;
+                const label = btn.parentElement.querySelector('.call-btn-label');
+                if (label) label.textContent = defaultLabel;
+            };
+            resetBtn('toggle-mute', 'Mute', 'Mute microphone');
+            resetBtn('toggle-video', 'Camera', 'Turn camera off');
+            resetBtn('screen-share-btn', 'Share', 'Share your screen');
         }
 
         function declineCall() {
@@ -1590,24 +1623,35 @@
             const track = localStream.getAudioTracks()[0];
             if (!track) return;
             track.enabled = !track.enabled;
-            e.currentTarget.classList.toggle('off', !track.enabled);
+            const btn = e.currentTarget;
+            btn.classList.toggle('off', !track.enabled);
+            btn.title = track.enabled ? 'Mute microphone' : 'Unmute microphone';
+            const label = btn.parentElement.querySelector('.call-btn-label');
+            if (label) label.textContent = track.enabled ? 'Mute' : 'Unmute';
         });
         document.getElementById('toggle-video').addEventListener('click', (e) => {
             if (!localStream) return;
             const track = localStream.getVideoTracks()[0];
             if (!track) return;
             track.enabled = !track.enabled;
-            e.currentTarget.classList.toggle('off', !track.enabled);
+            const btn = e.currentTarget;
+            btn.classList.toggle('off', !track.enabled);
+            btn.title = track.enabled ? 'Turn camera off' : 'Turn camera on';
+            const label = btn.parentElement.querySelector('.call-btn-label');
+            if (label) label.textContent = track.enabled ? 'Camera' : 'Camera Off';
         });
 
         // ---------- Screen sharing ----------
         document.getElementById('screen-share-btn').addEventListener('click', async () => {
             const btn = document.getElementById('screen-share-btn');
+            const label = btn.parentElement.querySelector('.call-btn-label');
             if (screenStream) {
                 // Stop screen share, revert to camera
                 screenStream.getTracks().forEach(t => t.stop());
                 screenStream = null;
                 btn.classList.remove('off');
+                btn.title = 'Share your screen';
+                if (label) label.textContent = 'Share';
                 const camTrack = localStream?.getVideoTracks()[0];
                 if (camTrack && pc) {
                     const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
@@ -1626,6 +1670,8 @@
                 }
                 document.getElementById('local-video').srcObject = screenStream;
                 btn.classList.add('off');
+                btn.title = 'Stop sharing screen';
+                if (label) label.textContent = 'Stop Share';
                 // Auto-revert when user stops sharing via browser UI
                 screenTrack.onended = () => document.getElementById('screen-share-btn').click();
                 showToast('🖥️', 'Sharing your screen', 'Click again to stop');
