@@ -243,3 +243,271 @@ body {
     animation: ws-live-pulse 1.8s ease-in-out infinite;
 }
 @keyframes ws-live-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
+
+/* ============================================================
+   Deep glass — layered translucency with glossy edges & bloom
+   Apply to cards you want to feel more premium. Combine freely.
+   ============================================================ */
+
+.ws-glass {
+    background: rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow:
+        0 20px 60px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.16);
+    border-radius: var(--ws-r-lg);
+    position: relative;
+    overflow: hidden;
+}
+
+.ws-glass-strong {
+    background: rgba(255, 255, 255, 0.10);
+    backdrop-filter: blur(36px) saturate(200%);
+    -webkit-backdrop-filter: blur(36px) saturate(200%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow:
+        0 28px 80px rgba(0, 0, 0, 0.45),
+        inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    border-radius: var(--ws-r-xl);
+    position: relative;
+    overflow: hidden;
+}
+
+.ws-glass-max {
+    background: rgba(255, 255, 255, 0.14);
+    backdrop-filter: blur(44px) saturate(220%) contrast(105%);
+    -webkit-backdrop-filter: blur(44px) saturate(220%) contrast(105%);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow:
+        0 32px 100px rgba(0, 0, 0, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.28),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.12);
+    border-radius: var(--ws-r-xl);
+    position: relative;
+    overflow: hidden;
+}
+
+/* Glossy top-highlight — makes any glass surface feel like real glass */
+.ws-glass::before,
+.ws-glass-strong::before,
+.ws-glass-max::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 40%;
+    background: linear-gradient(180deg,
+        rgba(255,255,255,0.18) 0%,
+        rgba(255,255,255,0.06) 50%,
+        transparent 100%);
+    pointer-events: none;
+    opacity: 0.9;
+}
+
+/* Ambient bloom — a coloured haze behind the card */
+.ws-bloom-blue    { box-shadow: 0 40px 120px -20px rgba(59, 130, 246, 0.55); }
+.ws-bloom-purple  { box-shadow: 0 40px 120px -20px rgba(139, 92, 246, 0.55); }
+.ws-bloom-emerald { box-shadow: 0 40px 120px -20px rgba(16, 185, 129, 0.55); }
+.ws-bloom-warm    { box-shadow: 0 40px 120px -20px rgba(249, 115, 22, 0.55); }
+
+/* Interactive lift on hover — subtle magnetic feel */
+.ws-lift { transition: transform var(--ws-motion), box-shadow var(--ws-motion); }
+.ws-lift:hover { transform: translateY(-4px); box-shadow: 0 32px 80px rgba(0,0,0,0.4); }
+
+/* Iridescent border shimmer — for premium accents */
+.ws-iridescent {
+    position: relative;
+}
+.ws-iridescent::after {
+    content: '';
+    position: absolute; inset: -1px;
+    border-radius: inherit;
+    background: linear-gradient(120deg,
+        transparent 20%,
+        rgba(255,255,255,0.4) 45%,
+        rgba(147, 197, 253, 0.35) 55%,
+        transparent 80%);
+    -webkit-mask:
+        linear-gradient(#000 0 0) content-box,
+        linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    padding: 1px;
+    pointer-events: none;
+    animation: ws-iridescent-slide 4s linear infinite;
+}
+@keyframes ws-iridescent-slide {
+    0%   { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+/* ============================================================
+   Command palette — global ⌘K / Ctrl+K overlay
+   All markup and behaviour lives in /commandpalette.js.
+   These styles establish the visual chrome.
+   ============================================================ */
+
+#ws-cmdk-overlay {
+    position: fixed; inset: 0; z-index: 2147483400;
+    display: none; align-items: flex-start; justify-content: center;
+    padding: 80px 16px 40px;
+    background: rgba(3, 7, 18, 0.55);
+    backdrop-filter: blur(12px) saturate(120%);
+    -webkit-backdrop-filter: blur(12px) saturate(120%);
+    animation: ws-fade-in .18s ease-out;
+    font-family: 'Inter', system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+#ws-cmdk-overlay.show { display: flex; }
+@keyframes ws-fade-in { from { opacity: 0 } to { opacity: 1 } }
+
+.ws-cmdk-panel {
+    width: 100%; max-width: 640px;
+    max-height: calc(100vh - 120px);
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(40px) saturate(200%);
+    -webkit-backdrop-filter: blur(40px) saturate(200%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 24px;
+    box-shadow: 0 40px 100px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    animation: ws-cmdk-in .22s cubic-bezier(.2,.9,.3,1);
+    color: var(--ws-text);
+    position: relative;
+}
+@keyframes ws-cmdk-in {
+    from { opacity: 0; transform: scale(.96) translateY(-8px); }
+    to   { opacity: 1; transform: none; }
+}
+.ws-cmdk-panel::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 60%;
+    background: linear-gradient(180deg,
+        rgba(255,255,255,0.10),
+        rgba(255,255,255,0.02) 50%,
+        transparent);
+    pointer-events: none;
+}
+
+.ws-cmdk-input-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    position: relative; z-index: 1;
+}
+.ws-cmdk-input-row .search-icon { color: var(--ws-text-muted); flex-shrink: 0; }
+.ws-cmdk-input-row input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--ws-text);
+    font-size: 17px; font-weight: 600;
+    font-family: inherit;
+    padding: 6px 0;
+}
+.ws-cmdk-input-row input::placeholder { color: var(--ws-text-dim); font-weight: 500; }
+.ws-cmdk-input-row .kbd {
+    display: inline-flex; align-items: center; padding: 3px 8px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px;
+    font-size: 11px; font-weight: 800; color: var(--ws-text-muted);
+    letter-spacing: 0.3px;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.ws-cmdk-results {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 10px 10px;
+    min-height: 0;
+    position: relative; z-index: 1;
+}
+.ws-cmdk-group-head {
+    font-size: 10px; font-weight: 900; color: var(--ws-text-dim);
+    text-transform: uppercase; letter-spacing: 1.5px;
+    padding: 12px 12px 6px;
+}
+.ws-cmdk-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background var(--ws-motion), transform var(--ws-motion);
+}
+.ws-cmdk-item:hover, .ws-cmdk-item.active {
+    background: rgba(59, 130, 246, 0.22);
+}
+.ws-cmdk-item .item-icon {
+    width: 36px; height: 36px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 900;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: var(--ws-text); overflow: hidden;
+    flex-shrink: 0;
+}
+.ws-cmdk-item .item-icon img { width: 100%; height: 100%; object-fit: cover; }
+.ws-cmdk-item .item-body { flex: 1; min-width: 0; }
+.ws-cmdk-item .item-title {
+    font-weight: 800; font-size: 14px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ws-cmdk-item .item-sub {
+    font-size: 12px; color: var(--ws-text-muted);
+    font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ws-cmdk-item .item-shortcut {
+    display: inline-flex; gap: 4px;
+    font-size: 10px; font-weight: 800; color: var(--ws-text-dim);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+.ws-cmdk-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--ws-text-muted);
+    font-size: 13px; font-weight: 600;
+}
+
+.ws-cmdk-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 11px; color: var(--ws-text-dim);
+    font-weight: 700; letter-spacing: 0.3px;
+    background: rgba(15, 23, 42, 0.5);
+    position: relative; z-index: 1;
+}
+.ws-cmdk-footer .hints { display: flex; gap: 12px; }
+.ws-cmdk-footer .hint { display: inline-flex; align-items: center; gap: 4px; }
+.ws-cmdk-footer .kbd {
+    display: inline-flex; align-items: center; padding: 2px 6px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 5px;
+    font-size: 10px; font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* Trigger chip (small pill button that opens the palette) */
+.ws-cmdk-trigger {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 8px 6px 12px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 999px;
+    color: var(--ws-text-muted);
+    font-size: 12px; font-weight: 700;
+    cursor: pointer;
+    transition: background var(--ws-motion), color var(--ws-motion);
+    font-family: inherit;
+}
+.ws-cmdk-trigger:hover { background: rgba(255,255,255,0.10); color: var(--ws-text); }
+.ws-cmdk-trigger .kbd {
+    display: inline-flex; align-items: center; padding: 2px 6px;
+    background: rgba(255,255,255,0.10);
+    border-radius: 5px;
+    font-size: 10px; font-weight: 800;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
