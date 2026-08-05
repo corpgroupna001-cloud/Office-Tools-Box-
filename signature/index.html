@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Email Signature Generator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<style>
+*{
+  box-sizing:border-box;
+  font-family:Segoe UI, Arial, sans-serif;
+}
+
+body{
+  margin:0;
+  min-height:100vh;
+  background:linear-gradient(135deg,#6d28d9,#9333ea,#0ea5e9);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:40px;
+}
+
+.container{
+  width:100%;
+  max-width:1200px;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:35px;
+}
+
+.glass{
+  background:rgba(255,255,255,0.15);
+  backdrop-filter:blur(20px);
+  border-radius:20px;
+  border:1px solid rgba(255,255,255,0.2);
+  padding:28px;
+  box-shadow:0 15px 40px rgba(0,0,0,0.2);
+}
+
+h2{
+  color:white;
+  margin-bottom:18px;
+}
+
+input,
+select{
+  width:100%;
+  padding:12px 14px;
+  border-radius:10px;
+  border:none;
+  margin-bottom:12px;
+  background:rgba(255,255,255,0.25);
+  color:white;
+  font-size:14px;
+  outline:none;
+}
+
+input::placeholder{
+  color:rgba(255,255,255,0.7);
+}
+
+select{
+  appearance:none;
+  cursor:pointer;
+}
+
+select option{
+  background:#6d28d9;
+  color:white;
+}
+
+button{
+  width:100%;
+  padding:12px;
+  border-radius:10px;
+  border:none;
+  background:white;
+  color:#6d28d9;
+  font-weight:600;
+  cursor:pointer;
+  transition:0.25s;
+}
+
+button:hover{
+  transform:scale(1.03);
+  box-shadow:0 10px 20px rgba(0,0,0,0.25);
+}
+
+.mode-switch{
+  display:flex;
+  gap:10px;
+  margin-bottom:14px;
+}
+
+.mode-switch button{
+  width:50%;
+  background:rgba(255,255,255,0.22);
+  color:white;
+  border:1px solid rgba(255,255,255,0.25);
+}
+
+.mode-switch button.active{
+  background:white;
+  color:#6d28d9;
+}
+
+.preview-shell{
+  border-radius:12px;
+  padding:20px;
+  transition:0.25s ease;
+  overflow:auto;
+}
+
+.preview-shell.light{
+  background:white;
+}
+
+.preview-shell.dark{
+  background:#111827;
+}
+
+#signature-preview,
+#signature-preview *{
+  font-family:"Arial Rounded MT Bold", Arial, sans-serif !important;
+}
+
+@media(max-width:900px){
+  .container{
+    grid-template-columns:1fr;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <!-- FORM -->
+  <div class="glass">
+
+    <h2>Employee Details</h2>
+
+    <input id="name" placeholder="Full Name">
+    <input id="title" placeholder="Job Title">
+
+    <select id="companySelect" onchange="renderPreview()">
+      <option value="">-- Select Company --</option>
+      <option value="Jobways Point LLP">Jobways Point LLP</option>
+      <option value="Nova Sportsmart Private Limited">Nova Sportsmart Private Limited</option>
+      <option value="Protathlitis Sportsmart LLP">Protathlitis Sportsmart LLP</option>
+      <option value="Navyug Raise A Player Foundation">Navyug Raise A Player Foundation</option>
+      <option value="GenieLamp Private Limited">GenieLamp Private Limited</option>
+    </select>
+
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <label style="color:white;font-size:14px;white-space:nowrap">
+        Company Colour:
+      </label>
+
+      <input
+        type="color"
+        id="companyColor"
+        value="#dc2626"
+        style="width:48px;height:38px;padding:2px 4px;margin-bottom:0;cursor:pointer;border-radius:8px"
+        oninput="renderPreview()"
+      >
+    </div>
+
+    <input id="phone" placeholder="Mobile">
+    <input id="email" placeholder="Email">
+    <input id="website" placeholder="Website">
+    <input id="address" placeholder="Address">
+
+    <input
+      type="file"
+      id="logoUpload"
+      accept="image/*"
+    >
+
+    <input
+      id="logoLink"
+      placeholder="Company Website / Logo Redirect URL"
+    >
+
+    <h2 style="margin-top:15px;">Social Links</h2>
+
+    <input id="linkedin" placeholder="LinkedIn URL">
+    <input id="facebook" placeholder="Facebook URL">
+    <input id="instagram" placeholder="Instagram URL">
+    <input id="youtube" placeholder="YouTube URL">
+
+    <button onclick="copySignature()">
+      Copy Outlook Signature
+    </button>
+
+  </div>
+
+  <!-- PREVIEW -->
+  <div class="glass">
+
+    <h2>Signature Preview</h2>
+
+    <div class="mode-switch">
+      <button
+        type="button"
+        id="lightBtn"
+        class="active"
+        onclick="setPreviewMode('light')"
+      >
+        Light Mode
+      </button>
+
+      <button
+        type="button"
+        id="darkBtn"
+        onclick="setPreviewMode('dark')"
+      >
+        Dark Mode
+      </button>
+    </div>
+
+    <div id="previewShell" class="preview-shell light">
+      <div id="signature-preview"></div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+let currentMode = "light";
+let logoDataUrl = "";
+
+function escapeHtml(str){
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function normalizeUrl(url){
+
+  if(!url) return "";
+
+  if(!/^https?:\/\//i.test(url)){
+    return "https://" + url;
+  }
+
+  return url;
+}
+
+function safeUrl(url){
+
+  try{
+
+    const normalized = normalizeUrl(url);
+    const parsed = new URL(normalized);
+
+    if(
+      parsed.protocol === "http:" ||
+      parsed.protocol === "https:"
+    ){
+      return parsed.href;
+    }
+
+    return "";
+
+  }catch{
+    return "";
+  }
+}
+
+function cleanWebsite(url){
+
+  return url
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
+    .replace(/\/$/, "");
+}
+
+function setPreviewMode(mode){
+
+  currentMode = mode;
+
+  const shell = document.getElementById("previewShell");
+  const lightBtn = document.getElementById("lightBtn");
+  const darkBtn = document.getElementById("darkBtn");
+
+  shell.classList.remove("light", "dark");
+  shell.classList.add(mode);
+
+  lightBtn.classList.toggle("active", mode === "light");
+  darkBtn.classList.toggle("active", mode === "dark");
+
+  renderPreview();
+}
+
+const inputs = [
+  "name",
+  "title",
+  "phone",
+  "email",
+  "website",
+  "address",
+  "linkedin",
+  "facebook",
+  "instagram",
+  "youtube",
+  "logoLink"
+];
+
+inputs.forEach(id => {
+
+  document
+    .getElementById(id)
+    .addEventListener("input", renderPreview);
+
+});
+
+function buildSignatureHTML(){
+
+  const name = escapeHtml(
+    document.getElementById("name").value
+  );
+
+  const title = escapeHtml(
+    document.getElementById("title").value
+  );
+
+  const company = escapeHtml(
+    document.getElementById("companySelect").value
+  );
+
+  const companyColor =
+    document.getElementById("companyColor").value;
+
+  const phone = escapeHtml(
+    document.getElementById("phone").value
+  );
+
+  const email = escapeHtml(
+    document.getElementById("email").value
+  );
+
+  const website = safeUrl(
+    document.getElementById("website").value.trim()
+  );
+
+  const cleanWebsiteText = website
+    ? cleanWebsite(website)
+    : "";
+
+  const address = escapeHtml(
+    document.getElementById("address").value
+  );
+
+  const logoLink = safeUrl(
+    document.getElementById("logoLink").value.trim()
+  );
+
+  const linkedin = safeUrl(
+    document.getElementById("linkedin").value.trim()
+  );
+
+  const facebook = safeUrl(
+    document.getElementById("facebook").value.trim()
+  );
+
+  const instagram = safeUrl(
+    document.getElementById("instagram").value.trim()
+  );
+
+  const youtube = safeUrl(
+    document.getElementById("youtube").value.trim()
+  );
+
+  const textColor =
+    currentMode === "dark"
+      ? "#f3f4f6"
+      : "#111111";
+
+  const secondaryColor =
+    currentMode === "dark"
+      ? "#d1d5db"
+      : "#4b5563";
+
+  const borderColor =
+    currentMode === "dark"
+      ? "#374151"
+      : "#e5e7eb";
+
+  const bgColor =
+    currentMode === "dark"
+      ? "#111827"
+      : "#ffffff";
+
+  const iconBg =
+    currentMode === "dark"
+      ? "#1f2937"
+      : "#ffffff";
+
+  const logoImage = logoDataUrl
+    ? `
+      <img
+        src="${logoDataUrl}"
+        alt="Logo"
+        style="
+          width:180px;
+          max-width:180px;
+          display:block;
+          margin:0 auto 10px;
+          border:0;
+          outline:none;
+        "
+      >
+    `
+    : "";
+
+  const logoHtml =
+    logoLink && logoImage
+      ? `
+        <a
+          href="${logoLink}"
+          target="_blank"
+          rel="noopener noreferrer"
+          style="
+            text-decoration:none;
+            border:none;
+            display:inline-block;
+          "
+        >
+          ${logoImage}
+        </a>
+      `
+      : logoImage;
+
+  function iconCell(src, href, alt){
+
+    if(!href) return "";
+
+    return `
+      <td
+        style="
+          padding-right:3px;
+          vertical-align:middle;
+        "
+      >
+
+        <a
+          href="${href}"
+          target="_blank"
+          rel="noopener noreferrer"
+          style="
+            display:inline-block;
+            line-height:0;
+            text-decoration:none;
+            border:none;
+          "
+        >
+
+          <span
+            style="
+              width:34px;
+              height:34px;
+              display:block;
+              border-radius:50%;
+              overflow:hidden;
+              background:${iconBg};
+            "
+          >
+
+            <img
+              src="${src}"
+              alt="${alt}"
+              width="28"
+              height="28"
+              style="
+                width:28px;
+                height:28px;
+                display:block;
+                border:0;
+                outline:none;
+                margin:3px;
+                object-fit:contain;
+              "
+            >
+
+          </span>
+
+        </a>
+
+      </td>
+    `;
+  }
+
+  const socialRow = `
+    <table
+      cellpadding="0"
+      cellspacing="0"
+      border="0"
+      style="
+        margin:6px auto 0;
+        border-collapse:collapse;
+      "
+    >
+      <tr>
+
+        ${iconCell(
+          "https://upload.wikimedia.org/wikipedia/commons/f/f8/LinkedIn_icon_circle.svg",
+          linkedin,
+          "LinkedIn"
+        )}
+
+        ${iconCell(
+          "https://upload.wikimedia.org/wikipedia/commons/thumb/5/51/Facebook_f_logo_%282019%29.svg/960px-Facebook_f_logo_%282019%29.svg.png",
+          facebook,
+          "Facebook"
+        )}
+
+        ${iconCell(
+          "https://toppng.com/uploads/preview/instagram-logo-circle-11549679754rhbcorxntv.png",
+          instagram,
+          "Instagram"
+        )}
+
+        ${iconCell(
+          "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a0/YouTube_social_red_circle_%282017%29.svg/960px-YouTube_social_red_circle_%282017%29.svg.png",
+          youtube,
+          "YouTube"
+        )}
+
+      </tr>
+    </table>
+  `;
+
+  const phoneHtml = phone
+    ? `
+      <div>
+        <strong>Mobile:</strong>
+        <span style="font-family:Verdana, sans-serif;font-style:italic;">
+          ${phone}
+        </span>
+      </div>
+    `
+    : "";
+
+  const emailHtml = email
+    ? `
+      <div>
+        <strong>Email:</strong>
+        <span style="font-family:Verdana, sans-serif;font-style:italic;">
+          ${email}
+        </span>
+      </div>
+    `
+    : "";
+
+  const websiteHtml = website
+    ? `
+      <div>
+        <strong>Web:</strong>
+
+        <a
+          href="${website}"
+          target="_blank"
+          rel="noopener noreferrer"
+          style="
+            font-family:Verdana, sans-serif;
+            font-style:italic;
+            color:#111111;
+            text-decoration:none;
+          "
+        >
+          ${cleanWebsiteText}
+        </a>
+      </div>
+    `
+    : "";
+
+  const addressHtml = address
+    ? `
+      <div style="margin-top:6px;">
+        <strong>Address:</strong>
+
+        <span
+          style="
+            font-family:Verdana, sans-serif;
+            font-style:italic;
+          "
+        >
+          ${address}
+        </span>
+      </div>
+    `
+    : "";
+
+  return `
+    <table
+      cellpadding="0"
+      cellspacing="0"
+      border="0"
+      style="
+        border-collapse:collapse;
+        background:${bgColor};
+        color:${textColor};
+        font-family:'Arial Rounded MT Bold', Arial, sans-serif;
+      "
+    >
+
+      <tr>
+
+        <td
+          style="
+            width:220px;
+            padding-right:20px;
+            vertical-align:top;
+            text-align:center;
+          "
+        >
+
+          ${logoHtml}
+
+          ${socialRow}
+
+        </td>
+
+        <td
+          style="
+            border-left:2px solid ${borderColor};
+            padding-left:20px;
+            vertical-align:middle;
+          "
+        >
+
+          <div
+            style="
+              font-size:20px;
+              font-weight:700;
+              line-height:1.2;
+              color:${textColor};
+            "
+          >
+            ${name}
+          </div>
+
+          <div
+            style="
+              font-size:14px;
+              line-height:1.5;
+              color:${secondaryColor};
+            "
+          >
+            ${title}
+          </div>
+
+          <div
+            style="
+              font-size:14px;
+              line-height:1.5;
+              color:${companyColor};
+              font-weight:700;
+              margin-bottom:8px;
+            "
+          >
+            ${company}
+          </div>
+
+          <div
+            style="
+              font-size:14px;
+              line-height:1.6;
+              color:${textColor};
+            "
+          >
+
+            ${phoneHtml}
+
+            ${emailHtml}
+
+            ${websiteHtml}
+
+            ${addressHtml}
+
+          </div>
+
+        </td>
+
+      </tr>
+
+    </table>
+  `;
+}
+
+function renderPreview(){
+
+  document.getElementById(
+    "signature-preview"
+  ).innerHTML = buildSignatureHTML();
+}
+
+document
+  .getElementById("logoUpload")
+  .addEventListener("change", function(){
+
+    const file = this.files[0];
+
+    if(!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = function(e){
+
+      logoDataUrl = e.target.result;
+
+      renderPreview();
+    };
+
+    reader.readAsDataURL(file);
+});
+
+async function copySignature(){
+
+  const html = buildSignatureHTML();
+
+  try{
+
+    const blob = new Blob(
+      [html],
+      { type:"text/html" }
+    );
+
+    const textBlob = new Blob(
+      [
+        html
+          .replace(/<br>/g, "\n")
+          .replace(/<[^>]*>/g, "")
+      ],
+      { type:"text/plain" }
+    );
+
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        "text/html": blob,
+        "text/plain": textBlob
+      })
+    ]);
+
+    alert(
+      "Signature copied. Paste into Outlook signature editor."
+    );
+
+  }catch(err){
+
+    const temp = document.createElement("div");
+
+    temp.innerHTML = html;
+
+    document.body.appendChild(temp);
+
+    const range = document.createRange();
+
+    range.selectNode(temp);
+
+    const sel = window.getSelection();
+
+    sel.removeAllRanges();
+
+    sel.addRange(range);
+
+    document.execCommand("copy");
+
+    sel.removeAllRanges();
+
+    document.body.removeChild(temp);
+
+    alert(
+      "Signature copied. Paste into Outlook signature editor."
+    );
+  }
+}
+
+renderPreview();
+setPreviewMode("light");
+</script>
+
+</body>
+</html>
