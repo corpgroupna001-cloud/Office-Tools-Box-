@@ -20,6 +20,8 @@
 
     // Chat page suppresses this — it has its own richer UI.
     const isChatPage = /\/chat\/?($|[?#])/.test(location.pathname);
+    // Home page — no back button needed
+    const isHomePage = /^\/(index\.html)?$/.test(location.pathname);
 
     let sb = null;
     let currentUserId = null;
@@ -98,6 +100,70 @@
                 background: #10b981; border: 2px solid #0b1120;
                 box-shadow: 0 0 0 1px rgba(16,185,129,.4); }
             .ws-online-dot.offline { background: #64748b; box-shadow: none; }
+
+            /* Pause overlay while a call is incoming/in-progress */
+            #ws-pause-overlay { position: fixed; inset: 0; z-index: 2147483000;
+                display: none; align-items: flex-end; justify-content: center;
+                background: rgba(15,23,42,0.35);
+                backdrop-filter: blur(6px);
+                pointer-events: auto;
+                animation: ws-fade-in .3s ease-out;
+                font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+            #ws-pause-overlay.show { display: flex; }
+            #ws-pause-overlay .ws-pause-card {
+                max-width: 520px; width: calc(100% - 32px);
+                background: linear-gradient(180deg, rgba(15,23,42,0.97), rgba(11,17,32,0.98));
+                border: 1px solid rgba(255,255,255,.08);
+                border-radius: 24px 24px 0 0;
+                padding: 24px 24px 32px; color: #fff;
+                box-shadow: 0 -24px 60px rgba(0,0,0,.5);
+                animation: ws-slide-up .35s cubic-bezier(.2,.9,.3,1); }
+            @keyframes ws-slide-up { from { transform: translateY(80px); opacity: 0; } to { transform: none; opacity: 1; } }
+            #ws-pause-overlay .ws-pause-title {
+                display: flex; align-items: center; gap: 10px;
+                font-size: 20px; font-weight: 900; margin-bottom: 6px; }
+            #ws-pause-overlay .ws-pause-sub { font-size: 13px; color: rgba(255,255,255,.75); margin-bottom: 16px; }
+            #ws-pause-overlay .ws-pause-rules {
+                background: rgba(255,255,255,.05); border-radius: 14px; padding: 14px 16px;
+                font-size: 12.5px; color: rgba(255,255,255,.85); line-height: 1.55; }
+            #ws-pause-overlay .ws-pause-rules strong { color: #fff; }
+            #ws-pause-overlay .ws-pause-rules ul { margin: 8px 0 0; padding-left: 20px; }
+            #ws-pause-overlay .ws-pause-rules li { margin: 3px 0; }
+            #ws-pause-overlay .ws-pause-actions { display: flex; gap: 10px; margin-top: 16px; justify-content: flex-end; }
+            #ws-pause-overlay .ws-pause-btn {
+                border: none; padding: 10px 18px; border-radius: 12px;
+                font-size: 13px; font-weight: 800; cursor: pointer;
+                background: rgba(255,255,255,.1); color: #fff; }
+            #ws-pause-overlay .ws-pause-btn.primary { background: linear-gradient(135deg,#10b981,#059669); }
+
+            /* Resume-session toast (shown after a call ends) */
+            #ws-resume-banner {
+                position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+                z-index: 2147483000; display: none;
+                background: linear-gradient(135deg,#10b981,#059669);
+                color: #fff; padding: 14px 24px; border-radius: 999px;
+                font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+                font-weight: 800; font-size: 14px; cursor: pointer;
+                box-shadow: 0 20px 50px rgba(16,185,129,.4);
+                display: none; align-items: center; gap: 10px;
+                animation: ws-slide-up .3s ease-out; }
+            #ws-resume-banner.show { display: inline-flex; }
+            #ws-resume-banner:hover { transform: translateX(-50%) translateY(-2px); }
+
+            /* Universal back-to-home button */
+            .ws-back-btn {
+                position: fixed; top: 14px; left: 14px; z-index: 2147482000;
+                display: inline-flex; align-items: center; gap: 8px;
+                padding: 9px 14px 9px 12px; border-radius: 999px;
+                background: rgba(15,23,42,0.85); color: #fff;
+                border: 1px solid rgba(255,255,255,.12);
+                font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+                font-weight: 700; font-size: 13px; text-decoration: none;
+                backdrop-filter: blur(14px);
+                box-shadow: 0 6px 20px rgba(0,0,0,.35);
+                transition: transform .15s ease, background .15s ease; }
+            .ws-back-btn:hover { background: rgba(30,41,59,0.95); transform: translateY(-1px); }
+            .ws-back-btn svg { width: 16px; height: 16px; }
         `;
         document.head.appendChild(s);
     }
@@ -271,20 +337,95 @@
         browserNotify(payload.name || 'Incoming call',
             payload.isVideo ? 'Video call — tap to answer' : 'Voice call — tap to answer',
             'ws-call');
+        showPauseOverlay(payload);
+        // Notify the host page so it can pause its own timer/activity
+        window.dispatchEvent(new CustomEvent('ws:call-incoming', { detail: payload }));
         // Auto-dismiss after 30s
         clearTimeout(showIncomingCall._t);
         showIncomingCall._t = setTimeout(() => {
             if (inflightCall && inflightCall.from === payload.from) {
                 hideCallBanner();
                 inflightCall = null;
+                onCallEnded('timeout');
             }
         }, 30000);
+    }
+
+    // ---------- Pause overlay (blocks host activity while call is incoming) ----------
+    function ensurePauseOverlay() {
+        let o = document.getElementById('ws-pause-overlay');
+        if (o) return o;
+        o = document.createElement('div');
+        o.id = 'ws-pause-overlay';
+        o.innerHTML = `
+            <div class="ws-pause-card">
+                <div class="ws-pause-title">⏸️ <span id="ws-pause-title-text">Session paused for incoming call</span></div>
+                <div class="ws-pause-sub" id="ws-pause-sub">Your current activity has been paused. Please respond to the caller.</div>
+                <div class="ws-pause-rules">
+                    <strong>Rules & regulations while a call is active</strong>
+                    <ul>
+                        <li>Your ongoing task (typing test, quiz, etc.) is <strong>paused automatically</strong> — timers and progress are preserved.</li>
+                        <li>Please decline or answer the call before continuing. Ignoring a call will not resume your session automatically.</li>
+                        <li>You may not switch tabs or windows during a live call — your host organization may log tab-switching events.</li>
+                        <li>All calls are peer-to-peer over WebRTC and are <strong>not recorded</strong> or stored by WorkSuite.</li>
+                        <li>After the call ends, tap <em>Resume session</em> at the bottom of the screen to continue where you left off.</li>
+                    </ul>
+                </div>
+            </div>`;
+        document.body.appendChild(o);
+        return o;
+    }
+    function showPauseOverlay(payload) {
+        const o = ensurePauseOverlay();
+        const t = document.getElementById('ws-pause-title-text');
+        const s = document.getElementById('ws-pause-sub');
+        if (t) t.textContent = `Session paused — ${payload.isVideo ? 'video' : 'voice'} call from ${payload.name || 'someone'}`;
+        if (s) s.textContent = `Your current activity has been paused. Answer or decline the call above to continue.`;
+        o.classList.add('show');
+    }
+    function hidePauseOverlay() {
+        const o = document.getElementById('ws-pause-overlay');
+        if (o) o.classList.remove('show');
+    }
+
+    function ensureResumeBanner() {
+        let r = document.getElementById('ws-resume-banner');
+        if (r) return r;
+        r = document.createElement('div');
+        r.id = 'ws-resume-banner';
+        r.innerHTML = `<span>▶</span><span>Resume session</span>`;
+        r.addEventListener('click', () => {
+            r.classList.remove('show');
+            window.dispatchEvent(new CustomEvent('ws:call-resume'));
+        });
+        document.body.appendChild(r);
+        return r;
+    }
+    function showResumeBanner() {
+        const r = ensureResumeBanner();
+        r.classList.add('show');
+        // Auto-dismiss after 60s
+        clearTimeout(showResumeBanner._t);
+        showResumeBanner._t = setTimeout(() => { r.classList.remove('show'); }, 60000);
+    }
+
+    function onCallEnded(reason) {
+        hidePauseOverlay();
+        // If the user declined or timed out — offer to resume immediately
+        if (reason === 'decline' || reason === 'timeout') {
+            showResumeBanner();
+            window.dispatchEvent(new CustomEvent('ws:call-ended', { detail: { reason } }));
+        } else {
+            // For any other termination, still let host know
+            window.dispatchEvent(new CustomEvent('ws:call-ended', { detail: { reason } }));
+        }
     }
 
     function acceptCurrentCall() {
         if (!inflightCall) return;
         const { from, isVideo } = inflightCall;
         hideCallBanner();
+        hidePauseOverlay();
         // Signal caller we're switching pages (they should keep rebroadcasting the offer)
         try {
             if (callChannel) {
@@ -294,7 +435,10 @@
                 });
             }
         } catch {}
+        // Remember where the user was, so chat can offer to send them back
+        try { sessionStorage.setItem('ws:returnFrom', location.href); } catch {}
         inflightCall = null;
+        window.dispatchEvent(new CustomEvent('ws:call-ended', { detail: { reason: 'accepted' } }));
         // Navigate to chat with an auto-accept hash. Chat page will auto-answer next offer from this caller.
         location.href = `/chat/#answer=${encodeURIComponent(from)}&video=${isVideo ? 1 : 0}`;
     }
@@ -311,6 +455,21 @@
         } catch {}
         inflightCall = null;
         hideCallBanner();
+        onCallEnded('decline');
+    }
+
+    // ---------- Universal back-to-home button ----------
+    function injectBackButton() {
+        if (isHomePage) return;
+        if (document.querySelector('.ws-back-btn')) return;
+        const a = document.createElement('a');
+        a.className = 'ws-back-btn';
+        a.href = '/';
+        a.title = 'Back to WorkSuite home';
+        a.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+            <span>Home</span>`;
+        (document.body || document.documentElement).appendChild(a);
     }
 
     // ---------- Online-dot helper ----------
@@ -340,6 +499,9 @@
     }
 
     async function init() {
+        // Back button and styles apply to every non-home page, even if not logged in
+        injectStyles();
+        injectBackButton();
         if (isChatPage) return; // chat has its own UI
         try {
             if (!(await waitForSupabase())) return;
@@ -416,11 +578,11 @@
                 })
                 .on('broadcast', { event: 'call-end' }, ({ payload }) => {
                     if (!inflightCall || payload.from !== inflightCall.from) return;
-                    inflightCall = null; hideCallBanner();
+                    inflightCall = null; hideCallBanner(); onCallEnded('remote-hangup');
                 })
                 .on('broadcast', { event: 'call-cancel' }, ({ payload }) => {
                     if (!inflightCall || payload.from !== inflightCall.from) return;
-                    inflightCall = null; hideCallBanner();
+                    inflightCall = null; hideCallBanner(); onCallEnded('remote-cancel');
                 })
                 .subscribe(async (status) => {
                     if (status === 'SUBSCRIBED') {
