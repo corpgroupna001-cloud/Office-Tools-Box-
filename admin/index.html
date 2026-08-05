@@ -45,9 +45,25 @@
         tbody tr { border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.15s; }
         tbody tr:hover { background: rgba(255,255,255,0.04); }
         select, input { color-scheme: dark; }
+        .ws-back-btn { position: fixed; top: 14px; left: 14px; z-index: 100;
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 9px 14px 9px 12px; border-radius: 999px;
+            background: rgba(15,23,42,0.85); color: #fff;
+            border: 1px solid rgba(255,255,255,.12);
+            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+            font-weight: 700; font-size: 13px; text-decoration: none;
+            backdrop-filter: blur(14px);
+            box-shadow: 0 6px 20px rgba(0,0,0,.35);
+            transition: transform .15s ease, background .15s ease; }
+        .ws-back-btn:hover { background: rgba(30,41,59,0.95); transform: translateY(-1px); }
+        .ws-back-btn svg { width: 16px; height: 16px; }
     </style>
 </head>
 <body>
+    <a href="/" class="ws-back-btn" title="Back to WorkSuite home">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+        <span>Home</span>
+    </a>
 
     <!-- Password gate -->
     <div id="gate" class="fixed inset-0 z-50 flex items-center justify-center p-4" style="background: rgba(11,17,32,0.8); backdrop-filter: blur(20px);">
