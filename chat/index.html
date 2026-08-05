@@ -85,6 +85,21 @@
             overflow: hidden;
             display: flex;
             flex-direction: column;
+            min-height: 0;   /* fix: allow inner scroll containers to constrain */
+        }
+        /* Flex-layout bug fix: children of a scrolling flex column need min-height:0
+           or their content pushes the parent taller than the viewport (which is why
+           the chat header was scrolling off with the messages). */
+        #chat-active { min-height: 0; }
+        #chat-active > .chat-header-fixed { flex: 0 0 auto; }
+        #msg-list { min-height: 0; }
+        /* The chat header stays put; the messages list scrolls inside it. */
+        .chat-header-fixed {
+            position: relative;
+            z-index: 5;
+            background: rgba(15, 23, 42, 0.55);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
         }
 
         /* Contact row */
@@ -680,8 +695,8 @@
 
             <!-- Active chat -->
             <div id="chat-active" class="flex-1 flex flex-col hidden">
-                <!-- Chat header -->
-                <div class="px-4 py-3 border-b border-white/10 flex items-center justify-between" style="background: rgba(15,23,42,0.3);">
+                <!-- Chat header (pinned at top of chat panel — never scrolls with messages) -->
+                <div class="chat-header-fixed px-4 py-3 border-b border-white/10 flex items-center justify-between">
                     <div id="chat-header-clickable" class="flex items-center gap-3 min-w-0 cursor-pointer hover:opacity-80 transition" title="View profile">
                         <div id="chat-avatar" class="contact-avatar" style="width:44px;height:44px;">
                             ?
