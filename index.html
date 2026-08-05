@@ -200,7 +200,12 @@
 
             <form id="login-form" class="space-y-3">
                 <input type="email" name="email" placeholder="Email" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
-                <input type="password" name="password" placeholder="Password" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                <div class="password-field">
+                    <input type="password" name="password" placeholder="Password" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                    <button type="button" class="password-toggle" aria-label="Show password" data-target="prev">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    </button>
+                </div>
                 <p id="login-error" class="text-rose-300 text-sm font-bold hidden"></p>
                 <button type="submit" class="w-full text-white font-extrabold py-4 rounded-2xl text-lg" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 10px 30px rgba(59,130,246,0.4);">Log In</button>
             </form>
@@ -228,11 +233,27 @@
                     <option value="Genie Lamp Private Limited">Genie Lamp Private Limited</option>
                     <option value="CORPGROUP">CORPGROUP</option>
                 </select>
-                <input type="password" name="password" placeholder="Password (min 6 chars)" required minlength="6" class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                <div class="password-field">
+                    <input id="signup-password" type="password" name="password" placeholder="Password (min 6 chars)" required minlength="6" class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                    <button type="button" class="password-toggle" aria-label="Show password" data-target="prev">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    </button>
+                </div>
+                <div id="pwd-strength" class="password-strength" data-score="0">
+                    <div class="track">
+                        <div class="segment"></div><div class="segment"></div><div class="segment"></div><div class="segment"></div>
+                    </div>
+                    <div class="label" id="pwd-strength-label">Enter a password</div>
+                </div>
                 <p id="signup-error" class="text-rose-300 text-sm font-bold hidden"></p>
                 <p id="signup-success" class="text-emerald-300 text-sm font-bold hidden"></p>
                 <button type="submit" class="w-full text-white font-extrabold py-4 rounded-2xl text-lg" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 10px 30px rgba(59,130,246,0.4);">Create Account</button>
             </form>
+
+            <div class="auth-trust">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                <span>Encrypted &amp; secure sign-in · No ads · Passwords never leave your device unhashed</span>
+            </div>
         </div>
     </div>
 
@@ -264,6 +285,69 @@
             40%, 80% { transform: translateX(8px); }
         }
         .shake { animation: shake 0.5s ease-in-out; }
+
+        /* Show/hide password toggle */
+        .password-field { position: relative; }
+        .password-field .password-toggle {
+            position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+            width: 34px; height: 34px; border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            background: transparent; border: none;
+            color: #94a3b8; cursor: pointer;
+            transition: color .15s, background .15s;
+        }
+        .password-field .password-toggle:hover { color: #f8fafc; background: rgba(255,255,255,0.08); }
+        .password-field input[type="password"], .password-field input[type="text"] {
+            padding-right: 52px !important;
+        }
+
+        /* Password strength meter (signup) */
+        .password-strength {
+            display: flex; flex-direction: column; gap: 4px;
+            margin: -6px 0 6px 4px;
+        }
+        .password-strength .track {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
+        }
+        .password-strength .segment {
+            height: 4px; border-radius: 2px;
+            background: rgba(255,255,255,0.08);
+            transition: background .15s;
+        }
+        .password-strength[data-score="1"] .segment:nth-child(-n+1) { background: #ef4444; }
+        .password-strength[data-score="2"] .segment:nth-child(-n+2) { background: #f97316; }
+        .password-strength[data-score="3"] .segment:nth-child(-n+3) { background: #eab308; }
+        .password-strength[data-score="4"] .segment:nth-child(-n+4) { background: #22c55e; }
+        .password-strength .label {
+            font-size: 11px; font-weight: 800; color: #94a3b8;
+            letter-spacing: 0.5px; text-transform: uppercase;
+        }
+        .password-strength[data-score="1"] .label { color: #fca5a5; }
+        .password-strength[data-score="2"] .label { color: #fdba74; }
+        .password-strength[data-score="3"] .label { color: #fde047; }
+        .password-strength[data-score="4"] .label { color: #86efac; }
+
+        /* Trust footer inside auth modal */
+        .auth-trust {
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+            margin-top: 14px; padding-top: 14px;
+            border-top: 1px solid rgba(255,255,255,0.06);
+            font-size: 11px; color: #64748b; font-weight: 700;
+            letter-spacing: 0.3px;
+        }
+        .auth-trust svg { width: 12px; height: 12px; }
+
+        /* Loading spinner (used inside buttons during submit) */
+        .btn-spinner {
+            display: inline-block; width: 16px; height: 16px;
+            border: 2.5px solid rgba(255,255,255,0.35);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 
     <!-- Photo picker modal (shown to existing users without an avatar) -->
@@ -1041,6 +1125,43 @@
             }
             finally { btn.disabled = false; btn.innerText = originalTxt; }
         });
+
+        // ---------- Auth UX helpers: show/hide password + strength meter ----------
+        document.querySelectorAll('.password-toggle[data-target="prev"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const input = btn.parentElement.querySelector('input');
+                if (!input) return;
+                const showing = input.type === 'text';
+                input.type = showing ? 'password' : 'text';
+                btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+                // Swap the icon between "eye" and "eye-off"
+                btn.innerHTML = showing
+                    ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`
+                    : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+                input.focus();
+            });
+        });
+
+        function passwordScore(pw) {
+            if (!pw) return 0;
+            let s = 0;
+            if (pw.length >= 6)  s++;
+            if (pw.length >= 10) s++;
+            if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) s++;
+            if (/\d/.test(pw) && /[^A-Za-z0-9]/.test(pw)) s++;
+            return Math.min(4, s);
+        }
+        const strengthLabels = ['Enter a password', 'Too weak', 'Weak', 'Strong', 'Excellent'];
+        const signupPwd = document.getElementById('signup-password');
+        if (signupPwd) {
+            signupPwd.addEventListener('input', () => {
+                const score = passwordScore(signupPwd.value);
+                const el = document.getElementById('pwd-strength');
+                const lbl = document.getElementById('pwd-strength-label');
+                if (el) el.setAttribute('data-score', String(score));
+                if (lbl) lbl.textContent = strengthLabels[score] || strengthLabels[0];
+            });
+        }
 
         document.getElementById('signup-form').addEventListener('submit', async (e) => {
             e.preventDefault();
