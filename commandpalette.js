@@ -25,7 +25,8 @@
         { title: 'Typing Test',    sub: 'Measure your WPM and accuracy',        icon: '⌨️', href: '/typingtest/',tags: 'typing wpm speed test zen' },
         { title: 'MCQ Quiz',       sub: '10 categories of quick-fire quizzes',  icon: '🧠', href: '/mcqquiz/',   tags: 'quiz mcq brain trivia' },
         { title: 'Signature',      sub: 'Generate a branded email signature',   icon: '✉️', href: '/signature/', tags: 'signature email brand' },
-        { title: 'Admin Dashboard',sub: 'Manage users & results (restricted)',  icon: '🛡️', href: '/admin/',     tags: 'admin dashboard restricted' },
+        // Admin is intentionally excluded — it lives behind a password gate,
+        // and surfacing it in the palette exposes the endpoint to non-admins.
     ];
 
     function injectMarkup() {
