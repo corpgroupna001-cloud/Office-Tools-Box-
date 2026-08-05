@@ -1,0 +1,245 @@
+/* ============================================================
+   WorkSuite — shared design system
+   Include on every page BEFORE any page-specific stylesheets:
+     <link rel="stylesheet" href="/design-system.css">
+   Purely additive: new classes + global refinements that
+   improve every page without conflicting with existing styles.
+   ============================================================ */
+
+:root {
+    /* Colour tokens — deep navy base + electric blue primary + accent gradients */
+    --ws-bg:          #0b1120;
+    --ws-bg-2:        #0f172a;
+    --ws-surface:     rgba(255, 255, 255, 0.06);
+    --ws-surface-2:   rgba(255, 255, 255, 0.10);
+    --ws-border:      rgba(255, 255, 255, 0.12);
+    --ws-border-2:    rgba(255, 255, 255, 0.18);
+
+    --ws-text:        #f1f5f9;
+    --ws-text-muted:  #94a3b8;
+    --ws-text-dim:    #64748b;
+
+    --ws-primary:     #3b82f6;
+    --ws-primary-2:   #6366f1;
+    --ws-primary-glow: 0 8px 30px rgba(59,130,246,0.5);
+
+    --ws-success:     #10b981;
+    --ws-warning:     #f59e0b;
+    --ws-danger:      #ef4444;
+
+    --ws-grad-primary:  linear-gradient(135deg,#3b82f6,#6366f1);
+    --ws-grad-cool:     linear-gradient(135deg,#06b6d4,#3b82f6);
+    --ws-grad-warm:     linear-gradient(135deg,#f97316,#ef4444);
+    --ws-grad-emerald:  linear-gradient(135deg,#10b981,#059669);
+    --ws-grad-danger:   linear-gradient(135deg,#f43f5e,#dc2626);
+
+    /* Radii, shadows, motion */
+    --ws-r-sm: 10px;
+    --ws-r-md: 16px;
+    --ws-r-lg: 24px;
+    --ws-r-xl: 32px;
+    --ws-r-pill: 999px;
+
+    --ws-shadow-sm: 0 4px 12px rgba(0,0,0,0.25);
+    --ws-shadow-md: 0 12px 32px rgba(0,0,0,0.35);
+    --ws-shadow-lg: 0 24px 60px rgba(0,0,0,0.45);
+
+    --ws-motion:       160ms cubic-bezier(.2,.9,.3,1);
+    --ws-motion-slow:  280ms cubic-bezier(.2,.9,.3,1);
+    --ws-ease-spring:  cubic-bezier(.34, 1.56, .64, 1);
+}
+
+/* ---------- Global refinements — apply on EVERY page ---------- */
+
+html { scroll-behavior: smooth; }
+
+body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+/* Highlight colour matches the primary */
+::selection {
+    background: rgba(99, 102, 241, 0.45);
+    color: #fff;
+}
+
+/* Beautiful thin scrollbars — dark, minimal, subtle hover glow */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.14) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.14);
+    border-radius: 999px;
+    transition: background var(--ws-motion);
+}
+*::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.28); }
+
+/* Consistent, visible keyboard focus ring — good for accessibility */
+:focus-visible {
+    outline: 2px solid #60a5fa;
+    outline-offset: 2px;
+    border-radius: var(--ws-r-sm);
+}
+
+/* Respect the OS "reduce motion" pref */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ---------- Components — opt-in via .ws-* classes ---------- */
+
+.ws-card {
+    background: var(--ws-surface);
+    border: 1px solid var(--ws-border);
+    border-radius: var(--ws-r-lg);
+    padding: 24px;
+    box-shadow: var(--ws-shadow-md);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    color: var(--ws-text);
+    transition: transform var(--ws-motion), border-color var(--ws-motion);
+}
+.ws-card-strong {
+    background: var(--ws-surface-2);
+    border-color: var(--ws-border-2);
+    box-shadow: var(--ws-shadow-lg);
+}
+
+.ws-btn {
+    display: inline-flex;
+    align-items: center; justify-content: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border-radius: var(--ws-r-md);
+    font-family: inherit; font-weight: 800; font-size: 14px;
+    color: var(--ws-text);
+    background: rgba(255,255,255,0.08);
+    border: 1px solid var(--ws-border);
+    cursor: pointer;
+    transition: transform var(--ws-motion), background var(--ws-motion), box-shadow var(--ws-motion);
+    text-decoration: none;
+    line-height: 1.2;
+}
+.ws-btn:hover:not(:disabled) { background: rgba(255,255,255,0.14); transform: translateY(-1px); }
+.ws-btn:active:not(:disabled) { transform: translateY(0); }
+.ws-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ws-btn-primary {
+    background: var(--ws-grad-primary);
+    box-shadow: var(--ws-primary-glow);
+    border-color: transparent;
+}
+.ws-btn-primary:hover:not(:disabled) {
+    box-shadow: 0 12px 40px rgba(59,130,246,0.65);
+    transform: translateY(-2px);
+}
+.ws-btn-danger {
+    background: var(--ws-grad-danger);
+    box-shadow: 0 8px 24px rgba(244,63,94,0.45);
+    border-color: transparent;
+}
+.ws-btn-ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--ws-text-muted);
+}
+.ws-btn-ghost:hover:not(:disabled) { color: var(--ws-text); background: rgba(255,255,255,0.06); }
+
+.ws-input {
+    width: 100%;
+    padding: 14px 18px;
+    border-radius: var(--ws-r-md);
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--ws-border);
+    color: var(--ws-text);
+    font-family: inherit; font-weight: 600; font-size: 14px;
+    transition: border-color var(--ws-motion), background var(--ws-motion), box-shadow var(--ws-motion);
+    outline: none;
+}
+.ws-input::placeholder { color: var(--ws-text-dim); }
+.ws-input:focus {
+    border-color: var(--ws-primary);
+    background: rgba(255,255,255,0.08);
+    box-shadow: 0 0 0 4px rgba(59,130,246,0.18);
+}
+
+.ws-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    border-radius: var(--ws-r-pill);
+    background: rgba(255,255,255,0.08);
+    border: 1px solid var(--ws-border);
+    font-size: 11px; font-weight: 800; letter-spacing: 0.4px;
+    color: var(--ws-text-muted);
+    text-transform: uppercase;
+}
+.ws-badge-success { background: rgba(16,185,129,0.18); color: #6ee7b7; border-color: rgba(16,185,129,0.35); }
+.ws-badge-warning { background: rgba(245,158,11,0.18); color: #fcd34d; border-color: rgba(245,158,11,0.35); }
+.ws-badge-danger  { background: rgba(239,68,68,0.18);  color: #fca5a5; border-color: rgba(239,68,68,0.35); }
+
+.ws-hr {
+    height: 1px; width: 100%;
+    background: linear-gradient(90deg, transparent, var(--ws-border), transparent);
+    border: 0; margin: 20px 0;
+}
+
+/* Skeleton loader — for shimmering "loading..." placeholders */
+.ws-skeleton {
+    background: linear-gradient(90deg,
+        rgba(255,255,255,0.05) 0%,
+        rgba(255,255,255,0.12) 50%,
+        rgba(255,255,255,0.05) 100%);
+    background-size: 200% 100%;
+    border-radius: var(--ws-r-sm);
+    animation: ws-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes ws-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* Empty-state block — e.g. "no contacts yet" */
+.ws-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--ws-text-muted);
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+.ws-empty .ws-empty-icon {
+    font-size: 40px; opacity: 0.7;
+    filter: drop-shadow(0 4px 12px rgba(0,0,0,0.3));
+}
+.ws-empty .ws-empty-title { font-weight: 800; color: var(--ws-text); font-size: 16px; }
+.ws-empty .ws-empty-sub { font-size: 13px; max-width: 320px; line-height: 1.5; }
+
+/* Entry animations — apply with .ws-in-* on any element */
+@keyframes ws-fade-in-up {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: none; }
+}
+@keyframes ws-scale-in {
+    from { opacity: 0; transform: scale(0.94); }
+    to   { opacity: 1; transform: none; }
+}
+.ws-in-up    { animation: ws-fade-in-up var(--ws-motion-slow) both; }
+.ws-in-scale { animation: ws-scale-in    var(--ws-motion-slow) var(--ws-ease-spring) both; }
+
+/* Live/pulse dot — reusable indicator */
+.ws-live-dot {
+    display: inline-block;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--ws-success);
+    box-shadow: 0 0 8px rgba(16,185,129,0.8);
+    animation: ws-live-pulse 1.8s ease-in-out infinite;
+}
+@keyframes ws-live-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
