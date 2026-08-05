@@ -164,6 +164,91 @@
             font-size: 11px; font-weight: 900;
         }
         .tool-stat .stat-badge.new { background: rgba(244,63,94,0.2); color: #fda4af; }
+
+        /* Recent activity feed (below the tool grid) */
+        .activity-section { margin-top: 56px; }
+        .activity-head {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        .activity-head h2 {
+            font-size: 22px; font-weight: 900; color: #f8fafc;
+            display: flex; align-items: center; gap: 10px; letter-spacing: -0.01em;
+        }
+        .activity-head .refresh-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-size: 12px; font-weight: 700; color: #94a3b8;
+            padding: 6px 12px; border-radius: 999px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.10);
+            cursor: pointer;
+            transition: color .15s, background .15s;
+        }
+        .activity-head .refresh-btn:hover { color: #fff; background: rgba(255,255,255,0.12); }
+        .activity-head .refresh-btn.spinning svg { animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .activity-list {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            padding: 8px;
+            overflow: hidden;
+        }
+        .activity-row {
+            display: flex; align-items: center; gap: 14px;
+            padding: 14px 16px;
+            border-radius: 16px;
+            transition: background .15s;
+        }
+        .activity-row:hover { background: rgba(255,255,255,0.04); }
+        .activity-row + .activity-row { border-top: 1px solid rgba(255,255,255,0.05); }
+        .activity-icon {
+            width: 42px; height: 42px; border-radius: 14px;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 16px; font-weight: 900; color: #fff;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.2);
+            flex-shrink: 0; overflow: hidden;
+        }
+        .activity-icon img { width: 100%; height: 100%; object-fit: cover; }
+        .activity-body { flex: 1; min-width: 0; }
+        .activity-line {
+            font-size: 14px; color: #e2e8f0; font-weight: 700;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .activity-line b { color: #f8fafc; font-weight: 900; }
+        .activity-line .metric {
+            color: #93c5fd; font-weight: 900; margin: 0 3px;
+        }
+        .activity-line .metric.warm  { color: #fdba74; }
+        .activity-line .metric.emerald { color: #6ee7b7; }
+        .activity-sub {
+            font-size: 12px; color: #64748b; font-weight: 700;
+            margin-top: 2px;
+        }
+        .activity-time {
+            font-size: 11px; font-weight: 700; color: #94a3b8;
+            flex-shrink: 0;
+        }
+        .activity-empty {
+            text-align: center; padding: 40px 20px;
+            color: #94a3b8; font-size: 13px; font-weight: 600;
+        }
+        .activity-loading {
+            padding: 8px;
+        }
+        .activity-loading .row {
+            display: flex; align-items: center; gap: 14px;
+            padding: 14px 16px;
+        }
+        .activity-loading .row + .row { border-top: 1px solid rgba(255,255,255,0.05); }
+        .activity-loading .sk-icon { width: 42px; height: 42px; border-radius: 14px; background: rgba(255,255,255,0.06); }
+        .activity-loading .sk-lines { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+        .activity-loading .sk-line { height: 12px; border-radius: 6px; background: rgba(255,255,255,0.06); }
+        .activity-loading .sk-line.short { width: 40%; }
+        .activity-loading .row { animation: pulse-op 1.5s ease-in-out infinite; }
+        @keyframes pulse-op { 0%,100% { opacity: 0.6 } 50% { opacity: 0.9 } }
     </style>
 </head>
 <body class="min-h-screen flex flex-col">
@@ -567,6 +652,27 @@
             </a>
 
         </div>
+
+        <!-- Recent Activity Feed — real-time team pulse -->
+        <div id="activity-section" class="activity-section" style="display:none;">
+            <div class="activity-head">
+                <h2>
+                    <span class="hero-eyebrow" style="margin:0;padding:4px 10px;font-size:11px;"><span class="live-dot"></span>Live</span>
+                    Team activity
+                </h2>
+                <button id="activity-refresh" class="refresh-btn" onclick="loadActivity()" type="button">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                    <span>Refresh</span>
+                </button>
+            </div>
+            <div id="activity-list" class="activity-list">
+                <div class="activity-loading">
+                    <div class="row"><div class="sk-icon"></div><div class="sk-lines"><div class="sk-line"></div><div class="sk-line short"></div></div></div>
+                    <div class="row"><div class="sk-icon"></div><div class="sk-lines"><div class="sk-line"></div><div class="sk-line short"></div></div></div>
+                    <div class="row"><div class="sk-icon"></div><div class="sk-lines"><div class="sk-line"></div><div class="sk-line short"></div></div></div>
+                </div>
+            </div>
+        </div>
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -826,6 +932,9 @@
             loadOnlineTeam().catch(() => {});
             setInterval(() => loadOnlineTeam().catch(() => {}), 20000);
             loadPersonalStats().catch(() => {});
+            loadActivity().catch(() => {});
+            // Refresh feed every 45s so it feels alive without hammering the DB
+            setInterval(() => loadActivity(true).catch(() => {}), 45000);
         }
 
         function personalizeHero(name) {
@@ -940,6 +1049,131 @@
                     }
                 }
             } catch (e) { /* silent */ }
+        }
+
+        // ---------- Team activity feed ----------
+        let _profileCache = new Map();
+        async function _profileByIds(ids) {
+            const need = [...new Set(ids.filter(Boolean).filter(id => !_profileCache.has(id)))];
+            if (need.length && rootSb) {
+                try {
+                    const { data } = await rootSb.from('profiles')
+                        .select('id, full_name, email, avatar_url')
+                        .in('id', need);
+                    (data || []).forEach(p => _profileCache.set(p.id, p));
+                } catch {}
+            }
+            return _profileCache;
+        }
+        function _actTimeAgo(iso) {
+            const diff = Date.now() - new Date(iso).getTime();
+            if (isNaN(diff)) return '';
+            if (diff < 60_000) return 'just now';
+            if (diff < 3_600_000) return Math.floor(diff/60_000) + 'm ago';
+            if (diff < 86_400_000) return Math.floor(diff/3_600_000) + 'h ago';
+            const d = new Date(iso);
+            const days = Math.floor(diff / 86_400_000);
+            if (days < 7) return days + 'd ago';
+            return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        }
+        function _actEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+        function _actAvatar(profile) {
+            if (!profile) return `<div class="activity-icon" style="background:linear-gradient(135deg,#64748b,#475569);">?</div>`;
+            if (profile.avatar_url) return `<div class="activity-icon"><img src="${_actEsc(profile.avatar_url)}"></div>`;
+            const name = profile.full_name || profile.email || '?';
+            const initial = name.charAt(0).toUpperCase();
+            const colors = ['#3b82f6','#6366f1','#8b5cf6','#ec4899','#f43f5e','#f97316','#22c55e','#14b8a6','#0ea5e9'];
+            let h = 0; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffffffff;
+            const bg = colors[Math.abs(h) % colors.length];
+            return `<div class="activity-icon" style="background:linear-gradient(135deg,${bg},#6366f1);">${_actEsc(initial)}</div>`;
+        }
+
+        async function loadActivity(silent) {
+            if (!rootSb || !currentUser) return;
+            const btn = document.getElementById('activity-refresh');
+            if (btn && !silent) btn.classList.add('spinning');
+            const section = document.getElementById('activity-section');
+            const listEl = document.getElementById('activity-list');
+            try {
+                section.style.display = 'block';
+                // Pull recent events from the three sources in parallel
+                const [tests, quizzes, messages] = await Promise.all([
+                    rootSb.from('test_results')
+                        .select('user_id, full_name, wpm, accuracy, created_at')
+                        .order('created_at', { ascending: false }).limit(10),
+                    rootSb.from('quiz_results')
+                        .select('user_id, full_name, score, total, accuracy, category_label, created_at')
+                        .order('created_at', { ascending: false }).limit(10),
+                    rootSb.from('messages')
+                        .select('sender_id, recipient_id, body, created_at')
+                        .or(`sender_id.eq.${currentUser.id},recipient_id.eq.${currentUser.id}`)
+                        .order('created_at', { ascending: false }).limit(10),
+                ]);
+                const events = [];
+                (tests.data || []).forEach(t => events.push({
+                    kind: 'typing', at: t.created_at, actor: t.user_id, fallbackName: t.full_name,
+                    payload: t
+                }));
+                (quizzes.data || []).forEach(q => events.push({
+                    kind: 'quiz', at: q.created_at, actor: q.user_id, fallbackName: q.full_name,
+                    payload: q
+                }));
+                (messages.data || []).forEach(m => {
+                    // Skip our own outgoing messages in the feed (chat page shows those); keep incoming.
+                    if (m.sender_id === currentUser.id) return;
+                    // Skip internal call-event markers
+                    if (typeof m.body === 'string' && m.body.startsWith('__CALL__::')) return;
+                    events.push({
+                        kind: 'message', at: m.created_at, actor: m.sender_id,
+                        payload: m
+                    });
+                });
+                events.sort((a, b) => (a.at < b.at ? 1 : -1));
+                const top = events.slice(0, 12);
+
+                // Batch-fetch actor profiles
+                await _profileByIds(top.map(e => e.actor));
+
+                if (top.length === 0) {
+                    listEl.innerHTML = `<div class="activity-empty">No team activity yet — be the first to take a typing test or send a message.</div>`;
+                    return;
+                }
+
+                listEl.innerHTML = top.map(e => {
+                    const profile = _profileCache.get(e.actor) || { full_name: e.fallbackName };
+                    const name = profile?.full_name || e.fallbackName || 'Someone';
+                    const time = _actTimeAgo(e.at);
+                    let line = '', sub = '';
+                    if (e.kind === 'typing') {
+                        const p = e.payload;
+                        line = `<b>${_actEsc(name)}</b> finished a typing test — <span class="metric">${p.wpm} WPM</span> · <span class="metric emerald">${p.accuracy}%</span>`;
+                        sub = 'ZenType';
+                    } else if (e.kind === 'quiz') {
+                        const p = e.payload;
+                        line = `<b>${_actEsc(name)}</b> scored <span class="metric warm">${p.score}/${p.total}</span> in <b>${_actEsc(p.category_label || 'Quiz')}</b>`;
+                        sub = 'MCQ Quiz';
+                    } else {
+                        const p = e.payload;
+                        const preview = (p.body || '').replace(/\s+/g, ' ').slice(0, 60);
+                        line = `<b>${_actEsc(name)}</b> messaged you: "${_actEsc(preview)}"`;
+                        sub = 'Chat';
+                    }
+                    return `
+                        <a href="${e.kind === 'message' ? '/chat/#thread=' + encodeURIComponent(e.actor) : (e.kind === 'quiz' ? '/mcqquiz/' : '/typingtest/')}" class="activity-row" style="text-decoration:none;">
+                            ${_actAvatar(profile)}
+                            <div class="activity-body">
+                                <div class="activity-line">${line}</div>
+                                <div class="activity-sub">${_actEsc(sub)}</div>
+                            </div>
+                            <div class="activity-time">${_actEsc(time)}</div>
+                        </a>`;
+                }).join('');
+            } catch (e) {
+                console.warn('activity load failed', e);
+                listEl.innerHTML = `<div class="activity-empty">Couldn't load activity right now.</div>`;
+            } finally {
+                if (btn) setTimeout(() => btn.classList.remove('spinning'), 300);
+            }
         }
 
         function showCompanyModal() {
