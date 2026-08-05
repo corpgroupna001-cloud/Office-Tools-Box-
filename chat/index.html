@@ -89,44 +89,87 @@
 
         /* Contact row */
         .contact {
-            display: flex;
-            align-items: center;
-            gap: 12px;
+            display: flex; align-items: center; gap: 12px;
             padding: 10px 12px;
             border-radius: 14px;
             cursor: pointer;
-            transition: background 0.15s ease;
+            transition: background .15s ease, transform .1s ease;
+            border: 1px solid transparent;
             position: relative;
         }
         .contact:hover { background: rgba(255,255,255,0.06); }
         .contact.active {
             background: rgba(59, 130, 246, 0.18);
-            border: 1px solid rgba(96, 165, 250, 0.35);
+            border-color: rgba(96, 165, 250, 0.35);
         }
         .contact-avatar {
-            width: 42px; height: 42px;
-            border-radius: 12px;
+            width: 44px; height: 44px;
+            border-radius: 14px;
             display: flex; align-items: center; justify-content: center;
             font-weight: 900; color: white;
             flex-shrink: 0;
             position: relative;
-            font-size: 15px;
+            font-size: 16px;
             letter-spacing: 0.02em;
+        }
+        /* Green ring around avatar when online — WhatsApp / iMessage style */
+        .contact-avatar.is-online::after {
+            content: ''; position: absolute; inset: -3px;
+            border-radius: inherit; border: 2px solid #10b981;
+            box-shadow: 0 0 0 1px rgba(16,185,129,0.25);
+            pointer-events: none;
         }
         .presence-dot {
             position: absolute;
             bottom: -2px; right: -2px;
             width: 12px; height: 12px;
             border-radius: 50%;
-            border: 2.5px solid #1e293b;
+            border: 2.5px solid #0f172a;
             background: transparent;
         }
         .presence-dot.online {
             background: #22c55e;
             box-shadow: 0 0 10px rgba(34, 197, 94, 0.7);
         }
-        .presence-dot.offline {
-            background: #64748b;
+        .presence-dot.offline { background: #64748b; }
+
+        /* Contact list rich metadata */
+        .contact-body { flex: 1; min-width: 0; }
+        .contact-top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .contact-name {
+            font-weight: 800; color: #f1f5f9; font-size: 14px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .contact-time {
+            font-size: 11px; font-weight: 700; color: #94a3b8;
+            flex-shrink: 0; white-space: nowrap;
+        }
+        .contact.has-unread .contact-time { color: #60a5fa; }
+        .contact-bottom-row {
+            display: flex; align-items: center; justify-content: space-between; gap: 8px;
+            margin-top: 2px;
+        }
+        .contact-preview {
+            font-size: 12.5px; color: #94a3b8; font-weight: 600;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            flex: 1;
+        }
+        .contact.has-unread .contact-preview { color: #e2e8f0; font-weight: 700; }
+        .contact-preview .mine-prefix { color: #64748b; margin-right: 4px; }
+
+        /* "Online now" section header inside contacts list */
+        .contacts-section-head {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 12px 6px; margin-top: 4px;
+        }
+        .contacts-section-head .lbl {
+            font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px;
+            color: #94a3b8;
+        }
+        .contacts-section-head .cnt {
+            font-size: 10px; font-weight: 900;
+            padding: 2px 8px; border-radius: 999px;
+            background: rgba(16,185,129,.18); color: #6ee7b7;
         }
 
         /* Message bubbles — proper WhatsApp style with anchored time */
@@ -182,21 +225,52 @@
             padding-right: 4px;
         }
 
-        /* Day separator (WhatsApp-style pill in the middle) */
+        /* Day separator — sticky pill that stays pinned while scrolling */
         .day-sep {
             display: flex;
             justify-content: center;
-            margin: 12px 0 4px 0;
+            margin: 14px 0 6px 0;
             width: 100%;
+            position: sticky;
+            top: 6px;
+            z-index: 3;
+            pointer-events: none;
         }
         .day-sep span {
-            background: rgba(0,0,0,0.4);
-            color: rgba(255,255,255,0.7);
+            background: rgba(11,17,32,0.75);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            color: rgba(255,255,255,0.82);
             font-size: 11px;
-            font-weight: 700;
-            padding: 4px 12px;
-            border-radius: 8px;
-            letter-spacing: 0.02em;
+            font-weight: 800;
+            padding: 5px 12px;
+            border-radius: 999px;
+            letter-spacing: 0.04em;
+            border: 1px solid rgba(255,255,255,0.08);
+            text-transform: uppercase;
+        }
+
+        /* iMessage-style consecutive-message grouping */
+        .msg-row.consec { margin-top: 0; margin-bottom: 0; }
+        .msg-row.first-of-burst { margin-top: 8px; }
+        .msg-row.last-of-burst  { margin-bottom: 6px; }
+
+        /* When same-sender messages are consecutive, tighten bubble corners
+           so they visually fuse together (like iMessage). */
+        .msg-row.consec.theirs .msg-bubble.msg-recv { border-top-left-radius: 4px; }
+        .msg-row.consec.mine   .msg-bubble.msg-sent { border-top-right-radius: 4px; }
+        .msg-row:not(.last-of-burst).theirs .msg-bubble.msg-recv { border-bottom-left-radius: 4px; }
+        .msg-row:not(.last-of-burst).mine   .msg-bubble.msg-sent { border-bottom-right-radius: 4px; }
+
+        /* Hide the time meta on non-last bubbles of a burst — only the last
+           one shows the timestamp (like iMessage). */
+        .msg-row:not(.last-of-burst) .msg-bubble .msg-meta { display: none; }
+        .msg-row:not(.last-of-burst) .msg-bubble { padding-bottom: 8px; }
+
+        /* Sender name shown once at the top of a received-message burst */
+        .msg-sender-name {
+            font-size: 11px; font-weight: 800;
+            color: #93c5fd; margin: 2px 0 2px 6px;
         }
 
         /* Call event in chat (WhatsApp style pill) */
@@ -416,22 +490,29 @@
         .receipt-sent  { color: rgba(255,255,255,0.7); }
         .receipt-read  { color: #6ee7b7; }
 
-        /* Reactions */
+        /* Reactions — iMessage style, floating on the bubble edge */
         .msg-reactions {
-            display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap;
+            display: flex; gap: 3px; margin-top: -6px; margin-bottom: 4px;
+            flex-wrap: wrap; z-index: 2; position: relative;
+            padding: 0 4px;
         }
         .reaction-chip {
-            padding: 2px 8px;
+            padding: 2px 7px;
             border-radius: 999px;
-            background: rgba(0,0,0,0.35);
-            border: 1px solid rgba(255,255,255,0.15);
-            font-size: 12px;
+            background: rgba(15,23,42,0.9);
+            backdrop-filter: blur(10px);
+            border: 1.5px solid rgba(255,255,255,0.12);
+            font-size: 13px;
             cursor: pointer;
             display: inline-flex; gap: 4px; align-items: center;
             transition: all 0.15s;
+            box-shadow: 0 4px 12px rgba(0,0,0,.35);
         }
-        .reaction-chip:hover { transform: scale(1.1); }
-        .reaction-chip.mine { background: rgba(96, 165, 250, 0.3); border-color: #60a5fa; }
+        .reaction-chip:hover { transform: scale(1.15); border-color: rgba(255,255,255,.25); }
+        .reaction-chip.mine {
+            background: linear-gradient(135deg, rgba(96,165,250,0.35), rgba(139,92,246,0.35));
+            border-color: rgba(147, 197, 253, 0.7);
+        }
         .reaction-count { font-size: 10px; font-weight: 900; color: #cbd5e1; }
 
         .react-btn {
@@ -794,6 +875,9 @@
         let messageChannel = null;
         let callChannel = null;
         let unreadByUser = new Map();
+        let lastMsgByUser = new Map();      // Map<userId, { body, created_at, mine }>
+        let lastMsgSenderInThread = null;   // Track sender for burst-grouping in renderMessage
+        let lastMsgTimeInThread   = 0;
         let presenceOnline = new Set();       // Realtime channel members (in chat right now)
         let lastSeenById = new Map();         // Map<userId, ISO string> from profiles.last_seen_at
         let lastSeenPollTimer = null;
@@ -980,6 +1064,23 @@
                 document.getElementById('contacts-list').innerHTML = `<p class="text-center text-slate-400 text-xs font-bold py-8 px-3">No other employees found.<br><br>If you're expecting others, ask an admin to run <code class="bg-white/10 px-1 rounded">supabase-profiles-fix.sql</code> in Supabase to update the profile visibility policy.</p>`;
                 return;
             }
+            // Seed lastMsgByUser with the most recent message per contact so previews render on load.
+            try {
+                const { data: msgs } = await sb.from('messages')
+                    .select('sender_id, recipient_id, body, created_at')
+                    .or(`sender_id.eq.${currentUser.id},recipient_id.eq.${currentUser.id}`)
+                    .order('created_at', { ascending: false })
+                    .limit(500);
+                (msgs || []).forEach(m => {
+                    const peer = m.sender_id === currentUser.id ? m.recipient_id : m.sender_id;
+                    if (!lastMsgByUser.has(peer)) {
+                        lastMsgByUser.set(peer, {
+                            body: m.body, created_at: m.created_at,
+                            mine: m.sender_id === currentUser.id
+                        });
+                    }
+                });
+            } catch (e) { console.warn('seed lastMsgByUser failed', e); }
             renderContacts();
         }
 
@@ -1012,6 +1113,64 @@
             return colors[i];
         }
 
+        function fmtRelativeTime(iso) {
+            if (!iso) return '';
+            const t = new Date(iso).getTime();
+            if (isNaN(t)) return '';
+            const diff = Date.now() - t;
+            if (diff < 60_000) return 'now';
+            if (diff < 3_600_000) return Math.floor(diff/60_000) + 'm';
+            const today = new Date(); today.setHours(0,0,0,0);
+            const d = new Date(iso); d.setHours(0,0,0,0);
+            if (d.getTime() === today.getTime()) return fmtTime(iso);
+            const days = Math.round((today - d) / 86_400_000);
+            if (days === 1) return 'yst';
+            if (days < 7) return d.toLocaleDateString('en-IN', { weekday: 'short' });
+            return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        }
+        function previewText(m) {
+            if (!m) return '';
+            if (typeof m.body === 'string' && m.body.startsWith('__CALL__::')) {
+                const parts = m.body.split('::');
+                return (parts[1] === 'video' ? '📹 Video call' : '📞 Voice call');
+            }
+            if (m.body === '__DELETED__') return '🗑️ Message deleted';
+            return (m.body || '').replace(/\s+/g, ' ').slice(0, 60);
+        }
+
+        function contactRowHtml(c) {
+            const name = c.full_name || c.email;
+            const initial = (name || '?').charAt(0).toUpperCase();
+            const color = pickColor(name || '');
+            const unread = unreadByUser.get(c.id) || 0;
+            const online = isOnline(c.id);
+            const avatarInner = c.avatar_url
+                ? `<img src="${c.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;">`
+                : initial;
+            const last = lastMsgByUser.get(c.id);
+            const preview = last
+                ? (last.mine ? `<span class="mine-prefix">You:</span>` : '') + escapeHtml(previewText(last))
+                : escapeHtml(c.email || '');
+            const timeStr = last ? fmtRelativeTime(last.created_at) : '';
+            return `
+                <div class="contact ${activeContact?.id === c.id ? 'active' : ''} ${unread > 0 ? 'has-unread' : ''}" data-id="${c.id}">
+                    <div class="contact-avatar ${online ? 'is-online' : ''}" style="background:${color};overflow:hidden;">
+                        ${avatarInner}
+                        <span class="presence-dot ${online ? 'online' : 'offline'}"></span>
+                    </div>
+                    <div class="contact-body">
+                        <div class="contact-top-row">
+                            <span class="contact-name">${escapeHtml(name || '')}</span>
+                            <span class="contact-time">${timeStr}</span>
+                        </div>
+                        <div class="contact-bottom-row">
+                            <span class="contact-preview">${preview}</span>
+                            ${unread > 0 ? `<div class="unread-badge">${unread}</div>` : ''}
+                        </div>
+                    </div>
+                </div>`;
+        }
+
         function renderContacts() {
             const search = document.getElementById('contact-search').value.trim().toLowerCase();
             const list = document.getElementById('contacts-list');
@@ -1023,29 +1182,29 @@
                 list.innerHTML = '<p class="text-center text-slate-400 text-sm font-bold py-8">No employees yet</p>';
                 return;
             }
-            list.innerHTML = filtered.map(c => {
-                const name = c.full_name || c.email;
-                const initial = name.charAt(0).toUpperCase();
-                const color = pickColor(name);
-                const unread = unreadByUser.get(c.id) || 0;
-                const online = isOnline(c.id);
-                const avatarInner = c.avatar_url
-                    ? `<img src="${c.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;">`
-                    : initial;
-                return `
-                    <div class="contact ${activeContact?.id === c.id ? 'active' : ''}" data-id="${c.id}">
-                        <div class="contact-avatar" style="background:${color};overflow:hidden;">
-                            ${avatarInner}
-                            <span class="presence-dot ${online ? 'online' : 'offline'}"></span>
-                        </div>
-                        <div class="flex-1 min-w-0">
-                            <p class="font-black text-white text-sm truncate">${escapeHtml(name)}</p>
-                            <p class="text-slate-400 text-xs truncate">${escapeHtml(c.email || '')}</p>
-                        </div>
-                        ${unread > 0 ? `<div class="unread-badge">${unread}</div>` : ''}
-                    </div>
-                `;
-            }).join('');
+            // Sort by (has-unread desc, last-message time desc, name asc)
+            const sorted = filtered.slice().sort((a, b) => {
+                const uA = (unreadByUser.get(a.id) || 0) > 0 ? 1 : 0;
+                const uB = (unreadByUser.get(b.id) || 0) > 0 ? 1 : 0;
+                if (uA !== uB) return uB - uA;
+                const tA = lastMsgByUser.get(a.id)?.created_at || '';
+                const tB = lastMsgByUser.get(b.id)?.created_at || '';
+                if (tA !== tB) return tA < tB ? 1 : -1;
+                return (a.full_name || a.email || '').localeCompare(b.full_name || b.email || '');
+            });
+            // Split into online / offline groups
+            const online  = sorted.filter(c => isOnline(c.id));
+            const offline = sorted.filter(c => !isOnline(c.id));
+            let html = '';
+            if (online.length) {
+                html += `<div class="contacts-section-head"><span class="lbl">Online now</span><span class="cnt">${online.length}</span></div>`;
+                html += online.map(contactRowHtml).join('');
+            }
+            if (offline.length) {
+                html += `<div class="contacts-section-head"><span class="lbl">${online.length ? 'Team' : 'All contacts'}</span><span class="cnt" style="background:rgba(255,255,255,.08);color:#94a3b8;">${offline.length}</span></div>`;
+                html += offline.map(contactRowHtml).join('');
+            }
+            list.innerHTML = html;
             list.querySelectorAll('.contact').forEach(el => {
                 el.addEventListener('click', () => selectContact(el.dataset.id));
             });
@@ -1082,6 +1241,8 @@
             if (dot) avatar.appendChild(dot);
 
             lastRenderedDay = null;  // reset day separator tracking for new thread
+            lastMsgSenderInThread = null;
+            lastMsgTimeInThread = 0;
             await loadMessages(id);
             document.getElementById('msg-input').focus();
         }
@@ -1252,12 +1413,40 @@
 
             maybeDaySeparator(list, m.created_at);
 
+            // Burst grouping (iMessage style): consecutive same-sender messages
+            // within 60 seconds fuse together with tighter corners and no repeated timestamps.
+            const nowMs = new Date(m.created_at).getTime();
+            const isConsec = (lastMsgSenderInThread === (mine ? 'me' : m.sender_id))
+                             && (nowMs - lastMsgTimeInThread) < 60_000;
+
+            // Any previous row that was "last-of-burst" should stop being so, since
+            // this new row will now be the last of its burst.
+            if (isConsec) {
+                const prevRow = list.querySelector('.msg-row.last-of-burst:last-of-type');
+                if (prevRow) prevRow.classList.remove('last-of-burst');
+            }
+
             const row = document.createElement('div');
-            row.className = `msg-row ${mine ? 'mine' : 'theirs'}`;
+            row.className = `msg-row ${mine ? 'mine' : 'theirs'} last-of-burst`
+                + (isConsec ? ' consec' : ' first-of-burst');
+
+            // Show sender name once at the top of an incoming-message burst
+            if (!mine && !isConsec) {
+                const contact = allContacts.find(c => c.id === m.sender_id) || activeContact;
+                const senderName = contact ? (contact.full_name || contact.email) : 'Someone';
+                const nameEl = document.createElement('div');
+                nameEl.className = 'msg-sender-name';
+                nameEl.textContent = senderName;
+                list.appendChild(nameEl);
+            }
 
             const bubble = document.createElement('div');
             bubble.className = `msg-bubble ${mine ? 'msg-sent' : 'msg-recv'}`;
             if (m.id) bubble.dataset.msgId = m.id;
+
+            // Update burst trackers
+            lastMsgSenderInThread = mine ? 'me' : m.sender_id;
+            lastMsgTimeInThread   = nowMs;
 
             const time = fmtTime(m.created_at);
             const receipt = mine
@@ -1473,6 +1662,9 @@
                 created_at: new Date().toISOString()
             };
             renderMessage(msg);  // optimistic
+            // Update contact-list preview for this thread
+            lastMsgByUser.set(activeContact.id, { body, created_at: msg.created_at, mine: true });
+            renderContacts();
             const { error } = await sb.from('messages').insert({
                 sender_id: currentUser.id,
                 recipient_id: activeContact.id,
@@ -1492,6 +1684,8 @@
                     (payload) => {
                         const m = payload.new;
                         renderMessage(m);
+                        // Track last message for contact list preview
+                        lastMsgByUser.set(m.sender_id, { body: m.body, created_at: m.created_at, mine: false });
                         if (!activeContact || activeContact.id !== m.sender_id) {
                             const count = (unreadByUser.get(m.sender_id) || 0) + 1;
                             unreadByUser.set(m.sender_id, count);
@@ -1503,6 +1697,7 @@
                         } else {
                             // Currently viewing this chat — mark as read right away
                             markAsRead([m.id]);
+                            renderContacts();
                         }
                     })
                 .on('postgres_changes',
