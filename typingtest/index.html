@@ -6,7 +6,6 @@
     <title>ZenType - AI Motivational Typing Test</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="/presence.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
@@ -1178,7 +1177,6 @@
                 sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
                     auth: { persistSession: true, autoRefreshToken: true }
                 });
-                window.__WS_SB__ = sb; // share with presence.js
                 return { ok: true };
             } catch (e) {
                 console.error('Supabase init failed', e);
