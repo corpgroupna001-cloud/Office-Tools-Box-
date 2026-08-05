@@ -548,7 +548,7 @@
             <div id="chat-active" class="flex-1 flex flex-col hidden">
                 <!-- Chat header -->
                 <div class="px-4 py-3 border-b border-white/10 flex items-center justify-between" style="background: rgba(15,23,42,0.3);">
-                    <div class="flex items-center gap-3 min-w-0">
+                    <div id="chat-header-clickable" class="flex items-center gap-3 min-w-0 cursor-pointer hover:opacity-80 transition" title="View profile">
                         <div id="chat-avatar" class="contact-avatar" style="width:44px;height:44px;">
                             ?
                             <span id="chat-presence-dot" class="presence-dot offline"></span>
@@ -683,6 +683,43 @@
         </div>
     </div>
 
+    <!-- Profile modal (view profile of active contact) -->
+    <div id="profile-modal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(20px);">
+        <div class="glass-strong w-full max-w-sm rounded-[2rem] p-8 relative">
+            <button id="close-profile" class="absolute top-4 right-4 text-white/60 hover:text-white text-xl">✕</button>
+            <div class="flex flex-col items-center">
+                <div id="profile-avatar" class="contact-avatar" style="width:120px;height:120px;font-size:44px;margin-bottom:16px;">?</div>
+                <h3 id="profile-name" class="text-2xl font-black text-white text-center">—</h3>
+                <p id="profile-status" class="text-sm font-bold text-emerald-300 mt-1">—</p>
+                <div class="w-full mt-6 space-y-3">
+                    <div class="glass rounded-xl px-4 py-3">
+                        <p class="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">Email</p>
+                        <p id="profile-email" class="text-sm text-white font-semibold break-all">—</p>
+                    </div>
+                    <div id="profile-company-row" class="glass rounded-xl px-4 py-3 hidden">
+                        <p class="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">Company</p>
+                        <p id="profile-company" class="text-sm text-white font-semibold">—</p>
+                    </div>
+                    <div class="glass rounded-xl px-4 py-3">
+                        <p class="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">Last seen</p>
+                        <p id="profile-lastseen" class="text-sm text-white font-semibold">—</p>
+                    </div>
+                </div>
+                <div class="w-full mt-6 grid grid-cols-2 gap-3">
+                    <button id="profile-voice" class="rounded-xl py-3 font-black text-white text-sm" style="background: linear-gradient(135deg,#10b981,#059669);">📞 Voice</button>
+                    <button id="profile-video" class="rounded-xl py-3 font-black text-white text-sm" style="background: linear-gradient(135deg,#3b82f6,#6366f1);">📹 Video</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Message actions popup (right-click / long-press on a message) -->
+    <div id="msg-menu" class="fixed z-[70] hidden glass-strong rounded-xl p-1 shadow-2xl" style="min-width:180px;">
+        <button data-action="react" class="w-full text-left px-3 py-2 rounded-lg text-sm text-white hover:bg-white/10 flex items-center gap-2 font-semibold">😊 React</button>
+        <button data-action="copy"  class="w-full text-left px-3 py-2 rounded-lg text-sm text-white hover:bg-white/10 flex items-center gap-2 font-semibold">📋 Copy text</button>
+        <button data-action="delete" class="w-full text-left px-3 py-2 rounded-lg text-sm text-rose-300 hover:bg-rose-500/20 flex items-center gap-2 font-semibold hidden">🗑️ Delete for everyone</button>
+    </div>
+
     <script>
         // ============================================================
         // Chat + Call app — Supabase Realtime + WebRTC
@@ -797,9 +834,31 @@
             document.getElementById('auth-modal').classList.add('hidden');
             document.getElementById('auth-modal').classList.remove('flex');
             document.getElementById('app').classList.remove('hidden');
-            loadContacts();
+            loadContacts().then(() => handleUrlHash());
             subscribeToMessages();
             requestNotificationPermission();
+        }
+
+        // Handle #answer=<peerId>&video=<0|1> (from notifications.js) and #thread=<peerId>
+        let autoAcceptFrom = null;
+        function handleUrlHash() {
+            const h = (location.hash || '').replace(/^#/, '');
+            if (!h) return;
+            const params = new URLSearchParams(h);
+            const threadId = params.get('thread');
+            const answerFrom = params.get('answer');
+            const focusId = answerFrom || threadId;
+            if (focusId) {
+                const contact = allContacts.find(c => c.id === focusId);
+                if (contact) selectContact(focusId);
+            }
+            if (answerFrom) {
+                autoAcceptFrom = answerFrom;
+                showToast('📞', 'Connecting…', 'Answering call — please allow camera/mic if prompted.');
+                setTimeout(() => { if (autoAcceptFrom === answerFrom) autoAcceptFrom = null; }, 45000);
+            }
+            // Clean the hash so refresh doesn't retrigger
+            history.replaceState(null, '', location.pathname + location.search);
         }
         function onLoggedOut() {
             currentUser = null;
@@ -1142,18 +1201,35 @@
             const receipt = mine
                 ? (m.read_at ? '<span class="receipt receipt-read">✓✓</span>' : '<span class="receipt receipt-sent">✓</span>')
                 : '';
-            const body = m.deleted
-                ? '<i style="opacity:0.7">Message deleted</i>'
+            const isDeleted = m.body === '__DELETED__' || m.deleted;
+            const body = isDeleted
+                ? '<i style="opacity:0.7">🗑️ This message was deleted</i>'
                 : escapeHtml(m.body).replace(/\n/g, '<br>');
+            if (isDeleted) bubble.dataset.deleted = '1';
 
             // Time + receipt floated inline at end so short messages have them beside text
             bubble.innerHTML = `<span class="msg-body">${body}<span class="msg-meta">${time}${receipt}</span></span>`;
+
+            // Long-press / right-click / dblclick to open message menu
+            const openMenu = (ev) => {
+                ev.preventDefault();
+                openMessageMenu(m, mine, ev.clientX || (ev.touches && ev.touches[0]?.clientX) || 100,
+                                             ev.clientY || (ev.touches && ev.touches[0]?.clientY) || 100);
+            };
+            bubble.addEventListener('contextmenu', openMenu);
+            bubble.addEventListener('dblclick', openMenu);
+            let pressTimer = null;
+            bubble.addEventListener('touchstart', (e) => {
+                pressTimer = setTimeout(() => openMenu(e), 500);
+            }, { passive: true });
+            bubble.addEventListener('touchend',   () => clearTimeout(pressTimer));
+            bubble.addEventListener('touchmove',  () => clearTimeout(pressTimer));
 
             // React button + reactions container inside the row
             const wrapper = document.createElement('div');
             wrapper.className = 'msg-wrap';
             wrapper.appendChild(bubble);
-            if (m.id && !m.deleted) {
+            if (m.id && !isDeleted) {
                 const reactBtn = document.createElement('button');
                 reactBtn.className = 'react-btn';
                 reactBtn.title = 'Add reaction';
@@ -1210,6 +1286,117 @@
             list.scrollTop = list.scrollHeight;
         }
 
+        // ---------- Message actions menu (react / copy / delete) ----------
+        let menuFor = null;
+        function openMessageMenu(m, mine, x, y) {
+            menuFor = m;
+            const menu = document.getElementById('msg-menu');
+            // Hide delete for non-mine or already-deleted messages
+            const delBtn = menu.querySelector('[data-action="delete"]');
+            const isDeleted = m.body === '__DELETED__';
+            delBtn.classList.toggle('hidden', !mine || isDeleted);
+            const reactBtn = menu.querySelector('[data-action="react"]');
+            reactBtn.classList.toggle('hidden', isDeleted);
+            const copyBtn = menu.querySelector('[data-action="copy"]');
+            copyBtn.classList.toggle('hidden', isDeleted || (typeof m.body === 'string' && m.body.startsWith('__CALL__::')));
+            // Position with clamp so it doesn't overflow
+            menu.classList.remove('hidden');
+            const w = 200, h = 140;
+            const px = Math.min(window.innerWidth - w - 10, Math.max(10, x));
+            const py = Math.min(window.innerHeight - h - 10, Math.max(10, y));
+            menu.style.left = px + 'px';
+            menu.style.top  = py + 'px';
+        }
+        function closeMessageMenu() {
+            document.getElementById('msg-menu').classList.add('hidden');
+            menuFor = null;
+        }
+        document.addEventListener('click', (e) => {
+            const menu = document.getElementById('msg-menu');
+            if (menu.classList.contains('hidden')) return;
+            if (!menu.contains(e.target)) closeMessageMenu();
+        });
+        document.getElementById('msg-menu').addEventListener('click', async (e) => {
+            const btn = e.target.closest('button[data-action]');
+            if (!btn || !menuFor) return;
+            const action = btn.dataset.action;
+            const m = menuFor;
+            closeMessageMenu();
+            if (action === 'copy') {
+                try { await navigator.clipboard.writeText(m.body || ''); showToast('📋', 'Copied', 'Message copied to clipboard'); } catch {}
+            } else if (action === 'react') {
+                const bubbleEl = document.querySelector(`[data-msg-id="${m.id}"]`);
+                if (bubbleEl) openEmojiPicker(m.id, bubbleEl);
+            } else if (action === 'delete') {
+                if (!confirm('Delete this message for everyone?')) return;
+                try {
+                    const { error } = await sb.from('messages').update({ body: '__DELETED__' }).eq('id', m.id);
+                    if (error) throw error;
+                    // Optimistic local update
+                    const el = document.querySelector(`[data-msg-id="${m.id}"] .msg-body`);
+                    if (el) el.innerHTML = '<i style="opacity:0.7">🗑️ This message was deleted</i><span class="msg-meta">' + fmtTime(m.created_at) + '</span>';
+                    const b = document.querySelector(`[data-msg-id="${m.id}"]`);
+                    if (b) b.dataset.deleted = '1';
+                    // Remove reactions/react-btn for this msg
+                    const parent = b?.closest('.msg-wrap');
+                    if (parent) {
+                        parent.querySelector('.react-btn')?.remove();
+                        parent.querySelector('.msg-reactions')?.remove();
+                    }
+                } catch (err) {
+                    console.error('delete failed', err);
+                    showToast('❌', 'Delete failed', err.message || 'Could not delete message');
+                }
+            }
+        });
+
+        // ---------- Profile modal ----------
+        function openProfileModal(contact) {
+            if (!contact) return;
+            const modal = document.getElementById('profile-modal');
+            const av = document.getElementById('profile-avatar');
+            av.innerHTML = '';
+            if (contact.avatar_url) {
+                av.innerHTML = `<img src="${contact.avatar_url}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;">`;
+            } else {
+                av.textContent = ((contact.full_name || contact.email || '?').charAt(0) || '?').toUpperCase();
+                av.style.background = pickColor(contact.full_name || contact.email || '');
+            }
+            document.getElementById('profile-name').textContent = contact.full_name || contact.email || 'Unknown';
+            const online = isOnline(contact.id);
+            const status = document.getElementById('profile-status');
+            status.textContent = online ? '● Online' : '○ Offline';
+            status.className = 'text-sm font-bold mt-1 ' + (online ? 'text-emerald-300' : 'text-slate-400');
+            document.getElementById('profile-email').textContent = contact.email || '—';
+            const companyRow = document.getElementById('profile-company-row');
+            if (contact.company) {
+                companyRow.classList.remove('hidden');
+                document.getElementById('profile-company').textContent = contact.company;
+            } else {
+                companyRow.classList.add('hidden');
+            }
+            document.getElementById('profile-lastseen').textContent = online ? 'Online now' : formatLastSeen(lastSeenById.get(contact.id));
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+        document.getElementById('close-profile').addEventListener('click', () => {
+            const m = document.getElementById('profile-modal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+        });
+        document.getElementById('chat-header-clickable').addEventListener('click', () => {
+            if (activeContact) openProfileModal(activeContact);
+        });
+        document.getElementById('profile-voice').addEventListener('click', () => {
+            const m = document.getElementById('profile-modal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+            startCall(false);
+        });
+        document.getElementById('profile-video').addEventListener('click', () => {
+            const m = document.getElementById('profile-modal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+            startCall(true);
+        });
+
         document.getElementById('msg-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             if (!activeContact) return;
@@ -1265,6 +1452,25 @@
                         if (el && m.read_at) { el.className = 'receipt receipt-read'; el.innerText = '✓✓'; }
                     })
                 .on('postgres_changes',
+                    // Messages I received that got updated (delete, edit) → refresh bubble
+                    { event: 'UPDATE', schema: 'public', table: 'messages', filter: `recipient_id=eq.${currentUser.id}` },
+                    (payload) => {
+                        const m = payload.new;
+                        if (m.body === '__DELETED__') {
+                            const bubble = document.querySelector(`[data-msg-id="${m.id}"]`);
+                            if (bubble) {
+                                bubble.dataset.deleted = '1';
+                                const bodyEl = bubble.querySelector('.msg-body');
+                                if (bodyEl) bodyEl.innerHTML = '<i style="opacity:0.7">🗑️ This message was deleted</i><span class="msg-meta">' + fmtTime(m.created_at) + '</span>';
+                                const wrap = bubble.closest('.msg-wrap');
+                                if (wrap) {
+                                    wrap.querySelector('.react-btn')?.remove();
+                                    wrap.querySelector('.msg-reactions')?.remove();
+                                }
+                            }
+                        }
+                    })
+                .on('postgres_changes',
                     // Reactions inserted or removed
                     { event: '*', schema: 'public', table: 'message_reactions' },
                     (payload) => {
@@ -1288,6 +1494,17 @@
                 .on('broadcast', { event: 'ice-candidate' }, ({ payload }) => onIceCandidate(payload))
                 .on('broadcast', { event: 'call-end' }, ({ payload }) => onRemoteEnd(payload))
                 .on('broadcast', { event: 'call-decline' }, ({ payload }) => onRemoteDecline(payload))
+                .on('broadcast', { event: 'call-hold' }, ({ payload }) => {
+                    // Recipient tapped Answer on another page — keep ringing longer, they're navigating in.
+                    if (!currentCall || payload.to !== currentUser.id && payload.from !== currentCall.peerId) return;
+                    if (currentCall && currentCall.timeoutId) {
+                        clearTimeout(currentCall.timeoutId);
+                        currentCall.timeoutId = setTimeout(() => {
+                            if (currentCall && !currentCall.startedAt) endCall(false, 'missed');
+                        }, 30000);
+                    }
+                    document.getElementById('call-status').innerText = 'Connecting…';
+                })
                 .on('broadcast', { event: 'typing' }, ({ payload }) => onRemoteTyping(payload))
                 .subscribe(async (status) => {
                     if (status === 'SUBSCRIBED') {
@@ -1338,11 +1555,15 @@
                 await createPeerConnection(activeContact.id);
                 const offer = await pc.createOffer();
                 await pc.setLocalDescription(offer);
-                await callChannel.send({
-                    type: 'broadcast', event: 'call-offer',
-                    payload: { from: currentUser.id, to: activeContact.id, sdp: offer, name: currentUserName, isVideo }
-                });
+                const offerPayload = { from: currentUser.id, to: activeContact.id, sdp: offer, name: currentUserName, isVideo };
+                await callChannel.send({ type: 'broadcast', event: 'call-offer', payload: offerPayload });
                 playOutgoingRing();
+                // Re-broadcast the offer every 3s so the recipient can pick it up
+                // from any page (they navigate to /chat and receive the next broadcast).
+                currentCall.rebroadcastId = setInterval(() => {
+                    if (!currentCall || currentCall.startedAt) return;
+                    try { callChannel.send({ type: 'broadcast', event: 'call-offer', payload: offerPayload }); } catch {}
+                }, 3000);
                 // Auto-give-up after 30s of no answer
                 currentCall.timeoutId = setTimeout(() => {
                     if (currentCall && !currentCall.startedAt) {
@@ -1392,6 +1613,11 @@
             inc.classList.add('show');
             playIncomingRingtone();
             notify(payload.name || 'Incoming call', payload.isVideo ? 'Video call — tap to answer' : 'Audio call — tap to answer');
+            // Auto-accept when arriving from a global notification banner
+            if (autoAcceptFrom && autoAcceptFrom === payload.from) {
+                autoAcceptFrom = null;
+                setTimeout(() => acceptCall(), 300);
+            }
         }
 
         async function acceptCall() {
@@ -1497,6 +1723,8 @@
                     payload: { from: currentUser.id, to: currentCall.peerId }
                 });
             }
+            if (currentCall && currentCall.rebroadcastId) { clearInterval(currentCall.rebroadcastId); currentCall.rebroadcastId = null; }
+            if (currentCall && currentCall.timeoutId) { clearTimeout(currentCall.timeoutId); currentCall.timeoutId = null; }
             if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; }
             if (localStream) {
                 localStream.getTracks().forEach(t => t.stop());
