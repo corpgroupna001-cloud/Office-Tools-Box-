@@ -200,6 +200,51 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ success: true });
     }
 
+    if (action === 'set_wfh') {
+      const id = String(body.id || '');
+      const is_wfh = body.is_wfh === true;
+      if (!id) return res.status(400).json({ error: 'id required' });
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${id}`, {
+        method: 'PATCH',
+        headers: {
+          apikey: SERVICE_KEY,
+          Authorization: `Bearer ${SERVICE_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=representation'
+        },
+        body: JSON.stringify({ is_wfh })
+      });
+      if (!r.ok) return res.status(502).json({ error: 'WFH flag update failed', detail: (await r.text()).slice(0, 200) });
+      return res.status(200).json({ success: true, is_wfh });
+    }
+
+    if (action === 'wfh_recordings') {
+      // Admin view — list all recordings, joined with a signed URL for download.
+      const week = body.week ? `&week_of=eq.${encodeURIComponent(String(body.week))}` : '';
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/wfh_recordings?select=*${week}&order=created_at.desc&limit=1000`, {
+        headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` }
+      });
+      if (!r.ok) return res.status(502).json({ error: 'Recordings fetch failed' });
+      const rows = await r.json();
+      // Sign each video_path so admin can play it in the dashboard
+      const signed = await Promise.all(rows.map(async row => {
+        if (!row.video_path) return { ...row, video_url: null };
+        try {
+          const sr = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/wfh-recordings/${row.video_path}`, {
+            method: 'POST',
+            headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ expiresIn: 3600 })
+          });
+          if (sr.ok) {
+            const j = await sr.json();
+            return { ...row, video_url: `${SUPABASE_URL}/storage/v1${j.signedURL || j.signedUrl || ''}` };
+          }
+        } catch {}
+        return { ...row, video_url: null };
+      }));
+      return res.status(200).json({ recordings: signed });
+    }
+
     if (action === 'delete_employee') {
       const id = String(body.id || '');
       if (!id) return res.status(400).json({ error: 'id required' });
