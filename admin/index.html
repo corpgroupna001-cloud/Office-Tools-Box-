@@ -147,6 +147,37 @@
             font-size: 10px; font-weight: 900; color: #64748b;
             text-transform: uppercase; letter-spacing: 1.5px;
         }
+
+        /* WFH toggle switch (iOS-style pill) */
+        .wfh-switch {
+            position: relative; display: inline-block;
+            width: 40px; height: 22px; cursor: pointer;
+        }
+        .wfh-switch input { opacity: 0; width: 0; height: 0; }
+        .wfh-slider {
+            position: absolute; inset: 0;
+            background: rgba(255,255,255,0.10);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 999px;
+            transition: background .2s, border-color .2s;
+        }
+        .wfh-slider::before {
+            content: ''; position: absolute;
+            top: 2px; left: 2px;
+            width: 16px; height: 16px; border-radius: 50%;
+            background: #cbd5e1;
+            transition: transform .2s, background .2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.35);
+        }
+        .wfh-switch input:checked + .wfh-slider {
+            background: linear-gradient(135deg,#10b981,#059669);
+            border-color: transparent;
+        }
+        .wfh-switch input:checked + .wfh-slider::before {
+            transform: translateX(18px);
+            background: #fff;
+        }
+        .wfh-switch input:disabled + .wfh-slider { opacity: 0.5; }
     </style>
 </head>
 <body>
@@ -438,6 +469,7 @@
                                     <th>Name</th>
                                     <th>Email</th>
                                     <th>Joined</th>
+                                    <th title="Assign as Work-From-Home — enables the Friday video check-in">🏠 WFH</th>
                                     <th>⌨️ Tests</th>
                                     <th>Best WPM</th>
                                     <th>🧠 Quizzes</th>
@@ -927,7 +959,7 @@
         // ---------- Employees ----------
         async function loadEmployees() {
             if (!adminPassword) return;
-            document.getElementById('emp-tbody').innerHTML = '<tr><td colspan="8" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading employees…</td></tr>';
+            document.getElementById('emp-tbody').innerHTML = '<tr><td colspan="11" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading employees…</td></tr>';
             try {
                 const r = await fetch('/api/admin', {
                     method: 'POST',
@@ -939,7 +971,7 @@
                 allEmployees = data.employees || [];
                 renderEmployees();
             } catch (e) {
-                document.getElementById('emp-tbody').innerHTML = `<tr><td colspan="8" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
+                document.getElementById('emp-tbody').innerHTML = `<tr><td colspan="11" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
             }
         }
 
@@ -976,11 +1008,18 @@
             empty.classList.add('hidden');
             tbody.innerHTML = filtered.map(e => {
                 const strikes = e.quiz_violations || 0;
+                const wfhOn = !!e.is_wfh;
                 return `
                 <tr>
                     <td class="font-bold text-white">${escapeHtml(e.full_name || '—')}</td>
                     <td class="text-slate-300 text-xs">${escapeHtml(e.email || '—')}</td>
                     <td class="text-slate-400 text-xs">${formatDate(e.created_at)}</td>
+                    <td>
+                        <label class="wfh-switch" title="${wfhOn ? 'WFH enabled — will see the Friday check-in' : 'Not WFH — click to enable'}">
+                            <input type="checkbox" data-wfh-id="${e.id}" ${wfhOn ? 'checked' : ''}>
+                            <span class="wfh-slider"></span>
+                        </label>
+                    </td>
                     <td class="mono font-black text-white">${e.tests || 0}</td>
                     <td class="mono font-black text-blue-300">${e.best_wpm || 0}</td>
                     <td class="mono font-black text-orange-300">${e.quiz_attempts || 0}</td>
@@ -1005,6 +1044,30 @@
                     if (action === 'edit')   openEditEmployee(emp);
                     if (action === 'delete') openDeleteEmployee(emp);
                     if (action === 'reset')  resetPasswordFor(emp);
+                });
+            });
+
+            // Wire WFH toggles
+            tbody.querySelectorAll('input[type="checkbox"][data-wfh-id]').forEach(input => {
+                input.addEventListener('change', async () => {
+                    const id = input.dataset.wfhId;
+                    const is_wfh = input.checked;
+                    input.disabled = true;
+                    try {
+                        const r = await fetch('/api/admin', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ password: adminPassword, action: 'set_wfh', id, is_wfh })
+                        });
+                        if (!r.ok) throw new Error((await r.json()).error || 'Update failed');
+                        const emp = allEmployees.find(x => x.id === id);
+                        if (emp) emp.is_wfh = is_wfh;
+                    } catch (err) {
+                        input.checked = !is_wfh;
+                        alert('WFH update failed: ' + err.message);
+                    } finally {
+                        input.disabled = false;
+                    }
                 });
             });
         }
