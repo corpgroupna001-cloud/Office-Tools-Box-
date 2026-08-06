@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weekly Recordings · WorkSuite</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/design-system.css">
+    <script defer src="/commandpalette.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            background: var(--ws-bg);
+            background-image:
+                radial-gradient(at 15% 12%, hsla(258, 90%, 55%, 0.5) 0, transparent 45%),
+                radial-gradient(at 85% 15%, hsla(200, 95%, 55%, 0.4) 0, transparent 45%),
+                radial-gradient(at 50% 90%, hsla(320, 80%, 55%, 0.35) 0, transparent 50%);
+            background-attachment: fixed;
+            color: var(--ws-text);
+            padding: 80px 24px 60px;
+        }
+        body::before {
+            content: ''; position: fixed; inset: 0; pointer-events: none;
+            background-image: radial-gradient(rgba(255,255,255,0.04) 1px, transparent 1px);
+            background-size: 22px 22px;
+        }
+        .container { max-width: 900px; margin: 0 auto; position: relative; z-index: 1; }
+
+        .page-hero {
+            display: flex; align-items: center; gap: 16px;
+            margin-bottom: 28px;
+        }
+        .page-hero .icon {
+            width: 56px; height: 56px; border-radius: 18px;
+            display: inline-flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg,#f43f5e,#a855f7);
+            box-shadow: 0 12px 30px rgba(168,85,247,0.5);
+        }
+        .page-hero h1 { font-size: 28px; font-weight: 900; letter-spacing: -0.01em; margin: 0; }
+        .page-hero .sub { font-size: 13px; color: var(--ws-text-muted); font-weight: 700; margin-top: 2px; }
+
+        .rules {
+            background: rgba(139,92,246,0.10);
+            border: 1px solid rgba(139,92,246,0.25);
+            border-radius: 18px;
+            padding: 16px 20px;
+            font-size: 13px; color: #ddd6fe;
+            margin-bottom: 24px;
+            line-height: 1.55;
+        }
+        .rules strong { color: #f8fafc; }
+        .rules ul { margin: 8px 0 0; padding-left: 20px; }
+        .rules li { margin: 4px 0; }
+
+        .cards { display: flex; flex-direction: column; gap: 20px; }
+
+        .card {
+            background: rgba(255,255,255,0.06);
+            backdrop-filter: blur(24px) saturate(180%);
+            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            border: 1px solid rgba(255,255,255,0.10);
+            border-radius: 24px;
+            padding: 24px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+            position: relative;
+            overflow: hidden;
+        }
+        .card::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 40%;
+            background: linear-gradient(180deg, rgba(255,255,255,0.10), transparent);
+            pointer-events: none;
+        }
+        .card-head {
+            display: flex; align-items: center; gap: 14px; margin-bottom: 16px;
+            position: relative; z-index: 1;
+        }
+        .card-head .num {
+            width: 40px; height: 40px; border-radius: 14px;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-weight: 900; font-size: 15px; color: white;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.25);
+        }
+        .card-head .num.laptop { background: linear-gradient(135deg,#3b82f6,#6366f1); }
+        .card-head .num.mobile { background: linear-gradient(135deg,#10b981,#059669); }
+        .card-head .num.tab    { background: linear-gradient(135deg,#f97316,#ef4444); }
+        .card-head h2 { font-size: 17px; font-weight: 900; }
+        .card-head .hint { font-size: 12px; color: var(--ws-text-muted); font-weight: 700; margin-top: 2px; }
+
+        .card-body { position: relative; z-index: 1; }
+
+        /* Recorder controls */
+        .rec-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+        .btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 11px 18px; border-radius: 14px;
+            font-weight: 800; font-size: 13px; cursor: pointer;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(255,255,255,0.08); color: #fff;
+            transition: transform .15s, background .15s, box-shadow .15s;
+            font-family: inherit;
+        }
+        .btn:hover:not(:disabled) { background: rgba(255,255,255,0.14); transform: translateY(-1px); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn.primary   { background: linear-gradient(135deg,#3b82f6,#6366f1); border-color: transparent; box-shadow: 0 8px 20px rgba(59,130,246,0.45); }
+        .btn.danger    { background: linear-gradient(135deg,#f43f5e,#dc2626); border-color: transparent; box-shadow: 0 8px 20px rgba(244,63,94,0.45); }
+        .btn.record    { background: linear-gradient(135deg,#ef4444,#b91c1c); border-color: transparent; box-shadow: 0 8px 20px rgba(239,68,68,0.5); position: relative; padding-left: 34px; }
+        .btn.record::before {
+            content: ''; position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+            width: 10px; height: 10px; border-radius: 50%; background: #fff;
+            box-shadow: 0 0 0 3px rgba(255,255,255,0.35);
+            animation: rec-pulse 1s ease-in-out infinite;
+        }
+        @keyframes rec-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
+
+        .rec-status {
+            font-size: 12px; font-weight: 800; color: #94a3b8;
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            padding: 6px 10px; border-radius: 8px; background: rgba(255,255,255,0.04);
+        }
+        .rec-status.live { color: #fecaca; background: rgba(239,68,68,0.14); }
+        .rec-status.done { color: #6ee7b7; background: rgba(16,185,129,0.14); }
+
+        video.preview {
+            width: 100%; max-width: 100%;
+            border-radius: 14px;
+            background: #0b1120;
+            border: 1px solid rgba(255,255,255,0.08);
+            aspect-ratio: 16 / 9;
+            display: block; margin-top: 10px;
+        }
+
+        .file-row {
+            display: flex; align-items: center; gap: 12px;
+            padding: 14px 16px;
+            border-radius: 14px;
+            background: rgba(255,255,255,0.04);
+            border: 1px dashed rgba(255,255,255,0.12);
+            cursor: pointer;
+            transition: background .15s, border-color .15s;
+        }
+        .file-row:hover { background: rgba(255,255,255,0.06); border-color: rgba(59,130,246,0.35); }
+        .file-row.filled { border-style: solid; border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.06); }
+        .file-row .file-icon {
+            width: 40px; height: 40px; border-radius: 12px;
+            display: inline-flex; align-items: center; justify-content: center;
+            background: rgba(255,255,255,0.08); flex-shrink: 0;
+        }
+        .file-row .fname { font-weight: 800; font-size: 14px; color: var(--ws-text); }
+        .file-row .fsub  { font-size: 11px; color: var(--ws-text-muted); font-weight: 700; margin-top: 2px; }
+        .file-row input[type="file"] { display: none; }
+
+        .submit-bar {
+            position: sticky; bottom: 24px; margin-top: 32px;
+            padding: 16px 20px; border-radius: 20px;
+            background: rgba(15,23,42,0.9);
+            backdrop-filter: blur(30px);
+            border: 1px solid rgba(255,255,255,0.10);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            display: flex; align-items: center; justify-content: space-between; gap: 16px;
+            z-index: 10;
+        }
+        .submit-bar .summary { font-size: 13px; color: var(--ws-text-muted); font-weight: 700; }
+        .submit-bar .summary b { color: #fff; }
+        .submit-bar .progress {
+            display: none; align-items: center; gap: 8px;
+            font-size: 12px; color: #93c5fd; font-weight: 800;
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+        }
+        .submit-bar .progress .bar { width: 120px; height: 6px; background: rgba(255,255,255,0.08); border-radius: 99px; overflow: hidden; }
+        .submit-bar .progress .fill { height: 100%; background: linear-gradient(90deg,#3b82f6,#8b5cf6); width: 0%; transition: width .2s; }
+
+        .history {
+            margin-top: 36px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 24px;
+            padding: 20px;
+        }
+        .history h3 { font-size: 15px; font-weight: 900; margin-bottom: 12px; }
+        .history-row {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 14px; border-radius: 12px;
+            font-size: 13px; font-weight: 700; color: var(--ws-text-muted);
+        }
+        .history-row + .history-row { border-top: 1px solid rgba(255,255,255,0.05); }
+        .history-row b { color: var(--ws-text); }
+        .history-row .tags { display: flex; gap: 6px; }
+        .history-row .tag {
+            font-size: 10px; font-weight: 900;
+            padding: 3px 8px; border-radius: 999px;
+        }
+        .history-row .tag.ok   { background: rgba(16,185,129,0.20); color: #6ee7b7; }
+        .history-row .tag.miss { background: rgba(148,163,184,0.15); color: #94a3b8; }
+
+        /* Auth gate for logged-out users */
+        #auth-gate {
+            max-width: 480px; margin: 60px auto; padding: 40px 32px;
+            text-align: center;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.10);
+            backdrop-filter: blur(24px);
+            border-radius: 28px;
+        }
+        #auth-gate h2 { font-size: 22px; font-weight: 900; margin-bottom: 8px; }
+        #auth-gate p { color: var(--ws-text-muted); font-size: 14px; margin-bottom: 20px; }
+
+        .toast {
+            position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+            background: rgba(15,23,42,0.95);
+            border: 1px solid rgba(255,255,255,0.12);
+            padding: 14px 24px; border-radius: 999px;
+            font-size: 13px; font-weight: 800;
+            z-index: 100; box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+            display: none;
+            backdrop-filter: blur(20px);
+        }
+        .toast.show { display: block; animation: toast-in .25s ease-out; }
+        @keyframes toast-in { from { transform: translate(-50%, 20px); opacity: 0 } to { transform: translate(-50%, 0); opacity: 1 } }
+        .toast.success { border-color: rgba(16,185,129,0.35); color: #6ee7b7; }
+        .toast.error   { border-color: rgba(239,68,68,0.35);  color: #fca5a5; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/presence.js"></script>
+    <script src="/notifications.js"></script>
+</head>
+<body>
+
+<div id="app" class="container" style="display:none;">
+    <div class="page-hero">
+        <div class="icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+        </div>
+        <div>
+            <h1>Weekly Recordings</h1>
+            <p class="sub">WFH check-in for <b id="week-of-label">this Friday</b></p>
+        </div>
+    </div>
+
+    <div class="rules">
+        <strong>📋 Rules & regulations</strong>
+        <ul>
+            <li><b>Every Friday</b>, WFH employees submit three clear recordings — one each of your <b>laptop</b>, <b>mobile</b>, and <b>tab</b>.</li>
+            <li>Laptop recording is captured directly in the browser (screen + system audio). Mobile and tab recordings are uploaded from files you record on the device itself.</li>
+            <li>Recordings should be at least <b>30 seconds</b>, clear and unedited. Keep them under <b>2 minutes</b> to stay within the storage limit.</li>
+            <li>Files are private — only you and your admin can see them.</li>
+        </ul>
+    </div>
+
+    <div class="cards">
+
+        <!-- 1: LAPTOP — record in-browser -->
+        <div class="card">
+            <div class="card-head">
+                <div class="num laptop">1</div>
+                <div>
+                    <h2>💻 Laptop screen</h2>
+                    <p class="hint">Click Start Recording, pick the "Entire screen" option, allow system audio if prompted.</p>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="rec-controls">
+                    <button id="rec-start" class="btn primary" type="button">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>
+                        Start Recording
+                    </button>
+                    <button id="rec-stop"  class="btn record" type="button" style="display:none;">
+                        Stop Recording
+                    </button>
+                    <button id="rec-retry" class="btn" type="button" style="display:none;">Re-record</button>
+                    <span id="rec-status" class="rec-status">Ready</span>
+                </div>
+                <video id="rec-preview" class="preview" controls playsinline style="display:none;"></video>
+                <p id="rec-error" style="display:none; color:#fca5a5; font-size:12px; font-weight:700; margin-top:8px;"></p>
+            </div>
+        </div>
+
+        <!-- 2: MOBILE — file upload -->
+        <div class="card">
+            <div class="card-head">
+                <div class="num mobile">2</div>
+                <div>
+                    <h2>📱 Mobile screen</h2>
+                    <p class="hint">Record with your phone's built-in screen recorder (iOS Control Centre / Android Quick Settings), then upload the video file.</p>
+                </div>
+            </div>
+            <div class="card-body">
+                <label id="mob-row" class="file-row" for="mob-file">
+                    <div class="file-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                    </div>
+                    <div style="flex:1; min-width:0;">
+                        <div id="mob-name" class="fname">Tap to choose your mobile recording…</div>
+                        <div id="mob-sub"  class="fsub">Accepts .mp4 / .mov / .webm — up to 100 MB</div>
+                    </div>
+                    <input id="mob-file" type="file" accept="video/*">
+                </label>
+                <video id="mob-preview" class="preview" controls playsinline style="display:none;"></video>
+            </div>
+        </div>
+
+        <!-- 3: TAB / TABLET — file upload -->
+        <div class="card">
+            <div class="card-head">
+                <div class="num tab">3</div>
+                <div>
+                    <h2>📟 Tab / Tablet screen</h2>
+                    <p class="hint">Same as mobile — use the tablet's built-in screen recorder, then upload the video file here.</p>
+                </div>
+            </div>
+            <div class="card-body">
+                <label id="tab-row" class="file-row" for="tab-file">
+                    <div class="file-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fdba74" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                    </div>
+                    <div style="flex:1; min-width:0;">
+                        <div id="tab-name" class="fname">Tap to choose your tab recording…</div>
+                        <div id="tab-sub"  class="fsub">Accepts .mp4 / .mov / .webm — up to 100 MB</div>
+                    </div>
+                    <input id="tab-file" type="file" accept="video/*">
+                </label>
+                <video id="tab-preview" class="preview" controls playsinline style="display:none;"></video>
+            </div>
+        </div>
+
+        <!-- Notes -->
+        <div class="card">
+            <div class="card-head">
+                <div class="num" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">4</div>
+                <div>
+                    <h2>📝 Notes (optional)</h2>
+                    <p class="hint">Anything you want your admin to know about this week's WFH.</p>
+                </div>
+            </div>
+            <div class="card-body">
+                <textarea id="notes-input" rows="3" placeholder="e.g. WiFi was flaky Wednesday morning, otherwise all good."
+                    style="width:100%; padding:14px 16px; border-radius:14px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.12); color:#fff; font-family:inherit; font-size:14px; resize:vertical; outline:none;"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="submit-bar">
+        <div class="summary">
+            <b id="ready-count">0/3</b> recordings ready
+        </div>
+        <div id="progress" class="progress">
+            <span id="progress-label">Uploading…</span>
+            <div class="bar"><div id="progress-fill" class="fill"></div></div>
+            <span id="progress-pct">0%</span>
+        </div>
+        <button id="submit-btn" class="btn primary" type="button" disabled>
+            Submit Weekly Recordings
+        </button>
+    </div>
+
+    <div id="history" class="history" style="display:none;">
+        <h3>📁 My previous submissions</h3>
+        <div id="history-list"></div>
+    </div>
+</div>
+
+<!-- Auth gate -->
+<div id="auth-gate" style="display:none;">
+    <div style="width:64px; height:64px; margin:0 auto 20px; border-radius:20px; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#f43f5e,#a855f7); box-shadow: 0 15px 40px rgba(168,85,247,0.5);">🔐</div>
+    <h2>Sign in to submit</h2>
+    <p>Weekly recordings are tied to your WorkSuite account. Please log in via the home page first.</p>
+    <a href="/" class="btn primary" style="display:inline-flex; text-decoration:none;">Go to Login</a>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+    // ---------- Bootstrap ----------
+    let sb = null;
+    let user = null;
+    let laptopBlob = null;
+    let laptopSecs = 0;
+    let mobileFile = null;
+    let tabFile = null;
+    let recording = false;
+    let mediaRecorder = null;
+    let recStartAt = 0;
+    let recTicker = null;
+
+    // Compute the Friday-anchored "week_of" (this week's Friday, or next Friday if it's the weekend)
+    function currentFriday() {
+        const d = new Date();
+        const day = d.getDay(); // 0=Sun..6=Sat
+        const daysToFri = (5 - day + 7) % 7; // 0..6
+        d.setDate(d.getDate() + daysToFri);
+        d.setHours(0,0,0,0);
+        return d;
+    }
+    function ymd(d) { return d.toISOString().slice(0, 10); }
+
+    async function init() {
+        const weekLbl = document.getElementById('week-of-label');
+        const wo = currentFriday();
+        weekLbl.textContent = wo.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
+
+        // Wait for supabase-js
+        for (let i = 0; i < 60 && !window.supabase; i++) await new Promise(r => setTimeout(r, 100));
+        if (!window.supabase) return showGate();
+
+        // Reuse an existing client if one exists on the page
+        sb = window.__WS_SB__ || window.__WS_PRESENCE_SB__ || null;
+        if (!sb) {
+            try {
+                const r = await fetch('/api/config');
+                const cfg = await r.json();
+                if (!cfg?.supabaseUrl || !cfg?.supabaseAnonKey) return showGate();
+                sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
+                    auth: { persistSession: true, autoRefreshToken: true }
+                });
+            } catch { return showGate(); }
+        }
+
+        const { data: { session } } = await sb.auth.getSession();
+        if (!session) return showGate();
+        user = session.user;
+
+        document.getElementById('app').style.display = 'block';
+        loadHistory();
+        wireHandlers();
+    }
+    function showGate() {
+        document.getElementById('auth-gate').style.display = 'block';
+    }
+
+    // ---------- Toast helper ----------
+    function toast(msg, kind) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.className = 'toast show ' + (kind || '');
+        clearTimeout(toast._t);
+        toast._t = setTimeout(() => t.classList.remove('show'), 3500);
+    }
+
+    // ---------- Laptop recorder (getDisplayMedia + MediaRecorder) ----------
+    async function startRecording() {
+        const err = document.getElementById('rec-error');
+        err.style.display = 'none';
+        if (!navigator.mediaDevices?.getDisplayMedia) {
+            err.textContent = 'Your browser does not support screen recording. Please use Chrome, Edge, or Firefox on a laptop.';
+            err.style.display = 'block';
+            return;
+        }
+        try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({
+                video: { frameRate: 15 },
+                audio: true
+            });
+            // Also grab microphone audio if available, and mix into the same stream
+            try {
+                const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mic.getAudioTracks().forEach(t => stream.addTrack(t));
+            } catch {}
+            // Prefer webm/vp9 for reasonable size; fall back if unsupported
+            let mime = 'video/webm;codecs=vp9,opus';
+            if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm;codecs=vp8,opus';
+            if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
+            mediaRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 800_000 });
+            const chunks = [];
+            mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+            mediaRecorder.onstop = () => {
+                laptopBlob = new Blob(chunks, { type: mime });
+                laptopSecs = Math.round((Date.now() - recStartAt) / 1000);
+                const preview = document.getElementById('rec-preview');
+                preview.src = URL.createObjectURL(laptopBlob);
+                preview.style.display = 'block';
+                const sizeMB = (laptopBlob.size / (1024 * 1024)).toFixed(1);
+                const s = document.getElementById('rec-status');
+                s.className = 'rec-status done';
+                s.textContent = `● Ready · ${laptopSecs}s · ${sizeMB} MB`;
+                document.getElementById('rec-start').style.display = 'none';
+                document.getElementById('rec-stop').style.display  = 'none';
+                document.getElementById('rec-retry').style.display = 'inline-flex';
+                stream.getTracks().forEach(t => t.stop());
+                clearInterval(recTicker);
+                updateReady();
+            };
+            // Live tick showing rec time
+            recStartAt = Date.now();
+            const s = document.getElementById('rec-status');
+            s.className = 'rec-status live';
+            recTicker = setInterval(() => {
+                const secs = Math.floor((Date.now() - recStartAt) / 1000);
+                s.textContent = `● REC · ${String(Math.floor(secs/60)).padStart(2,'0')}:${String(secs%60).padStart(2,'0')}`;
+                // Hard cap at 3 minutes to protect quota
+                if (secs >= 180) stopRecording();
+            }, 250);
+            // If the user hits the browser's own "Stop sharing" button, wire that to stop too
+            stream.getVideoTracks()[0].onended = () => stopRecording();
+
+            mediaRecorder.start(1000);
+            recording = true;
+            document.getElementById('rec-start').style.display = 'none';
+            document.getElementById('rec-stop').style.display  = 'inline-flex';
+        } catch (e) {
+            err.textContent = 'Could not start screen recording: ' + (e.message || 'permission denied');
+            err.style.display = 'block';
+        }
+    }
+    function stopRecording() {
+        if (!recording || !mediaRecorder) return;
+        recording = false;
+        try { mediaRecorder.stop(); } catch {}
+    }
+    function resetRecording() {
+        laptopBlob = null;
+        laptopSecs = 0;
+        const preview = document.getElementById('rec-preview');
+        preview.src = ''; preview.style.display = 'none';
+        document.getElementById('rec-start').style.display = 'inline-flex';
+        document.getElementById('rec-stop').style.display  = 'none';
+        document.getElementById('rec-retry').style.display = 'none';
+        const s = document.getElementById('rec-status');
+        s.className = 'rec-status';
+        s.textContent = 'Ready';
+        updateReady();
+    }
+
+    // ---------- File pickers (mobile + tab) ----------
+    function wireFileRow(inputId, previewId, rowId, nameId, subId, kind) {
+        const input = document.getElementById(inputId);
+        const preview = document.getElementById(previewId);
+        const row = document.getElementById(rowId);
+        const name = document.getElementById(nameId);
+        const sub  = document.getElementById(subId);
+        input.addEventListener('change', () => {
+            const f = input.files && input.files[0];
+            if (!f) return;
+            if (f.size > 100 * 1024 * 1024) {
+                toast('File too big — 100 MB max', 'error');
+                input.value = '';
+                return;
+            }
+            if (kind === 'mobile') mobileFile = f; else tabFile = f;
+            name.textContent = f.name;
+            sub.textContent = (f.size / (1024*1024)).toFixed(1) + ' MB · ' + (f.type || 'video');
+            row.classList.add('filled');
+            preview.src = URL.createObjectURL(f);
+            preview.style.display = 'block';
+            updateReady();
+        });
+    }
+
+    function updateReady() {
+        const n = (laptopBlob ? 1 : 0) + (mobileFile ? 1 : 0) + (tabFile ? 1 : 0);
+        document.getElementById('ready-count').textContent = `${n}/3`;
+        document.getElementById('submit-btn').disabled = n < 3;
+    }
+
+    // ---------- Upload + insert ----------
+    async function submit() {
+        if (!user || !sb) return;
+        const btn = document.getElementById('submit-btn');
+        const prog = document.getElementById('progress');
+        const label = document.getElementById('progress-label');
+        const fill = document.getElementById('progress-fill');
+        const pct = document.getElementById('progress-pct');
+        btn.disabled = true;
+        prog.style.display = 'inline-flex';
+
+        const weekOf = ymd(currentFriday());
+        const uid = user.id;
+        const items = [
+            { key: 'laptop', blob: laptopBlob, name: 'laptop.webm', mime: 'video/webm' },
+            { key: 'mobile', blob: mobileFile, name: 'mobile.' + (mobileFile.name.split('.').pop() || 'mp4'), mime: mobileFile.type || 'video/mp4' },
+            { key: 'tab',    blob: tabFile,    name: 'tab.'    + (tabFile.name.split('.').pop()    || 'mp4'), mime: tabFile.type    || 'video/mp4' },
+        ];
+        const paths = {};
+        try {
+            for (let i = 0; i < items.length; i++) {
+                const it = items[i];
+                label.textContent = `Uploading ${it.key}…`;
+                const doneBefore = (i / items.length) * 100;
+                fill.style.width = doneBefore.toFixed(0) + '%';
+                pct.textContent = doneBefore.toFixed(0) + '%';
+
+                const path = `${uid}/${weekOf}/${it.name}`;
+                const { error } = await sb.storage.from('wfh-recordings').upload(path, it.blob, {
+                    upsert: true,
+                    contentType: it.mime,
+                    cacheControl: '3600',
+                });
+                if (error) throw new Error(`${it.key} upload failed: ${error.message}`);
+                paths[it.key] = path;
+
+                const doneAfter = ((i + 1) / items.length) * 100;
+                fill.style.width = doneAfter.toFixed(0) + '%';
+                pct.textContent = doneAfter.toFixed(0) + '%';
+            }
+
+            // Metadata row (unique per user/week — upsert on conflict)
+            const meta = {
+                user_id: uid,
+                full_name: user.user_metadata?.full_name || null,
+                email: user.email,
+                week_of: weekOf,
+                laptop_path: paths.laptop,
+                mobile_path: paths.mobile,
+                tab_path:    paths.tab,
+                laptop_bytes: laptopBlob.size,
+                mobile_bytes: mobileFile.size,
+                tab_bytes:    tabFile.size,
+                laptop_secs:  laptopSecs,
+                notes: document.getElementById('notes-input').value.trim() || null,
+            };
+            const { error: metaErr } = await sb.from('wfh_recordings')
+                .upsert(meta, { onConflict: 'user_id,week_of' });
+            if (metaErr) throw metaErr;
+
+            label.textContent = 'Done!';
+            toast('✅ Submitted! Your admin will see it in the dashboard.', 'success');
+            setTimeout(() => { prog.style.display = 'none'; loadHistory(); resetForm(); }, 1200);
+        } catch (e) {
+            console.error(e);
+            toast('Upload failed: ' + (e.message || 'unknown error'), 'error');
+            btn.disabled = false;
+            prog.style.display = 'none';
+        }
+    }
+
+    function resetForm() {
+        resetRecording();
+        mobileFile = null; tabFile = null;
+        document.getElementById('mob-file').value = '';
+        document.getElementById('tab-file').value = '';
+        document.getElementById('mob-preview').src = ''; document.getElementById('mob-preview').style.display = 'none';
+        document.getElementById('tab-preview').src = ''; document.getElementById('tab-preview').style.display = 'none';
+        document.getElementById('mob-row').classList.remove('filled');
+        document.getElementById('tab-row').classList.remove('filled');
+        document.getElementById('mob-name').textContent = 'Tap to choose your mobile recording…';
+        document.getElementById('tab-name').textContent = 'Tap to choose your tab recording…';
+        document.getElementById('mob-sub').textContent = 'Accepts .mp4 / .mov / .webm — up to 100 MB';
+        document.getElementById('tab-sub').textContent = 'Accepts .mp4 / .mov / .webm — up to 100 MB';
+        document.getElementById('notes-input').value = '';
+        updateReady();
+    }
+
+    // ---------- History ----------
+    async function loadHistory() {
+        const list = document.getElementById('history-list');
+        const wrap = document.getElementById('history');
+        try {
+            const { data } = await sb.from('wfh_recordings')
+                .select('week_of, laptop_path, mobile_path, tab_path, created_at')
+                .eq('user_id', user.id)
+                .order('week_of', { ascending: false })
+                .limit(20);
+            if (!data || !data.length) { wrap.style.display = 'none'; return; }
+            wrap.style.display = 'block';
+            list.innerHTML = data.map(r => {
+                const d = new Date(r.week_of + 'T00:00');
+                const label = d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+                const tag = (k, ok) => `<span class="tag ${ok ? 'ok' : 'miss'}">${k}${ok ? ' ✓' : ' —'}</span>`;
+                return `
+                    <div class="history-row">
+                        <div><b>${label}</b> · submitted ${new Date(r.created_at).toLocaleDateString()}</div>
+                        <div class="tags">
+                            ${tag('Laptop', !!r.laptop_path)}
+                            ${tag('Mobile', !!r.mobile_path)}
+                            ${tag('Tab',    !!r.tab_path)}
+                        </div>
+                    </div>`;
+            }).join('');
+        } catch (e) { /* silent */ }
+    }
+
+    // ---------- Wire buttons ----------
+    function wireHandlers() {
+        document.getElementById('rec-start').addEventListener('click', startRecording);
+        document.getElementById('rec-stop').addEventListener('click',  stopRecording);
+        document.getElementById('rec-retry').addEventListener('click', resetRecording);
+        wireFileRow('mob-file', 'mob-preview', 'mob-row', 'mob-name', 'mob-sub', 'mobile');
+        wireFileRow('tab-file', 'tab-preview', 'tab-row', 'tab-name', 'tab-sub', 'tab');
+        document.getElementById('submit-btn').addEventListener('click', submit);
+    }
+
+    init();
+</script>
+</body>
+</html>
