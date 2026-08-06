@@ -25,7 +25,7 @@
         { title: 'Typing Test',    sub: 'Measure your WPM and accuracy',        icon: '⌨️', href: '/typingtest/',tags: 'typing wpm speed test zen' },
         { title: 'MCQ Quiz',       sub: '10 categories of quick-fire quizzes',  icon: '🧠', href: '/mcqquiz/',   tags: 'quiz mcq brain trivia' },
         { title: 'Signature',      sub: 'Generate a branded email signature',   icon: '✉️', href: '/signature/', tags: 'signature email brand' },
-        { title: 'WFH Recordings', sub: 'Submit your weekly Friday check-in',   icon: '📹', href: '/recordings/',tags: 'wfh recordings weekly friday laptop mobile tab video record submit check-in' },
+        { title: 'Friday Check-in', sub: 'WFH back-camera video (Fridays only)', icon: '📷', href: '/recordings/',tags: 'wfh friday check-in check in video camera workspace weekly record submit' },
         // Admin is intentionally excluded — it lives behind a password gate,
         // and surfacing it in the palette exposes the endpoint to non-admins.
     ];
