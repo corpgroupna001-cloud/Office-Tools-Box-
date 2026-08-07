@@ -682,8 +682,17 @@
             markDone(dev);
             toast(`✅ ${dev.charAt(0).toUpperCase()+dev.slice(1)} uploaded!`, 'success');
         } catch (e) {
-            console.error(e);
-            toast('Upload failed: ' + (e.message || 'unknown error'), 'error');
+            console.error('WFH upload failed', e);
+            // Surface the real reason: supabase-js wraps StorageApiError which carries
+            // { message, error, statusCode }, PostgrestError carries { message, details, hint, code }.
+            const parts = [];
+            if (e?.message)     parts.push(e.message);
+            if (e?.error && e.error !== e.message) parts.push(e.error);
+            if (e?.details)     parts.push(e.details);
+            if (e?.hint)        parts.push(e.hint);
+            if (e?.statusCode)  parts.push('HTTP ' + e.statusCode);
+            const msg = parts.length ? parts.join(' — ') : 'unknown error';
+            toast('Upload failed: ' + msg, 'error');
             btn.disabled = false;
             bar.classList.remove('show');
         }
