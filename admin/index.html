@@ -278,6 +278,7 @@
                 <button data-tab="results"   class="admin-tab active" type="button">⌨️ Typing</button>
                 <button data-tab="quizzes"   class="admin-tab" type="button">🧠 Quizzes</button>
                 <button data-tab="employees" class="admin-tab" type="button">👥 Employees</button>
+                <button data-tab="wfh"       class="admin-tab" type="button">📷 WFH Check-ins</button>
             </div>
 
             <!-- Filters (RESULTS TAB) -->
@@ -488,6 +489,22 @@
                     </div>
                 </div>
             </div>
+
+            <!-- WFH CHECK-INS PANEL -->
+            <div id="wfh-panel" class="hidden">
+                <div class="glass rounded-2xl p-4 mb-6 flex flex-wrap gap-3 items-center">
+                    <input id="wfh-search" type="text" placeholder="Search by name or email…"
+                        class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
+                    <input id="wfh-week" type="date"
+                        class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                    <button id="wfh-refresh" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh</button>
+                </div>
+                <div id="wfh-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+                <div id="wfh-empty" class="hidden glass rounded-2xl p-16 text-center text-slate-400">
+                    <p class="font-bold text-lg mb-1">No check-ins yet</p>
+                    <p class="text-sm">Videos will appear here once WFH employees submit them on Fridays.</p>
+                </div>
+            </div>
         </main>
     </div>
 
@@ -529,6 +546,7 @@
         let allResults = [];
         let allEmployees = [];
         let allQuizzes = [];
+        let allWfh = [];
         let currentTab = 'results';
         let editingEmployee = null;
         let deletingEmployee = null;
@@ -951,8 +969,10 @@
                 document.getElementById('results-panel').classList.toggle('hidden',   currentTab !== 'results');
                 document.getElementById('quizzes-panel').classList.toggle('hidden',   currentTab !== 'quizzes');
                 document.getElementById('employees-panel').classList.toggle('hidden', currentTab !== 'employees');
+                document.getElementById('wfh-panel').classList.toggle('hidden',       currentTab !== 'wfh');
                 if (currentTab === 'employees' && allEmployees.length === 0) loadEmployees();
                 if (currentTab === 'quizzes'   && allQuizzes.length === 0)   loadQuizzes();
+                if (currentTab === 'wfh'       && allWfh.length === 0)       loadWfh();
             });
         });
 
@@ -1174,6 +1194,102 @@
         document.getElementById('emp-search').addEventListener('input', renderEmployees);
         document.getElementById('emp-sort').addEventListener('change', renderEmployees);
         document.getElementById('emp-refresh').addEventListener('click', loadEmployees);
+
+        // ---------- WFH check-ins ----------
+        async function loadWfh() {
+            if (!adminPassword) return;
+            const grid = document.getElementById('wfh-grid');
+            grid.innerHTML = '<div class="glass rounded-2xl p-8 text-center text-slate-400 font-bold animate-pulse col-span-full">Loading Friday check-ins…</div>';
+            try {
+                const week = document.getElementById('wfh-week').value || '';
+                const r = await fetch('/api/admin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: adminPassword, action: 'wfh_recordings', week })
+                });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.error || 'Failed');
+                allWfh = data.recordings || [];
+                renderWfh();
+            } catch (e) {
+                grid.innerHTML = `<div class="glass rounded-2xl p-8 text-center text-rose-300 font-bold col-span-full">${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        function renderWfh() {
+            const search = document.getElementById('wfh-search').value.trim().toLowerCase();
+            let rows = allWfh;
+            if (search) {
+                rows = rows.filter(r =>
+                    (r.full_name || '').toLowerCase().includes(search) ||
+                    (r.email     || '').toLowerCase().includes(search)
+                );
+            }
+            const grid  = document.getElementById('wfh-grid');
+            const empty = document.getElementById('wfh-empty');
+            if (rows.length === 0) {
+                grid.innerHTML = '';
+                empty.classList.remove('hidden');
+                return;
+            }
+            empty.classList.add('hidden');
+
+            const DEVICES = [
+                { key: 'mobile', label: 'Mobile', icon: '📱' },
+                { key: 'laptop', label: 'Laptop', icon: '💻' },
+                { key: 'tab',    label: 'Tab',    icon: '📲' },
+            ];
+
+            grid.innerHTML = rows.map(row => {
+                const clipsHtml = DEVICES.map(d => {
+                    const url  = row[`${d.key}_url`];
+                    const secs = row[`${d.key}_secs`];
+                    if (url) {
+                        return `
+                            <div class="glass rounded-xl overflow-hidden">
+                                <video src="${url}" controls playsinline preload="metadata" style="width:100%; aspect-ratio: 16/9; background:#000; display:block;"></video>
+                                <div class="flex items-center justify-between px-3 py-2 text-xs">
+                                    <span class="font-black text-white">${d.icon} ${d.label}</span>
+                                    <span class="text-emerald-300 font-bold">${secs || '?'}s ✓</span>
+                                </div>
+                            </div>`;
+                    }
+                    return `
+                        <div class="glass rounded-xl overflow-hidden opacity-50" style="border: 1px dashed rgba(255,255,255,0.12);">
+                            <div style="aspect-ratio: 16/9; background:#0b1120; display:flex; align-items:center; justify-content:center; color:#64748b; font-size:32px;">${d.icon}</div>
+                            <div class="flex items-center justify-between px-3 py-2 text-xs">
+                                <span class="font-black text-slate-400">${d.icon} ${d.label}</span>
+                                <span class="text-slate-500 font-bold">Not submitted</span>
+                            </div>
+                        </div>`;
+                }).join('');
+
+                const complete = DEVICES.filter(d => row[`${d.key}_url`]).length;
+                const badge = complete === 3
+                    ? '<span class="text-[10px] font-black px-3 py-1 rounded-full" style="background: rgba(16,185,129,0.18); color:#6ee7b7;">✓ COMPLETE</span>'
+                    : `<span class="text-[10px] font-black px-3 py-1 rounded-full" style="background: rgba(234,179,8,0.18); color:#fde68a;">${complete}/3 CLIPS</span>`;
+
+                const wo = row.week_of ? new Date(row.week_of + 'T00:00').toLocaleDateString('en-IN', { weekday:'long', day:'numeric', month:'short', year:'numeric' }) : '—';
+
+                return `
+                    <div class="glass-strong rounded-2xl p-5">
+                        <div class="flex items-start justify-between mb-4">
+                            <div>
+                                <h4 class="text-white font-black text-lg">${escapeHtml(row.full_name || '—')}</h4>
+                                <p class="text-slate-400 text-xs font-bold">${escapeHtml(row.email || '')} · ${wo}</p>
+                            </div>
+                            ${badge}
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            ${clipsHtml}
+                        </div>
+                    </div>`;
+            }).join('');
+        }
+
+        document.getElementById('wfh-search').addEventListener('input', renderWfh);
+        document.getElementById('wfh-week').addEventListener('change', loadWfh);
+        document.getElementById('wfh-refresh').addEventListener('click', loadWfh);
 
         gatePassword.focus();
     </script>
