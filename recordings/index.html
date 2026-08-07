@@ -26,12 +26,9 @@
             background-image: radial-gradient(rgba(255,255,255,0.04) 1px, transparent 1px);
             background-size: 22px 22px;
         }
-        .container { max-width: 720px; margin: 0 auto; position: relative; z-index: 1; }
+        .container { max-width: 860px; margin: 0 auto; position: relative; z-index: 1; }
 
-        .hero {
-            display: flex; align-items: center; gap: 16px;
-            margin-bottom: 24px;
-        }
+        .hero { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
         .hero .ic {
             width: 56px; height: 56px; border-radius: 18px;
             display: inline-flex; align-items: center; justify-content: center;
@@ -40,24 +37,6 @@
         }
         .hero h1 { font-size: 26px; font-weight: 900; letter-spacing: -0.01em; margin: 0; }
         .hero .sub { font-size: 13px; color: var(--ws-text-muted); font-weight: 700; margin-top: 2px; }
-
-        .card {
-            background: rgba(255,255,255,0.06);
-            backdrop-filter: blur(24px) saturate(180%);
-            -webkit-backdrop-filter: blur(24px) saturate(180%);
-            border: 1px solid rgba(255,255,255,0.10);
-            border-radius: 24px;
-            padding: 28px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.35);
-            position: relative;
-            overflow: hidden;
-        }
-        .card::before {
-            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 40%;
-            background: linear-gradient(180deg, rgba(255,255,255,0.10), transparent);
-            pointer-events: none;
-        }
-        .card > * { position: relative; z-index: 1; }
 
         .rules {
             background: rgba(139,92,246,0.10);
@@ -72,23 +51,110 @@
         .rules ul { margin: 6px 0 0; padding-left: 20px; }
         .rules li { margin: 3px 0; }
 
+        /* -------- Progress rail across the three clips -------- */
+        .steps {
+            display: grid; grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px; margin-bottom: 20px;
+        }
+        .step {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.10);
+            border-radius: 16px; padding: 14px;
+            display: flex; align-items: center; gap: 12px;
+            font-weight: 800; font-size: 13px;
+            transition: all .2s ease;
+        }
+        .step .step-ic { font-size: 22px; }
+        .step .step-body { display: flex; flex-direction: column; }
+        .step .step-title { color: #e2e8f0; }
+        .step .step-sub   { color: #94a3b8; font-size: 11px; font-weight: 700; }
+        .step.done {
+            background: rgba(16,185,129,0.10); border-color: rgba(16,185,129,0.35);
+        }
+        .step.done .step-sub { color: #6ee7b7; }
+        .step.active {
+            background: linear-gradient(135deg, rgba(59,130,246,0.20), rgba(139,92,246,0.20));
+            border-color: rgba(139,92,246,0.55);
+            box-shadow: 0 8px 24px rgba(99,102,241,0.25);
+        }
+        @media (max-width: 640px) {
+            .steps { grid-template-columns: 1fr; }
+        }
+
+        /* -------- Per-device recorder card -------- */
+        .device-card {
+            background: rgba(255,255,255,0.06);
+            backdrop-filter: blur(24px) saturate(180%);
+            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            border: 1px solid rgba(255,255,255,0.10);
+            border-radius: 24px;
+            padding: 22px;
+            margin-bottom: 18px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+            position: relative;
+            overflow: hidden;
+            transition: all .25s ease;
+        }
+        .device-card.done  { border-color: rgba(16,185,129,0.35); }
+        .device-card.active { border-color: rgba(139,92,246,0.4); }
+        .device-card::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 40%;
+            background: linear-gradient(180deg, rgba(255,255,255,0.10), transparent);
+            pointer-events: none;
+        }
+        .device-card > * { position: relative; z-index: 1; }
+
+        .device-head {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 14px;
+        }
+        .device-head .left { display: flex; align-items: center; gap: 12px; }
+        .device-head .dic {
+            width: 44px; height: 44px; border-radius: 14px;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 22px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.10);
+        }
+        .device-head h3 { font-size: 17px; font-weight: 900; margin: 0; }
+        .device-head .hint { color: #94a3b8; font-size: 12px; font-weight: 700; margin-top: 1px; }
+        .badge-done {
+            font-size: 10px; font-weight: 900; padding: 5px 12px; border-radius: 999px;
+            background: rgba(16,185,129,0.18); color: #6ee7b7;
+        }
+        .badge-todo {
+            font-size: 10px; font-weight: 900; padding: 5px 12px; border-radius: 999px;
+            background: rgba(148,163,184,0.14); color: #cbd5e1;
+        }
+        .badge-live {
+            font-size: 10px; font-weight: 900; padding: 5px 12px; border-radius: 999px;
+            background: rgba(239,68,68,0.18); color: #fecaca;
+        }
+
         video.stream, video.preview {
             width: 100%;
-            border-radius: 18px;
+            border-radius: 16px;
             background: #000;
-            aspect-ratio: 3 / 4;
+            aspect-ratio: 16 / 9;
             object-fit: cover;
             display: block;
             border: 1px solid rgba(255,255,255,0.08);
         }
-        @media (min-aspect-ratio: 4/3) {
-            video.stream, video.preview { aspect-ratio: 16 / 9; }
+        .placeholder {
+            aspect-ratio: 16 / 9;
+            display: flex; align-items: center; justify-content: center; flex-direction: column;
+            background: #0b1120; border-radius: 16px;
+            border: 1px dashed rgba(255,255,255,0.12);
+            color: #64748b; text-align: center; padding: 20px;
         }
+        .placeholder .p-emoji { font-size: 38px; margin-bottom: 8px; }
+        .placeholder .p-title { font-weight: 800; color: #cbd5e1; font-size: 14px; }
+        .placeholder .p-sub   { font-size: 12px; margin-top: 4px; }
 
         .btn {
             display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-            padding: 14px 22px; border-radius: 16px;
-            font-weight: 900; font-size: 14px; cursor: pointer;
+            padding: 12px 18px; border-radius: 14px;
+            font-weight: 900; font-size: 13px; cursor: pointer;
             border: 1px solid rgba(255,255,255,0.12);
             background: rgba(255,255,255,0.08); color: #fff;
             transition: transform .15s, background .15s, box-shadow .15s;
@@ -100,25 +166,47 @@
         .btn.record  { background: linear-gradient(135deg,#ef4444,#b91c1c); border-color: transparent; box-shadow: 0 8px 20px rgba(239,68,68,0.5); padding-left: 40px; position: relative; }
         .btn.record::before {
             content: ''; position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
-            width: 12px; height: 12px; border-radius: 50%; background: #fff;
+            width: 10px; height: 10px; border-radius: 50%; background: #fff;
             box-shadow: 0 0 0 3px rgba(255,255,255,0.3);
             animation: rec-blink 1s ease-in-out infinite;
         }
+        .btn.success { background: linear-gradient(135deg,#059669,#047857); border-color: transparent; box-shadow: 0 8px 20px rgba(16,185,129,0.45); }
         @keyframes rec-blink { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
 
+        .action-row {
+            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+            margin-top: 12px;
+        }
         .rec-status {
             font-family: 'JetBrains Mono', ui-monospace, monospace;
             font-size: 12px; font-weight: 800;
             padding: 6px 12px; border-radius: 999px;
             background: rgba(255,255,255,0.06); color: #94a3b8;
+            margin-left: auto;
         }
         .rec-status.live { color: #fecaca; background: rgba(239,68,68,0.14); }
         .rec-status.done { color: #6ee7b7; background: rgba(16,185,129,0.14); }
 
-        .action-row {
-            display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-            margin-top: 16px;
+        .progress-bar { margin-top: 10px; height: 5px; background: rgba(255,255,255,0.08); border-radius: 99px; overflow: hidden; display: none; }
+        .progress-bar.show { display: block; }
+        .progress-bar .fill { height: 100%; background: linear-gradient(90deg,#3b82f6,#8b5cf6); width: 0%; transition: width .2s; }
+
+        /* -------- Final "all done" card -------- */
+        .all-done {
+            background: linear-gradient(135deg, rgba(16,185,129,0.12), rgba(59,130,246,0.10));
+            border: 1px solid rgba(16,185,129,0.35);
+            border-radius: 22px; padding: 22px;
+            display: flex; align-items: center; gap: 16px;
+            margin-top: 8px;
         }
+        .all-done .adic {
+            width: 56px; height: 56px; border-radius: 18px;
+            background: linear-gradient(135deg,#059669,#0ea5e9);
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 30px; flex-shrink: 0;
+        }
+        .all-done h4 { font-size: 16px; font-weight: 900; margin: 0 0 3px; color: #fff; }
+        .all-done p  { margin: 0; font-size: 13px; color: #a7f3d0; font-weight: 700; }
 
         .history {
             margin-top: 28px;
@@ -135,13 +223,15 @@
         }
         .h-row + .h-row { border-top: 1px solid rgba(255,255,255,0.05); }
         .h-row b { color: var(--ws-text); }
-        .h-row .tag { font-size: 10px; font-weight: 900; padding: 3px 10px; border-radius: 999px; background: rgba(16,185,129,0.18); color: #6ee7b7; }
-
-        /* Gated states (not-friday, not-wfh, not-logged-in) */
-        .gate {
-            text-align: center;
-            padding: 40px 24px;
+        .h-row .cnt { display: flex; gap: 6px; }
+        .h-row .cnt span {
+            font-size: 10px; font-weight: 900; padding: 3px 10px; border-radius: 999px;
+            background: rgba(148,163,184,0.15); color: #cbd5e1;
         }
+        .h-row .cnt span.ok { background: rgba(16,185,129,0.18); color: #6ee7b7; }
+
+        /* Gated states */
+        .gate { text-align: center; padding: 40px 24px; background: rgba(255,255,255,0.06); backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.10); border-radius: 24px; }
         .gate .gate-ic {
             width: 72px; height: 72px; margin: 0 auto 20px;
             border-radius: 22px;
@@ -155,10 +245,7 @@
         .gate h2 { font-size: 22px; font-weight: 900; margin-bottom: 8px; }
         .gate p { color: var(--ws-text-muted); font-size: 14px; max-width: 420px; margin: 0 auto 20px; line-height: 1.55; }
 
-        .day-strip {
-            display: flex; justify-content: center; gap: 6px;
-            margin: 20px 0 8px;
-        }
+        .day-strip { display: flex; justify-content: center; gap: 6px; margin: 20px 0 8px; }
         .day-strip .d {
             width: 40px; padding: 8px 0; border-radius: 10px;
             font-size: 11px; font-weight: 900; color: #64748b;
@@ -183,10 +270,6 @@
         @keyframes toast-in { from { transform: translate(-50%, 20px); opacity: 0 } to { transform: translate(-50%, 0); opacity: 1 } }
         .toast.success { border-color: rgba(16,185,129,0.35); color: #6ee7b7; }
         .toast.error   { border-color: rgba(239,68,68,0.35);  color: #fca5a5; }
-
-        .progress-bar { margin-top: 12px; height: 6px; background: rgba(255,255,255,0.08); border-radius: 99px; overflow: hidden; display: none; }
-        .progress-bar.show { display: block; }
-        .progress-bar .fill { height: 100%; background: linear-gradient(90deg,#3b82f6,#8b5cf6); width: 0%; transition: width .2s; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="/presence.js"></script>
@@ -201,37 +284,39 @@
         </div>
         <div>
             <h1>Friday WFH Check-in</h1>
-            <p class="sub" id="hero-sub">Record a short back-camera video of your workspace</p>
+            <p class="sub" id="hero-sub">Three short back-camera clips — one each of your mobile, laptop, and tab.</p>
         </div>
     </div>
 
-    <!-- Dynamic body: gate OR recorder OR done -->
     <div id="body"></div>
-
 </div>
 
 <div id="toast" class="toast"></div>
 
 <script>
+    // ---------- Devices we need a clip of ----------
+    const DEVICES = [
+        { key: 'mobile', label: 'Mobile phone', icon: '📱', hint: 'Slow pan around your phone — front, back, screen on.' },
+        { key: 'laptop', label: 'Laptop',       icon: '💻', hint: 'Show the laptop lid open, screen visible, keyboard.' },
+        { key: 'tab',    label: 'Tab (tablet)', icon: '📲', hint: 'Rotate the tab so both sides + screen are clear.' },
+    ];
+
     // ---------- Supabase bootstrap ----------
     let sb = null;
     let user = null;
     let profile = null;
-    let stream = null;
-    let recorder = null;
-    let recBlob = null;
-    let recSecs = 0;
-    let recTicker = null;
+
+    // Per-device recorder state (streams + blobs + timers), keyed by device.key
+    const st = {}; // st.mobile = { stream, recorder, blob, secs, ticker, submitted:false }
 
     function ymd(d) { return d.toISOString().slice(0, 10); }
     function todaysFriday() {
-        // Returns today's date if today is Friday, else null.
         const d = new Date();
         return d.getDay() === 5 ? d : null;
     }
     function nextFriday() {
         const d = new Date();
-        const daysToFri = (5 - d.getDay() + 7) % 7 || 7; // 1..7
+        const daysToFri = (5 - d.getDay() + 7) % 7 || 7;
         d.setDate(d.getDate() + daysToFri);
         return d;
     }
@@ -240,7 +325,6 @@
     }
 
     async function init() {
-        // Wait for supabase-js
         for (let i = 0; i < 60 && !window.supabase; i++) await new Promise(r => setTimeout(r, 100));
         if (!window.supabase) return renderLocked();
         sb = window.__WS_SB__ || window.__WS_PRESENCE_SB__ || null;
@@ -254,12 +338,10 @@
                 });
             } catch { return renderLocked(); }
         }
-
         const { data: { session } } = await sb.auth.getSession();
         if (!session) return renderLocked();
         user = session.user;
 
-        // Load profile to check is_wfh
         try {
             const { data } = await sb.from('profiles')
                 .select('id, full_name, email, is_wfh')
@@ -268,47 +350,44 @@
             profile = data;
         } catch {}
 
-        if (!profile?.is_wfh) return renderNotWFH();
-        if (!todaysFriday()) return renderNotFriday();
+        if (!profile?.is_wfh)      return renderNotWFH();
+        if (!todaysFriday())       return renderNotFriday();
         renderRecorder();
     }
 
     // ---------- Gate states ----------
     function renderLocked() {
         document.getElementById('body').innerHTML = `
-            <div class="card gate locked">
+            <div class="gate locked">
                 <div class="gate-ic">🔐</div>
                 <h2>Sign in required</h2>
                 <p>Log into WorkSuite first, then open this page again to submit your Friday check-in.</p>
                 <a href="/" class="btn primary" style="text-decoration:none;">Go to Login</a>
             </div>`;
     }
-
     function renderNotWFH() {
         document.getElementById('body').innerHTML = `
-            <div class="card gate wfh">
+            <div class="gate wfh">
                 <div class="gate-ic">🏢</div>
                 <h2>Not a WFH day for you</h2>
                 <p>The Friday video check-in is only for employees your admin has marked as <b>WFH</b>. If you think this is a mistake, message your admin on Chat.</p>
                 <a href="/chat/" class="btn primary" style="text-decoration:none;">Message admin</a>
             </div>`;
     }
-
     function renderNotFriday() {
         const next = nextFriday();
         const today = new Date();
-        // Build a Sun–Sat strip with Friday and today highlighted
         const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
         const stripHtml = days.map((label, idx) => {
             const cls = ['d'];
-            if (idx === today.getDay())  cls.push('today');
-            if (idx === 5)               cls.push('friday');
+            if (idx === today.getDay()) cls.push('today');
+            if (idx === 5)              cls.push('friday');
             return `<div class="${cls.join(' ')}">${label}</div>`;
         }).join('');
         const daysUntil = Math.round((next - today) / 86_400_000);
         const when = daysUntil <= 1 ? 'tomorrow' : `in ${daysUntil} days`;
         document.getElementById('body').innerHTML = `
-            <div class="card gate calendar">
+            <div class="gate calendar">
                 <div class="gate-ic">📅</div>
                 <h2>Come back on Friday</h2>
                 <p>The video check-in only opens on Fridays. Your next window is <b>${fmtDate(next)}</b> — that's ${when}.</p>
@@ -317,218 +396,291 @@
             </div>`;
     }
 
+    // ---------- Recorder (3 device cards) ----------
     function renderRecorder() {
         const today = todaysFriday();
-        document.getElementById('hero-sub').textContent = `Submit your ${fmtDate(today)} check-in`;
+        document.getElementById('hero-sub').textContent =
+            `Submit your ${fmtDate(today)} check-in — one clip each of your Mobile, Laptop and Tab.`;
+
+        const stepsHtml = DEVICES.map(d =>
+            `<div class="step" id="step-${d.key}">
+                <div class="step-ic">${d.icon}</div>
+                <div class="step-body">
+                    <span class="step-title">${d.label}</span>
+                    <span class="step-sub" id="step-sub-${d.key}">Not recorded yet</span>
+                </div>
+            </div>`).join('');
+
+        const cardsHtml = DEVICES.map(d => `
+            <div class="device-card" id="card-${d.key}">
+                <div class="device-head">
+                    <div class="left">
+                        <div class="dic">${d.icon}</div>
+                        <div>
+                            <h3>${d.label}</h3>
+                            <div class="hint">${d.hint}</div>
+                        </div>
+                    </div>
+                    <span class="badge-todo" id="badge-${d.key}">To do</span>
+                </div>
+                <div id="shell-${d.key}">
+                    <video id="stream-${d.key}"  class="stream"  playsinline muted autoplay style="display:none;"></video>
+                    <video id="preview-${d.key}" class="preview" playsinline controls style="display:none;"></video>
+                    <div id="ph-${d.key}" class="placeholder">
+                        <div class="p-emoji">📷</div>
+                        <div class="p-title">Tap "Open camera" to start</div>
+                        <div class="p-sub">Uses your back camera (env). 10–60s is ideal.</div>
+                    </div>
+                </div>
+                <div class="action-row">
+                    <button class="btn primary" data-act="open"   data-dev="${d.key}">📷 Open camera</button>
+                    <button class="btn"         data-act="flip"   data-dev="${d.key}" style="display:none;">🔄 Flip</button>
+                    <button class="btn record"  data-act="start"  data-dev="${d.key}" style="display:none;">Start</button>
+                    <button class="btn record"  data-act="stop"   data-dev="${d.key}" style="display:none;">Stop</button>
+                    <button class="btn"         data-act="retake" data-dev="${d.key}" style="display:none;">Re-record</button>
+                    <button class="btn success" data-act="submit" data-dev="${d.key}" style="display:none;" disabled>Upload ${d.label}</button>
+                    <span id="status-${d.key}" class="rec-status">Idle</span>
+                </div>
+                <div id="pb-${d.key}" class="progress-bar"><div class="fill" id="pf-${d.key}"></div></div>
+                <p id="err-${d.key}" style="display:none; color:#fca5a5; font-size:12px; font-weight:700; margin-top:8px;"></p>
+            </div>`).join('');
+
         document.getElementById('body').innerHTML = `
             <div class="rules">
-                <strong>📋 What to record</strong>
+                <strong>📋 What to record — three separate clips</strong>
                 <ul>
-                    <li>Use your <b>back camera</b> to slowly pan around your workspace and show your surroundings.</li>
-                    <li>Keep it <b>15–60 seconds</b> long — no need for anything longer.</li>
-                    <li>Videos are private — only you and your admin can see them.</li>
-                    <li>You get one submission per Friday. Re-record until you're happy, then hit <b>Submit</b>.</li>
+                    <li>Use the <b>back camera</b> for every clip.</li>
+                    <li>Show <b>Mobile</b>, <b>Laptop</b> and <b>Tab</b> — one at a time, slow pan, screen visible.</li>
+                    <li>Each clip <b>10–60 seconds</b> (hard cap at 90s).</li>
+                    <li>Upload each one right after you finish. All three must be uploaded to complete the week.</li>
+                    <li>Only you and your admin can see these videos.</li>
                 </ul>
             </div>
 
-            <div class="card">
-                <div id="camera-shell">
-                    <video id="stream" class="stream" playsinline muted autoplay style="display:none;"></video>
-                    <video id="preview" class="preview" playsinline controls style="display:none;"></video>
-                    <div id="camera-placeholder" style="aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;flex-direction:column;background:#0b1120;border-radius:18px;border:1px dashed rgba(255,255,255,0.12);color:#64748b;text-align:center;padding:20px;">
-                        <div style="font-size:44px;margin-bottom:10px;">📷</div>
-                        <div style="font-weight:800;color:#cbd5e1;font-size:15px;">Ready to record</div>
-                        <div style="font-size:12px;margin-top:6px;">Tap <b>Open camera</b> to preview. You'll be asked to allow camera access.</div>
-                    </div>
-                </div>
+            <div class="steps">${stepsHtml}</div>
 
-                <div class="action-row">
-                    <button id="btn-open" class="btn primary" type="button">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                        Open camera
-                    </button>
-                    <button id="btn-flip"    class="btn" type="button" style="display:none;">🔄 Flip camera</button>
-                    <button id="btn-start"   class="btn record" type="button" style="display:none;">Start Recording</button>
-                    <button id="btn-stop"    class="btn record" type="button" style="display:none;">Stop</button>
-                    <button id="btn-retake"  class="btn" type="button" style="display:none;">Re-record</button>
-                    <span id="rec-status" class="rec-status">Idle</span>
-                </div>
+            ${cardsHtml}
 
-                <div id="progress" class="progress-bar"><div id="progress-fill" class="fill"></div></div>
-
-                <div class="action-row" style="justify-content:flex-end;">
-                    <button id="btn-submit" class="btn primary" type="button" style="display:none;" disabled>
-                        Submit Weekly Check-in
-                    </button>
-                </div>
-
-                <p id="err" style="display:none; color:#fca5a5; font-size:12px; font-weight:700; margin-top:8px;"></p>
-            </div>
+            <div id="all-done-slot"></div>
 
             <div id="history" class="history" style="display:none;">
-                <h3>📁 My previous check-ins</h3>
+                <h3>📁 My previous Fridays</h3>
                 <div id="history-list"></div>
             </div>`;
-        wireRecorder();
+
+        // Init per-device state
+        DEVICES.forEach(d => { st[d.key] = { stream: null, recorder: null, blob: null, secs: 0, ticker: null, submitted: false, facing: 'environment' }; });
+
+        wireAll();
+        setActiveStep('mobile');
+        loadTodaySubmission();
         loadHistory();
-        // If already submitted today, jump to done state
-        checkTodaySubmission();
     }
 
-    async function checkTodaySubmission() {
+    function wireAll() {
+        document.querySelectorAll('button[data-act]').forEach(b => {
+            b.addEventListener('click', () => {
+                const act = b.dataset.act;
+                const dev = b.dataset.dev;
+                if (act === 'open')   openCamera(dev);
+                if (act === 'flip')   flipCamera(dev);
+                if (act === 'start')  startRec(dev);
+                if (act === 'stop')   stopRec(dev);
+                if (act === 'retake') retakeRec(dev);
+                if (act === 'submit') submitRec(dev);
+            });
+        });
+    }
+
+    function $(id) { return document.getElementById(id); }
+    function setBtn(dev, act, on) {
+        const el = document.querySelector(`button[data-act="${act}"][data-dev="${dev}"]`);
+        if (el) el.style.display = on ? 'inline-flex' : 'none';
+    }
+    function setActiveStep(dev) {
+        DEVICES.forEach(d => {
+            const step = $(`step-${d.key}`);
+            step.classList.remove('active');
+            $(`card-${d.key}`).classList.remove('active');
+        });
+        if (dev) {
+            $(`step-${dev}`)?.classList.add('active');
+            $(`card-${dev}`)?.classList.add('active');
+            $(`card-${dev}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+    }
+    function markDone(dev) {
+        $(`step-${dev}`).classList.remove('active');
+        $(`step-${dev}`).classList.add('done');
+        $(`step-sub-${dev}`).textContent = 'Uploaded ✓';
+        $(`card-${dev}`).classList.remove('active');
+        $(`card-${dev}`).classList.add('done');
+        $(`badge-${dev}`).outerHTML = `<span class="badge-done" id="badge-${dev}">Uploaded</span>`;
+        // Move to the next unfinished device
+        const next = DEVICES.find(d => !st[d.key].submitted);
+        setActiveStep(next?.key || null);
+        maybeShowAllDone();
+    }
+    function maybeShowAllDone() {
+        const doneCount = DEVICES.filter(d => st[d.key].submitted).length;
+        if (doneCount === DEVICES.length) {
+            $('all-done-slot').innerHTML = `
+                <div class="all-done">
+                    <div class="adic">✅</div>
+                    <div>
+                        <h4>All three clips submitted for ${fmtDate(todaysFriday())}!</h4>
+                        <p>Nice work — your admin can review them from the dashboard. See you next Friday.</p>
+                    </div>
+                </div>`;
+            $('all-done-slot').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+
+    async function loadTodaySubmission() {
         try {
             const wo = ymd(todaysFriday());
-            const { data } = await sb.from('wfh_recordings').select('id, video_path').eq('user_id', user.id).eq('week_of', wo).maybeSingle();
-            if (data?.video_path) {
-                // Already submitted today
-                document.getElementById('camera-shell').innerHTML = `
-                    <div style="aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;flex-direction:column;background:rgba(16,185,129,0.10);border-radius:18px;border:1px solid rgba(16,185,129,0.35);color:#6ee7b7;text-align:center;padding:20px;">
-                        <div style="font-size:56px;margin-bottom:10px;">✅</div>
-                        <div style="font-weight:900;color:#fff;font-size:18px;">You're done for today!</div>
-                        <div style="font-size:13px;margin-top:6px;color:#a7f3d0;">Your ${fmtDate(todaysFriday())} check-in is saved. See you next Friday.</div>
-                    </div>`;
-                document.getElementById('btn-open').style.display = 'none';
-            }
+            const { data } = await sb.from('wfh_recordings')
+                .select('mobile_path, laptop_path, tab_path')
+                .eq('user_id', user.id).eq('week_of', wo).maybeSingle();
+            if (!data) return;
+            DEVICES.forEach(d => {
+                if (data[`${d.key}_path`]) {
+                    st[d.key].submitted = true;
+                    markDone(d.key);
+                    // Collapse the card controls
+                    ['open','flip','start','stop','retake','submit'].forEach(a => setBtn(d.key, a, false));
+                    $(`shell-${d.key}`).innerHTML = `
+                        <div class="placeholder" style="border-color: rgba(16,185,129,0.35); color:#6ee7b7;">
+                            <div class="p-emoji">✅</div>
+                            <div class="p-title" style="color:#fff;">Already submitted for this Friday</div>
+                            <div class="p-sub">Come back next Friday for a fresh check-in.</div>
+                        </div>`;
+                    $(`status-${d.key}`).className = 'rec-status done';
+                    $(`status-${d.key}`).textContent = '● Uploaded';
+                }
+            });
         } catch {}
     }
 
-    // ---------- Recorder wiring ----------
-    let currentFacing = 'environment'; // back camera by default
-
-    function wireRecorder() {
-        document.getElementById('btn-open').addEventListener('click',  () => openCamera(currentFacing));
-        document.getElementById('btn-flip').addEventListener('click',  flipCamera);
-        document.getElementById('btn-start').addEventListener('click', startRec);
-        document.getElementById('btn-stop').addEventListener('click',  stopRec);
-        document.getElementById('btn-retake').addEventListener('click', retakeRec);
-        document.getElementById('btn-submit').addEventListener('click', submitRec);
-    }
-
-    async function openCamera(facing) {
-        const err = document.getElementById('err');
-        err.style.display = 'none';
+    // ---------- Camera ----------
+    async function openCamera(dev) {
+        const err = $(`err-${dev}`); err.style.display = 'none';
         if (!navigator.mediaDevices?.getUserMedia) {
             err.textContent = 'Your browser does not support camera access. Please use Chrome or Safari.';
-            err.style.display = 'block';
-            return;
+            err.style.display = 'block'; return;
         }
         try {
-            if (stream) stream.getTracks().forEach(t => t.stop());
-            stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 } },
+            if (st[dev].stream) st[dev].stream.getTracks().forEach(t => t.stop());
+            st[dev].stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { ideal: st[dev].facing }, width: { ideal: 1280 }, height: { ideal: 720 } },
                 audio: true
             });
-            const vid = document.getElementById('stream');
-            vid.srcObject = stream;
+            const vid = $(`stream-${dev}`);
+            vid.srcObject = st[dev].stream;
             vid.style.display = 'block';
-            document.getElementById('camera-placeholder').style.display = 'none';
-            document.getElementById('preview').style.display = 'none';
-            document.getElementById('btn-open').style.display  = 'none';
-            document.getElementById('btn-start').style.display = 'inline-flex';
-            document.getElementById('btn-flip').style.display  = 'inline-flex';
-            document.getElementById('btn-retake').style.display = 'none';
-            document.getElementById('btn-submit').style.display = 'none';
-            currentFacing = facing;
+            $(`ph-${dev}`).style.display = 'none';
+            $(`preview-${dev}`).style.display = 'none';
+            setBtn(dev, 'open', false); setBtn(dev, 'flip', true);
+            setBtn(dev, 'start', true); setBtn(dev, 'retake', false);
+            setBtn(dev, 'submit', false);
+            setActiveStep(dev);
         } catch (e) {
             err.textContent = 'Could not open camera: ' + (e.message || 'permission denied');
             err.style.display = 'block';
         }
     }
 
-    async function flipCamera() {
-        currentFacing = currentFacing === 'environment' ? 'user' : 'environment';
-        await openCamera(currentFacing);
+    async function flipCamera(dev) {
+        st[dev].facing = st[dev].facing === 'environment' ? 'user' : 'environment';
+        await openCamera(dev);
     }
 
-    async function startRec() {
-        if (!stream) return;
+    async function startRec(dev) {
+        const S = st[dev]; if (!S.stream) return;
         let mime = 'video/webm;codecs=vp9,opus';
         if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm;codecs=vp8,opus';
         if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
-        if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/mp4'; // Safari fallback
+        if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/mp4';
         const chunks = [];
-        recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 900_000 });
-        recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+        S.recorder = new MediaRecorder(S.stream, { mimeType: mime, videoBitsPerSecond: 900_000 });
+        S.recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
         const startAt = Date.now();
-        recorder.onstop = () => {
-            recBlob = new Blob(chunks, { type: mime });
-            recSecs = Math.round((Date.now() - startAt) / 1000);
-            const url = URL.createObjectURL(recBlob);
-            const p = document.getElementById('preview');
+        S.recorder.onstop = () => {
+            S.blob = new Blob(chunks, { type: mime });
+            S.secs = Math.round((Date.now() - startAt) / 1000);
+            const url = URL.createObjectURL(S.blob);
+            const p = $(`preview-${dev}`);
             p.src = url; p.style.display = 'block';
-            document.getElementById('stream').style.display = 'none';
-            document.getElementById('btn-start').style.display = 'none';
-            document.getElementById('btn-stop').style.display  = 'none';
-            document.getElementById('btn-flip').style.display  = 'none';
-            document.getElementById('btn-retake').style.display = 'inline-flex';
-            document.getElementById('btn-submit').style.display = 'inline-flex';
-            document.getElementById('btn-submit').disabled = false;
-            const sizeMB = (recBlob.size / (1024*1024)).toFixed(1);
-            const s = document.getElementById('rec-status');
+            $(`stream-${dev}`).style.display = 'none';
+            setBtn(dev, 'start', false); setBtn(dev, 'stop', false); setBtn(dev, 'flip', false);
+            setBtn(dev, 'retake', true); setBtn(dev, 'submit', true);
+            document.querySelector(`button[data-act="submit"][data-dev="${dev}"]`).disabled = false;
+            const sizeMB = (S.blob.size / (1024*1024)).toFixed(1);
+            const s = $(`status-${dev}`);
             s.className = 'rec-status done';
-            s.textContent = `● Ready · ${recSecs}s · ${sizeMB} MB`;
-            clearInterval(recTicker);
-            stream.getTracks().forEach(t => t.stop());
-            stream = null;
+            s.textContent = `● Ready · ${S.secs}s · ${sizeMB} MB`;
+            clearInterval(S.ticker);
+            S.stream?.getTracks().forEach(t => t.stop());
+            S.stream = null;
+            $(`badge-${dev}`).outerHTML = `<span class="badge-todo" id="badge-${dev}">Ready to upload</span>`;
         };
-        recorder.start(1000);
-        document.getElementById('btn-start').style.display = 'none';
-        document.getElementById('btn-stop').style.display  = 'inline-flex';
-        document.getElementById('btn-flip').style.display  = 'none';
-        const s = document.getElementById('rec-status');
+        S.recorder.start(1000);
+        setBtn(dev, 'start', false); setBtn(dev, 'stop', true); setBtn(dev, 'flip', false);
+        const s = $(`status-${dev}`);
         s.className = 'rec-status live';
-        recTicker = setInterval(() => {
+        $(`badge-${dev}`).outerHTML = `<span class="badge-live" id="badge-${dev}">● Recording</span>`;
+        S.ticker = setInterval(() => {
             const secs = Math.floor((Date.now() - startAt) / 1000);
             s.textContent = `● REC · ${String(Math.floor(secs/60)).padStart(2,'0')}:${String(secs%60).padStart(2,'0')}`;
-            if (secs >= 90) stopRec(); // hard cap 90s
+            if (secs >= 90) stopRec(dev);
         }, 250);
     }
 
-    function stopRec() { try { recorder?.stop(); } catch {} }
+    function stopRec(dev) { try { st[dev].recorder?.stop(); } catch {} }
 
-    async function retakeRec() {
-        recBlob = null; recSecs = 0;
-        document.getElementById('preview').src = '';
-        document.getElementById('preview').style.display = 'none';
-        document.getElementById('btn-retake').style.display = 'none';
-        document.getElementById('btn-submit').style.display = 'none';
-        const s = document.getElementById('rec-status');
-        s.className = 'rec-status'; s.textContent = 'Idle';
-        await openCamera(currentFacing);
+    async function retakeRec(dev) {
+        st[dev].blob = null; st[dev].secs = 0;
+        $(`preview-${dev}`).src = '';
+        $(`preview-${dev}`).style.display = 'none';
+        setBtn(dev, 'retake', false); setBtn(dev, 'submit', false);
+        const s = $(`status-${dev}`); s.className = 'rec-status'; s.textContent = 'Idle';
+        $(`badge-${dev}`).outerHTML = `<span class="badge-todo" id="badge-${dev}">To do</span>`;
+        await openCamera(dev);
     }
 
-    async function submitRec() {
-        if (!recBlob) return;
-        const btn = document.getElementById('btn-submit');
+    async function submitRec(dev) {
+        const S = st[dev]; if (!S.blob) return;
+        const btn = document.querySelector(`button[data-act="submit"][data-dev="${dev}"]`);
         btn.disabled = true;
-        const bar = document.getElementById('progress');
-        const fill = document.getElementById('progress-fill');
+        const bar = $(`pb-${dev}`); const fill = $(`pf-${dev}`);
         bar.classList.add('show');
         try {
             const wo = ymd(todaysFriday());
-            const ext = recBlob.type.includes('mp4') ? 'mp4' : 'webm';
-            const path = `${user.id}/${wo}/checkin.${ext}`;
+            const ext = S.blob.type.includes('mp4') ? 'mp4' : 'webm';
+            const path = `${user.id}/${wo}/${dev}.${ext}`;
             fill.style.width = '30%';
-            const { error: upErr } = await sb.storage.from('wfh-recordings').upload(path, recBlob, {
+            const { error: upErr } = await sb.storage.from('wfh-recordings').upload(path, S.blob, {
                 upsert: true,
-                contentType: recBlob.type,
+                contentType: S.blob.type,
                 cacheControl: '3600',
             });
             if (upErr) throw upErr;
             fill.style.width = '80%';
-            const { error: metaErr } = await sb.from('wfh_recordings').upsert({
+            const patch = {
                 user_id: user.id,
                 full_name: profile?.full_name || user.user_metadata?.full_name || null,
                 email: user.email,
                 week_of: wo,
-                video_path: path,
-                video_bytes: recBlob.size,
-                video_secs: recSecs,
-            }, { onConflict: 'user_id,week_of' });
+            };
+            patch[`${dev}_path`]  = path;
+            patch[`${dev}_bytes`] = S.blob.size;
+            patch[`${dev}_secs`]  = S.secs;
+            const { error: metaErr } = await sb.from('wfh_recordings').upsert(patch, { onConflict: 'user_id,week_of' });
             if (metaErr) throw metaErr;
             fill.style.width = '100%';
-            toast('✅ Submitted! See you next Friday.', 'success');
-            setTimeout(() => { checkTodaySubmission(); loadHistory(); }, 800);
+            S.submitted = true;
+            markDone(dev);
+            toast(`✅ ${dev.charAt(0).toUpperCase()+dev.slice(1)} uploaded!`, 'success');
         } catch (e) {
             console.error(e);
             toast('Upload failed: ' + (e.message || 'unknown error'), 'error');
@@ -540,27 +692,29 @@
     async function loadHistory() {
         try {
             const { data } = await sb.from('wfh_recordings')
-                .select('week_of, video_secs, created_at')
+                .select('week_of, mobile_path, laptop_path, tab_path, created_at')
                 .eq('user_id', user.id)
                 .order('week_of', { ascending: false })
                 .limit(12);
             if (!data || !data.length) return;
-            const wrap = document.getElementById('history');
-            wrap.style.display = 'block';
-            document.getElementById('history-list').innerHTML = data.map(r => {
+            const wrap = $('history'); wrap.style.display = 'block';
+            $('history-list').innerHTML = data.map(r => {
                 const d = new Date(r.week_of + 'T00:00');
+                const chips = DEVICES.map(dv => {
+                    const has = !!r[`${dv.key}_path`];
+                    return `<span class="${has ? 'ok' : ''}">${dv.icon} ${dv.key}${has ? ' ✓' : ''}</span>`;
+                }).join('');
                 return `
                     <div class="h-row">
-                        <div><b>${d.toLocaleDateString('en-IN', { weekday:'long', day:'numeric', month:'short', year:'numeric' })}</b> · ${r.video_secs || 0}s clip</div>
-                        <div class="tag">Submitted</div>
+                        <div><b>${d.toLocaleDateString('en-IN', { weekday:'long', day:'numeric', month:'short', year:'numeric' })}</b></div>
+                        <div class="cnt">${chips}</div>
                     </div>`;
             }).join('');
         } catch {}
     }
 
     function toast(msg, kind) {
-        const t = document.getElementById('toast');
-        t.textContent = msg;
+        const t = $('toast'); t.textContent = msg;
         t.className = 'toast show ' + (kind || '');
         clearTimeout(toast._t);
         toast._t = setTimeout(() => t.classList.remove('show'), 3500);
