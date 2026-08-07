@@ -665,14 +665,17 @@
             if (!session) throw new Error('No auth session — please sign in again');
             const cfg = await fetch('/api/config').then(r => r.json());
             const url = `${cfg.supabaseUrl}/storage/v1/object/wfh-recordings/${path}`;
+            // Strip codec parameters from the mime — nginx in front of Supabase Storage
+            // rejects video/webm;codecs=vp9,opus with an HTML 400 on some paths.
+            const cleanMime = (S.blob.type || 'video/webm').split(';')[0].trim() || 'video/webm';
             const upRes = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${session.access_token}`,
                     'apikey': cfg.supabaseAnonKey,
                     'x-upsert': 'true',
-                    'Content-Type': S.blob.type || 'video/webm',
-                    'cache-control': '3600',
+                    'Content-Type': cleanMime,
+                    'Cache-Control': 'max-age=3600',
                 },
                 body: S.blob,
             });
