@@ -659,12 +659,28 @@
             const ext = S.blob.type.includes('mp4') ? 'mp4' : 'webm';
             const path = `${user.id}/${wo}/${dev}.${ext}`;
             fill.style.width = '30%';
-            const { error: upErr } = await sb.storage.from('wfh-recordings').upload(path, S.blob, {
-                upsert: true,
-                contentType: S.blob.type,
-                cacheControl: '3600',
+            // Raw fetch — supabase-js masks Storage error bodies as "HTTP 400 error";
+            // going direct lets us surface the real reason (bucket, RLS, size, etc.).
+            const { data: { session } } = await sb.auth.getSession();
+            if (!session) throw new Error('No auth session — please sign in again');
+            const cfg = await fetch('/api/config').then(r => r.json());
+            const url = `${cfg.supabaseUrl}/storage/v1/object/wfh-recordings/${path}`;
+            const upRes = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${session.access_token}`,
+                    'apikey': cfg.supabaseAnonKey,
+                    'x-upsert': 'true',
+                    'Content-Type': S.blob.type || 'video/webm',
+                    'cache-control': '3600',
+                },
+                body: S.blob,
             });
-            if (upErr) throw upErr;
+            if (!upRes.ok) {
+                const bodyText = await upRes.text();
+                console.error('[wfh] storage upload failed', upRes.status, bodyText);
+                throw new Error(`Storage ${upRes.status}: ${bodyText.slice(0, 300) || '(empty body)'}`);
+            }
             fill.style.width = '80%';
             const patch = {
                 user_id: user.id,
