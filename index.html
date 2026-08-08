@@ -660,10 +660,14 @@
             };
         }
 
-        // 6-digit signup verification code modal. Injected on demand so we don't
-        // bloat the initial DOM. Calls onSuccess() only after /api/verify-code
-        // confirms the code the user typed.
-        function showVerifyCodeDialog({ email, userId, firstName, company, onSuccess }) {
+        // Generic 6-digit OTP modal. Injected on demand.
+        //   opts.email      — shown in the copy
+        //   opts.onVerify   — async (code) => { ok, message } ; called on submit
+        //   opts.onResend   — async () => bool ; called on "Resend"
+        //   opts.onSuccess  — called after onVerify returns ok
+        //   opts.onCancel   — called if the user backs out (optional)
+        //   opts.successTitle / successMessage — final dialog copy
+        function showOtpModal({ email, onVerify, onResend, onSuccess, onCancel, successTitle, successMessage }) {
             let host = document.getElementById('verify-code-modal');
             if (!host) {
                 host = document.createElement('div');
@@ -674,11 +678,14 @@
                     <div class="w-full max-w-md rounded-3xl p-8 text-center" style="background: rgba(17,24,39,0.95); border: 1px solid rgba(255,255,255,0.10); box-shadow: 0 30px 70px rgba(0,0,0,0.5);">
                         <div class="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-3xl" style="background: linear-gradient(135deg,#3b82f6,#8b5cf6); box-shadow: 0 12px 30px rgba(99,102,241,0.5);">📧</div>
                         <h3 class="text-2xl font-black text-white mb-1">Check your email</h3>
-                        <p id="vc-sub" class="text-slate-300 text-sm mb-4">We sent a 6-digit code to <b id="vc-email"></b>. It expires in 15 minutes.</p>
+                        <p id="vc-sub" class="text-slate-300 text-sm mb-4">We sent a 6-digit code to <b id="vc-email"></b>. It expires in 15 minutes.<br><span class="text-slate-400 text-xs">Your account is created only after you enter this code.</span></p>
                         <input id="vc-input" type="text" inputmode="numeric" pattern="\\d{6}" maxlength="6" autocomplete="one-time-code" placeholder="••••••" class="w-full text-center tracking-[.6em] text-2xl font-black py-4 px-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/30 text-white placeholder-slate-500" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); font-family: 'JetBrains Mono', ui-monospace, monospace;">
                         <p id="vc-error" class="text-rose-300 text-sm font-bold mt-3 hidden"></p>
                         <button id="vc-submit" type="button" class="w-full mt-4 text-white font-black py-4 rounded-2xl text-lg" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 10px 30px rgba(59,130,246,0.4);">Verify & Continue</button>
-                        <button id="vc-resend" type="button" class="mt-3 text-blue-300 hover:text-blue-200 text-sm font-bold">Didn't get it? Resend</button>
+                        <div class="flex items-center justify-center gap-6 mt-3">
+                            <button id="vc-resend" type="button" class="text-blue-300 hover:text-blue-200 text-sm font-bold">Didn't get it? Resend</button>
+                            <button id="vc-cancel" type="button" class="text-slate-400 hover:text-slate-200 text-sm font-bold">Cancel</button>
+                        </div>
                     </div>`;
                 document.body.appendChild(host);
             }
@@ -687,6 +694,7 @@
             const errEl  = document.getElementById('vc-error');
             const submit = document.getElementById('vc-submit');
             const resend = document.getElementById('vc-resend');
+            const cancel = document.getElementById('vc-cancel');
             input.value = ''; errEl.classList.add('hidden');
 
             host.classList.remove('hidden'); host.classList.add('flex');
@@ -703,18 +711,16 @@
                 if (!/^\d{6}$/.test(input.value)) { errEl.innerText = 'Please enter the 6-digit code.'; errEl.classList.remove('hidden'); return; }
                 setBusy(true, 'Verifying…');
                 try {
-                    const r = await fetch('/api/verify-code', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_id: userId, code: input.value })
-                    });
-                    const j = await r.json().catch(() => ({}));
-                    if (!r.ok) { errEl.innerText = j.message || j.error || 'Verification failed.'; errEl.classList.remove('hidden'); setBusy(false); return; }
-                    close();
+                    const result = await onVerify(input.value);
+                    if (!result || !result.ok) {
+                        errEl.innerText = (result && result.message) || 'Verification failed.';
+                        errEl.classList.remove('hidden'); setBusy(false); return;
+                    }
+                    close(); setBusy(false);
                     showDialog({
                         type: 'success',
-                        title: 'Email verified! 🎉',
-                        message: `Welcome aboard, ${firstName}. Let's get started.`,
+                        title: successTitle || 'Email verified! 🎉',
+                        message: successMessage || 'You are all set.',
                         buttonText: 'Continue',
                         onClose: () => { if (typeof onSuccess === 'function') onSuccess(); }
                     });
@@ -726,16 +732,41 @@
             resend.onclick = async () => {
                 resend.disabled = true; resend.innerText = 'Sending…';
                 try {
+                    const ok = await onResend();
+                    resend.innerText = ok ? 'Sent — check your inbox' : 'Resend failed';
+                } catch { resend.innerText = 'Resend failed'; }
+                setTimeout(() => { resend.disabled = false; resend.innerText = "Didn't get it? Resend"; }, 4000);
+            };
+
+            cancel.onclick = () => { close(); if (typeof onCancel === 'function') onCancel(); };
+        }
+
+        // Legacy wrapper — used at login for accounts created under the old flow
+        // that never finished verification (/api/verify-code + /api/send-verify).
+        function showVerifyCodeDialog({ email, userId, firstName, company, onSuccess }) {
+            showOtpModal({
+                email,
+                successTitle: 'Email verified! 🎉',
+                successMessage: `Welcome aboard, ${firstName}. Let's get started.`,
+                onSuccess,
+                onVerify: async (code) => {
+                    const r = await fetch('/api/verify-code', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_id: userId, code })
+                    });
+                    const j = await r.json().catch(() => ({}));
+                    return { ok: r.ok, message: j.message || j.error };
+                },
+                onResend: async () => {
                     const r = await fetch('/api/send-verify', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ user_id: userId, email, company, full_name: firstName })
                     });
-                    if (r.ok) { resend.innerText = 'Sent — check your inbox'; }
-                    else      { resend.innerText = 'Resend failed'; }
-                } catch { resend.innerText = 'Resend failed'; }
-                setTimeout(() => { resend.disabled = false; resend.innerText = "Didn't get it? Resend"; }, 4000);
-            };
+                    return r.ok;
+                },
+            });
         }
 
         function showToast(message, type = 'success') {
@@ -1339,82 +1370,74 @@
             }
             const btn = form.querySelector('button[type="submit"]');
             const originalTxt = btn.innerText;
-            btn.disabled = true; btn.innerText = 'Creating account…';
+            btn.disabled = true; btn.innerText = 'Sending code…';
             try {
-                const { data, error } = await rootSb.auth.signUp({
-                    email, password, options: { data: { full_name, company, avatar_url: signupAvatarDataUrl } }
+                // ---- Universal flow, step 1: request an OTP. ----
+                // NO account is created yet — /api/signup-start only emails a code.
+                const startRes = await fetch('/api/signup-start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, company, full_name })
                 });
-                if (error) {
-                    const f = friendlyAuthError(error.message, 'signup');
+                const startJ = await startRes.json().catch(() => ({}));
+                if (!startRes.ok) {
                     shakeForm(form);
-                    showDialog({ type: 'error', title: f.title, message: f.message, buttonText: 'Try Again' });
-                    return;
-                }
-                // Whether Supabase auto-confirmed or not, we run our own email
-                // verification step on top — a 6-digit code sent from the sender
-                // mailbox that matches the user's company.
-                const sessionForLogin = data.session;
-                const userId = data.user?.id || data.session?.user?.id;
-                if (!userId) {
-                    // Nothing we can hang a verification off of — fall through.
-                    showDialog({ type: 'success', title: 'Account created', message: 'Please sign in.', buttonText: 'OK', onClose: () => switchAuthTab('login') });
-                    return;
-                }
-                // Fire the code send (server routes SMTP by company).
-                let verifyResult = null;
-                try {
-                    const r = await fetch('/api/send-verify', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_id: userId, email, company, full_name })
-                    });
-                    verifyResult = await r.json().catch(() => ({}));
-                    if (!r.ok) throw new Error(verifyResult.error || 'send_failed');
-                } catch (sendErr) {
-                    console.error('[signup] verify send failed', sendErr);
-                    try { await rootSb.auth.signOut(); } catch {}
-                    showDialog({
-                        type: 'error',
-                        title: 'Code not sent',
-                        message: "Your account was created but we couldn't send the verification code. Try logging in — we'll re-send the code then.",
-                        buttonText: 'Go to Login',
-                        onClose: () => switchAuthTab('login')
-                    });
+                    if (startRes.status === 409) {
+                        showDialog({
+                            type: 'warning', title: 'Account already exists',
+                            message: startJ.message || 'An account with this email already exists. Try logging in instead.',
+                            buttonText: 'Go to Login', onClose: () => switchAuthTab('login')
+                        });
+                    } else {
+                        showDialog({
+                            type: 'error', title: 'Could not send code',
+                            message: startJ.message || startJ.error || 'Something went wrong sending the verification code. Please try again.',
+                            buttonText: 'Try Again'
+                        });
+                    }
                     return;
                 }
 
-                // Per the auth flow: sign-up NEVER auto-enters the app.
-                // New user → OTP → "signup success" → back to the Login tab.
-                const backToLogin = async (title, message) => {
-                    try { await rootSb.auth.signOut(); } catch {}
+                const firstName = full_name.split(' ')[0];
+                const resetSignupForm = () => {
                     form.reset();
                     signupAvatarDataUrl = '';
                     const p = document.getElementById('signup-photo-preview');
                     if (p) p.innerHTML = '📷';
-                    showDialog({
-                        type: 'success', title, message,
-                        buttonText: 'Go to Login',
-                        onClose: () => switchAuthTab('login')
-                    });
                 };
 
-                // "Coming soon" branch (Navyug Raise A Player Foundation) — skip the
-                // code step; account is active, but they still log in explicitly.
-                if (verifyResult.skipped === 'email_coming_soon') {
-                    await backToLogin(
-                        'Account created! 🎉',
-                        `${verifyResult.message || 'Email verification is coming soon for this company.'} Please log in with your email and password.`
-                    );
-                    return;
-                }
-
-                // Show the 6-digit code entry step; on success → login tab.
-                showVerifyCodeDialog({
-                    email, userId, firstName: full_name.split(' ')[0], company,
-                    onSuccess: () => backToLogin(
-                        'Sign-up successful! ✅',
-                        `Your email is verified, ${full_name.split(' ')[0]}. Log in with your email and password to get started.`
-                    )
+                // ---- Step 2: the OTP modal. The account is created server-side
+                // ONLY when the right code is submitted (/api/signup-complete).
+                // Cancel/abandon = no account. ----
+                showOtpModal({
+                    email,
+                    successTitle: 'Sign-up successful! ✅',
+                    successMessage: `Your account is created and verified, ${firstName}. Log in with your email and password to get started.`,
+                    onVerify: async (code) => {
+                        const r = await fetch('/api/signup-complete', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                email, code, password, full_name, company,
+                                avatar_url: signupAvatarDataUrl || null
+                            })
+                        });
+                        const j = await r.json().catch(() => ({}));
+                        if (r.ok) resetSignupForm();
+                        return { ok: r.ok, message: j.message || j.error };
+                    },
+                    onResend: async () => {
+                        const r = await fetch('/api/signup-start', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ email, company, full_name })
+                        });
+                        return r.ok;
+                    },
+                    onSuccess: () => switchAuthTab('login'),
+                    onCancel: () => {
+                        showToast('Sign-up cancelled — no account was created.', 'info');
+                    }
                 });
             } catch (ex) {
                 const f = friendlyAuthError(ex.message, 'signup');
