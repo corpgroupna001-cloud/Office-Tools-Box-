@@ -1216,6 +1216,39 @@
                     showDialog({ type: 'error', title: f.title, message: f.message, buttonText: 'Try Again' });
                     return;
                 }
+                // Gate: users who never completed the sign-up OTP must verify now.
+                let prof = null;
+                try {
+                    const { data: p } = await rootSb.from('profiles')
+                        .select('email_verified, company, full_name')
+                        .eq('id', data.session.user.id).maybeSingle();
+                    prof = p;
+                } catch {}
+                const COMING_SOON = ['Navyug Raise A Player Foundation', 'Raise a Player'];
+                if (prof && prof.email_verified === false && !COMING_SOON.includes(prof.company)) {
+                    // Re-send a fresh code, then require it before entry.
+                    btn.innerText = 'Sending code…';
+                    try {
+                        await fetch('/api/send-verify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                user_id: data.session.user.id, email,
+                                company: prof.company || 'CORPGROUP',
+                                full_name: prof.full_name || ''
+                            })
+                        });
+                    } catch {}
+                    showVerifyCodeDialog({
+                        email, userId: data.session.user.id,
+                        firstName: (prof.full_name || email).split(' ')[0], company: prof.company,
+                        onSuccess: () => {
+                            showToast('Email verified — welcome!', 'success');
+                            onLoggedIn(data.session);
+                        }
+                    });
+                    return;
+                }
                 showToast('Signed in — welcome back!', 'success');
                 onLoggedIn(data.session);
             } catch (ex) {
@@ -1327,36 +1360,49 @@
                     if (!r.ok) throw new Error(verifyResult.error || 'send_failed');
                 } catch (sendErr) {
                     console.error('[signup] verify send failed', sendErr);
+                    try { await rootSb.auth.signOut(); } catch {}
                     showDialog({
-                        type: 'success',
-                        title: 'Account created — email pending',
-                        message: 'We couldn’t send the verification code just now, but your account exists. You can sign in and re-request the code from your profile.',
-                        buttonText: 'Continue',
-                        onClose: () => { if (sessionForLogin) onLoggedIn(sessionForLogin); else switchAuthTab('login'); }
+                        type: 'error',
+                        title: 'Code not sent',
+                        message: "Your account was created but we couldn't send the verification code. Try logging in — we'll re-send the code then.",
+                        buttonText: 'Go to Login',
+                        onClose: () => switchAuthTab('login')
                     });
                     return;
                 }
+
+                // Per the auth flow: sign-up NEVER auto-enters the app.
+                // New user → OTP → "signup success" → back to the Login tab.
+                const backToLogin = async (title, message) => {
+                    try { await rootSb.auth.signOut(); } catch {}
+                    form.reset();
+                    signupAvatarDataUrl = '';
+                    const p = document.getElementById('signup-photo-preview');
+                    if (p) p.innerHTML = '📷';
+                    showDialog({
+                        type: 'success', title, message,
+                        buttonText: 'Go to Login',
+                        onClose: () => switchAuthTab('login')
+                    });
+                };
 
                 // "Coming soon" branch (Navyug Raise A Player Foundation) — skip the
-                // code step but still let them in and tell them why.
+                // code step; account is active, but they still log in explicitly.
                 if (verifyResult.skipped === 'email_coming_soon') {
-                    showDialog({
-                        type: 'success',
-                        title: 'Welcome aboard! 🎉',
-                        message: `${verifyResult.message || 'Email verification is coming soon for this company.'} Your account is active — welcome, ${full_name.split(' ')[0]}.`,
-                        buttonText: 'Continue',
-                        onClose: () => { if (sessionForLogin) onLoggedIn(sessionForLogin); else switchAuthTab('login'); }
-                    });
+                    await backToLogin(
+                        'Account created! 🎉',
+                        `${verifyResult.message || 'Email verification is coming soon for this company.'} Please log in with your email and password.`
+                    );
                     return;
                 }
 
-                // Show the 6-digit code entry step.
+                // Show the 6-digit code entry step; on success → login tab.
                 showVerifyCodeDialog({
                     email, userId, firstName: full_name.split(' ')[0], company,
-                    onSuccess: () => {
-                        if (sessionForLogin) onLoggedIn(sessionForLogin);
-                        else switchAuthTab('login');
-                    }
+                    onSuccess: () => backToLogin(
+                        'Sign-up successful! ✅',
+                        `Your email is verified, ${full_name.split(' ')[0]}. Log in with your email and password to get started.`
+                    )
                 });
             } catch (ex) {
                 const f = friendlyAuthError(ex.message, 'signup');
