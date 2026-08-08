@@ -235,7 +235,7 @@
                     <option value="" disabled selected>Select your company</option>
                     <option value="Nova Sportsmart Private Limited">Nova Sportsmart Private Limited</option>
                     <option value="Protathlitis Sportsmart LLP">Protathlitis Sportsmart LLP</option>
-                    <option value="Navyug Raise A Player Foundation">Navyug Raise A Player Foundation</option>
+                    <option value="Navyug Raise A Player Foundation">Navyug Raise A Player Foundation — Coming soon</option>
                     <option value="Jobways Point LLP">Jobways Point LLP</option>
                     <option value="Genie Lamp Private Limited">Genie Lamp Private Limited</option>
                     <option value="CORPGROUP">CORPGROUP</option>
@@ -1318,6 +1318,18 @@
             if (!company) {
                 shakeForm(form);
                 showDialog({ type: 'warning', title: 'Company required', message: 'Please select your company from the dropdown before continuing.' });
+                return;
+            }
+            // Navyug Raise A Player Foundation onboarding hasn't launched yet —
+            // block the sign-up entirely and ask them to pick another company.
+            if (company === 'Navyug Raise A Player Foundation' || company === 'Raise a Player') {
+                shakeForm(form);
+                showDialog({
+                    type: 'warning',
+                    title: 'Coming soon 🚧',
+                    message: 'Sign-ups for Navyug Raise A Player Foundation are not open yet. If you belong to another company, please select it from the dropdown and try again.',
+                    buttonText: 'Change Company'
+                });
                 return;
             }
             if (password.length < 6) {
