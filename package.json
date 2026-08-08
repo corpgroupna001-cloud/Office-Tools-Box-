@@ -1,0 +1,9 @@
+{
+  "name": "worksuite",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WorkSuite — internal productivity tools (Vercel + Supabase).",
+  "dependencies": {
+    "nodemailer": "^6.9.16"
+  }
+}

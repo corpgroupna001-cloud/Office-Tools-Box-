@@ -660,6 +660,84 @@
             };
         }
 
+        // 6-digit signup verification code modal. Injected on demand so we don't
+        // bloat the initial DOM. Calls onSuccess() only after /api/verify-code
+        // confirms the code the user typed.
+        function showVerifyCodeDialog({ email, userId, firstName, company, onSuccess }) {
+            let host = document.getElementById('verify-code-modal');
+            if (!host) {
+                host = document.createElement('div');
+                host.id = 'verify-code-modal';
+                host.className = 'fixed inset-0 z-[80] hidden items-center justify-center p-4';
+                host.style.cssText = 'background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);';
+                host.innerHTML = `
+                    <div class="w-full max-w-md rounded-3xl p-8 text-center" style="background: rgba(17,24,39,0.95); border: 1px solid rgba(255,255,255,0.10); box-shadow: 0 30px 70px rgba(0,0,0,0.5);">
+                        <div class="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-3xl" style="background: linear-gradient(135deg,#3b82f6,#8b5cf6); box-shadow: 0 12px 30px rgba(99,102,241,0.5);">📧</div>
+                        <h3 class="text-2xl font-black text-white mb-1">Check your email</h3>
+                        <p id="vc-sub" class="text-slate-300 text-sm mb-4">We sent a 6-digit code to <b id="vc-email"></b>. It expires in 15 minutes.</p>
+                        <input id="vc-input" type="text" inputmode="numeric" pattern="\\d{6}" maxlength="6" autocomplete="one-time-code" placeholder="••••••" class="w-full text-center tracking-[.6em] text-2xl font-black py-4 px-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/30 text-white placeholder-slate-500" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); font-family: 'JetBrains Mono', ui-monospace, monospace;">
+                        <p id="vc-error" class="text-rose-300 text-sm font-bold mt-3 hidden"></p>
+                        <button id="vc-submit" type="button" class="w-full mt-4 text-white font-black py-4 rounded-2xl text-lg" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 10px 30px rgba(59,130,246,0.4);">Verify & Continue</button>
+                        <button id="vc-resend" type="button" class="mt-3 text-blue-300 hover:text-blue-200 text-sm font-bold">Didn't get it? Resend</button>
+                    </div>`;
+                document.body.appendChild(host);
+            }
+            document.getElementById('vc-email').innerText = email;
+            const input  = document.getElementById('vc-input');
+            const errEl  = document.getElementById('vc-error');
+            const submit = document.getElementById('vc-submit');
+            const resend = document.getElementById('vc-resend');
+            input.value = ''; errEl.classList.add('hidden');
+
+            host.classList.remove('hidden'); host.classList.add('flex');
+            setTimeout(() => input.focus(), 60);
+
+            const close = () => { host.classList.add('hidden'); host.classList.remove('flex'); };
+            const setBusy = (b, txt) => { submit.disabled = b; submit.innerText = txt || 'Verify & Continue'; };
+
+            input.oninput = () => { input.value = input.value.replace(/\D/g, '').slice(0, 6); };
+            input.onkeydown = (e) => { if (e.key === 'Enter') submit.click(); };
+
+            submit.onclick = async () => {
+                errEl.classList.add('hidden');
+                if (!/^\d{6}$/.test(input.value)) { errEl.innerText = 'Please enter the 6-digit code.'; errEl.classList.remove('hidden'); return; }
+                setBusy(true, 'Verifying…');
+                try {
+                    const r = await fetch('/api/verify-code', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_id: userId, code: input.value })
+                    });
+                    const j = await r.json().catch(() => ({}));
+                    if (!r.ok) { errEl.innerText = j.message || j.error || 'Verification failed.'; errEl.classList.remove('hidden'); setBusy(false); return; }
+                    close();
+                    showDialog({
+                        type: 'success',
+                        title: 'Email verified! 🎉',
+                        message: `Welcome aboard, ${firstName}. Let's get started.`,
+                        buttonText: 'Continue',
+                        onClose: () => { if (typeof onSuccess === 'function') onSuccess(); }
+                    });
+                } catch (e) {
+                    errEl.innerText = 'Network error. Please try again.'; errEl.classList.remove('hidden'); setBusy(false);
+                }
+            };
+
+            resend.onclick = async () => {
+                resend.disabled = true; resend.innerText = 'Sending…';
+                try {
+                    const r = await fetch('/api/send-verify', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_id: userId, email, company, full_name: firstName })
+                    });
+                    if (r.ok) { resend.innerText = 'Sent — check your inbox'; }
+                    else      { resend.innerText = 'Resend failed'; }
+                } catch { resend.innerText = 'Resend failed'; }
+                setTimeout(() => { resend.disabled = false; resend.innerText = "Didn't get it? Resend"; }, 4000);
+            };
+        }
+
         function showToast(message, type = 'success') {
             const t = document.getElementById('toast');
             const bg = {
@@ -1227,31 +1305,59 @@
                     showDialog({ type: 'error', title: f.title, message: f.message, buttonText: 'Try Again' });
                     return;
                 }
-                if (data.session) {
-                    // Auto-confirmed — go straight in
+                // Whether Supabase auto-confirmed or not, we run our own email
+                // verification step on top — a 6-digit code sent from the sender
+                // mailbox that matches the user's company.
+                const sessionForLogin = data.session;
+                const userId = data.user?.id || data.session?.user?.id;
+                if (!userId) {
+                    // Nothing we can hang a verification off of — fall through.
+                    showDialog({ type: 'success', title: 'Account created', message: 'Please sign in.', buttonText: 'OK', onClose: () => switchAuthTab('login') });
+                    return;
+                }
+                // Fire the code send (server routes SMTP by company).
+                let verifyResult = null;
+                try {
+                    const r = await fetch('/api/send-verify', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_id: userId, email, company, full_name })
+                    });
+                    verifyResult = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(verifyResult.error || 'send_failed');
+                } catch (sendErr) {
+                    console.error('[signup] verify send failed', sendErr);
+                    showDialog({
+                        type: 'success',
+                        title: 'Account created — email pending',
+                        message: 'We couldn’t send the verification code just now, but your account exists. You can sign in and re-request the code from your profile.',
+                        buttonText: 'Continue',
+                        onClose: () => { if (sessionForLogin) onLoggedIn(sessionForLogin); else switchAuthTab('login'); }
+                    });
+                    return;
+                }
+
+                // "Coming soon" branch (Navyug Raise A Player Foundation) — skip the
+                // code step but still let them in and tell them why.
+                if (verifyResult.skipped === 'email_coming_soon') {
                     showDialog({
                         type: 'success',
                         title: 'Welcome aboard! 🎉',
-                        message: `Your account has been created, ${full_name.split(' ')[0]}. Let's get started.`,
+                        message: `${verifyResult.message || 'Email verification is coming soon for this company.'} Your account is active — welcome, ${full_name.split(' ')[0]}.`,
                         buttonText: 'Continue',
-                        onClose: () => onLoggedIn(data.session)
+                        onClose: () => { if (sessionForLogin) onLoggedIn(sessionForLogin); else switchAuthTab('login'); }
                     });
-                } else {
-                    // Email confirmation required
-                    form.reset();
-                    signupAvatarDataUrl = '';
-                    const p = document.getElementById('signup-photo-preview');
-                    if (p) p.innerHTML = '📷';
-                    const h = document.getElementById('signup-photo-hint');
-                    if (h) { h.innerText = 'Tap the icon — required'; h.className = 'text-slate-400 text-xs mt-0.5'; }
-                    showDialog({
-                        type: 'email',
-                        title: 'Check your email 📬',
-                        message: `We sent a confirmation link to ${email}. Click it to activate your account, then log in.`,
-                        buttonText: 'Got it',
-                        onClose: () => switchAuthTab('login')
-                    });
+                    return;
                 }
+
+                // Show the 6-digit code entry step.
+                showVerifyCodeDialog({
+                    email, userId, firstName: full_name.split(' ')[0], company,
+                    onSuccess: () => {
+                        if (sessionForLogin) onLoggedIn(sessionForLogin);
+                        else switchAuthTab('login');
+                    }
+                });
             } catch (ex) {
                 const f = friendlyAuthError(ex.message, 'signup');
                 shakeForm(form);
