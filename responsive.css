@@ -1,0 +1,77 @@
+/* ============================================================
+   WorkSuite — global responsive polish (mobile ⇄ desktop)
+   Loaded on every page after design-system.css.
+   Conservative overrides only: nothing here changes desktop
+   layouts; it adapts them below the breakpoints.
+   ============================================================ */
+
+html { -webkit-text-size-adjust: 100%; }
+
+/* Media never overflows its container */
+img, video, canvas { max-width: 100%; }
+
+/* ---------- Phones & small tablets ---------- */
+@media (max-width: 640px) {
+
+    /* Inputs at 16px+ so iOS Safari doesn't auto-zoom on focus */
+    input, select, textarea { font-size: 16px !important; }
+
+    /* Every fixed-overlay modal card: fit the viewport, scroll inside */
+    .fixed.inset-0 > div,
+    [id$="-modal"] > div {
+        max-height: 92vh;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* Headings scale down fluidly instead of wrapping awkwardly */
+    h1 { font-size: clamp(20px, 6.5vw, 28px) !important; line-height: 1.2 !important; }
+    h2 { font-size: clamp(18px, 5.5vw, 24px) !important; }
+
+    /* Tab bars & filter rows: swipe sideways rather than stack badly */
+    .tab-bar {
+        overflow-x: auto;
+        flex-wrap: nowrap !important;
+        white-space: nowrap;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+    .tab-bar::-webkit-scrollbar { display: none; }
+
+    /* Toasts: use the width of the phone, not a fixed pill */
+    .toast {
+        left: 12px !important; right: 12px !important;
+        transform: none !important;
+        text-align: center;
+    }
+    .toast.show { animation: none !important; }
+
+    /* Command palette fits the phone */
+    .ws-cmdk-panel { width: calc(100vw - 24px) !important; max-width: none !important; }
+
+    /* Big glass cards: slightly tighter padding + radius on phones */
+    .glass-strong { border-radius: 18px; }
+
+    /* Grids declared with fixed multi-columns collapse gracefully */
+    .day-strip .d { width: 34px; font-size: 10px; }
+}
+
+/* ---------- Small phones ---------- */
+@media (max-width: 400px) {
+    h1 { font-size: clamp(18px, 6vw, 22px) !important; }
+    .hero .ic { width: 44px !important; height: 44px !important; border-radius: 14px !important; }
+}
+
+/* ---------- Touch devices: comfortable hit areas ---------- */
+@media (pointer: coarse) {
+    .btn, button.btn, .auth-tab, .admin-tab {
+        min-height: 44px;
+    }
+    /* Video controls get a bit more room */
+    video::-webkit-media-controls-panel { padding: 0 4px; }
+}
+
+/* ---------- Large desktop: keep line lengths readable ---------- */
+@media (min-width: 1800px) {
+    .container { max-width: 1400px; margin-left: auto; margin-right: auto; }
+}
