@@ -541,6 +541,42 @@
         </div>
     </div>
 
+    <!-- WFH big-screen video player -->
+    <div id="wfh-player-modal" class="fixed inset-0 z-[80] hidden items-center justify-center p-4" style="background: rgba(0,0,0,0.93); backdrop-filter: blur(10px);">
+        <div class="w-full" style="max-width: 1100px;">
+            <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                <h3 id="wfh-player-title" class="text-white font-black text-lg truncate">Video</h3>
+                <div class="flex gap-2 flex-shrink-0">
+                    <button id="wfh-player-fs" type="button" class="glass text-white font-bold px-4 py-2 rounded-xl text-sm">⛶ Fullscreen</button>
+                    <button id="wfh-player-close" type="button" class="glass text-white font-bold px-4 py-2 rounded-xl text-sm">✕ Close</button>
+                </div>
+            </div>
+            <video id="wfh-player-video" controls autoplay playsinline
+                style="width:100%; max-height:78vh; background:#000; border-radius:16px; display:block;"></video>
+        </div>
+    </div>
+
+    <!-- WFH QC review modal (approve / reject) -->
+    <div id="wfh-review-modal" class="fixed inset-0 z-[76] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);">
+        <div class="glass-strong w-full max-w-md rounded-3xl p-8 text-center">
+            <div id="wfh-review-ic" class="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-white text-3xl font-black" style="background: linear-gradient(135deg,#059669,#047857); box-shadow: 0 15px 40px rgba(0,0,0,0.4);">✓</div>
+            <h3 id="wfh-review-title" class="text-2xl font-black text-white mb-2">Approve?</h3>
+            <p id="wfh-review-message" class="text-slate-300 text-sm mb-4">—</p>
+            <div id="wfh-review-note-wrap" class="hidden mb-4 text-left">
+                <label class="text-slate-400 text-xs font-bold block mb-1">Reason shown to the employee (optional)</label>
+                <textarea id="wfh-review-note" rows="2" maxlength="500"
+                    placeholder="e.g. Video is blurry / too dark — record in a well-lit area"
+                    class="w-full rounded-xl p-3 text-sm text-white"
+                    style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); outline: none; resize: vertical;"></textarea>
+            </div>
+            <div class="flex gap-3">
+                <button id="wfh-review-cancel" type="button" class="glass flex-1 text-white font-bold py-3 rounded-xl">Cancel</button>
+                <button id="wfh-review-confirm" type="button" class="flex-1 text-white font-black py-3 rounded-xl" style="background: linear-gradient(135deg,#059669,#047857);">Approve</button>
+            </div>
+            <p id="wfh-review-err" class="text-rose-300 text-sm font-bold mt-3 hidden"></p>
+        </div>
+    </div>
+
     <!-- Delete confirmation modal -->
     <div id="delete-emp-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);">
         <div class="glass-strong w-full max-w-md rounded-3xl p-8 text-center">
@@ -1270,6 +1306,10 @@
                                     <span class="font-black text-white">${d.icon} ${d.label}</span>
                                     <span class="flex items-center gap-2">
                                         <span class="text-emerald-300 font-bold">${secs || '?'}s ✓</span>
+                                        <button type="button" data-wfh-play="${row.id}" data-dev="${d.key}"
+                                            title="Open in big-screen player"
+                                            class="font-black px-2 py-1 rounded-lg"
+                                            style="background: rgba(59,130,246,0.18); color:#93c5fd; border:1px solid rgba(59,130,246,0.35);">⛶</button>
                                         <button type="button" data-wfh-del="${row.id}" data-dev="${d.key}"
                                             title="Delete this ${d.label} clip"
                                             class="font-black px-2 py-1 rounded-lg"
@@ -1293,17 +1333,37 @@
                     ? '<span class="text-[10px] font-black px-3 py-1 rounded-full" style="background: rgba(16,185,129,0.18); color:#6ee7b7;">✓ COMPLETE</span>'
                     : `<span class="text-[10px] font-black px-3 py-1 rounded-full" style="background: rgba(234,179,8,0.18); color:#fde68a;">${complete}/3 CLIPS</span>`;
 
+                const qc = row.status || 'pending';
+                const qcBadge = qc === 'approved'
+                    ? '<span class="text-[10px] font-black px-3 py-1 rounded-full" style="background: rgba(16,185,129,0.22); color:#6ee7b7; border:1px solid rgba(16,185,129,0.4);">✔ APPROVED</span>'
+                    : qc === 'rejected'
+                        ? '<span class="text-[10px] font-black px-3 py-1 rounded-full" style="background: rgba(244,63,94,0.22); color:#fda4af; border:1px solid rgba(244,63,94,0.4);">✖ QC FAILED</span>'
+                        : '<span class="text-[10px] font-black px-3 py-1 rounded-full" style="background: rgba(234,179,8,0.18); color:#fde68a; border:1px solid rgba(234,179,8,0.35);">⏳ PENDING QC</span>';
+
+                const qcButtons = `
+                    ${qc !== 'approved' ? `<button type="button" data-wfh-review="${row.id}" data-verdict="approved"
+                        class="text-[11px] font-black px-3 py-1.5 rounded-xl"
+                        style="background: linear-gradient(135deg,#059669,#047857); color:#fff; box-shadow: 0 6px 16px rgba(16,185,129,0.35);">✓ Approve</button>` : ''}
+                    ${qc !== 'rejected' ? `<button type="button" data-wfh-review="${row.id}" data-verdict="rejected"
+                        class="text-[11px] font-black px-3 py-1.5 rounded-xl"
+                        style="background: rgba(244,63,94,0.16); color:#fda4af; border:1px solid rgba(244,63,94,0.35);">✗ QC Fail</button>` : ''}`;
+
+                const noteHtml = qc === 'rejected' && row.review_note
+                    ? `<p class="text-rose-300 text-xs font-bold mt-3" style="background: rgba(244,63,94,0.10); border:1px solid rgba(244,63,94,0.25); border-radius: 12px; padding: 8px 12px;">📝 ${escapeHtml(row.review_note)} — employee has been asked to re-record.</p>`
+                    : '';
+
                 const wo = row.week_of ? new Date(row.week_of + 'T00:00').toLocaleDateString('en-IN', { weekday:'long', day:'numeric', month:'short', year:'numeric' }) : '—';
 
                 return `
                     <div class="glass-strong rounded-2xl p-5">
-                        <div class="flex items-start justify-between mb-4">
+                        <div class="flex items-start justify-between mb-4 gap-2 flex-wrap">
                             <div>
                                 <h4 class="text-white font-black text-lg">${escapeHtml(row.full_name || '—')}</h4>
                                 <p class="text-slate-400 text-xs font-bold">${escapeHtml(row.email || '')} · ${wo}</p>
                             </div>
-                            <div class="flex items-center gap-2">
+                            <div class="flex items-center gap-2 flex-wrap">
                                 ${badge}
+                                ${qcBadge}
                                 <button type="button" data-wfh-del="${row.id}" data-dev="all"
                                     title="Delete this entire submission (all clips + record)"
                                     class="text-[10px] font-black px-3 py-1 rounded-full"
@@ -1313,6 +1373,8 @@
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             ${clipsHtml}
                         </div>
+                        <div class="flex items-center gap-2 mt-4">${qcButtons}</div>
+                        ${noteHtml}
                     </div>`;
             }).join('');
 
@@ -1326,7 +1388,62 @@
                     showWfhDeleteModal({ id, device, who });
                 });
             });
+
+            // Wire QC approve / reject buttons → review modal
+            grid.querySelectorAll('button[data-wfh-review]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = btn.dataset.wfhReview;
+                    const verdict = btn.dataset.verdict;
+                    const row = allWfh.find(r => String(r.id) === String(id));
+                    const who = row ? (row.full_name || row.email || 'this employee') : 'this employee';
+                    showWfhReviewModal({ id, verdict, who });
+                });
+            });
+
+            // Wire ⛶ big-screen player buttons
+            grid.querySelectorAll('button[data-wfh-play]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const id = btn.dataset.wfhPlay;
+                    const device = btn.dataset.dev;
+                    const row = allWfh.find(r => String(r.id) === String(id));
+                    if (!row) return;
+                    const url = row[`${device}_url`];
+                    if (!url) return;
+                    openWfhPlayer({
+                        url,
+                        title: `${DEVICE_LABELS[device] || device} — ${row.full_name || row.email || ''}`
+                    });
+                });
+            });
         }
+
+        // ---------- Big-screen video player modal ----------
+        function openWfhPlayer({ url, title }) {
+            const m = document.getElementById('wfh-player-modal');
+            const v = document.getElementById('wfh-player-video');
+            document.getElementById('wfh-player-title').innerText = title;
+            v.src = url;
+            m.classList.remove('hidden'); m.classList.add('flex');
+            v.play().catch(() => {});
+        }
+        function closeWfhPlayer() {
+            const m = document.getElementById('wfh-player-modal');
+            const v = document.getElementById('wfh-player-video');
+            try { v.pause(); } catch {}
+            v.removeAttribute('src'); v.load();
+            m.classList.add('hidden'); m.classList.remove('flex');
+        }
+        document.getElementById('wfh-player-close').addEventListener('click', closeWfhPlayer);
+        document.getElementById('wfh-player-modal').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('wfh-player-modal')) closeWfhPlayer();
+        });
+        document.getElementById('wfh-player-fs').addEventListener('click', () => {
+            const v = document.getElementById('wfh-player-video');
+            (v.requestFullscreen || v.webkitRequestFullscreen || v.webkitEnterFullscreen || function(){}).call(v);
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !document.getElementById('wfh-player-modal').classList.contains('hidden')) closeWfhPlayer();
+        });
 
         // ---------- Custom WFH delete confirmation modal ----------
         const DEVICE_LABELS = { mobile: '📱 Mobile phone', laptop: '💻 Laptop', tab: '📲 Tab (tablet)' };
@@ -1381,6 +1498,79 @@
                 err.innerText = 'Delete failed: ' + e.message;
                 err.classList.remove('hidden');
                 btn.disabled = false; btn.innerText = device === 'all' ? 'Delete All' : 'Delete';
+            }
+        });
+
+        // ---------- Custom WFH QC review modal (approve / reject) ----------
+        let wfhReviewPending = null;
+
+        function showWfhReviewModal({ id, verdict, who }) {
+            wfhReviewPending = { id, verdict };
+            const m = document.getElementById('wfh-review-modal');
+            const ic = document.getElementById('wfh-review-ic');
+            const title = document.getElementById('wfh-review-title');
+            const msg = document.getElementById('wfh-review-message');
+            const noteWrap = document.getElementById('wfh-review-note-wrap');
+            const note = document.getElementById('wfh-review-note');
+            const err = document.getElementById('wfh-review-err');
+            const confirmBtn = document.getElementById('wfh-review-confirm');
+            err.classList.add('hidden');
+            note.value = '';
+            confirmBtn.disabled = false;
+            if (verdict === 'approved') {
+                ic.style.background = 'linear-gradient(135deg,#059669,#047857)';
+                ic.innerText = '✓';
+                title.innerText = 'Approve this check-in?';
+                msg.innerHTML = `<b class="text-white">${escapeHtml(who)}</b>'s videos pass quality check. They'll see <b class="text-emerald-300">Approved ✓</b> on their page.`;
+                noteWrap.classList.add('hidden');
+                confirmBtn.innerText = 'Approve';
+                confirmBtn.style.background = 'linear-gradient(135deg,#059669,#047857)';
+                confirmBtn.style.boxShadow = '0 10px 30px rgba(16,185,129,0.4)';
+            } else {
+                ic.style.background = 'linear-gradient(135deg,#f43f5e,#dc2626)';
+                ic.innerText = '✗';
+                title.innerText = 'Fail quality check?';
+                msg.innerHTML = `<b class="text-white">${escapeHtml(who)}</b> will be asked to <b class="text-rose-300">re-record and re-upload all three live videos</b> for this Friday.`;
+                noteWrap.classList.remove('hidden');
+                confirmBtn.innerText = 'QC Fail — ask to re-record';
+                confirmBtn.style.background = 'linear-gradient(135deg,#f43f5e,#dc2626)';
+                confirmBtn.style.boxShadow = '0 10px 30px rgba(244,63,94,0.4)';
+            }
+            m.classList.remove('hidden'); m.classList.add('flex');
+        }
+
+        function hideWfhReviewModal() {
+            const m = document.getElementById('wfh-review-modal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+            wfhReviewPending = null;
+        }
+
+        document.getElementById('wfh-review-cancel').addEventListener('click', hideWfhReviewModal);
+        document.getElementById('wfh-review-modal').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('wfh-review-modal')) hideWfhReviewModal();
+        });
+        document.getElementById('wfh-review-confirm').addEventListener('click', async () => {
+            if (!wfhReviewPending) return;
+            const { id, verdict } = wfhReviewPending;
+            const btn = document.getElementById('wfh-review-confirm');
+            const err = document.getElementById('wfh-review-err');
+            const note = document.getElementById('wfh-review-note').value.trim();
+            btn.disabled = true; btn.innerText = 'Saving…'; err.classList.add('hidden');
+            try {
+                const r = await fetch('/api/admin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: adminPassword, action: 'wfh_review', id, status: verdict, note })
+                });
+                const j = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(j.error || 'Review failed');
+                hideWfhReviewModal();
+                loadWfh();
+            } catch (e) {
+                err.innerText = 'Failed: ' + e.message;
+                err.classList.remove('hidden');
+                btn.disabled = false;
+                btn.innerText = verdict === 'approved' ? 'Approve' : 'QC Fail — ask to re-record';
             }
         });
 
