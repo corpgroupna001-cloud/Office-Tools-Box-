@@ -305,6 +305,35 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ success: true, deleted_files: paths.length, device });
     }
 
+    if (action === 'wfh_review') {
+      // QC verdict on a submission: approved (all good) or rejected
+      // (QC failed — employee must re-record and re-upload live videos).
+      const id = String(body.id || '');
+      const status = String(body.status || '');
+      const note = String(body.note || '').slice(0, 500);
+      if (!id) return res.status(400).json({ error: 'id required' });
+      if (!['approved', 'rejected', 'pending'].includes(status)) {
+        return res.status(400).json({ error: 'status must be approved|rejected|pending' });
+      }
+      const pr = await fetch(`${SUPABASE_URL}/rest/v1/wfh_recordings?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: {
+          apikey: SERVICE_KEY,
+          Authorization: `Bearer ${SERVICE_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=representation'
+        },
+        body: JSON.stringify({
+          status,
+          review_note: status === 'rejected' ? (note || 'Quality check failed — please re-record all three videos.') : null,
+          reviewed_at: new Date().toISOString()
+        })
+      });
+      if (!pr.ok) return res.status(502).json({ error: 'review_update_failed', detail: (await pr.text()).slice(0, 200) });
+      const updated = (await pr.json())[0] || null;
+      return res.status(200).json({ success: true, status, row: updated });
+    }
+
     if (action === 'delete_employee') {
       const id = String(body.id || '');
       if (!id) return res.status(400).json({ error: 'id required' });
