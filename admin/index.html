@@ -523,6 +523,23 @@
         </div>
     </div>
 
+    <!-- WFH clip delete confirmation modal -->
+    <div id="wfh-del-modal" class="fixed inset-0 z-[75] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);">
+        <div class="glass-strong w-full max-w-md rounded-3xl p-8 text-center">
+            <div class="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center" style="background: linear-gradient(135deg,#f43f5e,#dc2626); box-shadow: 0 15px 40px rgba(244,63,94,0.4);">
+                <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            </div>
+            <h3 id="wfh-del-title" class="text-2xl font-black text-white mb-2">Delete video?</h3>
+            <p id="wfh-del-message" class="text-slate-300 text-sm mb-1">—</p>
+            <p class="text-slate-400 text-xs mb-6">The video file is permanently removed from storage. This cannot be undone.</p>
+            <div class="flex gap-3">
+                <button id="wfh-del-cancel" type="button" class="glass flex-1 text-white font-bold py-3 rounded-xl">Cancel</button>
+                <button id="wfh-del-confirm" type="button" class="flex-1 text-white font-black py-3 rounded-xl" style="background: linear-gradient(135deg,#f43f5e,#dc2626); box-shadow: 0 10px 30px rgba(244,63,94,0.4);">Delete</button>
+            </div>
+            <p id="wfh-del-err" class="text-rose-300 text-sm font-bold mt-3 hidden"></p>
+        </div>
+    </div>
+
     <!-- Delete confirmation modal -->
     <div id="delete-emp-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);">
         <div class="glass-strong w-full max-w-md rounded-3xl p-8 text-center">
@@ -1298,35 +1315,73 @@
                     </div>`;
             }).join('');
 
-            // Wire delete buttons (per clip + whole submission)
+            // Wire delete buttons (per clip + whole submission) → custom modal
             grid.querySelectorAll('button[data-wfh-del]').forEach(btn => {
-                btn.addEventListener('click', async () => {
+                btn.addEventListener('click', () => {
                     const id = btn.dataset.wfhDel;
                     const device = btn.dataset.dev;
                     const row = allWfh.find(r => String(r.id) === String(id));
                     const who = row ? (row.full_name || row.email || 'this employee') : 'this employee';
-                    const what = device === 'all'
-                        ? `ALL clips and the whole ${who} submission`
-                        : `the ${device} clip from ${who}'s submission`;
-                    if (!confirm(`Delete ${what}? This permanently removes the video file(s) and cannot be undone.`)) return;
-                    const orig = btn.innerText;
-                    btn.disabled = true; btn.innerText = '…';
-                    try {
-                        const r = await fetch('/api/admin', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ password: adminPassword, action: 'wfh_delete', id, device })
-                        });
-                        const j = await r.json().catch(() => ({}));
-                        if (!r.ok) throw new Error(j.error || 'Delete failed');
-                        loadWfh(); // re-fetch the list
-                    } catch (e) {
-                        alert('Delete failed: ' + e.message);
-                        btn.disabled = false; btn.innerText = orig;
-                    }
+                    showWfhDeleteModal({ id, device, who });
                 });
             });
         }
+
+        // ---------- Custom WFH delete confirmation modal ----------
+        const DEVICE_LABELS = { mobile: '📱 Mobile phone', laptop: '💻 Laptop', tab: '📲 Tab (tablet)' };
+        let wfhDelPending = null;
+
+        function showWfhDeleteModal({ id, device, who }) {
+            wfhDelPending = { id, device };
+            const m = document.getElementById('wfh-del-modal');
+            const title = document.getElementById('wfh-del-title');
+            const msg = document.getElementById('wfh-del-message');
+            const err = document.getElementById('wfh-del-err');
+            const confirmBtn = document.getElementById('wfh-del-confirm');
+            err.classList.add('hidden');
+            confirmBtn.disabled = false; confirmBtn.innerText = device === 'all' ? 'Delete All' : 'Delete';
+            if (device === 'all') {
+                title.innerText = 'Delete entire submission?';
+                msg.innerHTML = `All three clips and the whole check-in record from <b class="text-white">${escapeHtml(who)}</b> will be removed.`;
+            } else {
+                title.innerText = 'Delete this clip?';
+                msg.innerHTML = `The <b class="text-white">${DEVICE_LABELS[device] || device}</b> clip from <b class="text-white">${escapeHtml(who)}</b>'s check-in will be removed. They can re-record it the same Friday.`;
+            }
+            m.classList.remove('hidden'); m.classList.add('flex');
+        }
+
+        function hideWfhDeleteModal() {
+            const m = document.getElementById('wfh-del-modal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+            wfhDelPending = null;
+        }
+
+        document.getElementById('wfh-del-cancel').addEventListener('click', hideWfhDeleteModal);
+        document.getElementById('wfh-del-modal').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('wfh-del-modal')) hideWfhDeleteModal();
+        });
+        document.getElementById('wfh-del-confirm').addEventListener('click', async () => {
+            if (!wfhDelPending) return;
+            const { id, device } = wfhDelPending;
+            const btn = document.getElementById('wfh-del-confirm');
+            const err = document.getElementById('wfh-del-err');
+            btn.disabled = true; btn.innerText = 'Deleting…'; err.classList.add('hidden');
+            try {
+                const r = await fetch('/api/admin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: adminPassword, action: 'wfh_delete', id, device })
+                });
+                const j = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(j.error || 'Delete failed');
+                hideWfhDeleteModal();
+                loadWfh(); // re-fetch the list
+            } catch (e) {
+                err.innerText = 'Delete failed: ' + e.message;
+                err.classList.remove('hidden');
+                btn.disabled = false; btn.innerText = device === 'all' ? 'Delete All' : 'Delete';
+            }
+        });
 
         document.getElementById('wfh-search').addEventListener('input', renderWfh);
         document.getElementById('wfh-week').addEventListener('change', loadWfh);
