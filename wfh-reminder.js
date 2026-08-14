@@ -10,9 +10,6 @@
         { key: 'laptop', label: 'Laptop', icon: '💻' },
         { key: 'tab', label: 'Tab (tablet)', icon: '📲' },
     ];
-    const SNOOZE_KEY = 'ws-wfh-popup-snooze';
-    const SNOOZE_MS = 60 * 60 * 1000; // "Later" hides it for 1 hour
-
     function isFriday() { return new Date().getDay() === 5; }
     function ymd(d) { return d.toISOString().slice(0, 10); }
     function isPhone() {
@@ -69,28 +66,18 @@
                     ✅ Exactly 30 seconds each, steady hands, no pause<br>
                     ❌ Blurry or dark video = QC fail = re-record everything
                 </div>
-                <div style="display:flex;gap:10px;">
-                    <button id="wfh-reminder-later" type="button" style="flex:1;padding:13px;border-radius:14px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.07);color:#fff;font-weight:800;font-size:13px;cursor:pointer;font-family:inherit;">Later</button>
-                    <button id="wfh-reminder-go" type="button" style="flex:2;padding:13px;border-radius:14px;border:none;background:linear-gradient(135deg,#3b82f6,#6366f1);color:#fff;font-weight:900;font-size:13px;cursor:pointer;box-shadow:0 10px 28px rgba(59,130,246,0.5);font-family:inherit;">📷 Open Check-in</button>
-                </div>
+                <button id="wfh-reminder-go" type="button" style="width:100%;padding:14px;border-radius:14px;border:none;background:linear-gradient(135deg,#3b82f6,#6366f1);color:#fff;font-weight:900;font-size:14px;cursor:pointer;box-shadow:0 10px 28px rgba(59,130,246,0.5);font-family:inherit;">📷 Open Check-in &amp; Upload Videos</button>
+                <p style="font-size:11px;color:#94a3b8;font-weight:700;margin:10px 0 0;">This reminder stays until all your videos are uploaded.</p>
             </div>`;
         document.body.appendChild(overlay);
         document.getElementById('wfh-reminder-go').addEventListener('click', () => {
             location.href = '/recordings/';
-        });
-        document.getElementById('wfh-reminder-later').addEventListener('click', () => {
-            try { sessionStorage.setItem(SNOOZE_KEY, String(Date.now())); } catch {}
-            overlay.remove();
         });
     }
 
     async function init() {
         if (!isFriday()) return;
         if (location.pathname.startsWith('/recordings') || location.pathname.startsWith('/admin')) return;
-        try {
-            const snoozed = parseInt(sessionStorage.getItem(SNOOZE_KEY) || '0', 10);
-            if (snoozed && Date.now() - snoozed < SNOOZE_MS) return;
-        } catch {}
 
         const sb = await getSb();
         if (!sb) return;
