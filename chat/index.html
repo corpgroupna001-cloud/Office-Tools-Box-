@@ -720,6 +720,9 @@
                         </div>
                     </div>
                     <div class="flex gap-2">
+                        <button id="clear-chat-btn" class="w-11 h-11 rounded-full flex items-center justify-center transition-transform hover:scale-105" style="background: rgba(244,63,94,0.15); border: 1px solid rgba(244,63,94,0.35); color: #fda4af;" title="Clear this chat">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        </button>
                         <button id="call-audio-btn" class="w-11 h-11 rounded-full flex items-center justify-center text-white transition-transform hover:scale-105" style="background: linear-gradient(135deg,#10b981,#059669); box-shadow: 0 6px 20px rgba(16,185,129,0.4);" title="Voice call">
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
                         </button>
@@ -735,6 +738,10 @@
                 <!-- Input -->
                 <div class="p-3 border-t border-white/10" style="background: rgba(15,23,42,0.3);">
                     <form id="msg-form" class="flex gap-2 items-center">
+                        <input id="file-input" type="file" class="hidden" multiple>
+                        <button type="button" id="attach-btn" class="w-12 h-12 rounded-full flex items-center justify-center shrink-0 transition-transform hover:scale-105" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); color: #cbd5e1;" title="Send photos or files (max 25 MB each)">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                        </button>
                         <div class="flex-1 relative">
                             <input id="msg-input" type="text" placeholder="Type a message..." maxlength="1000" autocomplete="off"
                                 class="w-full pl-5 pr-4 py-3 rounded-full text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40 font-medium"
@@ -885,6 +892,65 @@
         <button data-action="copy"  class="w-full text-left px-3 py-2 rounded-lg text-sm text-white hover:bg-white/10 flex items-center gap-2 font-semibold">📋 Copy text</button>
         <button data-action="delete" class="w-full text-left px-3 py-2 rounded-lg text-sm text-rose-300 hover:bg-rose-500/20 flex items-center gap-2 font-semibold hidden">🗑️ Delete for everyone</button>
     </div>
+
+    <!-- Full-screen image viewer -->
+    <div id="img-viewer" class="fixed inset-0 z-[85] hidden items-center justify-center" style="background: rgba(0,0,0,0.94); backdrop-filter: blur(8px);">
+        <button id="img-viewer-close" type="button" class="absolute top-4 right-4 glass text-white font-bold px-4 py-2 rounded-xl text-sm z-10">✕ Close</button>
+        <a id="img-viewer-dl" href="#" target="_blank" rel="noopener" class="absolute top-4 right-28 glass text-white font-bold px-4 py-2 rounded-xl text-sm z-10" download>⬇ Download</a>
+        <img id="img-viewer-img" src="" alt="" style="max-width: 94vw; max-height: 92vh; object-fit: contain; border-radius: 12px;">
+    </div>
+
+    <!-- Generic confirm modal (delete message / clear chat) -->
+    <div id="ws-confirm" class="fixed inset-0 z-[86] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);">
+        <div class="glass-strong w-full max-w-sm rounded-3xl p-7 text-center">
+            <div id="ws-confirm-ic" class="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center text-2xl" style="background: linear-gradient(135deg,#f43f5e,#dc2626); box-shadow: 0 15px 40px rgba(244,63,94,0.4);">🗑️</div>
+            <h3 id="ws-confirm-title" class="text-xl font-black text-white mb-2">Are you sure?</h3>
+            <p id="ws-confirm-msg" class="text-slate-300 text-sm mb-6">—</p>
+            <div class="flex gap-3">
+                <button id="ws-confirm-cancel" type="button" class="glass flex-1 text-white font-bold py-3 rounded-xl">Cancel</button>
+                <button id="ws-confirm-ok" type="button" class="flex-1 text-white font-black py-3 rounded-xl" style="background: linear-gradient(135deg,#f43f5e,#dc2626); box-shadow: 0 10px 30px rgba(244,63,94,0.4);">Delete</button>
+            </div>
+            <p id="ws-confirm-err" class="text-rose-300 text-sm font-bold mt-3 hidden"></p>
+        </div>
+    </div>
+
+    <style>
+        /* Chat attachments */
+        .chat-img {
+            max-width: min(320px, 62vw); max-height: 300px;
+            border-radius: 14px; display: block; cursor: zoom-in;
+            background: #0b1120; object-fit: cover; min-width: 120px; min-height: 80px;
+        }
+        .file-card {
+            display: flex; align-items: center; gap: 10px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.14);
+            border-radius: 14px; padding: 10px 14px;
+            max-width: min(320px, 62vw); cursor: pointer;
+            transition: background .15s;
+        }
+        .file-card:hover { background: rgba(255,255,255,0.14); }
+        .file-card .f-ic { font-size: 26px; flex-shrink: 0; }
+        .file-card .f-name { font-weight: 800; font-size: 13px; color: #fff; word-break: break-all; }
+        .file-card .f-size { font-size: 11px; color: #94a3b8; font-weight: 700; }
+        .msg-bubble a.chat-link { color: #93c5fd; text-decoration: underline; word-break: break-all; }
+        .msg-sent a.chat-link { color: #dbeafe; }
+        /* Link preview card */
+        .link-preview {
+            display: flex; gap: 10px; align-items: stretch; overflow: hidden;
+            margin-top: 8px; border-radius: 12px; cursor: pointer;
+            background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.14);
+            max-width: min(320px, 62vw); text-decoration: none;
+        }
+        .link-preview:hover { background: rgba(0,0,0,0.35); }
+        .link-preview .lp-img { width: 76px; min-height: 64px; object-fit: cover; flex-shrink: 0; background: #0b1120; }
+        .link-preview .lp-body { padding: 8px 10px; min-width: 0; }
+        .link-preview .lp-title { font-weight: 800; font-size: 12.5px; color: #fff; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .link-preview .lp-desc { font-size: 11px; color: #cbd5e1; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .link-preview .lp-host { font-size: 10px; color: #94a3b8; font-weight: 700; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+        #attach-btn.uploading { animation: attach-pulse 1s ease-in-out infinite; pointer-events: none; }
+        @keyframes attach-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.4 } }
+    </style>
 
     <script>
         // ============================================================
@@ -1161,7 +1227,114 @@
                 return (parts[1] === 'video' ? '📹 Video call' : '📞 Voice call');
             }
             if (m.body === '__DELETED__') return '🗑️ Message deleted';
+            if (typeof m.body === 'string' && m.body.startsWith('__FILE__::')) {
+                const f = parseFileMsg(m.body);
+                return f && f.mime.startsWith('image/') ? '🖼️ Photo' : '📎 ' + (f ? f.name : 'Attachment');
+            }
             return (m.body || '').replace(/\s+/g, ' ').slice(0, 60);
+        }
+
+        // ---------- File sharing helpers ----------
+        // File messages: __FILE__::<storage path>::<mime>::<bytes>::<original name>
+        function parseFileMsg(body) {
+            const parts = String(body).split('::');
+            if (parts.length < 5) return null;
+            return { path: parts[1], mime: parts[2], size: parseInt(parts[3] || '0', 10), name: parts.slice(4).join('::') };
+        }
+        function fmtBytes(n) {
+            if (!n) return '';
+            if (n < 1024) return n + ' B';
+            if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+            return (n / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+        const signedUrlCache = new Map(); // path -> { at, url }
+        async function getFileUrl(path) {
+            const hit = signedUrlCache.get(path);
+            if (hit && Date.now() - hit.at < 45 * 60_000) return hit.url;
+            const { data, error } = await sb.storage.from('chat-files').createSignedUrl(path, 3600);
+            if (error || !data?.signedUrl) throw error || new Error('sign failed');
+            signedUrlCache.set(path, { at: Date.now(), url: data.signedUrl });
+            return data.signedUrl;
+        }
+
+        // ---------- Generic confirm modal ----------
+        let wsConfirmResolve = null;
+        function wsConfirm({ icon = '🗑️', title = 'Are you sure?', message = '', okText = 'Delete' } = {}) {
+            return new Promise(resolve => {
+                wsConfirmResolve = resolve;
+                document.getElementById('ws-confirm-ic').innerText = icon;
+                document.getElementById('ws-confirm-title').innerText = title;
+                document.getElementById('ws-confirm-msg').innerHTML = message;
+                document.getElementById('ws-confirm-ok').innerText = okText;
+                document.getElementById('ws-confirm-err').classList.add('hidden');
+                const m = document.getElementById('ws-confirm');
+                m.classList.remove('hidden'); m.classList.add('flex');
+            });
+        }
+        function wsConfirmDone(val) {
+            const m = document.getElementById('ws-confirm');
+            m.classList.add('hidden'); m.classList.remove('flex');
+            if (wsConfirmResolve) { wsConfirmResolve(val); wsConfirmResolve = null; }
+        }
+        document.getElementById('ws-confirm-cancel').addEventListener('click', () => wsConfirmDone(false));
+        document.getElementById('ws-confirm-ok').addEventListener('click', () => wsConfirmDone(true));
+        document.getElementById('ws-confirm').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('ws-confirm')) wsConfirmDone(false);
+        });
+
+        // ---------- Image viewer ----------
+        function openImageViewer(url, name) {
+            const v = document.getElementById('img-viewer');
+            document.getElementById('img-viewer-img').src = url;
+            const dl = document.getElementById('img-viewer-dl');
+            dl.href = url; dl.setAttribute('download', name || 'image');
+            v.classList.remove('hidden'); v.classList.add('flex');
+        }
+        function closeImageViewer() {
+            const v = document.getElementById('img-viewer');
+            v.classList.add('hidden'); v.classList.remove('flex');
+            document.getElementById('img-viewer-img').src = '';
+        }
+        document.getElementById('img-viewer-close').addEventListener('click', closeImageViewer);
+        document.getElementById('img-viewer').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('img-viewer')) closeImageViewer();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !document.getElementById('img-viewer').classList.contains('hidden')) closeImageViewer();
+        });
+
+        // ---------- Linkify + link preview ----------
+        const URL_RE = /(https?:\/\/[^\s<>"']+)/g;
+        function linkify(escapedText) {
+            return escapedText.replace(URL_RE, (u) => {
+                const clean = u.replace(/&amp;/g, '&');
+                return `<a class="chat-link" href="${clean}" target="_blank" rel="noopener noreferrer">${u}</a>`;
+            });
+        }
+        const linkPreviewCache = new Map(); // url -> data|null
+        async function attachLinkPreview(bubble, rawUrl) {
+            try {
+                let data = linkPreviewCache.get(rawUrl);
+                if (data === undefined) {
+                    const r = await fetch('/api/linkpreview?url=' + encodeURIComponent(rawUrl));
+                    data = r.ok ? await r.json() : null;
+                    linkPreviewCache.set(rawUrl, data);
+                }
+                if (!data || (!data.title && !data.description)) return;
+                const a = document.createElement('a');
+                a.className = 'link-preview';
+                a.href = data.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+                a.innerHTML = `
+                    ${data.image ? `<img class="lp-img" src="${escapeHtml(data.image)}" alt="" onerror="this.remove()">` : ''}
+                    <div class="lp-body">
+                        <div class="lp-title">${escapeHtml(data.title || data.host)}</div>
+                        ${data.description ? `<div class="lp-desc">${escapeHtml(data.description)}</div>` : ''}
+                        <div class="lp-host">🔗 ${escapeHtml(data.host || '')}</div>
+                    </div>`;
+                bubble.appendChild(a);
+                const list = document.getElementById('msg-list');
+                list.scrollTop = list.scrollHeight;
+            } catch {}
         }
 
         function contactRowHtml(c) {
@@ -1479,13 +1652,58 @@
                 ? (m.read_at ? '<span class="receipt receipt-read">✓✓</span>' : '<span class="receipt receipt-sent">✓</span>')
                 : '';
             const isDeleted = m.body === '__DELETED__' || m.deleted;
-            const body = isDeleted
-                ? '<i style="opacity:0.7">🗑️ This message was deleted</i>'
-                : escapeHtml(m.body).replace(/\n/g, '<br>');
+            const isFile = !isDeleted && typeof m.body === 'string' && m.body.startsWith('__FILE__::');
+            let body;
+            if (isDeleted) {
+                body = '<i style="opacity:0.7">🗑️ This message was deleted</i>';
+            } else if (isFile) {
+                const f = parseFileMsg(m.body);
+                if (f && f.mime.startsWith('image/')) {
+                    body = `<img class="chat-img" data-file-path="${escapeHtml(f.path)}" data-file-name="${escapeHtml(f.name)}" alt="${escapeHtml(f.name)}" title="Click to view">`;
+                } else if (f) {
+                    body = `<span class="file-card" data-file-path="${escapeHtml(f.path)}" data-file-name="${escapeHtml(f.name)}" title="Click to download">
+                        <span class="f-ic">📎</span>
+                        <span><span class="f-name">${escapeHtml(f.name)}</span><br><span class="f-size">${fmtBytes(f.size)} · tap to download</span></span>
+                    </span>`;
+                } else {
+                    body = '<i style="opacity:0.7">📎 Attachment</i>';
+                }
+            } else {
+                body = linkify(escapeHtml(m.body)).replace(/\n/g, '<br>');
+            }
             if (isDeleted) bubble.dataset.deleted = '1';
 
             // Time + receipt floated inline at end so short messages have them beside text
             bubble.innerHTML = `<span class="msg-body">${body}<span class="msg-meta">${time}${receipt}</span></span>`;
+
+            // Hydrate attachments with a signed URL (private bucket)
+            if (isFile) {
+                const f = parseFileMsg(m.body);
+                const imgEl = bubble.querySelector('.chat-img');
+                if (imgEl && f) {
+                    getFileUrl(f.path).then(u => {
+                        imgEl.src = u;
+                        imgEl.addEventListener('load', () => { const l = document.getElementById('msg-list'); l.scrollTop = l.scrollHeight; }, { once: true });
+                        imgEl.addEventListener('click', (e) => { e.stopPropagation(); openImageViewer(imgEl.src, f.name); });
+                    }).catch(() => { imgEl.alt = 'Could not load image'; });
+                }
+                const cardEl = bubble.querySelector('.file-card');
+                if (cardEl && f) {
+                    cardEl.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        try {
+                            const u = await getFileUrl(f.path);
+                            const a = document.createElement('a');
+                            a.href = u; a.download = f.name; a.target = '_blank'; a.rel = 'noopener';
+                            document.body.appendChild(a); a.click(); a.remove();
+                        } catch { showToast('❌', 'Download failed', 'Could not fetch the file'); }
+                    });
+                }
+            } else if (!isDeleted) {
+                // Link preview card for the first URL in a text message
+                const match = String(m.body || '').match(URL_RE);
+                if (match && match[0]) attachLinkPreview(bubble, match[0]);
+            }
 
             // Long-press / right-click / dblclick to open message menu
             const openMenu = (ev) => {
@@ -1575,7 +1793,7 @@
             const reactBtn = menu.querySelector('[data-action="react"]');
             reactBtn.classList.toggle('hidden', isDeleted);
             const copyBtn = menu.querySelector('[data-action="copy"]');
-            copyBtn.classList.toggle('hidden', isDeleted || (typeof m.body === 'string' && m.body.startsWith('__CALL__::')));
+            copyBtn.classList.toggle('hidden', isDeleted || (typeof m.body === 'string' && (m.body.startsWith('__CALL__::') || m.body.startsWith('__FILE__::'))));
             // Position with clamp so it doesn't overflow
             menu.classList.remove('hidden');
             const w = 200, h = 140;
@@ -1605,8 +1823,18 @@
                 const bubbleEl = document.querySelector(`[data-msg-id="${m.id}"]`);
                 if (bubbleEl) openEmojiPicker(m.id, bubbleEl);
             } else if (action === 'delete') {
-                if (!confirm('Delete this message for everyone?')) return;
+                const ok = await wsConfirm({
+                    icon: '🗑️', title: 'Delete this message?',
+                    message: 'It will be removed for <b class="text-white">everyone</b> in this chat.',
+                    okText: 'Delete'
+                });
+                if (!ok) return;
                 try {
+                    // If it's a file I sent, remove the stored file too
+                    if (typeof m.body === 'string' && m.body.startsWith('__FILE__::') && m.sender_id === currentUser.id) {
+                        const f = parseFileMsg(m.body);
+                        if (f?.path) { try { await sb.storage.from('chat-files').remove([f.path]); } catch {} }
+                    }
                     const { error } = await sb.from('messages').update({ body: '__DELETED__' }).eq('id', m.id);
                     if (error) throw error;
                     // Optimistic local update
@@ -1711,6 +1939,93 @@
             }
         });
 
+        // ---------- Attachments: photos & files ----------
+        const MAX_FILE_MB = 25;
+        document.getElementById('attach-btn').addEventListener('click', () => {
+            if (!activeContact) return showToast('💬', 'Pick a chat first', 'Open a conversation, then attach files.');
+            document.getElementById('file-input').click();
+        });
+        document.getElementById('file-input').addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files || []).slice(0, 5);
+            e.target.value = '';
+            if (!files.length || !activeContact) return;
+            const btn = document.getElementById('attach-btn');
+            btn.classList.add('uploading');
+            for (const file of files) {
+                if (file.size > MAX_FILE_MB * 1024 * 1024) {
+                    showToast('⚠️', 'File too big', `${file.name} is over ${MAX_FILE_MB} MB.`);
+                    continue;
+                }
+                try {
+                    const safe = file.name.replace(/[^\w.\-]+/g, '_').slice(-80);
+                    const path = `${currentUser.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safe}`;
+                    const { error: upErr } = await sb.storage.from('chat-files')
+                        .upload(path, file, { contentType: file.type || 'application/octet-stream' });
+                    if (upErr) throw upErr;
+                    const body = `__FILE__::${path}::${file.type || 'application/octet-stream'}::${file.size}::${file.name}`;
+                    const msg = { sender_id: currentUser.id, recipient_id: activeContact.id, body, created_at: new Date().toISOString() };
+                    const { error: insErr } = await sb.from('messages').insert({ sender_id: currentUser.id, recipient_id: activeContact.id, body });
+                    if (insErr) throw insErr;
+                    renderMessage(msg); // optimistic
+                    lastMsgByUser.set(activeContact.id, { body, created_at: msg.created_at, mine: true });
+                    renderContacts();
+                    if (window.WSPush) {
+                        WSPush.notify(sb, {
+                            to: activeContact.id,
+                            title: '💬 ' + currentUserName,
+                            body: file.type.startsWith('image/') ? '🖼️ Sent you a photo' : '📎 Sent a file: ' + file.name.slice(0, 80),
+                            url: '/chat/#thread=' + currentUser.id,
+                            tag: 'msg-' + currentUser.id
+                        });
+                    }
+                } catch (err) {
+                    console.error('attachment failed', err);
+                    showToast('❌', 'Upload failed', err.message || 'Could not send ' + file.name);
+                }
+            }
+            btn.classList.remove('uploading');
+        });
+
+        // ---------- Clear chat (both sides) ----------
+        document.getElementById('clear-chat-btn').addEventListener('click', async () => {
+            if (!activeContact) return;
+            const who = activeContact.full_name || activeContact.email;
+            const ok = await wsConfirm({
+                icon: '🧹', title: 'Clear this chat?',
+                message: `All messages, photos and files between you and <b class="text-white">${escapeHtml(who)}</b> will be deleted for <b class="text-white">both of you</b>. This cannot be undone.`,
+                okText: 'Clear chat'
+            });
+            if (!ok) return;
+            try {
+                const me = currentUser.id, them = activeContact.id;
+                // Remove MY uploaded files in this thread from Storage
+                try {
+                    const { data: fileMsgs } = await sb.from('messages')
+                        .select('body, sender_id')
+                        .or(`and(sender_id.eq.${me},recipient_id.eq.${them}),and(sender_id.eq.${them},recipient_id.eq.${me})`)
+                        .like('body', '\\_\\_FILE\\_\\_::%');
+                    const myPaths = (fileMsgs || [])
+                        .filter(r => r.sender_id === me)
+                        .map(r => parseFileMsg(r.body)?.path)
+                        .filter(Boolean);
+                    if (myPaths.length) await sb.storage.from('chat-files').remove(myPaths);
+                } catch {}
+                const { error } = await sb.from('messages')
+                    .delete()
+                    .or(`and(sender_id.eq.${me},recipient_id.eq.${them}),and(sender_id.eq.${them},recipient_id.eq.${me})`);
+                if (error) throw error;
+                document.getElementById('msg-list').innerHTML = '';
+                lastMsgSenderInThread = null; lastMsgTimeInThread = 0;
+                lastMsgByUser.delete(them);
+                unreadByUser.delete(them);
+                renderContacts();
+                showToast('🧹', 'Chat cleared', `Conversation with ${who} was deleted for both of you.`);
+            } catch (err) {
+                console.error('clear chat failed', err);
+                showToast('❌', 'Clear failed', err.message || 'Could not clear this chat');
+            }
+        });
+
         function subscribeToMessages() {
             if (messageChannel) sb.removeChannel(messageChannel);
             messageChannel = sb.channel('messages:' + currentUser.id)
@@ -1727,8 +2042,8 @@
                             renderContacts();
                             const sender = allContacts.find(c => c.id === m.sender_id);
                             const senderName = sender ? (sender.full_name || sender.email) : 'Someone';
-                            showToast('💬', senderName, m.body.slice(0, 60));
-                            notify(senderName, m.body);
+                            showToast('💬', senderName, previewText(m));
+                            notify(senderName, previewText(m));
                         } else {
                             // Currently viewing this chat — mark as read right away
                             markAsRead([m.id]);
