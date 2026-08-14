@@ -218,6 +218,30 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ success: true, is_wfh });
     }
 
+    if (action === 'set_device') {
+      // Toggle which devices a WFH employee must record (mobile/laptop/tab).
+      const id = String(body.id || '');
+      const device = String(body.device || '');
+      const on = body.on === true;
+      if (!id) return res.status(400).json({ error: 'id required' });
+      if (!['mobile', 'laptop', 'tab'].includes(device)) {
+        return res.status(400).json({ error: 'device must be mobile|laptop|tab' });
+      }
+      const patch = {}; patch[`req_${device}`] = on;
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: {
+          apikey: SERVICE_KEY,
+          Authorization: `Bearer ${SERVICE_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=representation'
+        },
+        body: JSON.stringify(patch)
+      });
+      if (!r.ok) return res.status(502).json({ error: 'Device flag update failed', detail: (await r.text()).slice(0, 200) });
+      return res.status(200).json({ success: true, device, on });
+    }
+
     if (action === 'wfh_recordings') {
       // Admin view — list all recordings, joined with a signed URL PER device clip.
       const week = body.week ? `&week_of=eq.${encodeURIComponent(String(body.week))}` : '';
@@ -243,6 +267,19 @@ module.exports = async function handler(req, res) {
         return null;
       }
 
+      // Which devices does each employee actually need? (admin toggles)
+      const userIds = [...new Set(rows.map(x => x.user_id).filter(Boolean))];
+      const reqMap = {};
+      if (userIds.length) {
+        try {
+          const pr = await fetch(
+            `${SUPABASE_URL}/rest/v1/profiles?id=in.(${userIds.join(',')})&select=id,req_mobile,req_laptop,req_tab`,
+            { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } }
+          );
+          if (pr.ok) (await pr.json()).forEach(p => { reqMap[p.id] = p; });
+        } catch {}
+      }
+
       const signed = await Promise.all(rows.map(async row => {
         const [mobile_url, laptop_url, tab_url, video_url] = await Promise.all([
           signOne(row.mobile_path),
@@ -250,7 +287,11 @@ module.exports = async function handler(req, res) {
           signOne(row.tab_path),
           signOne(row.video_path), // v2 back-compat
         ]);
-        return { ...row, mobile_url, laptop_url, tab_url, video_url };
+        const p = reqMap[row.user_id];
+        const required = p
+          ? ['mobile', 'laptop', 'tab'].filter(d => p[`req_${d}`] !== false)
+          : ['mobile', 'laptop', 'tab'];
+        return { ...row, mobile_url, laptop_url, tab_url, video_url, required };
       }));
       return res.status(200).json({ recordings: signed });
     }
