@@ -406,6 +406,9 @@
         ACTIVE = DEVICES.filter(d => profile[`req_${d.key}`] !== false);
         if (!ACTIVE.length)        return renderNoDevices();
         if (!todaysFriday())       return renderNotFriday();
+        // Camera recording is MOBILE-ONLY — desktop/tab users must log in
+        // on their personal mobile (its back camera gives approval quality).
+        if (!/iPhone|iPod|Android.+Mobile/i.test(navigator.userAgent)) return renderMobileOnly();
         renderRecorder();
     }
 
@@ -417,6 +420,23 @@
                 <h2>Sign in required</h2>
                 <p>Log into WorkSuite first, then open this page again to submit your Friday check-in.</p>
                 <a href="/" class="btn primary" style="text-decoration:none;">Go to Login</a>
+            </div>`;
+    }
+    function renderMobileOnly() {
+        const kind = /iPad|Tablet|Android(?!.*Mobile)/i.test(navigator.userAgent) ? 'tab' : 'desktop';
+        document.getElementById('body').innerHTML = `
+            <div class="gate locked">
+                <div class="gate-ic">📱</div>
+                <h2>Record on your personal mobile only</h2>
+                <p>You're on a <b>${kind}</b> — the camera is disabled here. Video check-ins must be recorded on your <b>personal mobile phone</b>: its back camera gives the high-quality (4K) video required for admin approval.</p>
+                <div style="text-align:left; max-width:420px; margin:0 auto 20px; background:rgba(139,92,246,0.10); border:1px solid rgba(139,92,246,0.3); border-radius:14px; padding:14px 18px; font-size:13px; color:#ddd6fe; line-height:1.7;">
+                    <b style="color:#fff;">How to submit:</b><br>
+                    1️⃣ Open <b style="color:#fff;">${location.host}</b> on your personal mobile<br>
+                    2️⃣ Log in with the same account<br>
+                    3️⃣ Open <b style="color:#fff;">Friday WFH Check-in</b> and record each device<br>
+                    4️⃣ Slow 360° pan — every side, edge &amp; corner, screen ON
+                </div>
+                <p style="font-size:12px; color:#64748b;">This page unlocks automatically when opened on a mobile phone.</p>
             </div>`;
     }
     function renderNoDevices() {
@@ -466,6 +486,9 @@
         document.getElementById('hero-sub').textContent =
             `Submit your ${fmtDate(today)} check-in — one clip each of: ${deviceNames}.`;
 
+        // (Desktop/tab users never reach here — renderMobileOnly() gates them.)
+        const mobileNotice = '';
+
         const stepsHtml = ACTIVE.map(d =>
             `<div class="step" id="step-${d.key}">
                 <div class="step-ic">${d.icon}</div>
@@ -514,6 +537,7 @@
             </div>`).join('');
 
         document.getElementById('body').innerHTML = `
+            ${mobileNotice}
             <div class="rules">
                 <strong>📋 Do's &amp; Don'ts — read before recording</strong>
                 <ul>
