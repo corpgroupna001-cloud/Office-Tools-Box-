@@ -272,6 +272,42 @@
         @keyframes toast-in { from { transform: translate(-50%, 20px); opacity: 0 } to { transform: translate(-50%, 0); opacity: 1 } }
         .toast.success { border-color: rgba(16,185,129,0.35); color: #6ee7b7; }
         .toast.error   { border-color: rgba(239,68,68,0.35);  color: #fca5a5; }
+
+        /* Live quality gate hint under the camera */
+        .qc-hint {
+            display: none; margin-top: 10px;
+            padding: 10px 14px; border-radius: 12px;
+            font-size: 12.5px; font-weight: 800; line-height: 1.4;
+        }
+        .qc-hint.bad  { display: block; background: rgba(234,179,8,0.12); border: 1px solid rgba(234,179,8,0.35); color: #fde68a; }
+        .qc-hint.good { display: block; background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.35); color: #6ee7b7; }
+
+        /* 360° guide overlay + countdown during recording */
+        .cam-shell { position: relative; }
+        .guide-overlay {
+            position: absolute; left: 10px; right: 10px; bottom: 10px;
+            display: none; align-items: center; justify-content: space-between; gap: 10px;
+            background: rgba(11,17,32,0.78); backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,255,255,0.14);
+            border-radius: 14px; padding: 10px 14px;
+            font-size: 13px; font-weight: 900; color: #fff;
+            z-index: 2; pointer-events: none;
+        }
+        .guide-overlay.show { display: flex; }
+        .guide-overlay .countdown {
+            font-family: ui-monospace, monospace; font-size: 15px;
+            color: #fecaca; flex-shrink: 0;
+        }
+
+        /* QC verdict banners */
+        .qc-banner {
+            border-radius: 18px; padding: 16px 20px; margin-bottom: 20px;
+            font-size: 13px; font-weight: 800; line-height: 1.55;
+        }
+        .qc-banner.rejected { background: rgba(244,63,94,0.12); border: 1px solid rgba(244,63,94,0.4); color: #fecdd3; }
+        .qc-banner.approved { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.4); color: #a7f3d0; }
+        .qc-banner.pending  { background: rgba(234,179,8,0.10);  border: 1px solid rgba(234,179,8,0.30);  color: #fde68a; }
+        .qc-banner b { color: #fff; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="/presence.js"></script>
@@ -298,9 +334,18 @@
 <script>
     // ---------- Devices we need a clip of ----------
     const DEVICES = [
-        { key: 'mobile', label: 'Mobile phone', icon: '📱', hint: 'Slow pan around your phone — front, back, screen on.' },
-        { key: 'laptop', label: 'Laptop',       icon: '💻', hint: 'Show the laptop lid open, screen visible, keyboard.' },
-        { key: 'tab',    label: 'Tab (tablet)', icon: '📲', hint: 'Rotate the tab so both sides + screen are clear.' },
+        { key: 'mobile', label: 'Mobile phone', icon: '📱', hint: '360° — front, back, all edges & corners, screen ON.' },
+        { key: 'laptop', label: 'Laptop',       icon: '💻', hint: '360° — screen on, lid, keyboard, every side & corner.' },
+        { key: 'tab',    label: 'Tab (tablet)', icon: '📲', hint: '360° — both faces, every edge & corner, screen ON.' },
+    ];
+
+    const REC_SECONDS = 30; // fixed clip length — auto-stops, no pause
+    const GUIDE = [
+        [0,  '🎬 Show the FRONT — screen ON'],
+        [6,  '🔄 Turn to the BACK side'],
+        [12, '↔️ Left & right EDGES'],
+        [18, '↕️ Top & bottom + all 4 CORNERS'],
+        [24, '🐢 Slow full 360° rotate to finish'],
     ];
 
     // ---------- Supabase bootstrap ----------
@@ -425,20 +470,24 @@
                     </div>
                     <span class="badge-todo" id="badge-${d.key}">To do</span>
                 </div>
-                <div id="shell-${d.key}">
+                <div id="shell-${d.key}" class="cam-shell">
                     <video id="stream-${d.key}"  class="stream"  playsinline muted autoplay style="display:none;"></video>
                     <video id="preview-${d.key}" class="preview" playsinline controls style="display:none;"></video>
+                    <div id="guide-${d.key}" class="guide-overlay">
+                        <span id="guide-text-${d.key}">🎬 Show the FRONT — screen ON</span>
+                        <span class="countdown" id="guide-count-${d.key}">0:30</span>
+                    </div>
                     <div id="ph-${d.key}" class="placeholder">
                         <div class="p-emoji">📷</div>
                         <div class="p-title">Tap "Open camera" to start</div>
-                        <div class="p-sub">Uses your back camera (env). 10–60s is ideal.</div>
+                        <div class="p-sub">Back camera · highest quality (4K/2K) · auto-records exactly 30 seconds.</div>
                     </div>
                 </div>
+                <div id="qc-${d.key}" class="qc-hint"></div>
                 <div class="action-row">
                     <button class="btn primary" data-act="open"   data-dev="${d.key}">📷 Open camera</button>
                     <button class="btn"         data-act="flip"   data-dev="${d.key}" style="display:none;">🔄 Flip</button>
-                    <button class="btn record"  data-act="start"  data-dev="${d.key}" style="display:none;">Start</button>
-                    <button class="btn record"  data-act="stop"   data-dev="${d.key}" style="display:none;">Stop</button>
+                    <button class="btn record"  data-act="start"  data-dev="${d.key}" style="display:none;" disabled>Start (30s)</button>
                     <button class="btn"         data-act="retake" data-dev="${d.key}" style="display:none;">Re-record</button>
                     <button class="btn success" data-act="submit" data-dev="${d.key}" style="display:none;" disabled>Upload ${d.label}</button>
                     <span id="status-${d.key}" class="rec-status">Idle</span>
@@ -449,15 +498,19 @@
 
         document.getElementById('body').innerHTML = `
             <div class="rules">
-                <strong>📋 What to record — three separate clips</strong>
+                <strong>📋 Do's &amp; Don'ts — read before recording</strong>
                 <ul>
-                    <li>Use the <b>back camera</b> for every clip.</li>
-                    <li>Show <b>Mobile</b>, <b>Laptop</b> and <b>Tab</b> — one at a time, slow pan, screen visible.</li>
-                    <li>Each clip <b>10–60 seconds</b> (hard cap at 90s).</li>
-                    <li>Upload each one right after you finish. All three must be uploaded to complete the week.</li>
-                    <li>Only you and your admin can see these videos.</li>
+                    <li>✅ <b>Do</b> use the <b>back camera</b> in a <b>bright, well-lit area</b> — wipe the lens first.</li>
+                    <li>✅ <b>Do</b> a slow, steady <b>360° pan</b>: front, back, every side, edge and corner — with the device's <b>screen ON</b>.</li>
+                    <li>✅ <b>Do</b> record at the highest quality your camera supports (4K/2K is requested automatically).</li>
+                    <li>✅ <b>Do</b> upload each clip right after recording — all three (Mobile, Laptop, Tab) complete the week.</li>
+                    <li>🚫 <b>Don't</b> pause — there is no pause; every clip <b>auto-stops at exactly 30 seconds</b>.</li>
+                    <li>🚫 <b>Don't</b> record in the dark or with a shaky hand — blurry/dark video fails QC and you'll have to <b>re-record all three</b>.</li>
+                    <li>🚫 <b>Don't</b> show someone else's device. Only you and your admin can see these videos.</li>
                 </ul>
             </div>
+
+            <div id="qc-banner-slot"></div>
 
             <div class="steps">${stepsHtml}</div>
 
@@ -471,7 +524,7 @@
             </div>`;
 
         // Init per-device state
-        DEVICES.forEach(d => { st[d.key] = { stream: null, recorder: null, blob: null, secs: 0, ticker: null, submitted: false, facing: 'environment' }; });
+        DEVICES.forEach(d => { st[d.key] = { stream: null, recorder: null, blob: null, secs: 0, ticker: null, submitted: false, facing: 'environment', qcTimer: null, qcGoodStreak: 0, recording: false }; });
 
         wireAll();
         setActiveStep('mobile');
@@ -487,7 +540,6 @@
                 if (act === 'open')   openCamera(dev);
                 if (act === 'flip')   flipCamera(dev);
                 if (act === 'start')  startRec(dev);
-                if (act === 'stop')   stopRec(dev);
                 if (act === 'retake') retakeRec(dev);
                 if (act === 'submit') submitRec(dev);
             });
@@ -542,26 +594,60 @@
         try {
             const wo = ymd(todaysFriday());
             const { data } = await sb.from('wfh_recordings')
-                .select('mobile_path, laptop_path, tab_path')
+                .select('mobile_path, laptop_path, tab_path, status, review_note')
                 .eq('user_id', user.id).eq('week_of', wo).maybeSingle();
             if (!data) return;
+
+            const banner = $('qc-banner-slot');
+
+            // QC FAILED → everything must be re-recorded. Cards stay unlocked.
+            if (data.status === 'rejected') {
+                banner.innerHTML = `
+                    <div class="qc-banner rejected">
+                        ❌ <b>Quality check failed — please re-record all three videos.</b><br>
+                        ${data.review_note ? 'Admin note: <b>' + escapeText(data.review_note) + '</b><br>' : ''}
+                        Record again in a bright area with a slow, steady 360° pan, then upload each clip.
+                        Your new uploads replace the old ones.
+                    </div>`;
+                return; // do NOT mark devices done — employee records fresh clips
+            }
+
+            const complete = DEVICES.every(d => data[`${d.key}_path`]);
+            if (data.status === 'approved' && complete) {
+                banner.innerHTML = `
+                    <div class="qc-banner approved">
+                        ✔ <b>Approved!</b> Your ${fmtDate(todaysFriday())} check-in passed the quality check. See you next Friday.
+                    </div>`;
+            } else if (complete) {
+                banner.innerHTML = `
+                    <div class="qc-banner pending">
+                        ⏳ <b>Submitted — waiting for quality check.</b> Your admin will review the three clips. If QC fails you'll be asked to re-record here.
+                    </div>`;
+            }
+
             DEVICES.forEach(d => {
                 if (data[`${d.key}_path`]) {
                     st[d.key].submitted = true;
                     markDone(d.key);
                     // Collapse the card controls
-                    ['open','flip','start','stop','retake','submit'].forEach(a => setBtn(d.key, a, false));
+                    ['open','flip','start','retake','submit'].forEach(a => setBtn(d.key, a, false));
                     $(`shell-${d.key}`).innerHTML = `
                         <div class="placeholder" style="border-color: rgba(16,185,129,0.35); color:#6ee7b7;">
                             <div class="p-emoji">✅</div>
                             <div class="p-title" style="color:#fff;">Already submitted for this Friday</div>
-                            <div class="p-sub">Come back next Friday for a fresh check-in.</div>
+                            <div class="p-sub">${data.status === 'approved' ? 'Approved by admin ✔' : 'Waiting for admin quality check.'}</div>
                         </div>`;
                     $(`status-${d.key}`).className = 'rec-status done';
                     $(`status-${d.key}`).textContent = '● Uploaded';
                 }
             });
         } catch {}
+    }
+
+    function escapeText(s) {
+        const div = document.createElement('div');
+        div.textContent = String(s);
+        return div.innerHTML;
     }
 
     // ---------- Camera ----------
@@ -573,8 +659,15 @@
         }
         try {
             if (st[dev].stream) st[dev].stream.getTracks().forEach(t => t.stop());
+            // Ask for the highest quality available — 4K ideal, browser falls
+            // back to 2K / 1080p automatically if the camera can't do it.
             st[dev].stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: { ideal: st[dev].facing }, width: { ideal: 1280 }, height: { ideal: 720 } },
+                video: {
+                    facingMode: { ideal: st[dev].facing },
+                    width:  { ideal: 3840 },
+                    height: { ideal: 2160 },
+                    frameRate: { ideal: 30 }
+                },
                 audio: true
             });
             const vid = $(`stream-${dev}`);
@@ -586,10 +679,81 @@
             setBtn(dev, 'start', true); setBtn(dev, 'retake', false);
             setBtn(dev, 'submit', false);
             setActiveStep(dev);
+            startQualityGate(dev); // Start stays disabled until the image is bright & sharp
         } catch (e) {
             err.textContent = 'Could not open camera: ' + (e.message || 'permission denied');
             err.style.display = 'block';
         }
+    }
+
+    // ---------- Live quality gate (brightness + blur) ----------
+    // Samples the live preview every 500ms. The Start button unlocks only
+    // after 3 consecutive good frames (bright enough + sharp enough).
+    const QC_MIN_BRIGHT = 60;   // mean luma 0-255
+    const QC_MIN_SHARP  = 20;   // variance of Laplacian on 160x90 gray frame
+
+    function frameQuality(vid) {
+        if (!vid.videoWidth) return null;
+        const w = 160, h = 90;
+        const c = frameQuality._c || (frameQuality._c = document.createElement('canvas'));
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        try { ctx.drawImage(vid, 0, 0, w, h); } catch { return null; }
+        let d;
+        try { d = ctx.getImageData(0, 0, w, h).data; } catch { return null; }
+        const g = new Float32Array(w * h);
+        let sum = 0;
+        for (let i = 0; i < w * h; i++) {
+            const l = 0.299 * d[i*4] + 0.587 * d[i*4+1] + 0.114 * d[i*4+2];
+            g[i] = l; sum += l;
+        }
+        const bright = sum / (w * h);
+        let lapSum = 0, lapSq = 0, n = 0;
+        for (let y = 1; y < h - 1; y++) {
+            for (let x = 1; x < w - 1; x++) {
+                const i = y * w + x;
+                const lap = g[i-1] + g[i+1] + g[i-w] + g[i+w] - 4 * g[i];
+                lapSum += lap; lapSq += lap * lap; n++;
+            }
+        }
+        const mean = lapSum / n;
+        const sharp = lapSq / n - mean * mean;
+        return { bright, sharp };
+    }
+
+    function startQualityGate(dev) {
+        const S = st[dev];
+        clearInterval(S.qcTimer);
+        S.qcGoodStreak = 0;
+        const startBtn = document.querySelector(`button[data-act="start"][data-dev="${dev}"]`);
+        const hint = $(`qc-${dev}`);
+        if (startBtn) startBtn.disabled = true;
+        hint.className = 'qc-hint bad';
+        hint.innerHTML = '🔎 Checking camera quality…';
+        S.qcTimer = setInterval(() => {
+            if (!S.stream || S.recording) { clearInterval(S.qcTimer); return; }
+            const q = frameQuality($(`stream-${dev}`));
+            if (!q) return;
+            const problems = [];
+            if (q.bright < QC_MIN_BRIGHT) problems.push('💡 Too dark — please move to a bright, well-lit area');
+            if (q.sharp  < QC_MIN_SHARP)  problems.push('📷 Image looks blurry — wipe the lens and hold the phone steady');
+            if (problems.length) {
+                S.qcGoodStreak = 0;
+                if (startBtn) startBtn.disabled = true;
+                hint.className = 'qc-hint bad';
+                hint.innerHTML = problems.join('<br>');
+            } else {
+                S.qcGoodStreak++;
+                if (S.qcGoodStreak >= 3) {
+                    if (startBtn) startBtn.disabled = false;
+                    hint.className = 'qc-hint good';
+                    hint.innerHTML = '✅ Lighting & focus look good — you can start. Recording runs exactly 30 seconds, no pause.';
+                } else {
+                    hint.className = 'qc-hint bad';
+                    hint.innerHTML = '🔎 Hold steady — confirming quality…';
+                }
+            }
+        }, 500);
     }
 
     async function flipCamera(dev) {
@@ -598,23 +762,29 @@
     }
 
     async function startRec(dev) {
-        const S = st[dev]; if (!S.stream) return;
+        const S = st[dev]; if (!S.stream || S.recording) return;
+        S.recording = true;
+        clearInterval(S.qcTimer);
+        $(`qc-${dev}`).className = 'qc-hint';
         let mime = 'video/webm;codecs=vp9,opus';
         if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm;codecs=vp8,opus';
         if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
         if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/mp4';
         const chunks = [];
-        S.recorder = new MediaRecorder(S.stream, { mimeType: mime, videoBitsPerSecond: 900_000 });
+        // High bitrate to preserve 4K/2K detail (~30 MB for a 30s clip).
+        S.recorder = new MediaRecorder(S.stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
         S.recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
         const startAt = Date.now();
         S.recorder.onstop = () => {
+            S.recording = false;
             S.blob = new Blob(chunks, { type: mime });
-            S.secs = Math.round((Date.now() - startAt) / 1000);
+            S.secs = Math.min(REC_SECONDS, Math.round((Date.now() - startAt) / 1000));
             const url = URL.createObjectURL(S.blob);
             const p = $(`preview-${dev}`);
             p.src = url; p.style.display = 'block';
             $(`stream-${dev}`).style.display = 'none';
-            setBtn(dev, 'start', false); setBtn(dev, 'stop', false); setBtn(dev, 'flip', false);
+            $(`guide-${dev}`).classList.remove('show');
+            setBtn(dev, 'start', false); setBtn(dev, 'flip', false);
             setBtn(dev, 'retake', true); setBtn(dev, 'submit', true);
             document.querySelector(`button[data-act="submit"][data-dev="${dev}"]`).disabled = false;
             const sizeMB = (S.blob.size / (1024*1024)).toFixed(1);
@@ -627,14 +797,25 @@
             $(`badge-${dev}`).outerHTML = `<span class="badge-todo" id="badge-${dev}">Ready to upload</span>`;
         };
         S.recorder.start(1000);
-        setBtn(dev, 'start', false); setBtn(dev, 'stop', true); setBtn(dev, 'flip', false);
+        // No Stop / no pause — the clip runs exactly REC_SECONDS then ends itself.
+        setBtn(dev, 'start', false); setBtn(dev, 'flip', false);
         const s = $(`status-${dev}`);
         s.className = 'rec-status live';
         $(`badge-${dev}`).outerHTML = `<span class="badge-live" id="badge-${dev}">● Recording</span>`;
+        const overlay = $(`guide-${dev}`);
+        const guideText = $(`guide-text-${dev}`);
+        const guideCount = $(`guide-count-${dev}`);
+        overlay.classList.add('show');
         S.ticker = setInterval(() => {
-            const secs = Math.floor((Date.now() - startAt) / 1000);
-            s.textContent = `● REC · ${String(Math.floor(secs/60)).padStart(2,'0')}:${String(secs%60).padStart(2,'0')}`;
-            if (secs >= 90) stopRec(dev);
+            const secs = (Date.now() - startAt) / 1000;
+            const left = Math.max(0, REC_SECONDS - Math.floor(secs));
+            s.textContent = `● REC · 0:${String(left).padStart(2,'0')} left`;
+            guideCount.textContent = `0:${String(left).padStart(2,'0')}`;
+            // 360° coverage prompts across the 30 seconds
+            let prompt = GUIDE[0][1];
+            for (const [at, text] of GUIDE) { if (secs >= at) prompt = text; }
+            guideText.textContent = prompt;
+            if (secs >= REC_SECONDS) stopRec(dev);
         }, 250);
     }
 
@@ -696,6 +877,7 @@
             patch[`${dev}_path`]  = path;
             patch[`${dev}_bytes`] = S.blob.size;
             patch[`${dev}_secs`]  = S.secs;
+            patch.status = 'pending'; // fresh/replacement upload always goes back to QC
             const { error: metaErr } = await sb.from('wfh_recordings').upsert(patch, { onConflict: 'user_id,week_of' });
             if (metaErr) throw metaErr;
             fill.style.width = '100%';
@@ -722,7 +904,7 @@
     async function loadHistory() {
         try {
             const { data } = await sb.from('wfh_recordings')
-                .select('week_of, mobile_path, laptop_path, tab_path, created_at')
+                .select('week_of, mobile_path, laptop_path, tab_path, status, created_at')
                 .eq('user_id', user.id)
                 .order('week_of', { ascending: false })
                 .limit(12);
@@ -730,10 +912,15 @@
             const wrap = $('history'); wrap.style.display = 'block';
             $('history-list').innerHTML = data.map(r => {
                 const d = new Date(r.week_of + 'T00:00');
+                const qcChip = r.status === 'approved'
+                    ? '<span class="ok">✔ Approved</span>'
+                    : r.status === 'rejected'
+                        ? '<span style="background: rgba(244,63,94,0.18); color:#fda4af;">✖ QC failed</span>'
+                        : '<span>⏳ QC pending</span>';
                 const chips = DEVICES.map(dv => {
                     const has = !!r[`${dv.key}_path`];
                     return `<span class="${has ? 'ok' : ''}">${dv.icon} ${dv.key}${has ? ' ✓' : ''}</span>`;
-                }).join('');
+                }).join('') + qcChip;
                 return `
                     <div class="h-row">
                         <div><b>${d.toLocaleDateString('en-IN', { weekday:'long', day:'numeric', month:'short', year:'numeric' })}</b></div>
