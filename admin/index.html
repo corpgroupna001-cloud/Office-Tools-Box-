@@ -179,6 +179,22 @@
             background: #fff;
         }
         .wfh-switch input:disabled + .wfh-slider { opacity: 0.5; }
+
+        /* Per-device requirement chips (📱💻📲) next to the WFH toggle */
+        .dev-chip {
+            padding: 3px 8px; border-radius: 9px; font-size: 13px; line-height: 1;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.12);
+            opacity: 0.35; cursor: pointer;
+            transition: all .15s ease;
+        }
+        .dev-chip.on {
+            opacity: 1;
+            background: rgba(59,130,246,0.22);
+            border-color: rgba(59,130,246,0.55);
+            box-shadow: 0 4px 12px rgba(59,130,246,0.25);
+        }
+        .dev-chip:disabled { cursor: wait; }
     </style>
 </head>
 <body>
@@ -1093,6 +1109,11 @@
                             <input type="checkbox" data-wfh-id="${e.id}" ${wfhOn ? 'checked' : ''}>
                             <span class="wfh-slider"></span>
                         </label>
+                        <div class="flex items-center gap-1 mt-1.5" ${wfhOn ? '' : 'style="opacity:.35; pointer-events:none;"'} title="Toggle which devices they must record on Fridays">
+                            <button type="button" class="dev-chip ${e.req_mobile !== false ? 'on' : ''}" data-dev-toggle="${e.id}" data-dev="mobile" title="Mobile ${e.req_mobile !== false ? 'required — click to remove' : 'not required — click to add'}">📱</button>
+                            <button type="button" class="dev-chip ${e.req_laptop !== false ? 'on' : ''}" data-dev-toggle="${e.id}" data-dev="laptop" title="Laptop ${e.req_laptop !== false ? 'required — click to remove' : 'not required — click to add'}">💻</button>
+                            <button type="button" class="dev-chip ${e.req_tab !== false ? 'on' : ''}" data-dev-toggle="${e.id}" data-dev="tab" title="Tab ${e.req_tab !== false ? 'required — click to remove' : 'not required — click to add'}">📲</button>
+                        </div>
                     </td>
                     <td class="mono font-black text-white">${e.tests || 0}</td>
                     <td class="mono font-black text-blue-300">${e.best_wpm || 0}</td>
@@ -1141,6 +1162,34 @@
                         alert('WFH update failed: ' + err.message);
                     } finally {
                         input.disabled = false;
+                        renderEmployees(); // refresh so device chips enable/disable with WFH
+                    }
+                });
+            });
+
+            // Wire per-device requirement chips (📱💻📲)
+            tbody.querySelectorAll('button[data-dev-toggle]').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const id = btn.dataset.devToggle;
+                    const device = btn.dataset.dev;
+                    const emp = allEmployees.find(x => x.id === id);
+                    if (!emp) return;
+                    const field = 'req_' + device;
+                    const on = emp[field] === false; // flipping
+                    btn.disabled = true;
+                    try {
+                        const r = await fetch('/api/admin', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ password: adminPassword, action: 'set_device', id, device, on })
+                        });
+                        if (!r.ok) throw new Error((await r.json()).error || 'Update failed');
+                        emp[field] = on;
+                        btn.classList.toggle('on', on);
+                    } catch (err) {
+                        alert('Device update failed: ' + err.message);
+                    } finally {
+                        btn.disabled = false;
                     }
                 });
             });
@@ -1295,7 +1344,10 @@
             ];
 
             grid.innerHTML = rows.map(row => {
-                const clipsHtml = DEVICES.map(d => {
+                const required = Array.isArray(row.required) && row.required.length
+                    ? row.required : ['mobile', 'laptop', 'tab'];
+                const ROW_DEVICES = DEVICES.filter(d => required.includes(d.key));
+                const clipsHtml = ROW_DEVICES.map(d => {
                     const url  = row[`${d.key}_url`];
                     const secs = row[`${d.key}_secs`];
                     if (url) {
@@ -1328,10 +1380,10 @@
                         </div>`;
                 }).join('');
 
-                const complete = DEVICES.filter(d => row[`${d.key}_url`]).length;
-                const badge = complete === 3
+                const complete = ROW_DEVICES.filter(d => row[`${d.key}_url`]).length;
+                const badge = complete === ROW_DEVICES.length
                     ? '<span class="text-[10px] font-black px-3 py-1 rounded-full" style="background: rgba(16,185,129,0.18); color:#6ee7b7;">✓ COMPLETE</span>'
-                    : `<span class="text-[10px] font-black px-3 py-1 rounded-full" style="background: rgba(234,179,8,0.18); color:#fde68a;">${complete}/3 CLIPS</span>`;
+                    : `<span class="text-[10px] font-black px-3 py-1 rounded-full" style="background: rgba(234,179,8,0.18); color:#fde68a;">${complete}/${ROW_DEVICES.length} CLIPS</span>`;
 
                 const qc = row.status || 'pending';
                 const qcBadge = qc === 'approved'
