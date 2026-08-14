@@ -4,6 +4,7 @@
   "private": true,
   "description": "WorkSuite — internal productivity tools (Vercel + Supabase).",
   "dependencies": {
-    "nodemailer": "^6.9.16"
+    "nodemailer": "^6.9.16",
+    "web-push": "^3.6.7"
   }
 }
