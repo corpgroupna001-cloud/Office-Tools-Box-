@@ -1250,7 +1250,13 @@
                                 <video src="${url}" controls playsinline preload="metadata" style="width:100%; aspect-ratio: 16/9; background:#000; display:block;"></video>
                                 <div class="flex items-center justify-between px-3 py-2 text-xs">
                                     <span class="font-black text-white">${d.icon} ${d.label}</span>
-                                    <span class="text-emerald-300 font-bold">${secs || '?'}s ✓</span>
+                                    <span class="flex items-center gap-2">
+                                        <span class="text-emerald-300 font-bold">${secs || '?'}s ✓</span>
+                                        <button type="button" data-wfh-del="${row.id}" data-dev="${d.key}"
+                                            title="Delete this ${d.label} clip"
+                                            class="font-black px-2 py-1 rounded-lg"
+                                            style="background: rgba(244,63,94,0.15); color:#fda4af; border:1px solid rgba(244,63,94,0.3);">🗑</button>
+                                    </span>
                                 </div>
                             </div>`;
                     }
@@ -1278,13 +1284,48 @@
                                 <h4 class="text-white font-black text-lg">${escapeHtml(row.full_name || '—')}</h4>
                                 <p class="text-slate-400 text-xs font-bold">${escapeHtml(row.email || '')} · ${wo}</p>
                             </div>
-                            ${badge}
+                            <div class="flex items-center gap-2">
+                                ${badge}
+                                <button type="button" data-wfh-del="${row.id}" data-dev="all"
+                                    title="Delete this entire submission (all clips + record)"
+                                    class="text-[10px] font-black px-3 py-1 rounded-full"
+                                    style="background: rgba(244,63,94,0.18); color:#fda4af; border:1px solid rgba(244,63,94,0.35);">🗑 Delete all</button>
+                            </div>
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             ${clipsHtml}
                         </div>
                     </div>`;
             }).join('');
+
+            // Wire delete buttons (per clip + whole submission)
+            grid.querySelectorAll('button[data-wfh-del]').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const id = btn.dataset.wfhDel;
+                    const device = btn.dataset.dev;
+                    const row = allWfh.find(r => String(r.id) === String(id));
+                    const who = row ? (row.full_name || row.email || 'this employee') : 'this employee';
+                    const what = device === 'all'
+                        ? `ALL clips and the whole ${who} submission`
+                        : `the ${device} clip from ${who}'s submission`;
+                    if (!confirm(`Delete ${what}? This permanently removes the video file(s) and cannot be undone.`)) return;
+                    const orig = btn.innerText;
+                    btn.disabled = true; btn.innerText = '…';
+                    try {
+                        const r = await fetch('/api/admin', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ password: adminPassword, action: 'wfh_delete', id, device })
+                        });
+                        const j = await r.json().catch(() => ({}));
+                        if (!r.ok) throw new Error(j.error || 'Delete failed');
+                        loadWfh(); // re-fetch the list
+                    } catch (e) {
+                        alert('Delete failed: ' + e.message);
+                        btn.disabled = false; btn.innerText = orig;
+                    }
+                });
+            });
         }
 
         document.getElementById('wfh-search').addEventListener('input', renderWfh);
