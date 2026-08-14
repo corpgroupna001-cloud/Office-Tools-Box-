@@ -255,6 +255,56 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ recordings: signed });
     }
 
+    if (action === 'wfh_delete') {
+      // Delete one device clip (device: mobile|laptop|tab) or the whole
+      // submission (device: 'all') — removes Storage files + row/columns.
+      const id = String(body.id || '');
+      const device = String(body.device || 'all');
+      if (!id) return res.status(400).json({ error: 'id required' });
+      if (!['mobile', 'laptop', 'tab', 'all'].includes(device)) {
+        return res.status(400).json({ error: 'device must be mobile|laptop|tab|all' });
+      }
+      const H = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` };
+      const rowRes = await fetch(`${SUPABASE_URL}/rest/v1/wfh_recordings?id=eq.${encodeURIComponent(id)}&select=*&limit=1`, { headers: H });
+      if (!rowRes.ok) return res.status(502).json({ error: 'row fetch failed' });
+      const row = (await rowRes.json())[0];
+      if (!row) return res.status(404).json({ error: 'not_found' });
+
+      const devices = device === 'all' ? ['mobile', 'laptop', 'tab'] : [device];
+      const paths = devices.map(d => row[`${d}_path`]).filter(Boolean);
+      if (device === 'all' && row.video_path) paths.push(row.video_path); // v2 legacy single-clip
+
+      // Remove the files from Storage (bulk delete endpoint).
+      if (paths.length) {
+        const del = await fetch(`${SUPABASE_URL}/storage/v1/object/wfh-recordings`, {
+          method: 'DELETE',
+          headers: { ...H, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prefixes: paths })
+        });
+        if (!del.ok) {
+          const msg = (await del.text()).slice(0, 200);
+          return res.status(502).json({ error: 'storage_delete_failed', detail: msg });
+        }
+      }
+
+      if (device === 'all') {
+        const dr = await fetch(`${SUPABASE_URL}/rest/v1/wfh_recordings?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: H });
+        if (!dr.ok) return res.status(502).json({ error: 'row_delete_failed' });
+      } else {
+        const patch = {};
+        patch[`${device}_path`] = null;
+        patch[`${device}_bytes`] = null;
+        patch[`${device}_secs`] = null;
+        const pr = await fetch(`${SUPABASE_URL}/rest/v1/wfh_recordings?id=eq.${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          headers: { ...H, 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch)
+        });
+        if (!pr.ok) return res.status(502).json({ error: 'row_update_failed' });
+      }
+      return res.status(200).json({ success: true, deleted_files: paths.length, device });
+    }
+
     if (action === 'delete_employee') {
       const id = String(body.id || '');
       if (!id) return res.status(400).json({ error: 'id required' });
