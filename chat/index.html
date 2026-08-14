@@ -8,6 +8,10 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="/presence.js"></script>
+    <script src="/push.js"></script>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0b1120">
+    <link rel="apple-touch-icon" href="/icon-192.png">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/design-system.css">
     <link rel="stylesheet" href="/responsive.css">
@@ -1002,6 +1006,9 @@
             loadContacts().then(() => handleUrlHash());
             subscribeToMessages();
             requestNotificationPermission();
+            // Background push — messages & calls arrive even when this page
+            // (or the whole browser window) is closed.
+            if (window.WSPush) WSPush.init(sb);
         }
 
         // Handle #answer=<peerId>&video=<0|1> (from notifications.js) and #thread=<peerId>
@@ -1692,6 +1699,15 @@
             if (error) {
                 console.error(error);
                 showToast('❌', 'Could not send', error.message);
+            } else if (window.WSPush) {
+                // Background push — reaches them even if their page is closed
+                WSPush.notify(sb, {
+                    to: activeContact.id,
+                    title: '💬 ' + currentUserName,
+                    body: body.slice(0, 140),
+                    url: '/chat/#thread=' + currentUser.id,
+                    tag: 'msg-' + currentUser.id
+                });
             }
         });
 
@@ -1810,11 +1826,21 @@
         async function startCall(isVideo) {
             if (!activeContact) return;
 
-            // Offline guard — save a missed-call event and toast, don't dial
+            // Offline guard — save a missed-call event and toast, don't dial.
+            // Still push a notification so their phone/PC pings even with the page closed.
             if (!presenceOnline.has(activeContact.id)) {
                 const contactName = activeContact.full_name || activeContact.email;
                 showToast('📵', 'User is offline', `${contactName} isn't online. They'll see a missed call when they open Chat.`);
                 await saveCallEventMessage(activeContact.id, isVideo, 'offline', 0);
+                if (window.WSPush) {
+                    WSPush.notify(sb, {
+                        to: activeContact.id,
+                        title: '📞 Missed ' + (isVideo ? 'video' : 'voice') + ' call',
+                        body: currentUserName + ' tried to call you — open Chat to call back.',
+                        url: '/chat/#thread=' + currentUser.id,
+                        tag: 'call'
+                    });
+                }
                 playBusyTone();
                 return;
             }
@@ -1834,6 +1860,16 @@
                 await pc.setLocalDescription(offer);
                 const offerPayload = { from: currentUser.id, to: activeContact.id, sdp: offer, name: currentUserName, isVideo };
                 await callChannel.send({ type: 'broadcast', event: 'call-offer', payload: offerPayload });
+                if (window.WSPush) {
+                    // Ring their other devices too — arrives even if the page is closed
+                    WSPush.notify(sb, {
+                        to: activeContact.id,
+                        title: '📞 Incoming ' + (isVideo ? 'video' : 'voice') + ' call',
+                        body: currentUserName + ' is calling you — open Chat to answer.',
+                        url: '/chat/',
+                        tag: 'call'
+                    });
+                }
                 playOutgoingRing();
                 // Re-broadcast the offer every 3s so the recipient can pick it up
                 // from any page (they navigate to /chat and receive the next broadcast).
