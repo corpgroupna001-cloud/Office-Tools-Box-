@@ -339,6 +339,10 @@
         { key: 'tab',    label: 'Tab (tablet)', icon: '📲', hint: '360° — both faces, every edge & corner, screen ON.' },
     ];
 
+    // Devices this employee actually has to record — admin toggles them
+    // per employee (profiles.req_mobile / req_laptop / req_tab).
+    let ACTIVE = DEVICES;
+
     const REC_SECONDS = 30; // fixed clip length — auto-stops, no pause
     const GUIDE = [
         [0,  '🎬 Show the FRONT — screen ON'],
@@ -391,13 +395,16 @@
 
         try {
             const { data } = await sb.from('profiles')
-                .select('id, full_name, email, is_wfh')
+                .select('id, full_name, email, is_wfh, req_mobile, req_laptop, req_tab')
                 .eq('id', user.id)
                 .maybeSingle();
             profile = data;
         } catch {}
 
         if (!profile?.is_wfh)      return renderNotWFH();
+        // Only the devices the admin toggled ON for this employee
+        ACTIVE = DEVICES.filter(d => profile[`req_${d.key}`] !== false);
+        if (!ACTIVE.length)        return renderNoDevices();
         if (!todaysFriday())       return renderNotFriday();
         renderRecorder();
     }
@@ -410,6 +417,15 @@
                 <h2>Sign in required</h2>
                 <p>Log into WorkSuite first, then open this page again to submit your Friday check-in.</p>
                 <a href="/" class="btn primary" style="text-decoration:none;">Go to Login</a>
+            </div>`;
+    }
+    function renderNoDevices() {
+        document.getElementById('body').innerHTML = `
+            <div class="gate wfh">
+                <div class="gate-ic">📵</div>
+                <h2>No devices assigned</h2>
+                <p>You're marked WFH, but your admin hasn't selected which devices you should record (mobile / laptop / tab). Ask them to switch on your devices in the dashboard.</p>
+                <a href="/chat/" class="btn primary" style="text-decoration:none;">Message admin</a>
             </div>`;
     }
     function renderNotWFH() {
@@ -446,10 +462,11 @@
     // ---------- Recorder (3 device cards) ----------
     function renderRecorder() {
         const today = todaysFriday();
+        const deviceNames = ACTIVE.map(d => d.label).join(', ');
         document.getElementById('hero-sub').textContent =
-            `Submit your ${fmtDate(today)} check-in — one clip each of your Mobile, Laptop and Tab.`;
+            `Submit your ${fmtDate(today)} check-in — one clip each of: ${deviceNames}.`;
 
-        const stepsHtml = DEVICES.map(d =>
+        const stepsHtml = ACTIVE.map(d =>
             `<div class="step" id="step-${d.key}">
                 <div class="step-ic">${d.icon}</div>
                 <div class="step-body">
@@ -458,7 +475,7 @@
                 </div>
             </div>`).join('');
 
-        const cardsHtml = DEVICES.map(d => `
+        const cardsHtml = ACTIVE.map(d => `
             <div class="device-card" id="card-${d.key}">
                 <div class="device-head">
                     <div class="left">
@@ -503,16 +520,16 @@
                     <li>✅ <b>Do</b> use the <b>back camera</b> in a <b>bright, well-lit area</b> — wipe the lens first.</li>
                     <li>✅ <b>Do</b> a slow, steady <b>360° pan</b>: front, back, every side, edge and corner — with the device's <b>screen ON</b>.</li>
                     <li>✅ <b>Do</b> record at the highest quality your camera supports (4K/2K is requested automatically).</li>
-                    <li>✅ <b>Do</b> upload each clip right after recording — all three (Mobile, Laptop, Tab) complete the week.</li>
+                    <li>✅ <b>Do</b> upload each clip right after recording — your assigned devices (${ACTIVE.map(d => d.label).join(', ')}) complete the week.</li>
                     <li>🚫 <b>Don't</b> pause — there is no pause; every clip <b>auto-stops at exactly 30 seconds</b>.</li>
-                    <li>🚫 <b>Don't</b> record in the dark or with a shaky hand — blurry/dark video fails QC and you'll have to <b>re-record all three</b>.</li>
+                    <li>🚫 <b>Don't</b> record in the dark or with a shaky hand — blurry/dark video fails QC and you'll have to <b>re-record all of them</b>.</li>
                     <li>🚫 <b>Don't</b> show someone else's device. Only you and your admin can see these videos.</li>
                 </ul>
             </div>
 
             <div id="qc-banner-slot"></div>
 
-            <div class="steps">${stepsHtml}</div>
+            <div class="steps" style="grid-template-columns: repeat(${ACTIVE.length}, 1fr);">${stepsHtml}</div>
 
             ${cardsHtml}
 
@@ -523,13 +540,42 @@
                 <div id="history-list"></div>
             </div>`;
 
-        // Init per-device state
-        DEVICES.forEach(d => { st[d.key] = { stream: null, recorder: null, blob: null, secs: 0, ticker: null, submitted: false, facing: 'environment', qcTimer: null, qcGoodStreak: 0, recording: false }; });
+        // Init per-device state (only the devices this employee must record)
+        ACTIVE.forEach(d => { st[d.key] = { stream: null, recorder: null, blob: null, secs: 0, ticker: null, submitted: false, facing: 'environment', qcTimer: null, qcGoodStreak: 0, recording: false }; });
 
         wireAll();
-        setActiveStep('mobile');
+        setActiveStep(ACTIVE[0]?.key || null);
+        refreshGating();
         loadTodaySubmission();
         loadHistory();
+    }
+
+    // ---------- One-device-at-a-time gating ----------
+    // Only the first unfinished device is recordable; the rest stay locked
+    // until the previous clip is uploaded. No parallel recording.
+    function refreshGating() {
+        const current = ACTIVE.find(d => !st[d.key].submitted)?.key || null;
+        ACTIVE.forEach((d, idx) => {
+            if (st[d.key].submitted) return; // done cards keep their ✅ state
+            const locked = d.key !== current;
+            const card = $(`card-${d.key}`);
+            if (!card) return;
+            card.style.opacity = locked ? '0.55' : '';
+            card.style.pointerEvents = locked ? 'none' : '';
+            const ph = $(`ph-${d.key}`);
+            if (ph) {
+                const title = ph.querySelector('.p-title');
+                const sub = ph.querySelector('.p-sub');
+                if (locked) {
+                    const prev = ACTIVE[idx - 1];
+                    if (title) title.textContent = `🔒 Locked — upload your ${prev ? prev.label : 'previous'} clip first`;
+                    if (sub) sub.textContent = 'One device at a time, in order.';
+                } else {
+                    if (title) title.textContent = 'Tap "Open camera" to start';
+                    if (sub) sub.textContent = 'Back camera · highest quality (4K/2K) · auto-records exactly 30 seconds.';
+                }
+            }
+        });
     }
 
     function wireAll() {
@@ -552,7 +598,7 @@
         if (el) el.style.display = on ? 'inline-flex' : 'none';
     }
     function setActiveStep(dev) {
-        DEVICES.forEach(d => {
+        ACTIVE.forEach(d => {
             const step = $(`step-${d.key}`);
             step.classList.remove('active');
             $(`card-${d.key}`).classList.remove('active');
@@ -570,19 +616,20 @@
         $(`card-${dev}`).classList.remove('active');
         $(`card-${dev}`).classList.add('done');
         $(`badge-${dev}`).outerHTML = `<span class="badge-done" id="badge-${dev}">Uploaded</span>`;
-        // Move to the next unfinished device
-        const next = DEVICES.find(d => !st[d.key].submitted);
+        // Move to the next unfinished device and unlock it
+        const next = ACTIVE.find(d => !st[d.key].submitted);
         setActiveStep(next?.key || null);
+        refreshGating();
         maybeShowAllDone();
     }
     function maybeShowAllDone() {
-        const doneCount = DEVICES.filter(d => st[d.key].submitted).length;
-        if (doneCount === DEVICES.length) {
+        const doneCount = ACTIVE.filter(d => st[d.key].submitted).length;
+        if (doneCount === ACTIVE.length) {
             $('all-done-slot').innerHTML = `
                 <div class="all-done">
                     <div class="adic">✅</div>
                     <div>
-                        <h4>All three clips submitted for ${fmtDate(todaysFriday())}!</h4>
+                        <h4>All ${ACTIVE.length === 1 ? 'clips' : ACTIVE.length + ' clips'} submitted for ${fmtDate(todaysFriday())}!</h4>
                         <p>Nice work — your admin can review them from the dashboard. See you next Friday.</p>
                     </div>
                 </div>`;
@@ -604,7 +651,7 @@
             if (data.status === 'rejected') {
                 banner.innerHTML = `
                     <div class="qc-banner rejected">
-                        ❌ <b>Quality check failed — please re-record all three videos.</b><br>
+                        ❌ <b>Quality check failed — please re-record all your videos.</b><br>
                         ${data.review_note ? 'Admin note: <b>' + escapeText(data.review_note) + '</b><br>' : ''}
                         Record again in a bright area with a slow, steady 360° pan, then upload each clip.
                         Your new uploads replace the old ones.
@@ -612,7 +659,7 @@
                 return; // do NOT mark devices done — employee records fresh clips
             }
 
-            const complete = DEVICES.every(d => data[`${d.key}_path`]);
+            const complete = ACTIVE.every(d => data[`${d.key}_path`]);
             if (data.status === 'approved' && complete) {
                 banner.innerHTML = `
                     <div class="qc-banner approved">
@@ -621,11 +668,11 @@
             } else if (complete) {
                 banner.innerHTML = `
                     <div class="qc-banner pending">
-                        ⏳ <b>Submitted — waiting for quality check.</b> Your admin will review the three clips. If QC fails you'll be asked to re-record here.
+                        ⏳ <b>Submitted — waiting for quality check.</b> Your admin will review your clips. If QC fails you'll be asked to re-record here.
                     </div>`;
             }
 
-            DEVICES.forEach(d => {
+            ACTIVE.forEach(d => {
                 if (data[`${d.key}_path`]) {
                     st[d.key].submitted = true;
                     markDone(d.key);
