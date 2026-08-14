@@ -65,7 +65,11 @@ module.exports = async function handler(req, res) {
       email,
       password,
       email_confirm: true, // verified via our OTP — no Supabase confirmation email
-      user_metadata: { full_name, company, avatar_url },
+      // IMPORTANT: never put avatar_url (a base64 data URL) in user_metadata —
+      // Supabase embeds user_metadata inside every JWT, and a ~30KB avatar
+      // makes the Authorization header exceed nginx's limit → HTML 400s on
+      // Storage uploads. Avatars live in public.profiles only.
+      user_metadata: { full_name, company },
     })
   });
   const created = await createRes.json().catch(() => ({}));
