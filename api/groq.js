@@ -243,39 +243,40 @@ Return exactly this JSON structure and NOTHING else. Also include the person you
 
 User context: ${wpm} WPM, ${accuracy}% accuracy, difficulty ${level}, test duration ${duration} seconds. Random seed: ${Math.random().toString(36).slice(2, 8)}.`;
 
-  // Active Groq models as of 2026 — llama3-70b-8192 is decommissioned, removed.
-  const models = [
-    process.env.GROQ_MODEL,
-    'llama-3.3-70b-versatile',
-    'openai/gpt-oss-120b',
-    'moonshotai/kimi-k2-instruct',
-    'llama-3.1-8b-instant'
-  ].filter(Boolean);
-  const uniqueModels = [...new Set(models)];
+  // Groq retires models often — ask the API which models are live right now
+  // and order them by our preference. Falls back to a static list if the
+  // models endpoint is unreachable.
+  const uniqueModels = await resolveGroqModels(apiKey);
 
   const attempts = [];
+  const maxTok = duration >= 300 ? 1400 : duration >= 180 ? 900 : 450;
 
   for (const model of uniqueModels) {
+    // Try with strict JSON mode first; if Groq's JSON validation rejects the
+    // generation, retry once without response_format (our parser is lenient).
+    for (const cfg of [{ rf: true, temp: 0.95 }, { rf: false, temp: 0.6 }]) {
     try {
+      const reqBody = {
+        model,
+        temperature: cfg.temp,
+        max_tokens: maxTok,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ]
+      };
+      if (cfg.rf) reqBody.response_format = { type: 'json_object' };
       const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          temperature: 0.95,
-          max_tokens: duration >= 300 ? 1400 : duration >= 180 ? 900 : 450,
-          response_format: { type: 'json_object' },
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ]
-        })
+        body: JSON.stringify(reqBody)
       });
 
       if (!r.ok) {
         const errText = (await r.text()).slice(0, 160);
         attempts.push({ model, error: `HTTP ${r.status}: ${errText}` });
-        continue;
+        if (r.status === 400 && cfg.rf && /json/i.test(errText)) continue; // retry w/o JSON mode
+        break; // other errors: move on to the next model
       }
 
       const data = await r.json();
@@ -287,7 +288,7 @@ User context: ${wpm} WPM, ${accuracy}% accuracy, difficulty ${level}, test durat
 
       let parsed;
       try { parsed = JSON.parse(jsonStr); }
-      catch (parseErr) { attempts.push({ model, error: `JSON parse failed: ${parseErr.message}` }); continue; }
+      catch (parseErr) { attempts.push({ model, error: `JSON parse failed: ${parseErr.message}` }); break; }
 
       let passage = String(parsed.passage || parsed.text || parsed.content || parsed.paragraph || parsed.body || '')
         .replace(/[‘’‚‛]/g, "'").replace(/[“”„‟]/g, '"').replace(/[–—]/g, '-').replace(/…/g, '...')
@@ -297,7 +298,7 @@ User context: ${wpm} WPM, ${accuracy}% accuracy, difficulty ${level}, test durat
       // More lenient floor so a slightly short passage still passes rather than failing entirely.
       if (!passage || wordCount < target.floor) {
         attempts.push({ model, error: `passage too short (${wordCount} words)` });
-        continue;
+        break;
       }
 
       const tip = String(parsed.tip || parsed.coaching || 'Keep your rhythm steady and breathe.')
@@ -312,8 +313,9 @@ User context: ${wpm} WPM, ${accuracy}% accuracy, difficulty ${level}, test durat
       });
     } catch (e) {
       attempts.push({ model, error: e.message || 'unknown error' });
-      continue;
+      break;
     }
+    } // end cfg retry loop
   }
 
   // All models failed. Return a friendly error the client can show as a refresh prompt.
@@ -324,3 +326,42 @@ User context: ${wpm} WPM, ${accuracy}% accuracy, difficulty ${level}, test durat
     source: 'ai-failed'
   });
 };
+
+// ---------- Live model discovery ----------
+// Groq decommissions models regularly. Query the live model list and order it
+// by preference so the app keeps working even when old models disappear.
+const GROQ_PREFERRED = [
+  'openai/gpt-oss-120b',
+  'llama-3.3-70b-versatile',
+  'moonshotai/kimi-k2-instruct',
+  'openai/gpt-oss-20b',
+  'llama-3.1-8b-instant'
+];
+const GROQ_EXCLUDE = /whisper|tts|guard|embed|moderation|playai|vision|allam|compound|safety/i;
+let groqModelCache = { at: 0, models: null };
+
+async function resolveGroqModels(apiKey) {
+  const prefs = [...new Set([process.env.GROQ_MODEL, ...GROQ_PREFERRED].filter(Boolean))];
+  if (groqModelCache.models && Date.now() - groqModelCache.at < 10 * 60_000) {
+    return groqModelCache.models;
+  }
+  try {
+    const r = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { Authorization: `Bearer ${apiKey}` }
+    });
+    if (r.ok) {
+      const ids = (((await r.json()).data) || [])
+        .map(m => m && m.id)
+        .filter(id => typeof id === 'string' && !GROQ_EXCLUDE.test(id));
+      if (ids.length) {
+        const live = prefs.filter(m => ids.includes(m));
+        const extras = ids.filter(id => !live.includes(id));
+        const models = [...live, ...extras].slice(0, 6);
+        groqModelCache = { at: Date.now(), models };
+        return models;
+      }
+    }
+  } catch {}
+  return prefs; // models endpoint unreachable — try the static list anyway
+}
+module.exports.resolveGroqModels = resolveGroqModels;

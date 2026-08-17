@@ -45,37 +45,37 @@ Return EXACTLY this JSON structure and nothing else:
 
 Random seed for variety: ${Math.random().toString(36).slice(2, 10)}`;
 
-  const models = [
-    process.env.GROQ_MODEL,
-    'llama-3.3-70b-versatile',
-    'openai/gpt-oss-120b',
-    'llama-3.1-8b-instant'
-  ].filter(Boolean);
-  const uniqueModels = [...new Set(models)];
+  // Groq retires models often — discover what's live and order by preference.
+  const uniqueModels = await resolveGroqModels(apiKey);
 
   const attempts = [];
 
   for (const model of uniqueModels) {
+    // Strict JSON mode first; if Groq's JSON validation rejects the output,
+    // retry once without response_format (our parser is lenient).
+    for (const cfg of [{ rf: true, temp: 0.75 }, { rf: false, temp: 0.5 }]) {
     try {
+      const reqBody = {
+        model,
+        temperature: cfg.temp,
+        max_tokens: 3000,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ]
+      };
+      if (cfg.rf) reqBody.response_format = { type: 'json_object' };
       const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          temperature: 0.75,
-          max_tokens: 3000,
-          response_format: { type: 'json_object' },
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ]
-        })
+        body: JSON.stringify(reqBody)
       });
 
       if (!r.ok) {
         const errText = (await r.text()).slice(0, 200);
         attempts.push({ model, error: `HTTP ${r.status}: ${errText}` });
-        continue;
+        if (r.status === 400 && cfg.rf && /json/i.test(errText)) continue; // retry w/o JSON mode
+        break;
       }
 
       const data = await r.json();
@@ -90,7 +90,7 @@ Random seed for variety: ${Math.random().toString(36).slice(2, 10)}`;
       try { parsed = JSON.parse(jsonStr); }
       catch (parseErr) {
         attempts.push({ model, error: `JSON parse: ${parseErr.message}` });
-        continue;
+        break;
       }
 
       const raw = Array.isArray(parsed.questions) ? parsed.questions : (Array.isArray(parsed) ? parsed : []);
@@ -109,7 +109,7 @@ Random seed for variety: ${Math.random().toString(36).slice(2, 10)}`;
 
       if (questions.length < 5) {
         attempts.push({ model, error: `Only ${questions.length} valid questions returned` });
-        continue;
+        break;
       }
 
       return res.status(200).json({
@@ -122,8 +122,9 @@ Random seed for variety: ${Math.random().toString(36).slice(2, 10)}`;
       });
     } catch (e) {
       attempts.push({ model, error: e.message || 'unknown error' });
-      continue;
+      break;
     }
+    } // end cfg retry loop
   }
 
   return res.status(502).json({
@@ -132,3 +133,39 @@ Random seed for variety: ${Math.random().toString(36).slice(2, 10)}`;
     attempts
   });
 };
+
+// ---------- Live model discovery (same as api/groq.js) ----------
+const GROQ_PREFERRED = [
+  'openai/gpt-oss-120b',
+  'llama-3.3-70b-versatile',
+  'moonshotai/kimi-k2-instruct',
+  'openai/gpt-oss-20b',
+  'llama-3.1-8b-instant'
+];
+const GROQ_EXCLUDE = /whisper|tts|guard|embed|moderation|playai|vision|allam|compound|safety/i;
+let groqModelCache = { at: 0, models: null };
+
+async function resolveGroqModels(apiKey) {
+  const prefs = [...new Set([process.env.GROQ_MODEL, ...GROQ_PREFERRED].filter(Boolean))];
+  if (groqModelCache.models && Date.now() - groqModelCache.at < 10 * 60_000) {
+    return groqModelCache.models;
+  }
+  try {
+    const r = await fetch('https://api.groq.com/openai/v1/models', {
+      headers: { Authorization: `Bearer ${apiKey}` }
+    });
+    if (r.ok) {
+      const ids = (((await r.json()).data) || [])
+        .map(m => m && m.id)
+        .filter(id => typeof id === 'string' && !GROQ_EXCLUDE.test(id));
+      if (ids.length) {
+        const live = prefs.filter(m => ids.includes(m));
+        const extras = ids.filter(id => !live.includes(id));
+        const models = [...live, ...extras].slice(0, 6);
+        groqModelCache = { at: Date.now(), models };
+        return models;
+      }
+    }
+  } catch {}
+  return prefs;
+}
