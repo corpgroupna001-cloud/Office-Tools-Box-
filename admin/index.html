@@ -10,6 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/design-system.css">
     <link rel="stylesheet" href="/responsive.css">
+    <script src="/dialogs.js"></script>
     <script defer src="/commandpalette.js"></script>
     <style>
         body {
@@ -1159,7 +1160,7 @@
                         if (emp) emp.is_wfh = is_wfh;
                     } catch (err) {
                         input.checked = !is_wfh;
-                        alert('WFH update failed: ' + err.message);
+                        wsDialog.alert({ icon: '🏠', danger: true, title: 'WFH update failed', message: escapeHtml(err.message || 'Please try again.') });
                     } finally {
                         input.disabled = false;
                         renderEmployees(); // refresh so device chips enable/disable with WFH
@@ -1187,7 +1188,7 @@
                         emp[field] = on;
                         btn.classList.toggle('on', on);
                     } catch (err) {
-                        alert('Device update failed: ' + err.message);
+                        wsDialog.alert({ icon: '📱', danger: true, title: 'Device update failed', message: escapeHtml(err.message || 'Please try again.') });
                     } finally {
                         btn.disabled = false;
                     }
@@ -1279,7 +1280,8 @@
 
         // Reset password (send recovery email)
         async function resetPasswordFor(emp) {
-            if (!confirm(`Send a password reset email to ${emp.email}?`)) return;
+            const okReset = await wsDialog.confirm({ icon: '🔑', title: 'Send password reset?', message: `A reset email will be sent to <b>${escapeHtml(emp.email)}</b>.`, okText: 'Send Email' });
+            if (!okReset) return;
             try {
                 const r = await fetch('/api/admin', {
                     method: 'POST',
@@ -1288,9 +1290,9 @@
                 });
                 const data = await r.json();
                 if (!r.ok) throw new Error(data.error || 'Failed');
-                alert('Password reset email sent to ' + emp.email);
+                wsDialog.alert({ icon: '📧', success: true, title: 'Reset email sent', message: 'Password reset email sent to <b>' + escapeHtml(emp.email) + '</b>.' });
             } catch (e) {
-                alert('Failed: ' + e.message);
+                wsDialog.alert({ icon: '❌', danger: true, title: 'Failed', message: escapeHtml(e.message || 'Please try again.') });
             }
         }
 
