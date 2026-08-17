@@ -12,6 +12,8 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/design-system.css">
     <link rel="stylesheet" href="/responsive.css">
+    <script src="/dialogs.js"></script>
+    <script defer src="/wfh-reminder.js"></script>
     <script defer src="/commandpalette.js"></script>
     <style>
         body {
@@ -1738,8 +1740,14 @@
             updateWelcomeStats();
         });
         document.getElementById('next-btn').addEventListener('click', nextQuestion);
-        document.getElementById('quit-btn').addEventListener('click', () => {
-            if (confirm('Quit this quiz? Your progress will be lost.')) {
+        document.getElementById('quit-btn').addEventListener('click', async () => {
+            const ok = await wsDialog.confirm({
+                icon: '🚪', danger: true,
+                title: 'Quit this quiz?',
+                message: 'Your progress will be <b>lost</b> and this attempt will not be saved.',
+                okText: 'Quit Quiz', cancelText: 'Keep Playing'
+            });
+            if (ok) {
                 clearInterval(quiz.timerInterval);
                 disableAntiCheat();
                 document.getElementById('quiz-screen').classList.add('hidden');
