@@ -15,6 +15,8 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/design-system.css">
     <link rel="stylesheet" href="/responsive.css">
+    <script src="/dialogs.js"></script>
+    <script defer src="/wfh-reminder.js"></script>
     <script defer src="/commandpalette.js"></script>
     <style>
         body {
@@ -1676,7 +1678,7 @@
                 showToast('📥', 'Image saved', 'Check your Downloads folder.');
             } catch (e) {
                 console.error('Download failed', e);
-                alert('Could not create image. Please take a screenshot instead.');
+                wsDialog.alert({ icon: '🖼️', danger: true, title: 'Download failed', message: 'Could not create the image. Please take a screenshot instead.' });
             } finally {
                 btn.innerHTML = orig;
                 btn.disabled = false;
@@ -2516,7 +2518,7 @@
         document.getElementById('custom-use').addEventListener('click', async () => {
             const txt = document.getElementById('custom-text').value.trim().replace(/\s+/g, ' ');
             if (txt.split(' ').length < 20) {
-                alert('Please paste at least 20 words.');
+                wsDialog.alert({ icon: '✍️', title: 'Text too short', message: 'Please paste at least <b>20 words</b> to use as a custom passage.' });
                 return;
             }
             const m = document.getElementById('custom-modal');
@@ -2576,7 +2578,7 @@
                 await navigator.clipboard.writeText(text);
                 showToast('✅', 'Copied to clipboard', 'Paste it anywhere to share your result.');
             } catch {
-                alert('Copy failed. Please screenshot instead.');
+                wsDialog.alert({ icon: '📋', danger: true, title: 'Copy failed', message: 'Could not copy to clipboard. Please take a screenshot instead.' });
             }
         });
 
