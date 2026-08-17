@@ -520,7 +520,7 @@
                     <div id="ph-${d.key}" class="placeholder">
                         <div class="p-emoji">📷</div>
                         <div class="p-title">Tap "Open camera" to start</div>
-                        <div class="p-sub">Back camera · highest quality (4K/2K) · auto-records exactly 30 seconds.</div>
+                        <div class="p-sub">Back camera · high quality (2K) · auto-records exactly 30 seconds.</div>
                     </div>
                 </div>
                 <div id="qc-${d.key}" class="qc-hint"></div>
@@ -596,7 +596,7 @@
                     if (sub) sub.textContent = 'One device at a time, in order.';
                 } else {
                     if (title) title.textContent = 'Tap "Open camera" to start';
-                    if (sub) sub.textContent = 'Back camera · highest quality (4K/2K) · auto-records exactly 30 seconds.';
+                    if (sub) sub.textContent = 'Back camera · high quality (2K) · auto-records exactly 30 seconds.';
                 }
             }
         });
@@ -730,14 +730,16 @@
         }
         try {
             if (st[dev].stream) st[dev].stream.getTracks().forEach(t => t.stop());
-            // Ask for the highest quality available — 4K ideal, browser falls
-            // back to 2K / 1080p automatically if the camera can't do it.
+            // 2K @ 30fps — sharp enough to see every edge & corner, but light
+            // enough that the phone's encoder keeps up. Full 4K overloads many
+            // phones' MediaRecorder (software encoding) and produces laggy,
+            // frame-dropping clips. Falls back to 1080p on weaker cameras.
             st[dev].stream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     facingMode: { ideal: st[dev].facing },
-                    width:  { ideal: 3840 },
-                    height: { ideal: 2160 },
-                    frameRate: { ideal: 30 }
+                    width:  { ideal: 2560 },
+                    height: { ideal: 1440 },
+                    frameRate: { ideal: 30, max: 30 }
                 },
                 audio: true
             });
@@ -842,8 +844,8 @@
         if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
         if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/mp4';
         const chunks = [];
-        // High bitrate to preserve 4K/2K detail (~30 MB for a 30s clip).
-        S.recorder = new MediaRecorder(S.stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+        // 6 Mbps matches 2K/30fps — smooth encode, ~22 MB per 30s clip.
+        S.recorder = new MediaRecorder(S.stream, { mimeType: mime, videoBitsPerSecond: 6_000_000 });
         S.recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
         const startAt = Date.now();
         S.recorder.onstop = () => {
