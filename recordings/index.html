@@ -869,6 +869,8 @@
             S.stream = null;
             $(`badge-${dev}`).outerHTML = `<span class="badge-todo" id="badge-${dev}">Ready to upload</span>`;
         };
+        // Fingerprint the recording device while the camera is live
+        collectDeviceInfo(S.stream).then(di => { S.deviceInfo = di; }).catch(() => {});
         S.recorder.start(1000);
         // No Stop / no pause — the clip runs exactly REC_SECONDS then ends itself.
         setBtn(dev, 'start', false); setBtn(dev, 'flip', false);
@@ -893,6 +895,46 @@
     }
 
     function stopRec(dev) { try { st[dev].recorder?.stop(); } catch {} }
+
+    // ---------- Recording-device fingerprint ----------
+    // Captured at record time and stored with the clip so the admin can see
+    // exactly which device (name/model/camera) it was recorded on.
+    async function collectDeviceInfo(stream) {
+        const info = {};
+        try {
+            info.ua = navigator.userAgent.slice(0, 220);
+            info.platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+            if (navigator.userAgentData?.getHighEntropyValues) {
+                try {
+                    const h = await navigator.userAgentData.getHighEntropyValues(['model', 'platformVersion']);
+                    if (h.model) info.model = h.model;
+                    if (h.platformVersion) info.os = `${info.platform} ${h.platformVersion}`;
+                } catch {}
+            }
+            if (!info.model) {
+                const m = navigator.userAgent.match(/Android [^;]+;\s*([^);]+)[);]/);
+                if (m) info.model = m[1].trim();
+                else if (/iPhone/.test(navigator.userAgent)) info.model = 'iPhone';
+                else if (/iPad/.test(navigator.userAgent)) info.model = 'iPad';
+                else if (/Macintosh/.test(navigator.userAgent)) info.model = 'Mac';
+                else if (/Windows/.test(navigator.userAgent)) info.model = 'Windows PC';
+            }
+            info.device_type = /iPhone|iPod|Android.+Mobile/i.test(navigator.userAgent)
+                ? 'mobile'
+                : (/iPad|Tablet|Android/i.test(navigator.userAgent) ? 'tablet' : 'desktop');
+            info.screen = `${screen.width}x${screen.height}`;
+            if (navigator.deviceMemory) info.memory_gb = navigator.deviceMemory;
+            if (navigator.hardwareConcurrency) info.cpu_cores = navigator.hardwareConcurrency;
+            const t = stream?.getVideoTracks?.()[0];
+            if (t) {
+                info.camera = (t.label || '').slice(0, 120);
+                const s = t.getSettings();
+                info.capture = `${s.width || '?'}x${s.height || '?'}@${Math.round(s.frameRate || 0)}fps`;
+                if (s.facingMode) info.facing = s.facingMode;
+            }
+        } catch {}
+        return info;
+    }
 
     async function retakeRec(dev) {
         st[dev].blob = null; st[dev].secs = 0;
@@ -950,6 +992,7 @@
             patch[`${dev}_path`]  = path;
             patch[`${dev}_bytes`] = S.blob.size;
             patch[`${dev}_secs`]  = S.secs;
+            patch[`${dev}_device`] = S.deviceInfo || null; // which device recorded this clip
             patch.status = 'pending'; // fresh/replacement upload always goes back to QC
             const { error: metaErr } = await sb.from('wfh_recordings').upsert(patch, { onConflict: 'user_id,week_of' });
             if (metaErr) throw metaErr;
