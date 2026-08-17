@@ -58,13 +58,14 @@ Random seed for variety: ${Math.random().toString(36).slice(2, 10)}`;
       const reqBody = {
         model,
         temperature: cfg.temp,
-        max_tokens: 3000,
+        max_tokens: 6000,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ]
       };
       if (cfg.rf) reqBody.response_format = { type: 'json_object' };
+      if (/gpt-oss/.test(model)) reqBody.reasoning_effort = 'low';
       const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -142,7 +143,7 @@ const GROQ_PREFERRED = [
   'openai/gpt-oss-20b',
   'llama-3.1-8b-instant'
 ];
-const GROQ_EXCLUDE = /whisper|tts|guard|embed|moderation|playai|vision|allam|compound|safety/i;
+const GROQ_EXCLUDE = /whisper|tts|guard|embed|moderation|playai|vision|allam|compound|safety|orpheus|speech|audio|realtime/i;
 let groqModelCache = { at: 0, models: null };
 
 async function resolveGroqModels(apiKey) {

@@ -249,7 +249,9 @@ User context: ${wpm} WPM, ${accuracy}% accuracy, difficulty ${level}, test durat
   const uniqueModels = await resolveGroqModels(apiKey);
 
   const attempts = [];
-  const maxTok = duration >= 300 ? 1400 : duration >= 180 ? 900 : 450;
+  // Reasoning models (gpt-oss, qwen) burn tokens on hidden thinking before
+  // emitting JSON — give generous headroom or the JSON arrives truncated.
+  const maxTok = duration >= 300 ? 4000 : duration >= 180 ? 3000 : 2500;
 
   for (const model of uniqueModels) {
     // Try with strict JSON mode first; if Groq's JSON validation rejects the
@@ -266,6 +268,7 @@ User context: ${wpm} WPM, ${accuracy}% accuracy, difficulty ${level}, test durat
         ]
       };
       if (cfg.rf) reqBody.response_format = { type: 'json_object' };
+      if (/gpt-oss/.test(model)) reqBody.reasoning_effort = 'low';
       const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -337,7 +340,7 @@ const GROQ_PREFERRED = [
   'openai/gpt-oss-20b',
   'llama-3.1-8b-instant'
 ];
-const GROQ_EXCLUDE = /whisper|tts|guard|embed|moderation|playai|vision|allam|compound|safety/i;
+const GROQ_EXCLUDE = /whisper|tts|guard|embed|moderation|playai|vision|allam|compound|safety|orpheus|speech|audio|realtime/i;
 let groqModelCache = { at: 0, models: null };
 
 async function resolveGroqModels(apiKey) {
