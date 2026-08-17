@@ -8,6 +8,8 @@
 
 <link rel="stylesheet" href="/design-system.css">
     <link rel="stylesheet" href="/responsive.css">
+    <script src="/dialogs.js"></script>
+    <script defer src="/wfh-reminder.js"></script>
 <script defer src="/commandpalette.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
 <style>
@@ -826,9 +828,7 @@ async function copySignature(){
       })
     ]);
 
-    alert(
-      "Signature copied. Paste into Outlook signature editor."
-    );
+    wsDialog.alert({ icon: "✅", success: true, title: "Signature copied", message: "Now paste it into the Outlook signature editor." });
 
   }catch(err){
 
@@ -854,9 +854,7 @@ async function copySignature(){
 
     document.body.removeChild(temp);
 
-    alert(
-      "Signature copied. Paste into Outlook signature editor."
-    );
+    wsDialog.alert({ icon: "✅", success: true, title: "Signature copied", message: "Now paste it into the Outlook signature editor." });
   }
 }
 
