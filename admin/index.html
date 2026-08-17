@@ -1350,6 +1350,20 @@
                 const clipsHtml = ROW_DEVICES.map(d => {
                     const url  = row[`${d.key}_url`];
                     const secs = row[`${d.key}_secs`];
+                    const di = row[`${d.key}_device`] || null;
+                    let deviceLine = '';
+                    if (di) {
+                        const bits = [];
+                        if (di.model) bits.push(di.model);
+                        else if (di.platform) bits.push(di.platform);
+                        if (di.camera) bits.push(di.camera);
+                        if (di.capture) bits.push(di.capture);
+                        const notMobile = di.device_type && di.device_type !== 'mobile';
+                        deviceLine = `
+                            <div class="px-3 pb-2 text-[10px] font-semibold ${notMobile ? 'text-rose-300' : 'text-slate-400'}" title="${escapeHtml(di.ua || '')}">
+                                ${notMobile ? '⚠️ Recorded on ' + escapeHtml(di.device_type).toUpperCase() + ' — ' : '📱 '}${escapeHtml(bits.join(' · '))}
+                            </div>`;
+                    }
                     if (url) {
                         return `
                             <div class="glass rounded-xl overflow-hidden">
@@ -1368,6 +1382,7 @@
                                             style="background: rgba(244,63,94,0.15); color:#fda4af; border:1px solid rgba(244,63,94,0.3);">🗑</button>
                                     </span>
                                 </div>
+                                ${deviceLine}
                             </div>`;
                     }
                     return `
