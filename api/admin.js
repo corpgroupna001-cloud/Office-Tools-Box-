@@ -336,6 +336,7 @@ module.exports = async function handler(req, res) {
         patch[`${device}_path`] = null;
         patch[`${device}_bytes`] = null;
         patch[`${device}_secs`] = null;
+        patch[`${device}_device`] = null;
         const pr = await fetch(`${SUPABASE_URL}/rest/v1/wfh_recordings?id=eq.${encodeURIComponent(id)}`, {
           method: 'PATCH',
           headers: { ...H, 'Content-Type': 'application/json' },
