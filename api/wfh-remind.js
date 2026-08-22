@@ -45,9 +45,9 @@ module.exports = async function handler(req, res) {
 
   const H = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` };
   try {
-    // The Friday's full IST day in UTC — for typing-test lookups
-    const dayStart = new Date(`${weekOf}T00:00:00+05:30`).toISOString();
-    const dayEnd = new Date(`${weekOf}T23:59:59.999+05:30`).toISOString();
+    // Friday typing test window: 5:00 PM – 8:00 PM IST, in UTC — for typing-test lookups
+    const dayStart = new Date(`${weekOf}T17:00:00+05:30`).toISOString();
+    const dayEnd = new Date(`${weekOf}T20:00:00+05:30`).toISOString();
 
     const [pRes, rRes, sRes, tRes] = await Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/profiles?is_wfh=eq.true&select=id,full_name,req_mobile,req_laptop,req_tab`, { headers: H }),
@@ -86,8 +86,8 @@ module.exports = async function handler(req, res) {
         if (typedToday.has(emp.id)) { alreadyDone++; continue; }
         missing = ['typing test'];
         payload = JSON.stringify({
-          title: '⌨️ Friday Typing Test due — 7 PM reminder',
-          body: 'You have not submitted today\'s typing test. Finish it before end of day — not submitting is a violation (1 day salary cut policy).',
+          title: '⌨️ Friday Typing Test — window closes at 8:00 PM',
+          body: 'Friday typing test timings: 5:00 PM – 8:00 PM. You have not submitted yet — finish before 8 PM. Not submitting is a violation (1 day salary cut policy).',
           url: '/typingtest/',
           tag: 'typing-reminder'
         });

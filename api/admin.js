@@ -378,7 +378,7 @@ module.exports = async function handler(req, res) {
 
     if (action === 'friday_report') {
       // Per-Friday compliance report for every WFH employee:
-      //  - Typing test: submitted that Friday (IST day) or not
+      //  - Typing test: submitted in the Friday window 5:00 PM – 8:00 PM IST or not
       //  - WFH device videos: uploaded per required device + QC status
       //  - Violations: anything missing/QC-failed => 1-day salary cut policy
       let week = String(body.week || '');
@@ -387,9 +387,9 @@ module.exports = async function handler(req, res) {
         ist.setUTCDate(ist.getUTCDate() - ((ist.getUTCDay() - 5 + 7) % 7)); // most recent Friday
         week = ist.toISOString().slice(0, 10);
       }
-      // The Friday's full IST day expressed in UTC
-      const dayStart = new Date(`${week}T00:00:00+05:30`).toISOString();
-      const dayEnd = new Date(`${week}T23:59:59.999+05:30`).toISOString();
+      // Friday typing test window: 5:00 PM – 8:00 PM IST, expressed in UTC
+      const dayStart = new Date(`${week}T17:00:00+05:30`).toISOString();
+      const dayEnd = new Date(`${week}T20:00:00+05:30`).toISOString();
       const H = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` };
 
       const [pRes2, rRes2, tRes2] = await Promise.all([
