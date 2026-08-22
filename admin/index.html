@@ -297,6 +297,7 @@
                 <button data-tab="quizzes"   class="admin-tab" type="button">🧠 Quizzes</button>
                 <button data-tab="employees" class="admin-tab" type="button">👥 Employees</button>
                 <button data-tab="wfh"       class="admin-tab" type="button">📷 WFH Check-ins</button>
+                <button data-tab="friday"    class="admin-tab" type="button">📅 Friday Report</button>
             </div>
 
             <!-- Filters (RESULTS TAB) -->
@@ -523,6 +524,46 @@
                     <p class="text-sm">Videos will appear here once WFH employees submit them on Fridays.</p>
                 </div>
             </div>
+
+            <!-- FRIDAY REPORT PANEL -->
+            <div id="friday-panel" class="hidden">
+                <div class="glass rounded-2xl p-4 mb-6 flex flex-wrap gap-3 items-center">
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] uppercase tracking-widest text-slate-400 font-black">Friday</span>
+                        <input id="friday-week" type="date"
+                            class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                    </div>
+                    <button id="friday-refresh" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh</button>
+                    <div class="flex-1"></div>
+                    <button id="friday-export" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">⬇ Export CSV</button>
+                </div>
+
+                <!-- Summary tiles -->
+                <div id="friday-summary" class="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6"></div>
+
+                <!-- Report table -->
+                <div class="glass rounded-2xl overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr>
+                                    <th>Employee</th>
+                                    <th>Company</th>
+                                    <th>⌨️ Typing Test</th>
+                                    <th>📷 WFH Device Videos</th>
+                                    <th>⚠️ Violation</th>
+                                </tr>
+                            </thead>
+                            <tbody id="friday-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div id="friday-empty" class="hidden p-16 text-center text-slate-400">
+                        <p class="font-bold text-lg mb-1">No WFH employees</p>
+                        <p class="text-sm">Mark employees as Work From Home in the Employees tab to see them here.</p>
+                    </div>
+                </div>
+                <p class="text-slate-400 text-xs font-bold mt-4 text-center">⚠️ Policy: Missing Friday typing test or WFH device check videos is a violation — <span class="text-rose-300">1 day salary cut</span>.</p>
+            </div>
         </main>
     </div>
 
@@ -618,6 +659,7 @@
         let allEmployees = [];
         let allQuizzes = [];
         let allWfh = [];
+        let allFriday = [];
         let currentTab = 'results';
         let editingEmployee = null;
         let deletingEmployee = null;
@@ -1041,9 +1083,11 @@
                 document.getElementById('quizzes-panel').classList.toggle('hidden',   currentTab !== 'quizzes');
                 document.getElementById('employees-panel').classList.toggle('hidden', currentTab !== 'employees');
                 document.getElementById('wfh-panel').classList.toggle('hidden',       currentTab !== 'wfh');
+                document.getElementById('friday-panel').classList.toggle('hidden',    currentTab !== 'friday');
                 if (currentTab === 'employees' && allEmployees.length === 0) loadEmployees();
                 if (currentTab === 'quizzes'   && allQuizzes.length === 0)   loadQuizzes();
                 if (currentTab === 'wfh'       && allWfh.length === 0)       loadWfh();
+                if (currentTab === 'friday'    && allFriday.length === 0)    loadFriday();
             });
         });
 
@@ -1646,6 +1690,126 @@
         document.getElementById('wfh-search').addEventListener('input', renderWfh);
         document.getElementById('wfh-week').addEventListener('change', loadWfh);
         document.getElementById('wfh-refresh').addEventListener('click', loadWfh);
+
+        // ---------- Friday Report ----------
+        let fridayWeek = '';
+        function latestFridayIST() {
+            const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
+            ist.setUTCDate(ist.getUTCDate() - ((ist.getUTCDay() - 5 + 7) % 7));
+            return ist.toISOString().slice(0, 10);
+        }
+
+        async function loadFriday() {
+            if (!adminPassword) return;
+            const tbody = document.getElementById('friday-tbody');
+            tbody.innerHTML = '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold animate-pulse">Building Friday report…</td></tr>';
+            try {
+                const weekInput = document.getElementById('friday-week');
+                if (!weekInput.value) weekInput.value = latestFridayIST();
+                const r = await fetch('/api/admin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: adminPassword, action: 'friday_report', week: weekInput.value })
+                });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.error || 'Failed');
+                allFriday = data.rows || [];
+                fridayWeek = data.week || weekInput.value;
+                renderFriday(data.summary || {});
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
+            }
+        }
+
+        function renderFriday(summary) {
+            const tiles = [
+                { label: 'WFH Employees',    value: summary.wfh_total ?? 0,        cls: 'slate' },
+                { label: 'Typing Submitted', value: summary.typing_submitted ?? 0, cls: 'emerald' },
+                { label: 'Typing Missing',   value: summary.typing_missing ?? 0,   cls: 'rose' },
+                { label: 'Videos OK',        value: summary.videos_ok ?? 0,        cls: 'emerald' },
+                { label: 'Videos Missing',   value: summary.videos_missing ?? 0,   cls: 'rose' },
+                { label: 'Violations',       value: summary.violations ?? 0,       cls: 'rose' },
+            ];
+            document.getElementById('friday-summary').innerHTML = tiles.map(t => `
+                <div class="stat-card ${t.cls}">
+                    <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">${t.label}</p>
+                    <p class="text-3xl font-black text-white">${t.value}</p>
+                </div>`).join('');
+
+            const tbody = document.getElementById('friday-tbody');
+            const empty = document.getElementById('friday-empty');
+            if (!allFriday.length) {
+                tbody.innerHTML = '';
+                empty.classList.remove('hidden');
+                return;
+            }
+            empty.classList.add('hidden');
+
+            const DEV_LABEL = { mobile: '📱 Mobile', laptop: '💻 Laptop', tab: '📲 Tab' };
+            tbody.innerHTML = allFriday.map(row => {
+                const t = row.typing || {};
+                const v = row.videos || {};
+                const typingCell = t.submitted
+                    ? `<span class="text-emerald-300 font-black">✅ Submitted</span><br>
+                       <span class="text-slate-400 text-xs font-bold">${t.tests} test${t.tests === 1 ? '' : 's'} · best ${t.best_wpm ?? '—'} WPM · ${t.best_acc ?? '—'}% acc</span>`
+                    : `<span class="text-rose-300 font-black">❌ Not submitted</span>`;
+
+                let videoCell;
+                if (!(v.required || []).length) {
+                    videoCell = '<span class="text-slate-400 font-bold">— No devices assigned</span>';
+                } else if (v.qc === 'rejected') {
+                    videoCell = `<span class="text-rose-300 font-black">🛑 QC FAILED — re-record required</span>
+                        ${v.note ? `<br><span class="text-slate-400 text-xs font-bold">${escapeHtml(v.note)}</span>` : ''}`;
+                } else if ((v.missing || []).length) {
+                    videoCell = `<span class="text-rose-300 font-black">❌ Missing: ${v.missing.map(d => DEV_LABEL[d] || d).join(', ')}</span>
+                        <br><span class="text-slate-400 text-xs font-bold">${v.uploaded}/${v.required.length} uploaded</span>`;
+                } else {
+                    const qcBadge = v.qc === 'approved'
+                        ? '<span class="text-emerald-300 text-xs font-black">QC APPROVED</span>'
+                        : '<span class="text-amber-300 text-xs font-black">QC PENDING</span>';
+                    videoCell = `<span class="text-emerald-300 font-black">✅ ${v.uploaded}/${v.required.length} uploaded</span> · ${qcBadge}`;
+                }
+
+                const violationCell = (row.violations || []).length
+                    ? `<span class="text-rose-300 font-black">⚠️ ${row.violations.map(escapeHtml).join('; ')}</span>
+                       <br><span class="inline-block mt-1 px-2 py-0.5 rounded-lg text-[10px] font-black text-white" style="background: linear-gradient(135deg,#f43f5e,#dc2626);">1 DAY SALARY CUT</span>`
+                    : '<span class="text-emerald-300 font-black">—</span>';
+
+                return `<tr>
+                    <td class="font-bold text-white">${escapeHtml(row.name || '—')}<br><span class="text-slate-400 text-xs font-medium">${escapeHtml(row.email || '')}</span></td>
+                    <td class="text-slate-300 font-bold">${escapeHtml(row.company || '—')}</td>
+                    <td>${typingCell}</td>
+                    <td>${videoCell}</td>
+                    <td>${violationCell}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        document.getElementById('friday-export').addEventListener('click', () => {
+            if (!allFriday.length) {
+                wsDialog.alert({ icon: 'ℹ️', title: 'Nothing to export', message: 'Load a Friday report first — pick a Friday date and press Refresh.' });
+                return;
+            }
+            const rows = [
+                ['Employee', 'Email', 'Company', 'Typing Submitted', 'Tests', 'Best WPM', 'Best Accuracy',
+                 'Videos Required', 'Videos Uploaded', 'Videos Missing', 'QC Status', 'QC Note', 'Violations', 'Penalty'],
+                ...allFriday.map(r => [
+                    r.name || '', r.email || '', r.company || '',
+                    r.typing?.submitted ? 'YES' : 'NO', r.typing?.tests ?? 0, r.typing?.best_wpm ?? '', r.typing?.best_acc ?? '',
+                    (r.videos?.required || []).join(' '), r.videos?.uploaded ?? 0,
+                    (r.videos?.missing || []).join(' '), r.videos?.qc || '', r.videos?.note || '',
+                    (r.violations || []).join('; '), r.penalty || ''
+                ])
+            ];
+            const csv = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `friday-report-${fridayWeek || new Date().toISOString().slice(0,10)}.csv`;
+            link.click();
+        });
+        document.getElementById('friday-refresh').addEventListener('click', loadFriday);
+        document.getElementById('friday-week').addEventListener('change', loadFriday);
 
         gatePassword.focus();
     </script>
