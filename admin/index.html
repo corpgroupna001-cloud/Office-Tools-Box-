@@ -549,7 +549,7 @@
                                 <tr>
                                     <th>Employee</th>
                                     <th>Company</th>
-                                    <th>⌨️ Typing Test</th>
+                                    <th>⌨️ Typing Test (5–8 PM)</th>
                                     <th>📷 WFH Device Videos</th>
                                     <th>⚠️ Violation</th>
                                 </tr>
@@ -562,7 +562,7 @@
                         <p class="text-sm">Mark employees as Work From Home in the Employees tab to see them here.</p>
                     </div>
                 </div>
-                <p class="text-slate-400 text-xs font-bold mt-4 text-center">⚠️ Policy: Missing Friday typing test or WFH device check videos is a violation — <span class="text-rose-300">1 day salary cut</span>.</p>
+                <p class="text-slate-400 text-xs font-bold mt-4 text-center">⚠️ Policy: Friday typing test must be submitted between <span class="text-white">5:00 PM – 8:00 PM</span>. Missing the typing test or WFH device check videos is a violation — <span class="text-rose-300">1 day salary cut</span>.</p>
             </div>
         </main>
     </div>
@@ -1752,7 +1752,8 @@
                 const typingCell = t.submitted
                     ? `<span class="text-emerald-300 font-black">✅ Submitted</span><br>
                        <span class="text-slate-400 text-xs font-bold">${t.tests} test${t.tests === 1 ? '' : 's'} · best ${t.best_wpm ?? '—'} WPM · ${t.best_acc ?? '—'}% acc</span>`
-                    : `<span class="text-rose-300 font-black">❌ Not submitted</span>`;
+                    : `<span class="text-rose-300 font-black">❌ Not submitted</span><br>
+                       <span class="text-slate-400 text-xs font-bold">Window: 5:00–8:00 PM</span>`;
 
                 let videoCell;
                 if (!(v.required || []).length) {
