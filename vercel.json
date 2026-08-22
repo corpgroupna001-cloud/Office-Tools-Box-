@@ -2,14 +2,45 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "crons": [
-    { "path": "/api/wfh-remind", "schedule": "30 3 * * 5" }
+    {
+      "path": "/api/wfh-remind",
+      "schedule": "30 3 * * 5"
+    },
+    {
+      "path": "/api/wfh-remind",
+      "schedule": "30 13 * * 5"
+    }
   ],
   "redirects": [
-    { "source": "/Network.ADMIN",  "destination": "/admin",         "permanent": false },
-    { "source": "/Network.ADMIN/", "destination": "/admin",         "permanent": false },
-    { "source": "/macshortcuts",   "destination": "/mcqquiz", "permanent": false },
-    { "source": "/macshortcuts/",  "destination": "/mcqquiz", "permanent": false },
-    { "source": "/keyboardninja",  "destination": "/mcqquiz", "permanent": false },
-    { "source": "/keyboardninja/", "destination": "/mcqquiz", "permanent": false }
+    {
+      "source": "/Network.ADMIN",
+      "destination": "/admin",
+      "permanent": false
+    },
+    {
+      "source": "/Network.ADMIN/",
+      "destination": "/admin",
+      "permanent": false
+    },
+    {
+      "source": "/macshortcuts",
+      "destination": "/mcqquiz",
+      "permanent": false
+    },
+    {
+      "source": "/macshortcuts/",
+      "destination": "/mcqquiz",
+      "permanent": false
+    },
+    {
+      "source": "/keyboardninja",
+      "destination": "/mcqquiz",
+      "permanent": false
+    },
+    {
+      "source": "/keyboardninja/",
+      "destination": "/mcqquiz",
+      "permanent": false
+    }
   ]
 }
