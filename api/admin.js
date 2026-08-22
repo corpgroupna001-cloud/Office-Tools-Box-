@@ -376,6 +376,80 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ success: true, status, row: updated });
     }
 
+    if (action === 'friday_report') {
+      // Per-Friday compliance report for every WFH employee:
+      //  - Typing test: submitted that Friday (IST day) or not
+      //  - WFH device videos: uploaded per required device + QC status
+      //  - Violations: anything missing/QC-failed => 1-day salary cut policy
+      let week = String(body.week || '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) {
+        const ist = new Date(Date.now() + 5.5 * 3600 * 1000);
+        ist.setUTCDate(ist.getUTCDate() - ((ist.getUTCDay() - 5 + 7) % 7)); // most recent Friday
+        week = ist.toISOString().slice(0, 10);
+      }
+      // The Friday's full IST day expressed in UTC
+      const dayStart = new Date(`${week}T00:00:00+05:30`).toISOString();
+      const dayEnd = new Date(`${week}T23:59:59.999+05:30`).toISOString();
+      const H = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` };
+
+      const [pRes2, rRes2, tRes2] = await Promise.all([
+        fetch(`${SUPABASE_URL}/rest/v1/profiles?is_wfh=eq.true&select=id,full_name,email,company,req_mobile,req_laptop,req_tab`, { headers: H }),
+        fetch(`${SUPABASE_URL}/rest/v1/wfh_recordings?week_of=eq.${week}&select=user_id,mobile_path,laptop_path,tab_path,status,review_note`, { headers: H }),
+        fetch(`${SUPABASE_URL}/rest/v1/test_results?created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=user_id,wpm,accuracy,category,duration,created_at&limit=5000`, { headers: H }),
+      ]);
+      if (!pRes2.ok) return res.status(502).json({ error: 'profiles fetch failed' });
+      const employees = await pRes2.json();
+      const recRows = rRes2.ok ? await rRes2.json() : [];
+      const testRows = (tRes2.ok ? await tRes2.json() : []).filter(t => t.category !== 'MCQ Quiz');
+
+      const recByUser = new Map(recRows.map(r => [r.user_id, r]));
+      const testsByUser = new Map();
+      testRows.forEach(t => {
+        if (!testsByUser.has(t.user_id)) testsByUser.set(t.user_id, []);
+        testsByUser.get(t.user_id).push(t);
+      });
+
+      const rows = employees.map(emp => {
+        const required = ['mobile', 'laptop', 'tab'].filter(d => emp[`req_${d}`] !== false);
+        const rec = recByUser.get(emp.id);
+        const uploaded = required.filter(d => rec && rec[`${d}_path`]);
+        const missing = required.filter(d => !uploaded.includes(d));
+        const qcStatus = rec ? (rec.status || 'pending') : null;
+        const videosOk = required.length > 0 && missing.length === 0 && qcStatus !== 'rejected';
+
+        const tests = testsByUser.get(emp.id) || [];
+        const typingOk = tests.length > 0;
+        const bestWpm = typingOk ? Math.max(...tests.map(t => Number(t.wpm) || 0)) : null;
+        const bestAcc = typingOk ? Math.max(...tests.map(t => Number(t.accuracy) || 0)) : null;
+
+        const violations = [];
+        if (!typingOk) violations.push('Typing test not submitted');
+        if (required.length && missing.length) violations.push(`Videos missing: ${missing.join(', ')}`);
+        if (qcStatus === 'rejected') violations.push('Videos QC failed');
+
+        return {
+          id: emp.id,
+          name: emp.full_name || '',
+          email: emp.email || '',
+          company: emp.company || '',
+          typing: { submitted: typingOk, tests: tests.length, best_wpm: bestWpm, best_acc: bestAcc },
+          videos: { required, uploaded, missing, qc: qcStatus, note: rec?.review_note || null, ok: videosOk },
+          violations,
+          penalty: violations.length ? '1 day salary cut' : null
+        };
+      });
+
+      const summary = {
+        wfh_total: rows.length,
+        typing_submitted: rows.filter(r => r.typing.submitted).length,
+        typing_missing: rows.filter(r => !r.typing.submitted).length,
+        videos_ok: rows.filter(r => r.videos.ok).length,
+        videos_missing: rows.filter(r => !r.videos.ok).length,
+        violations: rows.filter(r => r.violations.length).length
+      };
+      return res.status(200).json({ week, rows, summary });
+    }
+
     if (action === 'delete_employee') {
       const id = String(body.id || '');
       if (!id) return res.status(400).json({ error: 'id required' });

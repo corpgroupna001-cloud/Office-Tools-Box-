@@ -34,17 +34,36 @@ module.exports = async function handler(req, res) {
   }
   const weekOf = istNow.toISOString().slice(0, 10);
 
+  // Two reminder modes, auto-picked by IST time of day:
+  //   'videos' — morning cron (9 AM IST): upload your WFH device videos
+  //   'typing' — evening cron (7 PM IST): finish your Friday typing test
+  // Override with ?mode=videos|typing when triggering manually.
+  const qMode = String(req.query?.mode || '');
+  const mode = ['videos', 'typing'].includes(qMode)
+    ? qMode
+    : (istNow.getUTCHours() >= 16 ? 'typing' : 'videos');
+
   const H = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` };
   try {
-    const [pRes, rRes, sRes] = await Promise.all([
+    // The Friday's full IST day in UTC — for typing-test lookups
+    const dayStart = new Date(`${weekOf}T00:00:00+05:30`).toISOString();
+    const dayEnd = new Date(`${weekOf}T23:59:59.999+05:30`).toISOString();
+
+    const [pRes, rRes, sRes, tRes] = await Promise.all([
       fetch(`${SUPABASE_URL}/rest/v1/profiles?is_wfh=eq.true&select=id,full_name,req_mobile,req_laptop,req_tab`, { headers: H }),
       fetch(`${SUPABASE_URL}/rest/v1/wfh_recordings?week_of=eq.${weekOf}&select=user_id,mobile_path,laptop_path,tab_path,status`, { headers: H }),
       fetch(`${SUPABASE_URL}/rest/v1/push_subscriptions?select=user_id,endpoint,p256dh,auth`, { headers: H }),
+      mode === 'typing'
+        ? fetch(`${SUPABASE_URL}/rest/v1/test_results?created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=user_id,category&limit=5000`, { headers: H })
+        : Promise.resolve(null),
     ]);
     if (!pRes.ok) return res.status(502).json({ error: 'profiles fetch failed' });
     const wfhEmployees = await pRes.json();
     const rows = rRes.ok ? await rRes.json() : [];
     const subs = sRes.ok ? await sRes.json() : [];
+    const typedToday = new Set(
+      tRes && tRes.ok ? (await tRes.json()).filter(t => t.category !== 'MCQ Quiz').map(t => t.user_id) : []
+    );
 
     const rowByUser = new Map(rows.map(r => [r.user_id, r]));
     const subsByUser = new Map();
@@ -59,23 +78,38 @@ module.exports = async function handler(req, res) {
     const details = [];
 
     for (const emp of wfhEmployees) {
-      const required = ['mobile', 'laptop', 'tab'].filter(d => emp[`req_${d}`] !== false);
-      if (!required.length) continue;
-      const row = rowByUser.get(emp.id);
-      const rejected = row?.status === 'rejected';
-      const missing = rejected ? required : required.filter(d => !row || !row[`${d}_path`]);
-      if (!missing.length) { alreadyDone++; continue; }
+      let missing = [];
+      let payload = null;
+
+      if (mode === 'typing') {
+        // 7 PM prompt: WFH employees who haven't done today's typing test
+        if (typedToday.has(emp.id)) { alreadyDone++; continue; }
+        missing = ['typing test'];
+        payload = JSON.stringify({
+          title: '⌨️ Friday Typing Test due — 7 PM reminder',
+          body: 'You have not submitted today\'s typing test. Finish it before end of day — not submitting is a violation (1 day salary cut policy).',
+          url: '/typingtest/',
+          tag: 'typing-reminder'
+        });
+      } else {
+        const required = ['mobile', 'laptop', 'tab'].filter(d => emp[`req_${d}`] !== false);
+        if (!required.length) continue;
+        const row = rowByUser.get(emp.id);
+        const rejected = row?.status === 'rejected';
+        missing = rejected ? required : required.filter(d => !row || !row[`${d}_path`]);
+        if (!missing.length) { alreadyDone++; continue; }
+
+        const deviceList = missing.map(d => d === 'mobile' ? '📱 Mobile' : d === 'laptop' ? '💻 Laptop' : '📲 Tab').join(', ');
+        payload = JSON.stringify({
+          title: rejected ? '📷 QC failed — re-record your WFH videos' : '📷 Friday WFH Check-in — upload your videos',
+          body: `Record on your PERSONAL MOBILE: ${deviceList}. High quality, all sides & corners — admin approval required. Not submitting = 1 day salary cut.`,
+          url: '/recordings/',
+          tag: 'wfh-reminder'
+        });
+      }
 
       const empSubs = subsByUser.get(emp.id) || [];
       if (!empSubs.length) { noSubscription++; details.push({ name: emp.full_name, missing, pushed: false }); continue; }
-
-      const deviceList = missing.map(d => d === 'mobile' ? '📱 Mobile' : d === 'laptop' ? '💻 Laptop' : '📲 Tab').join(', ');
-      const payload = JSON.stringify({
-        title: rejected ? '📷 QC failed — re-record your WFH videos' : '📷 Friday WFH Check-in — upload your videos',
-        body: `Record on your PERSONAL MOBILE: ${deviceList}. High quality, all sides & corners — admin approval required.`,
-        url: '/recordings/',
-        tag: 'wfh-reminder'
-      });
 
       let sent = false;
       await Promise.all(empSubs.map(async s => {
@@ -100,7 +134,7 @@ module.exports = async function handler(req, res) {
       details.push({ name: emp.full_name, missing, pushed: sent });
     }
 
-    return res.status(200).json({ success: true, week_of: weekOf, wfh_total: wfhEmployees.length, notified, alreadyDone, noSubscription, cleaned, details });
+    return res.status(200).json({ success: true, mode, week_of: weekOf, wfh_total: wfhEmployees.length, notified, alreadyDone, noSubscription, cleaned, details });
   } catch (e) {
     return res.status(500).json({ error: 'server error', detail: String(e.message || e).slice(0, 200) });
   }
