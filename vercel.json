@@ -11,6 +11,16 @@
       "schedule": "30 13 * * 5"
     }
   ],
+  "rewrites": [
+    {
+      "source": "/api/send-verify",
+      "destination": "/api/verify?fn=send"
+    },
+    {
+      "source": "/api/verify-code",
+      "destination": "/api/verify?fn=check"
+    }
+  ],
   "redirects": [
     {
       "source": "/Network.ADMIN",

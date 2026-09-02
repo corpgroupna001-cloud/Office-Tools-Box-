@@ -164,7 +164,8 @@ click. Binding a code also re-points that code's past punches.
   handy for confirming the URL and key before you switch the transfer on.
 - Admin → **🕐 Attendance** shows the daily report (first IN, last OUT, hours,
   absentees), a live punch feed, mail status per punch, CSV export, and a
-  **Resend failed** button.
+  **Resend failed** button. (Its actions live inside `/api/admin` under the
+  `att_` prefix — see the note below.)
 - Employees see their own punches at `/attendance/`.
 
 ### Notes
@@ -174,3 +175,22 @@ click. Binding a code also re-points that code's past punches.
 - Replays are ignored: `(employee_code, log_datetime, direction, device_sn)`
   is unique, so re-exporting a date range inserts nothing and emails nothing.
 - Naive timestamps from the device are read as **IST**.
+
+### Vercel Hobby: the 12-function cap
+
+A Hobby deployment may contain at most **12 serverless functions**, and this
+project sits exactly on that line. Two consolidations keep it there:
+
+- The attendance admin actions live in `api/admin.js` (prefixed `att_`)
+  instead of their own file — it was already the password-gated action router.
+- `api/send-verify.js` and `api/verify-code.js` were merged into
+  `api/verify.js`. Both original URLs still work, via rewrites in
+  `vercel.json`, so nothing on the front end changed.
+
+**Before adding another endpoint, you must free a slot** (merge two related
+handlers behind a rewrite) or move to a paid plan. A deployment with 13+
+functions fails the build with
+`No more than 12 Serverless Functions can be added to a Deployment on the Hobby plan.`
+
+Cron slots are similarly full: Hobby allows 2, and both are used by
+`/api/wfh-remind`.
