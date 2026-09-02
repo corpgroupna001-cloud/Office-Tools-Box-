@@ -32,14 +32,14 @@ alter table public.shifts drop constraint if exists shifts_grace_ck;
 alter table public.shifts add constraint shifts_grace_ck
   check (grace_minutes between 0 and 240 and early_out_grace_minutes between 0 and 240);
 
--- working_days must be a non-empty set of valid ISO weekdays
+-- working_days must be a non-empty set of valid ISO weekdays.
+-- Uses array containment (<@) rather than a subquery: Postgres rejects
+-- subqueries inside CHECK constraints (ERROR 0A000).
 alter table public.shifts drop constraint if exists shifts_working_days_ck;
 alter table public.shifts add constraint shifts_working_days_ck
   check (
     array_length(working_days, 1) between 1 and 7
-    and not exists (
-      select 1 from unnest(working_days) d where d < 1 or d > 7
-    )
+    and working_days <@ array[1,2,3,4,5,6,7]::smallint[]
   );
 
 -- Only one default shift at a time (used for employees with nothing assigned).
