@@ -8,7 +8,7 @@
 //   SMTP_* (see lib/mailer.js) — used by the attendance resend action
 
 const { sendMail } = require('../lib/mailer');
-const { istParts, istToday, buildPunchEmail } = require('../lib/attendance');
+const { istParts, istToday, buildPunchEmail, evaluateShift, describeWorkingDays } = require('../lib/attendance');
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -490,6 +490,102 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ success: true });
     }
 
+    // ================= SHIFTS =================
+    // Named shift templates + assignment. Lives here (prefixed shift_) for the
+    // same reason the attendance actions do: Vercel Hobby caps a deployment at
+    // 12 serverless functions and we are on the line.
+    if (String(action).startsWith('shift_')) {
+      const SH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
+      const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...SH, ...(opts.headers || {}) } });
+
+      if (action === 'shift_list') {
+        const [sRes, pRes] = await Promise.all([
+          sb('shifts?select=*&order=start_time.asc'),
+          sb('profiles?select=id,full_name,email,company,shift_id&order=full_name.asc&limit=2000'),
+        ]);
+        if (!sRes.ok) return res.status(502).json({ error: 'shifts fetch failed', detail: (await sRes.text()).slice(0, 200) });
+        const shifts = await sRes.json();
+        const profiles = pRes.ok ? await pRes.json() : [];
+
+        const counts = new Map();
+        profiles.forEach(p => { if (p.shift_id) counts.set(p.shift_id, (counts.get(p.shift_id) || 0) + 1); });
+
+        return res.status(200).json({
+          shifts: shifts.map(sh => ({
+            ...sh,
+            assigned_count: counts.get(sh.id) || 0,
+            working_days_label: describeWorkingDays(sh.working_days),
+          })),
+          employees: profiles,
+          unassigned: profiles.filter(p => !p.shift_id).length,
+        });
+      }
+
+      if (action === 'shift_save') {
+        const b = body.shift || {};
+        const name = String(b.name || '').trim();
+        if (!name) return res.status(400).json({ error: 'Shift name is required' });
+        if (!/^\d{1,2}:\d{2}/.test(String(b.start_time || '')) || !/^\d{1,2}:\d{2}/.test(String(b.end_time || ''))) {
+          return res.status(400).json({ error: 'start_time and end_time must look like HH:MM' });
+        }
+        const days = [...new Set((b.working_days || []).map(Number))].filter(d => d >= 1 && d <= 7).sort();
+        if (!days.length) return res.status(400).json({ error: 'Pick at least one working day' });
+
+        const payload = {
+          name,
+          start_time: b.start_time,
+          end_time: b.end_time,
+          grace_minutes: Math.max(0, Math.min(240, Number(b.grace_minutes) || 0)),
+          early_out_grace_minutes: Math.max(0, Math.min(240, Number(b.early_out_grace_minutes) || 0)),
+          working_days: days,
+          is_default: !!b.is_default,
+        };
+
+        // Only one default at a time — clear the flag elsewhere first, or the
+        // partial unique index rejects the write.
+        if (payload.is_default) {
+          const q = b.id ? `shifts?is_default=eq.true&id=neq.${encodeURIComponent(b.id)}` : 'shifts?is_default=eq.true';
+          await sb(q, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ is_default: false }) }).catch(() => {});
+        }
+
+        const r = b.id
+          ? await sb(`shifts?id=eq.${encodeURIComponent(b.id)}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(payload) })
+          : await sb('shifts', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify(payload) });
+
+        if (!r.ok) {
+          const detail = (await r.text()).slice(0, 250);
+          const dup = /duplicate key|unique/i.test(detail);
+          return res.status(dup ? 409 : 502).json({ error: dup ? `A shift named "${name}" already exists.` : 'save failed', detail });
+        }
+        return res.status(200).json({ success: true, shift: (await r.json())[0] || null });
+      }
+
+      if (action === 'shift_delete') {
+        const id = String(body.id || '');
+        if (!id) return res.status(400).json({ error: 'id required' });
+        // profiles.shift_id is ON DELETE SET NULL, so anyone on this shift
+        // simply becomes unassigned rather than blocking the delete.
+        const r = await sb(`shifts?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: { Prefer: 'return=representation' } });
+        if (!r.ok) return res.status(502).json({ error: 'delete failed', detail: (await r.text()).slice(0, 200) });
+        return res.status(200).json({ success: true, deleted: (await r.json()).length });
+      }
+
+      if (action === 'shift_assign') {
+        const ids = Array.isArray(body.user_ids) ? body.user_ids.filter(Boolean) : [];
+        if (!ids.length) return res.status(400).json({ error: 'user_ids required' });
+        const shiftId = body.shift_id === null || body.shift_id === '' ? null : body.shift_id;
+        const inList = ids.map(encodeURIComponent).join(',');
+        const r = await sb(`profiles?id=in.(${inList})`, {
+          method: 'PATCH', headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ shift_id: shiftId }),
+        });
+        if (!r.ok) return res.status(502).json({ error: 'assign failed', detail: (await r.text()).slice(0, 200) });
+        return res.status(200).json({ success: true, updated: (await r.json()).length, shift_id: shiftId });
+      }
+
+      return res.status(400).json({ error: 'Unknown shift action' });
+    }
+
     // ================= BIOMETRIC ATTENDANCE =================
     // Folded in here rather than living in its own api/attendance.js: Vercel's
     // Hobby plan caps a deployment at 12 serverless functions and we were
@@ -502,7 +598,7 @@ module.exports = async function handler(req, res) {
       const AH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
       const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...AH, ...(opts.headers || {}) } });
       const loadProfiles = async () => {
-        const r = await sb('profiles?select=id,email,full_name,company,employee_code&limit=2000');
+        const r = await sb('profiles?select=id,email,full_name,company,employee_code,shift_id&limit=2000');
         if (!r.ok) throw new Error('profiles fetch failed: ' + (await r.text()).slice(0, 160));
         return r.json();
       };
@@ -513,10 +609,19 @@ module.exports = async function handler(req, res) {
     if (action === 'att_daily_report') {
       const date = String(body.date || istToday()).slice(0, 10);
 
-      const [profiles, logsRes] = await Promise.all([
+      const [profiles, logsRes, shiftsRes] = await Promise.all([
         loadProfiles(),
         sb(`attendance_logs?log_date=eq.${date}&select=*&order=log_datetime.asc&limit=5000`),
+        sb('shifts?select=*'),
       ]);
+      // Shifts are optional — if the migration hasn't been run the report
+      // still works, just without late/early flags.
+      const shiftList  = shiftsRes.ok ? await shiftsRes.json() : [];
+      const shiftById  = new Map(shiftList.map(x => [x.id, x]));
+      const defaultShift = shiftList.find(x => x.is_default) || null;
+      // The date is a plain IST calendar day; anchor it at midday so the
+      // weekday lookup can't slip either side of the timezone boundary.
+      const dayAnchor = new Date(`${date}T12:00:00+05:30`);
       if (!logsRes.ok) return res.status(502).json({ error: 'logs fetch failed', detail: (await logsRes.text()).slice(0, 200) });
       const logs = await logsRes.json();
 
@@ -567,16 +672,31 @@ module.exports = async function handler(req, res) {
         .map(p => {
           const punches = byUser.get(p.id) || [];
           const s = summarize(punches);
+          const shift = (p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+          const sh = evaluateShift({ shift, firstIn: s.first_in, lastOut: s.last_out, date: dayAnchor });
+
           let status = 'Absent';
           if (punches.length) status = (s.first_in && !s.last_out) ? 'No check-out' : 'Present';
+          // A non-working day is a week-off, not an absence — otherwise every
+          // Sunday reads as 24 people failing to turn up.
+          else if (sh.isWorkingDay === false) status = 'Week-off';
+
           return {
             user_id: p.id, full_name: p.full_name, email: p.email,
             company: p.company, employee_code: p.employee_code || null,
+            shift_name:   shift ? shift.name : null,
+            shift_window: sh.window,
+            shift_assigned: !!(p.shift_id && shiftById.get(p.shift_id)),
+            is_working_day: sh.isWorkingDay,
+            late_minutes:      punches.length ? sh.lateMinutes : null,
+            early_out_minutes: punches.length ? sh.earlyOutMinutes : null,
+            is_late:      punches.length ? sh.isLate : false,
+            is_early_out: punches.length ? sh.isEarlyOut : false,
             status, ...s,
           };
         })
         .sort((a, b) => {
-          const rank = v => v === 'Present' ? 0 : v === 'No check-out' ? 1 : 2;
+          const rank = v => v === 'Present' ? 0 : v === 'No check-out' ? 1 : v === 'Absent' ? 2 : 3;
           return rank(a.status) - rank(b.status)
             || String(a.full_name || '').localeCompare(String(b.full_name || ''));
         });
@@ -597,6 +717,10 @@ module.exports = async function handler(req, res) {
           present:    rows.filter(r => r.status === 'Present').length,
           no_checkout: rows.filter(r => r.status === 'No check-out').length,
           absent:     rows.filter(r => r.status === 'Absent').length,
+          week_off:   rows.filter(r => r.status === 'Week-off').length,
+          late:       rows.filter(r => r.is_late).length,
+          early_out:  rows.filter(r => r.is_early_out).length,
+          no_shift:   rows.filter(r => !r.shift_assigned).length,
           punches:    logs.length,
           mail_sent:  logs.filter(l => l.email_status === 'sent').length,
           mail_problem: logs.filter(l => ['failed', 'pending', 'unmapped'].includes(l.email_status)).length,

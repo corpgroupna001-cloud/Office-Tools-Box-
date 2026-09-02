@@ -37,6 +37,7 @@ const { sendMail } = require('../lib/mailer');
 const {
   parseDeviceDateTime, istParts, normalizeDirection,
   matchProfileByName, buildPunchEmail,
+  evaluateShift, timeToMinutes, offsetFromBoundary,
 } = require('../lib/attendance');
 
 // Vercel Hobby kills the function at 10s. Stop starting new sends at 7.5s and
@@ -147,13 +148,26 @@ module.exports = async function handler(req, res) {
   try {
     // ---- 1. Everyone we know about, in one query ----
     const pRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/profiles?select=id,email,full_name,company,employee_code&limit=2000`,
+      `${SUPABASE_URL}/rest/v1/profiles?select=id,email,full_name,company,employee_code,shift_id&limit=2000`,
       { headers: H }
     );
     if (!pRes.ok) {
       return res.status(502).json({ error: 'profiles fetch failed', detail: (await pRes.text()).slice(0, 200) });
     }
     const profiles = await pRes.json();
+
+    // Shifts are optional: if the migration hasn't been run, punches still
+    // land and email, just without the late / early note.
+    let shiftById = new Map(), defaultShift = null;
+    try {
+      const shRes = await fetch(`${SUPABASE_URL}/rest/v1/shifts?select=*`, { headers: H });
+      if (shRes.ok) {
+        const list = await shRes.json();
+        shiftById = new Map(list.map(x => [x.id, x]));
+        defaultShift = list.find(x => x.is_default) || null;
+      }
+    } catch { /* no shifts table yet */ }
+    const shiftFor = p => (p && p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
     const byCode = new Map(
       profiles.filter(p => p.employee_code).map(p => [String(p.employee_code).trim(), p])
     );
@@ -251,10 +265,12 @@ module.exports = async function handler(req, res) {
     // ---- 2b. Derive IN/OUT for anything the device didn't label ----
     // Counted by position within the employee's IST day, using both what is
     // already stored and the earlier records in this same batch.
-    const undirected = rows.filter(r => r.insert.direction === 'UNKNOWN');
-    if (undirected.length) {
+    // Runs over EVERY row, not just undirected ones: the ordinal also tells
+    // us whether a punch is the day's first, which is what makes a "late"
+    // note on the email trustworthy.
+    {
       const groups = new Map();
-      for (const r of undirected) {
+      for (const r of rows) {
         const key = `${r.insert.employee_code}|${r.insert.log_date}`;
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(r);
@@ -282,8 +298,11 @@ module.exports = async function handler(req, res) {
         for (const item of list) {
           const t = new Date(item.insert.log_datetime).getTime();
           const priors = stored.filter(x => x < t).length;
-          item.insert.direction = priors % 2 === 0 ? 'IN' : 'OUT';
-          item.insert.direction_derived = true;
+          item.isFirstOfDay = priors === 0;
+          if (item.insert.direction === 'UNKNOWN') {
+            item.insert.direction = priors % 2 === 0 ? 'IN' : 'OUT';
+            item.insert.direction_derived = true;
+          }
           stored.push(t);
         }
       }));
@@ -332,12 +351,34 @@ module.exports = async function handler(req, res) {
       toEmail, EMAIL_CONCURRENCY, deadlineAt,
       async ({ row, meta }) => {
         const p = meta.profile;
+        const shift = shiftFor(p);
+
+        // Only annotate a boundary we can actually stand behind:
+        //  - lateness, only on the day's FIRST punch (a 2pm return from lunch
+        //    is not "4 hours late for a 9:30 shift");
+        //  - leaving early, only from the shift's midpoint onwards, so a
+        //    lunch-break exit isn't reported as going home early.
+        let pastMidpoint = false;
+        if (shift) {
+          const st = timeToMinutes(shift.start_time), en = timeToMinutes(shift.end_time);
+          const span = (((en - st) % 1440) + 1440) % 1440 || 1440;
+          const mid  = (st + Math.floor(span / 2)) % 1440;
+          pastMidpoint = offsetFromBoundary(timeToMinutes(istParts(meta.when).isoTime), mid) >= 0;
+        }
+        const shiftEval = shift ? evaluateShift({
+          shift,
+          firstIn:  (row.direction === 'IN'  && meta.isFirstOfDay) ? meta.when : null,
+          lastOut:  (row.direction === 'OUT' && pastMidpoint)      ? meta.when : null,
+          date: meta.when,
+        }) : null;
+
         const { subject, html, text } = buildPunchEmail({
           fullName: p.full_name,
           direction: row.direction,
           when: meta.when,
           deviceName: row.device_name,
           employeeCode: row.employee_code,
+          shift: shiftEval,
         });
 
         const result = await sendMail({ company: p.company, to: p.email, subject, html, text });
