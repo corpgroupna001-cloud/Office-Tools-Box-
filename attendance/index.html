@@ -53,6 +53,25 @@
         .prompt .p-ico { font-size: 22px; flex:0 0 auto; }
         .prompt .p-title { margin:0; font-size:14px; font-weight:900; }
         .prompt .p-sub { margin:2px 0 0; font-size:12px; font-weight:700; color: var(--ws-text-muted); }
+        .mcal { display:grid; grid-template-columns:repeat(7,1fr); gap:5px; }
+        .mcal .h { text-align:center; font-size:10px; font-weight:900; letter-spacing:.06em;
+                   text-transform:uppercase; color:var(--ws-text-muted); padding-bottom:4px; }
+        .mcal .d { aspect-ratio:1/1; border-radius:10px; padding:5px 6px; display:flex; flex-direction:column;
+                   border:1.5px solid transparent; min-height:44px; }
+        .mcal .d.blank { border:none; background:none; }
+        .mcal .d .n { font-size:12px; font-weight:900; line-height:1; }
+        .mcal .d .t { font-size:9px; font-weight:700; margin-top:auto; opacity:.85; line-height:1.25;
+                      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .mcal .d.today { outline:2px solid #3b82f6; outline-offset:1px; }
+        .cal-legend { display:flex; flex-wrap:wrap; gap:10px; margin-top:14px; }
+        .cal-legend span { display:inline-flex; align-items:center; gap:5px; font-size:10.5px;
+                           font-weight:800; color:var(--ws-text-muted); text-transform:uppercase; letter-spacing:.03em; }
+        .cal-legend i { width:10px; height:10px; border-radius:3px; }
+        .cal-tot { display:flex; flex-wrap:wrap; gap:14px; margin-bottom:14px; }
+        .cal-tot b { display:block; font-size:19px; font-weight:900; line-height:1; }
+        .cal-tot span { font-size:10px; font-weight:800; text-transform:uppercase;
+                        letter-spacing:.05em; color:var(--ws-text-muted); }
+        @media (max-width:560px) { .mcal .d .t { display:none; } .mcal .d { min-height:38px; } }
         .prompt .p-acts { margin-left:auto; flex:0 0 auto; display:flex; gap:8px; }
         .prompt .p-btn { flex:0 0 auto; background: var(--ws-grad-cool); border:none; color:#fff;
                          border-radius: var(--ws-r-sm); padding:10px 18px; font-weight:900; font-size:12.5px; cursor:pointer; }
@@ -269,12 +288,21 @@
             <div class="seg">
                 <button type="button" data-view="days" class="on">By day</button>
                 <button type="button" data-view="punches">All punches</button>
+                <button type="button" data-view="calendar">Calendar</button>
             </div>
             <div style="flex:1"></div>
             <input type="month" id="month">
         </div>
 
-        <div class="card" style="overflow:hidden;">
+        <!-- Month calendar: same classification the admin grid and pay sheet use,
+             because it comes from the same server helper. -->
+        <div class="card" id="cal-card" style="display:none;">
+            <div id="cal-tot" class="cal-tot"></div>
+            <div class="mcal" id="mcal"></div>
+            <div class="cal-legend" id="cal-legend"></div>
+        </div>
+
+        <div class="card" id="table-card" style="overflow:hidden;">
             <div class="scroll">
                 <table>
                     <thead id="thead"></thead>
@@ -545,6 +573,83 @@
             else setTile('t-dur', '—', 'none', 'Today');
         }
 
+        // ---- Month calendar -------------------------------------------------
+        // Fetched from the server rather than derived here, so my month, the
+        // admin team grid and the salary sheet can never disagree about
+        // whether the 12th was a holiday, a week off or an absence.
+        let calData = null, calMonthLoaded = null;
+
+        async function loadCalendar() {
+            const ym = el('month').value || fmtISO.format(new Date()).slice(0, 7);
+            if (calMonthLoaded === ym && calData) return renderCalendar();
+            el('mcal').innerHTML = '<div class="h" style="grid-column:1/-1;padding:26px 0;">Loading…</div>';
+            el('cal-tot').innerHTML = ''; el('cal-legend').innerHTML = '';
+            try {
+                const { data: { session: fresh } } = await sb.auth.getSession();
+                const r = await fetch('/api/attendance-webhook', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${(fresh || session).access_token}` },
+                    body: JSON.stringify({ mode: 'calendar', month: ym })
+                });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.detail || data.error || 'Could not load the calendar.');
+                calData = data; calMonthLoaded = ym;
+                renderCalendar();
+            } catch (e) {
+                el('mcal').innerHTML = `<div class="h" style="grid-column:1/-1;padding:26px 0;color:#fda4af;">${esc(e.message)}</div>`;
+            }
+        }
+
+        function renderCalendar() {
+            const d = calData;
+            if (!d) return;
+            const L = d.legend || {};
+            const T = d.totals || {};
+
+            el('cal-tot').innerHTML = [
+                ['present', (T.present || 0) + (T.late || 0), 'Present'],
+                ['late',    T.late    || 0, 'Late'],
+                ['absent',  T.absent  || 0, 'Absent'],
+                ['leave',   T.leave   || 0, 'Leave'],
+                ['holiday', T.holiday || 0, 'Holidays'],
+                ['weekoff', T.weekoff || 0, 'Week offs'],
+            ].map(([k, v, label]) =>
+                `<div><b style="color:${L[k] ? L[k].color : '#fff'}">${v}</b><span>${label}</span></div>`
+            ).join('');
+
+            // Monday-first grid; pad the leading blanks so the 1st lands under
+            // the right weekday.
+            const iso = ds => ({ Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6,Sun:7 })[
+                new Intl.DateTimeFormat('en-GB', { timeZone: IST, weekday: 'short' })
+                    .format(new Date(ds + 'T12:00:00+05:30'))] || 1;
+
+            const head = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
+                .map(x => `<div class="h">${x}</div>`).join('');
+            const lead = d.days.length ? iso(d.days[0].date) - 1 : 0;
+            const blanks = Array.from({ length: lead }, () => '<div class="d blank"></div>').join('');
+
+            const cells = d.days.map(day => {
+                const meta = L[day.status] || { label: day.status, color: '#94a3b8' };
+                const dim = day.status === 'future' ? 0.28 : 1;
+                const detail = day.status === 'present' || day.status === 'late'
+                    ? `${day.in || '—'}${day.out ? '–' + day.out : ''}`
+                    : (day.note || meta.label);
+                const title = `${day.date} · ${meta.label}` +
+                    (day.in ? `\nIn ${day.in}${day.out ? ' · Out ' + day.out : ''}` : '') +
+                    (day.late ? `\n${day.late} min late` : '') +
+                    (day.note ? `\n${day.note}` : '');
+                return `<div class="d${day.date === d.today ? ' today' : ''}" title="${esc(title)}"` +
+                       ` style="background:${meta.color}22;border-color:${meta.color}55;opacity:${dim}">` +
+                       `<div class="n" style="color:${meta.color}">${Number(day.date.slice(8))}</div>` +
+                       `<div class="t">${esc(detail || '')}</div></div>`;
+            }).join('');
+
+            el('mcal').innerHTML = head + blanks + cells;
+            el('cal-legend').innerHTML = ['present','late','absent','leave','holiday','weekoff']
+                .map(k => L[k] ? `<span><i style="background:${L[k].color}"></i>${esc(L[k].label)}</span>` : '')
+                .join('');
+        }
+
         function render() {
             const thead = el('thead'), tbody = el('tbody'), empty = el('empty');
             if (!rows.length) {
@@ -595,7 +700,7 @@
         const MAX_BRIGHTNESS = 238;   // blown out / pointed at a lamp
         const FACE_CHECK_MS  = 450;
 
-        let camStream = null, pendingEvent = null, fixedCoords = null, busy = false;
+        let camStream = null, pendingEvent = null, fixedCoords = null, fixedAddress = null, busy = false;
         let faceDetector = null, blazeModel = null, faceMethod = 'none';
         let checkTimer = null, lastBrightness = null, lastFaceSeen = false;
 
@@ -614,7 +719,7 @@
             el('cam-video').style.display = '';
             el('cam-canvas').style.display = 'none';
             el('sheet-msg').textContent = '';
-            pendingEvent = null; fixedCoords = null; busy = false;
+            pendingEvent = null; fixedCoords = null; fixedAddress = null; busy = false;
             lastBrightness = null; lastFaceSeen = false;
         }
 
@@ -630,6 +735,39 @@
                     { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
                 );
             });
+        }
+
+        // Best-effort street address for the photo stamp.
+        //
+        // The SERVER does its own lookup for the stored value, so this one is
+        // cosmetic: if it is slow, throttled or offline the punch still goes
+        // through with coordinates on it. That is also why the formatting is
+        // duplicated rather than shared — this page is static HTML and cannot
+        // require() lib/attendance.js.
+        async function lookupAddress({ latitude, longitude }) {
+            try {
+                const ctrl = new AbortController();
+                const timer = setTimeout(() => ctrl.abort(), 4000);
+                const r = await fetch(
+                    `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1` +
+                    `&lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}`,
+                    { signal: ctrl.signal, headers: { 'Accept-Language': 'en' } });
+                clearTimeout(timer);
+                if (!r.ok) return null;
+                const a = (await r.json()).address || {};
+                const parts = [
+                    [a.house_number, a.road].filter(Boolean).join(' '),
+                    a.neighbourhood || a.suburb || a.city_district,
+                    a.city || a.town || a.village || a.county,
+                    a.postcode,
+                ].filter(Boolean);
+                const seen = new Set();
+                return parts.filter(x => {
+                    const k = String(x).trim().toLowerCase();
+                    if (!k || seen.has(k)) return false;
+                    seen.add(k); return true;
+                }).join(', ') || null;
+            } catch { return null; }
         }
 
         // ---- Face detection ----------------------------------------------
@@ -721,7 +859,7 @@
         }
 
         async function openSheet(event) {
-            pendingEvent = event; fixedCoords = null;
+            pendingEvent = event; fixedCoords = null; fixedAddress = null;
             el('sheet-title').textContent = EVENT_TITLE[event];
             el('sheet-sub').textContent = 'Look at the camera and hold still.';
             el('sheet-msg').textContent = '';
@@ -737,7 +875,16 @@
             initFaceDetection();   // in the background; not awaited
 
             const locP = getLocation()
-                .then(c => { fixedCoords = c; stepState('step-loc', 'ok', `Location fixed (±${Math.round(c.accuracy_m)}m)`); })
+                .then(c => {
+                    fixedCoords = c;
+                    stepState('step-loc', 'ok', `Location fixed (±${Math.round(c.accuracy_m)}m)`);
+                    // Not awaited: a slow geocoder must not hold up the capture.
+                    lookupAddress(c).then(addr => {
+                        if (!addr || fixedCoords !== c) return;
+                        fixedAddress = addr;
+                        stepState('step-loc', 'ok', `${addr} (±${Math.round(c.accuracy_m)}m)`);
+                    });
+                })
                 .catch(e => { stepState('step-loc', 'bad', e.message); throw e; });
 
             const camP = navigator.mediaDevices.getUserMedia({
@@ -768,17 +915,48 @@
             const ctx = c.getContext('2d');
             ctx.drawImage(v, 0, 0, c.width, c.height);
 
-            const lines = [
-                `${myName || 'Employee'} · ${EVENT_TITLE[pendingEvent]}`,
-                new Intl.DateTimeFormat('en-GB', { timeZone: IST, dateStyle: 'medium', timeStyle: 'medium' }).format(new Date()) + ' IST',
-                fixedCoords
-                    ? `${fixedCoords.latitude.toFixed(5)}, ${fixedCoords.longitude.toFixed(5)}  ±${Math.round(fixedCoords.accuracy_m)}m`
-                    : 'no location',
-            ];
-
             const pad = Math.round(c.width * 0.025);
             const fs  = Math.max(11, Math.round(c.width * 0.038));
+            const sm  = Math.round(fs * 0.86);
             const lh  = Math.round(fs * 1.34);
+            const font = big => `${big ? '800' : '600'} ${big ? fs : sm}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+            const maxW = c.width - pad * 2;
+
+            // A street address is long and the photo is narrow, so wrap it
+            // rather than letting it run off the edge of the frame.
+            const wrapText = (text, limit) => {
+                ctx.font = font(false);
+                const words = String(text).split(/\s+/).filter(Boolean);
+                const out = [];
+                let cur = '';
+                for (const w of words) {
+                    const t = cur ? cur + ' ' + w : w;
+                    if (ctx.measureText(t).width <= maxW || !cur) { cur = t; continue; }
+                    out.push(cur); cur = w;
+                    if (out.length >= limit) { cur = ''; break; }
+                }
+                if (cur && out.length < limit) out.push(cur);
+                // Anything that did not fit gets an ellipsis, not a silent cut.
+                if (out.join(' ').split(/\s+/).filter(Boolean).length < words.length && out.length) {
+                    let last = out[out.length - 1];
+                    while (last.length > 1 && ctx.measureText(last + '…').width > maxW) last = last.slice(0, -1);
+                    out[out.length - 1] = last + '…';
+                }
+                return out;
+            };
+
+            const lines = [
+                { t: `${myName || 'Employee'} · ${EVENT_TITLE[pendingEvent]}`, big: true },
+                { t: new Intl.DateTimeFormat('en-GB', { timeZone: IST, dateStyle: 'medium', timeStyle: 'medium' }).format(new Date()) + ' IST', big: false },
+            ];
+            if (fixedAddress) wrapText(fixedAddress, 2).forEach(t => lines.push({ t, big: false }));
+            lines.push({
+                t: fixedCoords
+                    ? `${fixedCoords.latitude.toFixed(5)}, ${fixedCoords.longitude.toFixed(5)}  ±${Math.round(fixedCoords.accuracy_m)}m`
+                    : 'no location',
+                big: false,
+            });
+
             const boxH = lh * lines.length + pad * 1.4;
 
             const grad = ctx.createLinearGradient(0, c.height - boxH - pad, 0, c.height);
@@ -791,11 +969,11 @@
             ctx.textBaseline = 'top';
             lines.forEach((line, i) => {
                 const y = c.height - boxH + (i * lh) - pad * 0.1;
-                ctx.font = `${i === 0 ? '800' : '600'} ${i === 0 ? fs : Math.round(fs * 0.86)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+                ctx.font = font(line.big);
                 ctx.fillStyle = 'rgba(0,0,0,0.85)';
-                ctx.fillText(line, pad + 1, y + 1);
-                ctx.fillStyle = i === 0 ? '#ffffff' : 'rgba(255,255,255,0.92)';
-                ctx.fillText(line, pad, y);
+                ctx.fillText(line.t, pad + 1, y + 1);
+                ctx.fillStyle = line.big ? '#ffffff' : 'rgba(255,255,255,0.92)';
+                ctx.fillText(line.t, pad, y);
             });
 
             v.style.display = 'none'; c.style.display = 'block';
@@ -956,10 +1134,17 @@
             b.addEventListener('click', () => {
                 document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b));
                 view = b.dataset.view;
-                render();
+                const cal = view === 'calendar';
+                el('cal-card').style.display   = cal ? '' : 'none';
+                el('table-card').style.display = cal ? 'none' : '';
+                if (cal) loadCalendar(); else render();
             });
         });
-        el('month').addEventListener('change', load);
+        el('month').addEventListener('change', () => {
+            calMonthLoaded = null;                 // the cached month is stale now
+            if (view === 'calendar') loadCalendar();
+            load();
+        });
 
         await loadMyShift();
         await loadLeave();
