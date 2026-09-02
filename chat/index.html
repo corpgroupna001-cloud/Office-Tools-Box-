@@ -111,6 +111,10 @@
         }
 
         /* Contact row */
+        .day-chip { display:inline-block; margin-left:6px; padding:1px 6px; border-radius:6px;
+                    font-size:9.5px; font-weight:900; letter-spacing:.02em; vertical-align:middle;
+                    border:1px solid transparent; white-space:nowrap; }
+        .day-chip.wfh { background:rgba(59,130,246,.14); color:#93c5fd; border-color:rgba(59,130,246,.32); }
         .contact {
             display: flex; align-items: center; gap: 12px;
             padding: 10px 12px;
@@ -869,6 +873,10 @@
                         <p class="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">Email</p>
                         <p id="profile-email" class="text-sm text-white font-semibold break-all">—</p>
                     </div>
+                    <div id="profile-today-row" class="glass rounded-xl px-4 py-3 hidden">
+                        <p class="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">Today</p>
+                        <p id="profile-today" class="text-sm text-white font-semibold">—</p>
+                    </div>
                     <div id="profile-company-row" class="glass rounded-xl px-4 py-3 hidden">
                         <p class="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-1">Company</p>
                         <p id="profile-company" class="text-sm text-white font-semibold">—</p>
@@ -1070,6 +1078,10 @@
             document.getElementById('auth-modal').classList.remove('flex');
             document.getElementById('app').classList.remove('hidden');
             loadContacts().then(() => handleUrlHash());
+            loadTeamStatus();
+            // A day's status changes when leave is approved or midnight passes;
+            // a quarter-hourly refresh is plenty and costs one small request.
+            setInterval(loadTeamStatus, 15 * 60 * 1000);
             subscribeToMessages();
             requestNotificationPermission();
             // Background push — messages & calls arrive even when this page
@@ -1337,6 +1349,46 @@
             } catch {}
         }
 
+
+        // ---- Who is available today ----------------------------------------
+        // Leave, holidays and weekly offs come from the server: leave_requests
+        // is RLS'd to "your own rows", which is correct for the table and
+        // useless for a team directory. The endpoint returns names and status
+        // only — no punch times, no coordinates, no photos, no pay.
+        //
+        // Deliberately NOT shown: present / absent. "Absent" next to a
+        // colleague's name in a chat list is a performance judgement, not a
+        // useful availability hint, and this is a directory, not a report.
+        let dayStatusById = new Map();
+        const SHOW_STATUS = new Set(['leave', 'holiday', 'weekoff']);
+
+        async function loadTeamStatus() {
+            try {
+                const { data: { session } } = await sb.auth.getSession();
+                if (!session) return;
+                const r = await fetch('/api/attendance-webhook', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+                    body: JSON.stringify({ mode: 'team_status' })
+                });
+                if (!r.ok) return;                      // never block chat over a badge
+                const data = await r.json();
+                dayStatusById = new Map((data.people || []).map(p => [p.id, p]));
+                renderContacts();
+            } catch { /* badges are a nicety; chat works without them */ }
+        }
+
+        function statusBadge(id) {
+            const p = dayStatusById.get(id);
+            if (!p) return '';
+            if (SHOW_STATUS.has(p.status)) {
+                return `<span class="day-chip" style="background:${p.color}22;color:${p.color};border-color:${p.color}55">` +
+                       `${p.icon} ${escapeHtml(p.label)}</span>`;
+            }
+            if (p.is_wfh) return '<span class="day-chip wfh">🏠 WFH</span>';
+            return '';
+        }
+
         function contactRowHtml(c) {
             const name = c.full_name || c.email;
             const initial = (name || '?').charAt(0).toUpperCase();
@@ -1359,7 +1411,7 @@
                     </div>
                     <div class="contact-body">
                         <div class="contact-top-row">
-                            <span class="contact-name">${escapeHtml(name || '')}</span>
+                            <span class="contact-name">${escapeHtml(name || '')}${statusBadge(c.id)}</span>
                             <span class="contact-time">${timeStr}</span>
                         </div>
                         <div class="contact-bottom-row">
@@ -1881,6 +1933,16 @@
                 companyRow.classList.add('hidden');
             }
             document.getElementById('profile-lastseen').textContent = online ? 'Online now' : formatLastSeen(lastSeenById.get(contact.id));
+            const today = dayStatusById.get(contact.id);
+            const todayRow = document.getElementById('profile-today-row');
+            if (today) {
+                todayRow.classList.remove('hidden');
+                const t = document.getElementById('profile-today');
+                t.textContent = `${today.icon} ${today.label}` + (today.is_wfh ? ' · works from home' : '');
+                t.style.color = today.color || '#fff';
+            } else {
+                todayRow.classList.add('hidden');
+            }
             modal.classList.remove('hidden');
             modal.classList.add('flex');
         }
