@@ -48,6 +48,20 @@
         .tag.ontime { background: rgba(16,185,129,0.16); color:#6ee7b7; }
         .tag.early { background: rgba(245,158,11,0.16); color:#fcd34d; }
 
+        .prompt { padding: 15px 18px; margin-bottom: 16px; display:flex; align-items:center; gap:14px;
+                  border-color: rgba(56,189,248,0.35); background: rgba(56,189,248,0.07); }
+        .prompt .p-ico { font-size: 22px; flex:0 0 auto; }
+        .prompt .p-title { margin:0; font-size:14px; font-weight:900; }
+        .prompt .p-sub { margin:2px 0 0; font-size:12px; font-weight:700; color: var(--ws-text-muted); }
+        .prompt .p-btn { margin-left:auto; flex:0 0 auto; background: var(--ws-grad-cool); border:none; color:#fff;
+                         border-radius: var(--ws-r-sm); padding:10px 18px; font-weight:900; font-size:12.5px; cursor:pointer; }
+        .prompt.done { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.07); }
+        .prompt.warn { border-color: rgba(245,158,11,0.4); background: rgba(245,158,11,0.08); }
+        @media (max-width: 560px) {
+            .prompt { flex-wrap: wrap; }
+            .prompt .p-btn { margin-left: 0; width: 100%; }
+        }
+
         .clock { padding: 20px; margin-bottom: 22px; }
         .clock h2 { margin: 0 0 3px; font-size: 15px; font-weight: 900; }
         .clock p.hint { margin: 0 0 15px; font-size: 12px; font-weight: 700; color: var(--ws-text-dim); }
@@ -178,6 +192,16 @@
             </div>
         </div>
 
+        <!-- Daily prompt: only for WFH staff, and only when something is outstanding -->
+        <div class="card prompt" id="prompt" style="display:none;">
+            <span class="p-ico" id="prompt-ico">🔔</span>
+            <div>
+                <p class="p-title" id="prompt-title"></p>
+                <p class="p-sub" id="prompt-sub"></p>
+            </div>
+            <button class="p-btn" id="prompt-btn"></button>
+        </div>
+
         <!-- WFH selfie clock (shown only to work-from-home employees) -->
         <div class="card clock" id="clock" style="display:none;">
             <h2>📸 Selfie attendance</h2>
@@ -270,6 +294,7 @@
             </div>
             <div class="step wait" id="step-loc"><span class="dot">1</span><span id="step-loc-txt">Getting your location…</span></div>
             <div class="step wait" id="step-cam"><span class="dot">2</span><span id="step-cam-txt">Starting the camera…</span></div>
+            <div class="step wait" id="step-qual"><span class="dot">3</span><span id="step-qual-txt">Checking lighting and face…</span></div>
             <div class="sheet-actions">
                 <button id="sheet-cancel">Cancel</button>
                 <button id="sheet-shoot" class="primary" disabled>Capture</button>
@@ -293,6 +318,8 @@
         let view = 'days';
         let rows = [];
         let myShift = null;
+        let isWfh = false;
+        let myName = '';
 
         // ---- Supabase client (reuse whatever the guard/presence already made) ----
         let sb = window.__WS_SB__ || window.__WS_PRESENCE_SB__ || null;
@@ -318,8 +345,10 @@
 
         async function loadMyShift() {
             try {
-                const { data: prof } = await sb.from('profiles').select('shift_id, is_wfh').eq('id', session.user.id).maybeSingle();
-                if (prof && prof.is_wfh === true) el('clock').style.display = '';
+                const { data: prof } = await sb.from('profiles').select('shift_id, is_wfh, full_name').eq('id', session.user.id).maybeSingle();
+                isWfh = !!(prof && prof.is_wfh === true);
+                myName = (prof && prof.full_name) || '';
+                if (isWfh) el('clock').style.display = '';
                 const { data: shifts } = await sb.from('shifts').select('*');
                 if (!shifts || !shifts.length) return;
                 myShift = shifts.find(s => prof && s.id === prof.shift_id) || shifts.find(s => s.is_default) || null;
@@ -352,7 +381,7 @@
             // RLS restricts this to the signed-in user's own rows.
             const { data, error } = await sb
                 .from('attendance_logs')
-                .select('id,direction,log_datetime,log_date,device_name,device_sn,employee_code')
+                .select('id,direction,log_datetime,log_date,device_name,device_sn,employee_code,event_type,source')
                 .gte('log_datetime', start.toISOString())
                 .lt('log_datetime', end.toISOString())
                 .order('log_datetime', { ascending: false })
@@ -398,10 +427,44 @@
             };
         }
 
+        // Nudges only where there is something to do — a card that always says
+        // "all good" is noise people learn to ignore.
+        function renderPrompt(todayPunches) {
+            if (!isWfh) { el('prompt').style.display = 'none'; return; }
+            const has = t => todayPunches.some(p => p.event_type === t);
+            const p = el('prompt'), btn = el('prompt-btn');
+            const show = (cls, ico, title, sub, label, ev) => {
+                p.className = 'card prompt ' + cls;
+                el('prompt-ico').textContent = ico;
+                el('prompt-title').textContent = title;
+                el('prompt-sub').textContent = sub;
+                btn.textContent = label;
+                btn.style.display = ev ? '' : 'none';
+                btn.onclick = ev ? () => openSheet(ev) : null;
+                p.style.display = '';
+            };
+
+            const now = new Date();
+            const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', hour12: false }).format(now));
+
+            if (!has('LOGIN')) {
+                show('', '🔔', "You haven't logged in today",
+                     'Work-from-home attendance needs a selfie login.', 'Login now', 'LOGIN');
+            } else if (!has('LOGOUT') && hour >= 17) {
+                show('warn', '⏰', 'Still logged in',
+                     "Remember to log out when you finish, or today shows no check-out.", 'Logout', 'LOGOUT');
+            } else if (has('LOGOUT')) {
+                show('done', '✅', 'Attendance complete for today', 'Login and logout both recorded.', '', null);
+            } else {
+                el('prompt').style.display = 'none';
+            }
+        }
+
         function renderToday() {
             const today = fmtISO.format(new Date());
             const mine = rows.filter(r => (r.log_date || fmtISO.format(new Date(r.log_datetime))) === today);
             const s = dayStats(mine.slice().sort((a, b) => new Date(a.log_datetime) - new Date(b.log_datetime)));
+            renderPrompt(mine);
 
             const setTile = (id, value, cls, sub) => {
                 const v = el(id);
@@ -487,25 +550,37 @@
 
         // ================= SELFIE ATTENDANCE (WFH) =================
         const EVENT_TITLE = { LOGIN: 'Login', LOGOUT: 'Logout', BREAK_OUT: 'Start break', BREAK_IN: 'End break' };
+
+        // Quality gates. A black frame or a photo of the ceiling proves nothing,
+        // so capture stays locked until the frame is bright enough AND a face
+        // is visible.
+        const MIN_BRIGHTNESS = 45;    // 0-255 mean luma; below this is unusable
+        const MAX_BRIGHTNESS = 238;   // blown out / pointed at a lamp
+        const FACE_CHECK_MS  = 450;
+
         let camStream = null, pendingEvent = null, fixedCoords = null, busy = false;
+        let faceDetector = null, blazeModel = null, faceMethod = 'none';
+        let checkTimer = null, lastBrightness = null, lastFaceSeen = false;
 
         function stepState(id, state, text) {
             const elm = el(id);
             elm.className = 'step ' + state;
-            elm.querySelector('.dot').textContent = state === 'ok' ? '✓' : state === 'bad' ? '!' : id === 'step-loc' ? '1' : '2';
+            const n = { 'step-loc': '1', 'step-cam': '2', 'step-qual': '3' }[id] || '';
+            elm.querySelector('.dot').textContent = state === 'ok' ? '✓' : state === 'bad' ? '!' : n;
             if (text) el(id + '-txt').textContent = text;
         }
 
         function closeSheet() {
             el('sheet').classList.remove('on');
+            if (checkTimer) { clearInterval(checkTimer); checkTimer = null; }
             if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
             el('cam-video').style.display = '';
             el('cam-canvas').style.display = 'none';
             el('sheet-msg').textContent = '';
             pendingEvent = null; fixedCoords = null; busy = false;
+            lastBrightness = null; lastFaceSeen = false;
         }
 
-        // GPS is mandatory, so this resolves or the punch does not happen.
         function getLocation() {
             return new Promise((resolve, reject) => {
                 if (!navigator.geolocation) return reject(new Error('This device has no location support.'));
@@ -520,6 +595,94 @@
             });
         }
 
+        // ---- Face detection ----------------------------------------------
+        // Chromium's built-in FaceDetector costs nothing when it exists.
+        // Otherwise BlazeFace is pulled from a CDN once and cached.
+        //
+        // If NEITHER is available we deliberately FAIL OPEN and record that the
+        // check did not run. Blocking attendance entirely because a CDN is
+        // unreachable would be a worse failure than an unverified photo — the
+        // admin review queue shows which punches were unchecked.
+        function loadScript(src) {
+            return new Promise((res, rej) => {
+                const s = document.createElement('script');
+                s.src = src; s.onload = res; s.onerror = () => rej(new Error('load failed'));
+                document.head.appendChild(s);
+            });
+        }
+
+        async function initFaceDetection() {
+            if (faceMethod !== 'none') return;
+            if ('FaceDetector' in window) {
+                try {
+                    faceDetector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
+                    faceMethod = 'native';
+                    return;
+                } catch { /* fall through to BlazeFace */ }
+            }
+            try {
+                if (!window.tf) await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
+                if (!window.blazeface) await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.0/dist/blazeface.min.js');
+                blazeModel = await window.blazeface.load();
+                faceMethod = 'blazeface';
+            } catch {
+                faceMethod = 'unavailable';
+            }
+        }
+
+        async function detectFace(video) {
+            try {
+                if (faceMethod === 'native' && faceDetector) {
+                    return (await faceDetector.detect(video)).length > 0;
+                }
+                if (faceMethod === 'blazeface' && blazeModel) {
+                    const preds = await blazeModel.estimateFaces(video, false);
+                    return preds.length > 0;
+                }
+            } catch { /* treat a detector hiccup as "not checked" */ }
+            return null; // null = could not check
+        }
+
+        // ---- Brightness ---------------------------------------------------
+        const probe = document.createElement('canvas');
+        function measureBrightness(video) {
+            probe.width = 64; probe.height = 48;
+            const ctx = probe.getContext('2d', { willReadFrequently: true });
+            ctx.drawImage(video, 0, 0, 64, 48);
+            const { data } = ctx.getImageData(0, 0, 64, 48);
+            let sum = 0;
+            for (let i = 0; i < data.length; i += 4) {
+                sum += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+            }
+            return Math.round(sum / (data.length / 4));
+        }
+
+        async function runQualityCheck() {
+            const v = el('cam-video');
+            if (!v.videoWidth) return;
+
+            lastBrightness = measureBrightness(v);
+            const face = await detectFace(v);
+            lastFaceSeen = face === true;
+
+            let bad = null;
+            if (lastBrightness < MIN_BRIGHTNESS)      bad = `Too dark (${lastBrightness}/255) — turn on a light or face a window`;
+            else if (lastBrightness > MAX_BRIGHTNESS) bad = `Too bright — move out of direct light`;
+            else if (face === false)                  bad = 'No face detected — look straight at the camera';
+
+            if (bad) {
+                stepState('step-qual', 'bad', bad);
+                el('sheet-shoot').disabled = true;
+            } else if (face === null) {
+                // Detector unavailable — allow, but say so plainly.
+                stepState('step-qual', 'ok', `Lighting OK (${lastBrightness}/255) · face check unavailable`);
+                el('sheet-shoot').disabled = !fixedCoords;
+            } else {
+                stepState('step-qual', 'ok', `Face detected · lighting OK (${lastBrightness}/255)`);
+                el('sheet-shoot').disabled = !fixedCoords;
+            }
+        }
+
         async function openSheet(event) {
             pendingEvent = event; fixedCoords = null;
             el('sheet-title').textContent = EVENT_TITLE[event];
@@ -529,40 +692,77 @@
             el('sheet-shoot').textContent = 'Capture';
             el('cam-video').style.display = '';
             el('cam-canvas').style.display = 'none';
-            stepState('step-loc', 'wait', 'Getting your location…');
-            stepState('step-cam', 'wait', 'Starting the camera…');
+            stepState('step-loc',  'wait', 'Getting your location…');
+            stepState('step-cam',  'wait', 'Starting the camera…');
+            stepState('step-qual', 'wait', 'Checking lighting and face…');
             el('sheet').classList.add('on');
 
-            // Location and camera in parallel — both must succeed.
+            initFaceDetection();   // in the background; not awaited
+
             const locP = getLocation()
                 .then(c => { fixedCoords = c; stepState('step-loc', 'ok', `Location fixed (±${Math.round(c.accuracy_m)}m)`); })
                 .catch(e => { stepState('step-loc', 'bad', e.message); throw e; });
 
             const camP = navigator.mediaDevices.getUserMedia({
                     video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false })
-                .then(st => { camStream = st; el('cam-video').srcObject = st; stepState('step-cam', 'ok', 'Camera ready'); })
+                .then(st => {
+                    camStream = st; el('cam-video').srcObject = st;
+                    stepState('step-cam', 'ok', 'Camera ready');
+                    if (checkTimer) clearInterval(checkTimer);
+                    checkTimer = setInterval(runQualityCheck, FACE_CHECK_MS);
+                })
                 .catch(() => { stepState('step-cam', 'bad', 'Camera blocked. Allow camera access and try again.'); throw new Error('camera'); });
 
             try {
                 await Promise.all([locP, camP]);
-                el('sheet-shoot').disabled = false;
             } catch {
                 el('sheet-msg').style.color = '#fda4af';
-                el('sheet-msg').textContent = 'Both a photo and your location are required.';
+                el('sheet-msg').textContent = 'A photo and your location are both required.';
             }
         }
 
-        // Downscale before upload — a raw phone photo is ~300KB and the free
-        // Supabase tier is 1GB; ~640px JPEG lands around 60KB.
+        // Downscale, then stamp the evidence onto the image itself so the
+        // photo carries its own where and when.
         function captureBlob() {
             const v = el('cam-video'), c = el('cam-canvas');
-            const scale = Math.min(1, 640 / Math.max(v.videoWidth, v.videoHeight));
+            const scale = Math.min(1, 720 / Math.max(v.videoWidth, v.videoHeight));
             c.width = Math.round(v.videoWidth * scale);
             c.height = Math.round(v.videoHeight * scale);
             const ctx = c.getContext('2d');
             ctx.drawImage(v, 0, 0, c.width, c.height);
+
+            const lines = [
+                `${myName || 'Employee'} · ${EVENT_TITLE[pendingEvent]}`,
+                new Intl.DateTimeFormat('en-GB', { timeZone: IST, dateStyle: 'medium', timeStyle: 'medium' }).format(new Date()) + ' IST',
+                fixedCoords
+                    ? `${fixedCoords.latitude.toFixed(5)}, ${fixedCoords.longitude.toFixed(5)}  ±${Math.round(fixedCoords.accuracy_m)}m`
+                    : 'no location',
+            ];
+
+            const pad = Math.round(c.width * 0.025);
+            const fs  = Math.max(11, Math.round(c.width * 0.038));
+            const lh  = Math.round(fs * 1.34);
+            const boxH = lh * lines.length + pad * 1.4;
+
+            const grad = ctx.createLinearGradient(0, c.height - boxH - pad, 0, c.height);
+            grad.addColorStop(0, 'rgba(0,0,0,0)');
+            grad.addColorStop(0.35, 'rgba(0,0,0,0.72)');
+            grad.addColorStop(1, 'rgba(0,0,0,0.86)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, c.height - boxH - pad, c.width, boxH + pad);
+
+            ctx.textBaseline = 'top';
+            lines.forEach((line, i) => {
+                const y = c.height - boxH + (i * lh) - pad * 0.1;
+                ctx.font = `${i === 0 ? '800' : '600'} ${i === 0 ? fs : Math.round(fs * 0.86)}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+                ctx.fillStyle = 'rgba(0,0,0,0.85)';
+                ctx.fillText(line, pad + 1, y + 1);
+                ctx.fillStyle = i === 0 ? '#ffffff' : 'rgba(255,255,255,0.92)';
+                ctx.fillText(line, pad, y);
+            });
+
             v.style.display = 'none'; c.style.display = 'block';
-            return new Promise(r => c.toBlob(r, 'image/jpeg', 0.7));
+            return new Promise(r => c.toBlob(r, 'image/jpeg', 0.72));
         }
 
         async function submitPunch() {
@@ -573,6 +773,7 @@
                 return;
             }
             busy = true;
+            if (checkTimer) { clearInterval(checkTimer); checkTimer = null; }
             const btn = el('sheet-shoot');
             btn.disabled = true; btn.textContent = 'Capturing…';
             try {
@@ -590,7 +791,11 @@
                 const r = await fetch('/api/attendance-webhook', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${(fresh || session).access_token}` },
-                    body: JSON.stringify({ mode: 'selfie', event_type: pendingEvent, selfie_path: path, ...fixedCoords })
+                    body: JSON.stringify({
+                        mode: 'selfie', event_type: pendingEvent, selfie_path: path,
+                        brightness: lastBrightness, face_detected: lastFaceSeen, face_method: faceMethod,
+                        ...fixedCoords
+                    })
                 });
                 const data = await r.json();
                 if (!r.ok) throw new Error(data.detail || data.error || 'Could not record the punch.');
@@ -606,11 +811,12 @@
                 el('sheet-msg').textContent = e.message;
                 btn.disabled = false; btn.textContent = 'Try again';
                 busy = false;
-                // The photo is spent — reopen the camera for another attempt.
                 try {
                     camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
                     el('cam-video').srcObject = camStream;
                     el('cam-video').style.display = ''; el('cam-canvas').style.display = 'none';
+                    if (checkTimer) clearInterval(checkTimer);
+                    checkTimer = setInterval(runQualityCheck, FACE_CHECK_MS);
                 } catch { /* leave the still frame up */ }
             }
         }
