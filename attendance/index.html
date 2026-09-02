@@ -53,13 +53,19 @@
         .prompt .p-ico { font-size: 22px; flex:0 0 auto; }
         .prompt .p-title { margin:0; font-size:14px; font-weight:900; }
         .prompt .p-sub { margin:2px 0 0; font-size:12px; font-weight:700; color: var(--ws-text-muted); }
-        .prompt .p-btn { margin-left:auto; flex:0 0 auto; background: var(--ws-grad-cool); border:none; color:#fff;
+        .prompt .p-acts { margin-left:auto; flex:0 0 auto; display:flex; gap:8px; }
+        .prompt .p-btn { flex:0 0 auto; background: var(--ws-grad-cool); border:none; color:#fff;
                          border-radius: var(--ws-r-sm); padding:10px 18px; font-weight:900; font-size:12.5px; cursor:pointer; }
+        .prompt .p-btn.ghost { background: transparent; color: var(--ws-text-muted);
+                               border:1.5px solid var(--ws-border); }
         .prompt.done { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.07); }
         .prompt.warn { border-color: rgba(245,158,11,0.4); background: rgba(245,158,11,0.08); }
+        .prompt.live { border-color: rgba(59,130,246,0.35); background: rgba(59,130,246,0.07); }
+        .prompt.brk  { border-color: rgba(139,92,246,0.38); background: rgba(139,92,246,0.08); }
         @media (max-width: 560px) {
             .prompt { flex-wrap: wrap; }
-            .prompt .p-btn { margin-left: 0; width: 100%; }
+            .prompt .p-acts { margin-left: 0; width: 100%; }
+            .prompt .p-btn { flex: 1 1 0; }
         }
 
         .clock { padding: 20px; margin-bottom: 22px; }
@@ -199,7 +205,10 @@
                 <p class="p-title" id="prompt-title"></p>
                 <p class="p-sub" id="prompt-sub"></p>
             </div>
-            <button class="p-btn" id="prompt-btn"></button>
+            <div class="p-acts">
+                <button class="p-btn ghost" id="prompt-btn2"></button>
+                <button class="p-btn" id="prompt-btn"></button>
+            </div>
         </div>
 
         <!-- WFH selfie clock (shown only to work-from-home employees) -->
@@ -427,36 +436,64 @@
             };
         }
 
-        // Nudges only where there is something to do — a card that always says
-        // "all good" is noise people learn to ignore.
+        // The daily card is the WFH person's whole attendance UI, so it always
+        // shows where the day stands — including mid-day, when nothing is
+        // outstanding. An empty space there reads as "the feature is broken".
         function renderPrompt(todayPunches) {
             if (!isWfh) { el('prompt').style.display = 'none'; return; }
-            const has = t => todayPunches.some(p => p.event_type === t);
-            const p = el('prompt'), btn = el('prompt-btn');
-            const show = (cls, ico, title, sub, label, ev) => {
+
+            // Selfie events only. Biometric rows carry event_type null and say
+            // nothing about a WFH day.
+            const evs = todayPunches
+                .filter(r => r.event_type)
+                .slice()
+                .sort((a, b) => new Date(a.log_datetime) - new Date(b.log_datetime));
+            const last = t => { for (let i = evs.length - 1; i >= 0; i--) if (evs[i].event_type === t) return evs[i]; return null; };
+            const has = t => !!last(t);
+            const at = r => r ? new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', minute: '2-digit', hour12: false })
+                                    .format(new Date(r.log_datetime)) : '';
+
+            const p = el('prompt'), btn = el('prompt-btn'), btn2 = el('prompt-btn2');
+            const act = (b, label, ev) => {
+                b.textContent = label || '';
+                b.style.display = ev ? '' : 'none';
+                b.onclick = ev ? () => openSheet(ev) : null;
+            };
+            const show = (cls, ico, title, sub, main, secondary) => {
                 p.className = 'card prompt ' + cls;
                 el('prompt-ico').textContent = ico;
                 el('prompt-title').textContent = title;
                 el('prompt-sub').textContent = sub;
-                btn.textContent = label;
-                btn.style.display = ev ? '' : 'none';
-                btn.onclick = ev ? () => openSheet(ev) : null;
+                act(btn, main && main[0], main && main[1]);
+                act(btn2, secondary && secondary[0], secondary && secondary[1]);
                 p.style.display = '';
             };
 
-            const now = new Date();
-            const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', hour12: false }).format(now));
+            const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', hour12: false }).format(new Date()));
+            const login = last('LOGIN'), logout = last('LOGOUT');
+            // Whichever break event came last decides whether we're on a break.
+            const lastBreak = evs.filter(r => r.event_type === 'BREAK_OUT' || r.event_type === 'BREAK_IN').pop();
+            const onBreak = !!lastBreak && lastBreak.event_type === 'BREAK_OUT';
 
-            if (!has('LOGIN')) {
+            if (logout) {
+                show('done', '✅', 'Attendance complete for today',
+                     `Logged in ${at(login)} · logged out ${at(logout)}.`, null, null);
+            } else if (!login) {
                 show('', '🔔', "You haven't logged in today",
-                     'Work-from-home attendance needs a selfie login.', 'Login now', 'LOGIN');
-            } else if (!has('LOGOUT') && hour >= 17) {
+                     'Work-from-home attendance needs a selfie login.',
+                     ['Login now', 'LOGIN'], null);
+            } else if (onBreak) {
+                show('brk', '☕', `On a break since ${at(lastBreak)}`,
+                     'Break in when you are back so the day adds up.',
+                     ['Break in', 'BREAK_IN'], null);
+            } else if (hour >= 17) {
                 show('warn', '⏰', 'Still logged in',
-                     "Remember to log out when you finish, or today shows no check-out.", 'Logout', 'LOGOUT');
-            } else if (has('LOGOUT')) {
-                show('done', '✅', 'Attendance complete for today', 'Login and logout both recorded.', '', null);
+                     `Logged in at ${at(login)}. Log out when you finish, or today shows no check-out.`,
+                     ['Logout', 'LOGOUT'], ['Break out', 'BREAK_OUT']);
             } else {
-                el('prompt').style.display = 'none';
+                show('live', '🟢', `Logged in at ${at(login)}`,
+                     'Working from home. Break out if you step away, log out when you finish.',
+                     ['Logout', 'LOGOUT'], ['Break out', 'BREAK_OUT']);
             }
         }
 
