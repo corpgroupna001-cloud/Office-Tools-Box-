@@ -26,6 +26,15 @@
 // are both accepted, and IN/OUT can arrive as `direction`, as separate
 // `in`/`out` fields, or as 1/0.
 //
+// This endpoint serves TWO callers, which is why it is not two files: the
+// Hobby plan caps a deployment at 12 serverless functions and we are on the
+// line.
+//   1. The biometric cloud, authenticating with BIOMETRIC_API_KEY.
+//   2. A WFH employee's browser posting a selfie punch, authenticating with
+//      their own Supabase access token (mode:'selfie'). Their JWT is verified
+//      against Supabase, so a punch can only ever be filed as the person
+//      actually signed in, and the timestamp is taken from the server.
+//
 // Env required in Vercel:
 //   BIOMETRIC_API_KEY            shared secret the device sends
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
@@ -110,7 +119,16 @@ module.exports = async function handler(req, res) {
     || String(req.query?.key || '');
 
   if (!API_KEY) return res.status(500).json({ error: 'BIOMETRIC_API_KEY not configured on server.' });
+
   if (supplied !== API_KEY) {
+    // Not the device key — the only other accepted caller is a signed-in
+    // employee filing their own selfie punch.
+    let maybe = req.body;
+    if (typeof maybe === 'string') { try { maybe = JSON.parse(maybe || '{}'); } catch { maybe = {}; } }
+    if (req.method === 'POST' && supplied && maybe && maybe.mode === 'selfie') {
+      if (!SUPABASE_URL || !SERVICE_KEY) return res.status(500).json({ error: 'Supabase server config missing.' });
+      return handleSelfiePunch({ res, token: supplied, body: maybe, SUPABASE_URL, SERVICE_KEY, startedAt });
+    }
     await new Promise(r => setTimeout(r, 400)); // slow down guessing
     return res.status(401).json({ error: 'unauthorized' });
   }
@@ -168,6 +186,7 @@ module.exports = async function handler(req, res) {
       }
     } catch { /* no shifts table yet */ }
     const shiftFor = p => (p && p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+
     const byCode = new Map(
       profiles.filter(p => p.employee_code).map(p => [String(p.employee_code).trim(), p])
     );
@@ -418,3 +437,213 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ error: 'server error', detail: String(e && e.message || e).slice(0, 300) });
   }
 };
+
+
+// ============================================================
+// Selfie punch from a WFH employee's browser.
+//
+// Trust model: the caller proves who they are with their own Supabase access
+// token, and everything that matters is decided server-side — identity from
+// the verified token, the timestamp from this server's clock, and the WFH
+// eligibility from their profile. The client supplies only the event, the
+// photo path and the GPS fix.
+// ============================================================
+
+const EVENT_DIRECTION = {
+  LOGIN:     'IN',
+  BREAK_OUT: 'OUT',   // stepping away
+  BREAK_IN:  'IN',    // coming back
+  LOGOUT:    'OUT',
+};
+const EVENT_LABEL = {
+  LOGIN: 'Login', LOGOUT: 'Logout', BREAK_OUT: 'Break start', BREAK_IN: 'Break end',
+};
+
+// A repeat of the same event inside this window is treated as a double-tap.
+const SELFIE_REPEAT_WINDOW_MS = 60 * 1000;
+
+async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, startedAt }) {
+  const H = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
+
+  try {
+    // ---- 1. Who is this, really? Ask Supabase, don't trust the payload ----
+    const anonKey = process.env.SUPABASE_ANON_KEY || SERVICE_KEY;
+    const uRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { apikey: anonKey, Authorization: `Bearer ${token}` },
+    });
+    if (!uRes.ok) return res.status(401).json({ error: 'session_expired', detail: 'Your session expired. Refresh the page and sign in again.' });
+    const user = await uRes.json();
+    const userId = user && user.id;
+    if (!userId) return res.status(401).json({ error: 'session_expired', detail: 'Could not confirm who you are. Sign in again.' });
+
+    // ---- 2. Validate what the client did supply ----
+    const eventType = String(body.event_type || '').toUpperCase();
+    if (!EVENT_DIRECTION[eventType]) {
+      return res.status(400).json({ error: 'bad_event', detail: 'Unknown punch type.' });
+    }
+
+    // Number(null) and Number('') are both 0, which would quietly accept a
+    // missing fix as the coordinates of Null Island. Reject blanks first.
+    const blank = v => v === null || v === undefined || v === '';
+    const lat = blank(body.latitude) ? NaN : Number(body.latitude);
+    const lng = blank(body.longitude) ? NaN : Number(body.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      return res.status(400).json({
+        error: 'location_required',
+        detail: 'Location is required. Allow location access and try again.',
+      });
+    }
+
+    const selfiePath = String(body.selfie_path || '');
+    // The storage policy already confines uploads to the user's own folder;
+    // re-check here so a row can never point at somebody else's photo.
+    if (!selfiePath || !selfiePath.startsWith(`${userId}/`)) {
+      return res.status(400).json({ error: 'bad_selfie_path', detail: 'Selfie upload missing or not yours.' });
+    }
+
+    // ---- 3. Eligibility ----
+    const pRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}` +
+      `&select=id,email,full_name,company,employee_code,shift_id,is_wfh&limit=1`,
+      { headers: H }
+    );
+    if (!pRes.ok) return res.status(502).json({ error: 'profile fetch failed' });
+    const profile = (await pRes.json())[0];
+    if (!profile) return res.status(404).json({ error: 'no_profile', detail: 'No profile found for your account.' });
+    if (profile.is_wfh !== true) {
+      return res.status(403).json({ error: 'not_wfh', detail: 'Selfie attendance is for work-from-home employees. Use the biometric reader.' });
+    }
+
+    // ---- 4. Server clock, not the client's ----
+    const when = new Date();
+    const t = istParts(when);
+
+    const sinceIso = new Date(when.getTime() - SELFIE_REPEAT_WINDOW_MS).toISOString();
+    const dupRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/attendance_logs?user_id=eq.${encodeURIComponent(userId)}` +
+      `&event_type=eq.${eventType}&log_datetime=gte.${encodeURIComponent(sinceIso)}&select=id&limit=1`,
+      { headers: H }
+    );
+    if (dupRes.ok && (await dupRes.json()).length) {
+      return res.status(429).json({ error: 'too_soon', detail: `You already recorded ${EVENT_LABEL[eventType]} moments ago.` });
+    }
+
+    let priorToday = 0;
+    try {
+      const cRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/attendance_logs?user_id=eq.${encodeURIComponent(userId)}` +
+        `&log_date=eq.${t.isoDate}&select=id&limit=200`,
+        { headers: H }
+      );
+      if (cRes.ok) priorToday = (await cRes.json()).length;
+    } catch { /* worst case we omit the shift note */ }
+
+    // ---- 5. Store ----
+    const insertRow = {
+      user_id:       userId,
+      employee_code: profile.employee_code || null,
+      employee_name: profile.full_name || null,
+      direction:     EVENT_DIRECTION[eventType],
+      log_datetime:  when.toISOString(),
+      log_date:      t.isoDate,
+      log_time:      t.isoTime,
+      device_sn:     '',
+      device_name:   'WFH selfie',
+      source:        'selfie',
+      event_type:    eventType,
+      selfie_path:   selfiePath,
+      latitude:      lat,
+      longitude:     lng,
+      accuracy_m:    Number.isFinite(Number(body.accuracy_m)) ? Number(body.accuracy_m) : null,
+      review_status: 'pending',
+      email_status:  'pending',
+      email_to:      profile.email || null,
+      raw:           {
+        mode: 'selfie', event_type: eventType, latitude: lat, longitude: lng,
+        accuracy_m: body.accuracy_m ?? null,
+        // Quality signals the client measured on the frame it actually sent.
+        brightness: body.brightness ?? null,
+        face_detected: body.face_detected ?? null,
+        face_method: body.face_method ?? null,
+      },
+    };
+
+    const insRes = await fetch(`${SUPABASE_URL}/rest/v1/attendance_logs`, {
+      method: 'POST',
+      headers: { ...H, Prefer: 'return=representation' },
+      body: JSON.stringify([insertRow]),
+    });
+    if (!insRes.ok) {
+      const detail = (await insRes.text()).slice(0, 300);
+      if (/duplicate key|unique/i.test(detail)) {
+        return res.status(429).json({ error: 'too_soon', detail: 'That punch is already recorded.' });
+      }
+      console.error('[selfie] insert failed', detail);
+      return res.status(502).json({ error: 'insert_failed', detail: 'Could not save the punch. Try again.' });
+    }
+    const row = (await insRes.json())[0];
+
+    // ---- 6. Notify, using the same rules as a device punch ----
+    let shiftEval = null;
+    try {
+      const shRes = await fetch(`${SUPABASE_URL}/rest/v1/shifts?select=*`, { headers: H });
+      if (shRes.ok) {
+        const list = await shRes.json();
+        const shift = list.find(x => x.id === profile.shift_id) || list.find(x => x.is_default) || null;
+        if (shift) {
+          const st = timeToMinutes(shift.start_time), en = timeToMinutes(shift.end_time);
+          const span = (((en - st) % 1440) + 1440) % 1440 || 1440;
+          const mid  = (st + Math.floor(span / 2)) % 1440;
+          const past = offsetFromBoundary(timeToMinutes(t.isoTime), mid) >= 0;
+          shiftEval = evaluateShift({
+            shift,
+            firstIn: (eventType === 'LOGIN' && priorToday === 0) ? when : null,
+            lastOut: (eventType === 'LOGOUT' && past)            ? when : null,
+            date: when,
+          });
+        }
+      }
+    } catch { /* email still goes out, just without the shift note */ }
+
+    let emailed = false, emailError = null;
+    if (profile.email) {
+      const { subject, html, text } = buildPunchEmail({
+        fullName: profile.full_name,
+        direction: insertRow.direction,
+        when,
+        deviceName: `WFH selfie · ${EVENT_LABEL[eventType]}`,
+        employeeCode: profile.employee_code,
+        shift: shiftEval,
+      });
+      const result = await sendMail({ company: profile.company, to: profile.email, subject, html, text });
+      emailed = result.ok;
+      if (!result.ok) emailError = `${result.reason}: ${result.detail}`.slice(0, 400);
+    }
+
+    await fetch(`${SUPABASE_URL}/rest/v1/attendance_logs?id=eq.${row.id}`, {
+      method: 'PATCH',
+      headers: { ...H, Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        email_status: emailed ? 'sent' : 'failed',
+        emailed_at:   emailed ? new Date().toISOString() : null,
+        email_error:  emailed ? null : emailError,
+      }),
+    }).catch(() => {});
+
+    return res.status(200).json({
+      success: true,
+      id: row.id,
+      event: eventType,
+      label: EVENT_LABEL[eventType],
+      direction: insertRow.direction,
+      at: t.prettyTime,
+      date: t.prettyDate,
+      emailed,
+      late_minutes: shiftEval && shiftEval.isLate ? shiftEval.lateMinutes : null,
+      ms: Date.now() - startedAt,
+    });
+  } catch (e) {
+    console.error('[selfie] error', e);
+    return res.status(500).json({ error: 'server_error', detail: 'Something went wrong saving the punch.' });
+  }
+}

@@ -1033,6 +1033,96 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ success: true, candidates: logs.length, sent, failed, skipped });
     }
 
+      if (action === 'att_selfies') {
+        const date   = body.date ? String(body.date).slice(0, 10) : null;
+        const status = ['pending', 'approved', 'flagged'].includes(body.status) ? body.status : null;
+        const q = `attendance_logs?source=eq.selfie&select=*&order=log_datetime.desc&limit=300`
+                + (date ? `&log_date=eq.${date}` : '')
+                + (status ? `&review_status=eq.${status}` : '');
+
+        const [profiles, r] = await Promise.all([loadProfiles(), sb(q)]);
+        if (!r.ok) return res.status(502).json({ error: 'selfies fetch failed', detail: (await r.text()).slice(0, 200) });
+        const logs = await r.json();
+        const byId = new Map(profiles.map(p => [p.id, p]));
+
+        // The bucket is private, so hand the admin UI short-lived signed URLs
+        // rather than making the photos publicly readable.
+        const paths = [...new Set(logs.map(l => l.selfie_path).filter(Boolean))];
+        const signed = new Map();
+        if (paths.length) {
+          try {
+            const sg = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/selfies`, {
+              method: 'POST', headers: AH,
+              body: JSON.stringify({ expiresIn: 3600, paths }),
+            });
+            if (sg.ok) {
+              for (const row of await sg.json()) {
+                if (row.path && row.signedURL) signed.set(row.path, `${SUPABASE_URL}/storage/v1${row.signedURL}`);
+              }
+            } else {
+              console.error('[selfies] sign failed', (await sg.text()).slice(0, 200));
+            }
+            // Log rather than swallow: a silent catch here previously hid a
+            // ReferenceError and every photo just quietly failed to appear.
+          } catch (e) { console.error('[selfies] sign threw', e && e.message); }
+        }
+
+        return res.status(200).json({
+          selfies: logs.map(l => {
+            const p = l.user_id ? byId.get(l.user_id) : null;
+            const d = new Date(l.log_datetime);
+            const t = istParts(d);
+            return {
+              id: l.id,
+              full_name: p ? p.full_name : (l.employee_name || null),
+              email: p ? p.email : null,
+              company: p ? p.company : null,
+              event_type: l.event_type,
+              direction: l.direction,
+              log_date: l.log_date,
+              pretty_time: t.prettyTime,
+              pretty_date: t.prettyDate,
+              latitude: l.latitude,
+              longitude: l.longitude,
+              accuracy_m: l.accuracy_m,
+              map_url: (l.latitude != null && l.longitude != null)
+                ? `https://www.google.com/maps?q=${l.latitude},${l.longitude}` : null,
+              review_status: l.review_status || 'pending',
+              review_note: l.review_note || null,
+              email_status: l.email_status,
+              brightness: l.raw && l.raw.brightness != null ? l.raw.brightness : null,
+              face_detected: l.raw && l.raw.face_detected != null ? l.raw.face_detected : null,
+              photo_url: signed.get(l.selfie_path) || null,
+            };
+          }),
+          counts: {
+            total:    logs.length,
+            pending:  logs.filter(l => (l.review_status || 'pending') === 'pending').length,
+            approved: logs.filter(l => l.review_status === 'approved').length,
+            flagged:  logs.filter(l => l.review_status === 'flagged').length,
+          },
+        });
+      }
+
+      if (action === 'att_review') {
+        const id = String(body.id || '');
+        const status = body.review_status;
+        if (!id) return res.status(400).json({ error: 'id required' });
+        if (!['pending', 'approved', 'flagged'].includes(status)) {
+          return res.status(400).json({ error: 'review_status must be pending, approved or flagged' });
+        }
+        const r = await sb(`attendance_logs?id=eq.${encodeURIComponent(id)}&source=eq.selfie`, {
+          method: 'PATCH', headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({
+            review_status: status,
+            review_note: body.review_note ? String(body.review_note).slice(0, 300) : null,
+            reviewed_at: new Date().toISOString(),
+          }),
+        });
+        if (!r.ok) return res.status(502).json({ error: 'review failed', detail: (await r.text()).slice(0, 200) });
+        return res.status(200).json({ success: true, updated: (await r.json()).length });
+      }
+
       return res.status(400).json({ error: 'Unknown attendance action' });
     }
 
