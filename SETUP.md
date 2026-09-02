@@ -339,6 +339,64 @@ window. Override with `SELFIE_RETENTION_DAYS`.
 
 Rough steady state: 24 people × 4 punches × 22 days × 60KB ≈ **380MB**.
 
+## Step 9 — Leave & holidays
+
+The point of this step is the attendance report. Before it, **Absent** meant
+"no punch", which lumped together someone who skipped work, someone on
+approved leave, and everyone on Diwali. After it, Absent means absent.
+
+### 9.1 Run the migration
+
+`supabase-leave-migration.sql` — creates `leave_types` (seeded CL / SL / EL /
+Comp Off / LWP), `holidays`, and `leave_requests`.
+
+### 9.2 Admin → 🌴 Leave
+
+- **Leave requests** — filter by status; Approve / Reject on pending ones.
+  The confirm spells out the consequence: approving means those dates read
+  *On leave* rather than *Absent*.
+- **Holiday calendar** — add a date, a name, optionally scoped to one company
+  and optionally marked *Optional*. A company-specific entry wins over the
+  all-companies one for that entity.
+
+### 9.3 Employees
+
+`/attendance` gains a **Leave** card: pick a type, dates, full or half day,
+an optional reason. They can withdraw their own request while it is still
+pending. The next few upcoming holidays are listed underneath.
+
+### 9.4 How a day is decided
+
+Order matters, and it is deliberate:
+
+| Condition | Status |
+|---|---|
+| Any punch that day | Present (or No check-out) |
+| Public holiday | Holiday |
+| Approved leave | On leave / Half day leave |
+| Optional holiday | Holiday |
+| Not a working day on their shift | Week-off |
+| Anything left | **Absent** |
+
+Someone who punches in on a holiday is **Present**, not Holiday — they
+worked. And a public holiday beats booked leave, so nobody burns a leave day
+on a day the office was shut anyway.
+
+### 9.5 Nobody can approve their own leave
+
+RLS, not just UI:
+
+- An employee may only insert a request **for themselves** and only with
+  `status = 'pending'` — posting `status:'approved'` straight at the REST API
+  is rejected by the policy.
+- They may update their own request only **while it is still pending**, and
+  only into `cancelled`.
+- Approval runs through the admin API on the service_role key, and only acts
+  on a row that is still pending — so a double-click cannot flip an already
+  rejected request to approved.
+
+A half day is constrained to a single date in the database as well as the UI.
+
 ---
 
 ### Vercel Hobby: the 12-function cap
@@ -349,6 +407,9 @@ project sits exactly on that line. Two consolidations keep it there:
 - The attendance admin actions live in `api/admin.js` (prefixed `att_`)
   instead of their own file — it was already the password-gated action router.
 - The shift actions live there too (prefixed `shift_`), for the same reason.
+- The leave and holiday actions live in `api/admin.js` too (`leave_*` /
+  `holiday_*`), and employees read/write their own leave straight through
+  Supabase RLS rather than an endpoint.
 - Selfie punches reuse `/api/attendance-webhook` with a Supabase user token
   rather than adding an endpoint, and the retention sweep rides along with
   `/api/wfh-remind` rather than taking a third cron slot.
