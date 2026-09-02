@@ -262,6 +262,83 @@ The email only annotates a boundary it can stand behind:
 The admin report has no such restriction: it works from the day's real first
 IN and last OUT.
 
+## Step 8 — Selfie attendance for WFH employees
+
+WFH staff clock in and out — and start/end breaks — with a selfie plus a
+**mandatory** GPS fix. These land in the same `attendance_logs` table as the
+biometric punches, so one daily report, one set of emails and one set of
+shift rules cover office and home alike.
+
+### 8.1 Run the migration
+
+Supabase → SQL Editor → `supabase-selfie-migration.sql`. Adds the selfie
+columns to `attendance_logs`, creates the private `selfies` bucket with
+per-user folder policies, and makes `employee_code` nullable (a WFH employee
+may have no biometric reader code at all).
+
+### 8.2 Mark who is WFH
+
+Admin → **👥 Employees** → the 🏠 toggle. The selfie panel only appears for
+people flagged `is_wfh`, and the server rejects a punch from anyone else.
+
+### 8.3 How it works
+
+Employee opens `/attendance` and sees four buttons — **Login**, **Start
+break**, **End break**, **Logout**. Each one asks for location and camera
+together; both must succeed or the punch cannot be made. The photo is
+downscaled to ~640px JPEG in the browser (~60KB) before upload.
+
+Event → direction mapping, which is what keeps first-IN / last-OUT correct:
+
+| Button | Stored as | Direction |
+|---|---|---|
+| Login | `LOGIN` | IN |
+| Start break | `BREAK_OUT` | OUT |
+| End break | `BREAK_IN` | IN |
+| Logout | `LOGOUT` | OUT |
+
+### 8.4 Why this needed no new API function
+
+We are on Vercel Hobby's 12-function limit, so the browser posts to the
+existing `/api/attendance-webhook` with the employee's **own Supabase access
+token** instead of the device key. The endpoint verifies that token against
+Supabase and only then files the punch.
+
+That is also the security model: identity comes from the verified token, not
+the payload, and **the timestamp is taken from the server**, so a punch can
+be neither forged as somebody else nor backdated. The client only supplies
+the event, the photo path and the GPS fix.
+
+Other guards, each covered by a test:
+
+- No location, a null/blank location, or coordinates out of range → refused.
+  (`Number(null)` is `0`, so a blank latitude would otherwise be silently
+  accepted as Null Island — checked explicitly.)
+- A `selfie_path` outside the user's own folder → refused, in the storage
+  policy *and* again in the handler.
+- Not flagged WFH → refused.
+- The same event twice inside 60 seconds → refused as a double-tap, with a
+  partial unique index as the backstop.
+- Employees have **no** update or delete policy on the bucket: once a selfie
+  punch is recorded, the person who made it cannot alter or remove it.
+
+### 8.5 Admin review
+
+Admin → **📸 Selfies**: photo, name, event, time, and the GPS fix as a
+Google Maps link, filterable by date and status, with Approve / Flag. Photos
+are served as 1-hour signed URLs — the bucket is private.
+
+### 8.6 Retention (1GB free tier)
+
+Photos older than **90 days** are deleted and `selfie_path` cleared; the
+attendance row itself is kept forever, so historic reports stay intact.
+
+The sweep is folded into `/api/wfh-remind`, which already runs on both of
+Hobby's two allowed cron slots — a twice-weekly sweep is ample for a 90-day
+window. Override with `SELFIE_RETENTION_DAYS`.
+
+Rough steady state: 24 people × 4 punches × 22 days × 60KB ≈ **380MB**.
+
 ---
 
 ### Vercel Hobby: the 12-function cap
@@ -272,6 +349,9 @@ project sits exactly on that line. Two consolidations keep it there:
 - The attendance admin actions live in `api/admin.js` (prefixed `att_`)
   instead of their own file — it was already the password-gated action router.
 - The shift actions live there too (prefixed `shift_`), for the same reason.
+- Selfie punches reuse `/api/attendance-webhook` with a Supabase user token
+  rather than adding an endpoint, and the retention sweep rides along with
+  `/api/wfh-remind` rather than taking a third cron slot.
 - `api/send-verify.js` and `api/verify-code.js` were merged into
   `api/verify.js`. Both original URLs still work, via rewrites in
   `vercel.json`, so nothing on the front end changed.
