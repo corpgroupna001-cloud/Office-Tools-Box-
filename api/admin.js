@@ -490,6 +490,125 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ success: true });
     }
 
+    // ================= LEAVE & HOLIDAYS =================
+    // Prefixed leave_ / holiday_, folded in here like the att_ and shift_
+    // actions — the Hobby plan is at its 12-function cap.
+    if (String(action).startsWith('leave_') || String(action).startsWith('holiday_')) {
+      const LH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
+      const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...LH, ...(opts.headers || {}) } });
+
+      // ---- Leave ----
+      if (action === 'leave_list') {
+        const status = ['pending', 'approved', 'rejected', 'cancelled'].includes(body.status) ? body.status : null;
+        const [profiles, tRes, rRes] = await Promise.all([
+          sb('profiles?select=id,full_name,email,company&limit=2000').then(r => r.ok ? r.json() : []),
+          sb('leave_types?select=*&order=sort_order.asc'),
+          sb(`leave_requests?select=*&order=created_at.desc&limit=500` + (status ? `&status=eq.${status}` : '')),
+        ]);
+        if (!rRes.ok) return res.status(502).json({ error: 'leave fetch failed', detail: (await rRes.text()).slice(0, 200) });
+        const types = tRes.ok ? await tRes.json() : [];
+        const rows  = await rRes.json();
+        const byId  = new Map(profiles.map(p => [p.id, p]));
+        const typeById = new Map(types.map(t => [t.id, t]));
+
+        const DAY_PART = { full: 'Full day', first_half: 'First half', second_half: 'Second half' };
+        return res.status(200).json({
+          types,
+          requests: rows.map(r => {
+            const p = byId.get(r.user_id);
+            const t = r.leave_type_id ? typeById.get(r.leave_type_id) : null;
+            // Inclusive day count; a half day counts as 0.5.
+            const days = r.day_part === 'full'
+              ? Math.round((new Date(r.end_date) - new Date(r.start_date)) / 86400000) + 1
+              : 0.5;
+            return {
+              ...r,
+              full_name: p ? p.full_name : null,
+              email: p ? p.email : null,
+              company: p ? p.company : null,
+              type_name: t ? t.name : '—',
+              type_code: t ? t.code : null,
+              is_paid: t ? t.is_paid : null,
+              day_part_label: DAY_PART[r.day_part] || r.day_part,
+              days,
+            };
+          }),
+          counts: {
+            pending:  rows.filter(r => r.status === 'pending').length,
+            approved: rows.filter(r => r.status === 'approved').length,
+            rejected: rows.filter(r => r.status === 'rejected').length,
+          },
+        });
+      }
+
+      if (action === 'leave_decide') {
+        const id = String(body.id || '');
+        const decision = body.status;
+        if (!id) return res.status(400).json({ error: 'id required' });
+        if (!['approved', 'rejected'].includes(decision)) {
+          return res.status(400).json({ error: 'status must be approved or rejected' });
+        }
+        // Only a pending request can be decided — stops a double-click
+        // flipping an already-rejected request to approved.
+        const r = await sb(`leave_requests?id=eq.${encodeURIComponent(id)}&status=eq.pending`, {
+          method: 'PATCH', headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({
+            status: decision,
+            decided_by: 'admin',
+            decided_at: new Date().toISOString(),
+            decision_note: body.note ? String(body.note).slice(0, 300) : null,
+          }),
+        });
+        if (!r.ok) return res.status(502).json({ error: 'decision failed', detail: (await r.text()).slice(0, 200) });
+        const updated = await r.json();
+        if (!updated.length) return res.status(409).json({ error: 'not_pending', detail: 'That request has already been decided.' });
+        return res.status(200).json({ success: true, request: updated[0] });
+      }
+
+      // ---- Holidays ----
+      if (action === 'holiday_list') {
+        const year = String(body.year || new Date().getFullYear()).slice(0, 4);
+        const r = await sb(`holidays?select=*&holiday_date=gte.${year}-01-01&holiday_date=lte.${year}-12-31&order=holiday_date.asc`);
+        if (!r.ok) return res.status(502).json({ error: 'holidays fetch failed', detail: (await r.text()).slice(0, 200) });
+        return res.status(200).json({ year, holidays: await r.json() });
+      }
+
+      if (action === 'holiday_save') {
+        const h = body.holiday || {};
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(h.holiday_date || ''))) {
+          return res.status(400).json({ error: 'holiday_date must be YYYY-MM-DD' });
+        }
+        if (!String(h.name || '').trim()) return res.status(400).json({ error: 'Holiday name is required' });
+        const payload = {
+          holiday_date: h.holiday_date,
+          name: String(h.name).trim(),
+          company: h.company ? String(h.company) : null,
+          is_optional: !!h.is_optional,
+        };
+        const r = h.id
+          ? await sb(`holidays?id=eq.${encodeURIComponent(h.id)}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(payload) })
+          : await sb('holidays', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify(payload) });
+        if (!r.ok) {
+          const detail = (await r.text()).slice(0, 250);
+          const dup = /duplicate key|unique/i.test(detail);
+          return res.status(dup ? 409 : 502).json({
+            error: dup ? 'A holiday is already set for that date.' : 'save failed', detail,
+          });
+        }
+        return res.status(200).json({ success: true, holiday: (await r.json())[0] || null });
+      }
+
+      if (action === 'holiday_delete') {
+        const id = String(body.id || '');
+        if (!id) return res.status(400).json({ error: 'id required' });
+        const r = await sb(`holidays?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: { Prefer: 'return=representation' } });
+        if (!r.ok) return res.status(502).json({ error: 'delete failed', detail: (await r.text()).slice(0, 200) });
+        return res.status(200).json({ success: true, deleted: (await r.json()).length });
+      }
+
+      return res.status(400).json({ error: 'Unknown leave action' });
+    }
+
     // ================= SHIFTS =================
     // Named shift templates + assignment. Lives here (prefixed shift_) for the
     // same reason the attendance actions do: Vercel Hobby caps a deployment at
@@ -609,10 +728,14 @@ module.exports = async function handler(req, res) {
     if (action === 'att_daily_report') {
       const date = String(body.date || istToday()).slice(0, 10);
 
-      const [profiles, logsRes, shiftsRes] = await Promise.all([
+      const [profiles, logsRes, shiftsRes, holRes, leaveRes] = await Promise.all([
         loadProfiles(),
         sb(`attendance_logs?log_date=eq.${date}&select=*&order=log_datetime.asc&limit=5000`),
         sb('shifts?select=*'),
+        sb(`holidays?holiday_date=eq.${date}&select=*`),
+        // Approved leave whose range covers this date.
+        sb(`leave_requests?status=eq.approved&start_date=lte.${date}&end_date=gte.${date}` +
+           `&select=user_id,leave_type_id,day_part`),
       ]);
       // Shifts are optional — if the migration hasn't been run the report
       // still works, just without late/early flags.
@@ -622,6 +745,23 @@ module.exports = async function handler(req, res) {
       // The date is a plain IST calendar day; anchor it at midday so the
       // weekday lookup can't slip either side of the timezone boundary.
       const dayAnchor = new Date(`${date}T12:00:00+05:30`);
+
+      // Leave and holidays are optional too — if those migrations haven't run
+      // the report still works, it just can't tell leave from absence.
+      const holidays = holRes.ok ? await holRes.json() : [];
+      const leaveRows = leaveRes.ok ? await leaveRes.json() : [];
+      const leaveByUser = new Map(leaveRows.map(l => [l.user_id, l]));
+      let leaveTypeName = new Map();
+      if (leaveRows.length) {
+        try {
+          const lt = await sb('leave_types?select=id,name,code');
+          if (lt.ok) leaveTypeName = new Map((await lt.json()).map(x => [x.id, x]));
+        } catch { /* fall back to a bare "On leave" */ }
+      }
+      // A company-specific holiday beats the all-companies one for that entity.
+      const holidayFor = (company) =>
+        holidays.find(h => h.company && h.company === company) ||
+        holidays.find(h => !h.company) || null;
       if (!logsRes.ok) return res.status(502).json({ error: 'logs fetch failed', detail: (await logsRes.text()).slice(0, 200) });
       const logs = await logsRes.json();
 
@@ -675,15 +815,26 @@ module.exports = async function handler(req, res) {
           const shift = (p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
           const sh = evaluateShift({ shift, firstIn: s.first_in, lastOut: s.last_out, date: dayAnchor });
 
+          const holiday = holidayFor(p.company);
+          const leave   = leaveByUser.get(p.id) || null;
+          const leaveType = leave && leave.leave_type_id ? leaveTypeName.get(leave.leave_type_id) : null;
+
+          // Order matters. Someone who actually punched is Present even on a
+          // holiday. Otherwise: holiday, then approved leave, then week-off,
+          // and only what is left over is a real absence.
           let status = 'Absent';
-          if (punches.length) status = (s.first_in && !s.last_out) ? 'No check-out' : 'Present';
-          // A non-working day is a week-off, not an absence — otherwise every
-          // Sunday reads as 24 people failing to turn up.
-          else if (sh.isWorkingDay === false) status = 'Week-off';
+          if (punches.length)                    status = (s.first_in && !s.last_out) ? 'No check-out' : 'Present';
+          else if (holiday && !holiday.is_optional) status = 'Holiday';
+          else if (leave)                        status = leave.day_part === 'full' ? 'On leave' : 'Half day leave';
+          else if (holiday)                      status = 'Holiday';
+          else if (sh.isWorkingDay === false)    status = 'Week-off';
 
           return {
             user_id: p.id, full_name: p.full_name, email: p.email,
             company: p.company, employee_code: p.employee_code || null,
+            holiday_name: holiday ? holiday.name : null,
+            leave_type:   leaveType ? leaveType.name : (leave ? 'Leave' : null),
+            leave_part:   leave ? leave.day_part : null,
             shift_name:   shift ? shift.name : null,
             shift_window: sh.window,
             shift_assigned: !!(p.shift_id && shiftById.get(p.shift_id)),
@@ -696,7 +847,8 @@ module.exports = async function handler(req, res) {
           };
         })
         .sort((a, b) => {
-          const rank = v => v === 'Present' ? 0 : v === 'No check-out' ? 1 : v === 'Absent' ? 2 : 3;
+          const rank = v => v === 'Present' ? 0 : v === 'No check-out' ? 1 : v === 'Absent' ? 2
+                         : v === 'On leave' || v === 'Half day leave' ? 3 : 4;
           return rank(a.status) - rank(b.status)
             || String(a.full_name || '').localeCompare(String(b.full_name || ''));
         });
@@ -712,12 +864,15 @@ module.exports = async function handler(req, res) {
         date,
         rows,
         unknown,
+        holiday: holidays.length ? holidays[0].name : null,
         totals: {
           employees:  rows.length,
           present:    rows.filter(r => r.status === 'Present').length,
           no_checkout: rows.filter(r => r.status === 'No check-out').length,
           absent:     rows.filter(r => r.status === 'Absent').length,
           week_off:   rows.filter(r => r.status === 'Week-off').length,
+          on_leave:   rows.filter(r => r.status === 'On leave' || r.status === 'Half day leave').length,
+          holiday:    rows.filter(r => r.status === 'Holiday').length,
           late:       rows.filter(r => r.is_late).length,
           early_out:  rows.filter(r => r.is_early_out).length,
           no_shift:   rows.filter(r => !r.shift_assigned).length,
