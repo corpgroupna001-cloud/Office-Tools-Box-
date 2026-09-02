@@ -14,6 +14,13 @@
 //     "downloaded_at": "2026-09-02 08:46:00",
 //     "device_sn": "SN-009128", "device_name": "Main Gate" }
 //
+// IN/OUT: the Realtime export does NOT actually send a direction — its
+// payload is only employee_code, employee_name, log_datetime, downloaded_at,
+// device_sn and device_name. So when no direction arrives we DERIVE it from
+// the punch's position in that employee's IST day (1st = IN, 2nd = OUT, …)
+// and flag the row direction_derived. An explicit direction from the device
+// always wins, so this needs no change if the vendor ever starts sending one.
+//
 // It is deliberately forgiving about shape: keys are matched
 // case/underscore-insensitively, a single object or an array (or {data:[…]})
 // are both accepted, and IN/OUT can arrive as `direction`, as separate
@@ -241,14 +248,57 @@ module.exports = async function handler(req, res) {
       });
     }
 
+    // ---- 2b. Derive IN/OUT for anything the device didn't label ----
+    // Counted by position within the employee's IST day, using both what is
+    // already stored and the earlier records in this same batch.
+    const undirected = rows.filter(r => r.insert.direction === 'UNKNOWN');
+    if (undirected.length) {
+      const groups = new Map();
+      for (const r of undirected) {
+        const key = `${r.insert.employee_code}|${r.insert.log_date}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(r);
+      }
+
+      await Promise.all([...groups.entries()].map(async ([key, list]) => {
+        const sep  = key.lastIndexOf('|');
+        const code = key.slice(0, sep);
+        const day  = key.slice(sep + 1);
+
+        let stored = [];
+        try {
+          const r = await fetch(
+            `${SUPABASE_URL}/rest/v1/attendance_logs` +
+            `?employee_code=eq.${encodeURIComponent(code)}&log_date=eq.${day}` +
+            `&select=log_datetime&limit=1000`,
+            { headers: H }
+          );
+          if (r.ok) stored = (await r.json()).map(x => new Date(x.log_datetime).getTime());
+        } catch { /* fall back to batch-only ordering */ }
+
+        // Compare against absolute instants, so an out-of-order or replayed
+        // batch still lands on the same parity as a live sequence would.
+        list.sort((a, b) => new Date(a.insert.log_datetime) - new Date(b.insert.log_datetime));
+        for (const item of list) {
+          const t = new Date(item.insert.log_datetime).getTime();
+          const priors = stored.filter(x => x < t).length;
+          item.insert.direction = priors % 2 === 0 ? 'IN' : 'OUT';
+          item.insert.direction_derived = true;
+          stored.push(t);
+        }
+      }));
+    }
+
     if (!rows.length) {
       return res.status(200).json({ success: true, received: records.length, stored: 0, emailed: 0, rejected });
     }
 
     // ---- 3. One insert for the whole batch. ON CONFLICT DO NOTHING means a
     //         replayed export inserts nothing and therefore emails nothing.
+//         Keyed on (employee_code, log_datetime, device_sn) — not direction,
+//         which is derived and can legitimately be recomputed.
     const insRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/attendance_logs?on_conflict=employee_code,log_datetime,direction,device_sn`,
+      `${SUPABASE_URL}/rest/v1/attendance_logs?on_conflict=employee_code,log_datetime,device_sn`,
       {
         method: 'POST',
         headers: { ...H, Prefer: 'return=representation,resolution=ignore-duplicates' },
@@ -263,7 +313,9 @@ module.exports = async function handler(req, res) {
     const inserted = await insRes.json();
 
     // Re-attach the resolved profile to each freshly inserted row.
-    const keyOf = r => `${r.employee_code}|${new Date(r.log_datetime).getTime()}|${r.direction}|${r.device_sn || ''}`;
+    // Must match the unique index: direction is derived and therefore not
+    // part of a punch's identity.
+    const keyOf = r => `${r.employee_code}|${new Date(r.log_datetime).getTime()}|${r.device_sn || ''}`;
     const metaByKey = new Map(rows.map(r => [keyOf(r.insert), r]));
 
     const toEmail = inserted

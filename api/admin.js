@@ -530,7 +530,12 @@ module.exports = async function handler(req, res) {
         bucket.get(key).push(l);
       }
 
-      const summarize = (punches) => {
+      const summarize = (unordered) => {
+        // Sort here rather than trusting the caller's query order — first-IN /
+        // last-OUT are only meaningful on a chronological list, and that is
+        // too important to leave depending on what the REST layer returns.
+        const punches = unordered.slice()
+          .sort((a, b) => new Date(a.log_datetime) - new Date(b.log_datetime));
         const ins  = punches.filter(p => p.direction === 'IN');
         const outs = punches.filter(p => p.direction === 'OUT');
         // If the device never told us the direction, fall back to
