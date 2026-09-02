@@ -299,6 +299,7 @@
                 <button data-tab="wfh"       class="admin-tab" type="button">📷 WFH Check-ins</button>
                 <button data-tab="friday"    class="admin-tab" type="button">📅 Friday Report</button>
                 <button data-tab="attendance" class="admin-tab" type="button">🕐 Attendance</button>
+                <button data-tab="shifts"     class="admin-tab" type="button">⏰ Shifts</button>
             </div>
 
             <!-- Filters (RESULTS TAB) -->
@@ -600,6 +601,7 @@
                                 <tr>
                                     <th>Employee</th>
                                     <th>Code</th>
+                                    <th>Shift</th>
                                     <th>Status</th>
                                     <th>First IN</th>
                                     <th>Last OUT</th>
@@ -630,9 +632,80 @@
                     </div>
                 </div>
             </div>
+
+            <!-- SHIFTS TAB -->
+            <div id="shifts-panel" class="hidden">
+                <div class="glass rounded-2xl p-4 mb-6 flex flex-wrap gap-3 items-center">
+                    <button id="shift-new" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">+ New Shift</button>
+                    <button id="shift-refresh" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/10">Refresh</button>
+                    <div class="flex-1"></div>
+                    <span id="shift-unassigned" class="text-xs font-bold text-slate-400"></span>
+                </div>
+
+                <div class="section-head mb-3"><h3>⏰ Shift templates</h3><span class="sub">Define once, assign to people below</span></div>
+                <div id="shift-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8"></div>
+
+                <div class="section-head mb-3"><h3>👥 Who works which shift</h3><span class="sub">Changes save immediately</span></div>
+                <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
+                    <input id="shift-emp-search" type="text" placeholder="Search employee…"
+                        class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
+                    <select id="shift-bulk-select" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none"></select>
+                    <button id="shift-bulk-apply" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold text-blue-200 hover:bg-blue-500/10">Apply to all shown</button>
+                </div>
+                <div class="glass rounded-2xl overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead><tr><th>Employee</th><th>Company</th><th>Shift</th></tr></thead>
+                            <tbody id="shift-emp-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 
+
+    <!-- Shift editor modal -->
+    <div id="shift-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);">
+        <div class="glass-strong w-full max-w-lg rounded-3xl p-8">
+            <h3 id="shift-modal-title" class="text-2xl font-black text-white mb-6 text-center">New Shift</h3>
+            <label class="text-[10px] uppercase tracking-widest text-slate-400 font-black block mb-2">Shift name</label>
+            <input id="shift-f-name" type="text" placeholder="General"
+                class="glass w-full px-4 py-3 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-400/40 font-bold mb-4">
+            <div class="grid grid-cols-2 gap-3 mb-4">
+                <div>
+                    <label class="text-[10px] uppercase tracking-widest text-slate-400 font-black block mb-2">Starts</label>
+                    <input id="shift-f-start" type="time" class="glass w-full px-4 py-3 rounded-xl text-white font-bold focus:outline-none" style="color-scheme: dark;">
+                </div>
+                <div>
+                    <label class="text-[10px] uppercase tracking-widest text-slate-400 font-black block mb-2">Ends</label>
+                    <input id="shift-f-end" type="time" class="glass w-full px-4 py-3 rounded-xl text-white font-bold focus:outline-none" style="color-scheme: dark;">
+                </div>
+            </div>
+            <p id="shift-f-overnight" class="text-amber-300 text-xs font-bold mb-4 hidden">🌙 Ends the next morning — treated as an overnight shift.</p>
+            <div class="grid grid-cols-2 gap-3 mb-4">
+                <div>
+                    <label class="text-[10px] uppercase tracking-widest text-slate-400 font-black block mb-2">Late grace (min)</label>
+                    <input id="shift-f-grace" type="number" min="0" max="240" value="10" class="glass w-full px-4 py-3 rounded-xl text-white font-bold focus:outline-none">
+                </div>
+                <div>
+                    <label class="text-[10px] uppercase tracking-widest text-slate-400 font-black block mb-2">Early-out grace (min)</label>
+                    <input id="shift-f-outgrace" type="number" min="0" max="240" value="10" class="glass w-full px-4 py-3 rounded-xl text-white font-bold focus:outline-none">
+                </div>
+            </div>
+            <label class="text-[10px] uppercase tracking-widest text-slate-400 font-black block mb-2">Working days</label>
+            <div id="shift-f-days" class="flex flex-wrap gap-2 mb-4"></div>
+            <label class="flex items-center gap-2 mb-6 cursor-pointer">
+                <input id="shift-f-default" type="checkbox" class="w-4 h-4">
+                <span class="text-sm font-bold text-slate-200">Use for anyone without a shift assigned</span>
+            </label>
+            <div class="flex gap-3">
+                <button id="shift-cancel" type="button" class="glass flex-1 text-white font-bold py-3 rounded-xl">Cancel</button>
+                <button id="shift-save" type="button" class="btn-primary flex-1 text-white font-black py-3 rounded-xl">Save</button>
+            </div>
+            <p id="shift-err" class="text-rose-300 text-sm font-bold mt-3 hidden text-center"></p>
+        </div>
+    </div>
     <!-- Edit Employee modal -->
     <div id="edit-emp-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);">
         <div class="glass-strong w-full max-w-md rounded-3xl p-8">
@@ -729,6 +802,7 @@
         let attReport = null;
         let attFeed = [];
         let attUnmapped = null;
+        let shiftData = null;
         let currentTab = 'results';
         let editingEmployee = null;
         let deletingEmployee = null;
@@ -1154,11 +1228,13 @@
                 document.getElementById('wfh-panel').classList.toggle('hidden',       currentTab !== 'wfh');
                 document.getElementById('friday-panel').classList.toggle('hidden',    currentTab !== 'friday');
                 document.getElementById('attendance-panel').classList.toggle('hidden', currentTab !== 'attendance');
+                document.getElementById('shifts-panel').classList.toggle('hidden',     currentTab !== 'shifts');
                 if (currentTab === 'employees' && allEmployees.length === 0) loadEmployees();
                 if (currentTab === 'quizzes'   && allQuizzes.length === 0)   loadQuizzes();
                 if (currentTab === 'wfh'       && allWfh.length === 0)       loadWfh();
                 if (currentTab === 'friday'    && allFriday.length === 0)    loadFriday();
                 if (currentTab === 'attendance' && !attReport)               loadAttendance();
+                if (currentTab === 'shifts'     && !shiftData)               loadShifts();
             });
         });
 
@@ -1908,7 +1984,7 @@
             const date = dateInput.value;
 
             document.getElementById('att-tbody').innerHTML =
-                '<tr><td colspan="8" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading attendance…</td></tr>';
+                '<tr><td colspan="9" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading attendance…</td></tr>';
             try {
                 const [report, feed, unmapped] = await Promise.all([
                     attApi({ action: 'daily_report', date }),
@@ -1921,14 +1997,20 @@
                 renderAttendance();
             } catch (e) {
                 document.getElementById('att-tbody').innerHTML =
-                    `<tr><td colspan="8" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
+                    `<tr><td colspan="9" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
             }
+        }
+
+        function attMins(m) {
+            const n = Math.abs(Math.round(Number(m) || 0));
+            return n < 60 ? `${n}m` : `${Math.floor(n / 60)}h ${String(n % 60).padStart(2, '0')}m`;
         }
 
         function attBadge(status) {
             if (status === 'Present')      return '<span class="text-emerald-300 font-black">✅ Present</span>';
             if (status === 'No check-out') return '<span class="text-amber-300 font-black">⏳ No check-out</span>';
             if (status === 'Unmapped')     return '<span class="text-amber-300 font-black">⚠️ Unmapped</span>';
+            if (status === 'Week-off')     return '<span class="text-slate-400 font-black">🌙 Week-off</span>';
             return '<span class="text-rose-300 font-black">❌ Absent</span>';
         }
 
@@ -1941,9 +2023,13 @@
                 { label: 'Present',      value: t.present ?? 0,        cls: 'emerald' },
                 { label: 'No check-out', value: t.no_checkout ?? 0,    cls: 'rose'    },
                 { label: 'Absent',       value: t.absent ?? 0,         cls: 'rose'    },
+                { label: 'Late in',      value: t.late ?? 0,           cls: (t.late ? 'rose' : 'emerald') },
+                { label: 'Early out',    value: t.early_out ?? 0,      cls: (t.early_out ? 'rose' : 'emerald') },
+                { label: 'Week-off',     value: t.week_off ?? 0,       cls: 'slate'   },
                 { label: 'Punches',      value: t.punches ?? 0,        cls: 'slate'   },
                 { label: 'Mail issues',  value: t.mail_problem ?? 0,   cls: (t.mail_problem ? 'rose' : 'emerald') },
             ];
+            document.getElementById('att-summary').className = 'grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-6';
             document.getElementById('att-summary').innerHTML = tiles.map(x => `
                 <div class="stat-card ${x.cls}">
                     <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">${x.label}</p>
@@ -1992,9 +2078,14 @@
                         <td class="font-bold text-white">${escapeHtml(r.full_name || '—')}<br>
                             <span class="text-slate-400 text-xs font-medium">${escapeHtml(r.email || r.company || '')}</span></td>
                         <td class="text-slate-300 font-bold">${escapeHtml(r.employee_code || '—')}</td>
+                        <td class="text-slate-300 font-bold">${r.shift_name
+                            ? `${escapeHtml(r.shift_name)}<br><span class="text-slate-500 text-xs font-bold">${escapeHtml(r.shift_window || '')}${r.shift_assigned ? '' : ' · default'}</span>`
+                            : '<span class="text-slate-500">— none —</span>'}</td>
                         <td>${attBadge(r.status)}</td>
-                        <td class="text-emerald-200 font-bold">${escapeHtml(r.first_in_time || '—')}</td>
-                        <td class="text-rose-200 font-bold">${escapeHtml(r.last_out_time || '—')}</td>
+                        <td class="text-emerald-200 font-bold">${escapeHtml(r.first_in_time || '—')}
+                            ${r.is_late ? `<br><span class="text-rose-300 text-xs font-black">▲ ${attMins(r.late_minutes)} late</span>` : ''}</td>
+                        <td class="text-rose-200 font-bold">${escapeHtml(r.last_out_time || '—')}
+                            ${r.is_early_out ? `<br><span class="text-amber-300 text-xs font-black">▼ ${attMins(r.early_out_minutes)} early</span>` : ''}</td>
                         <td class="text-white font-black">${escapeHtml(r.duration || '—')}</td>
                         <td class="text-slate-300 font-bold">${r.punches ?? 0}</td>
                         <td>${r.mail_problem
@@ -2086,16 +2177,20 @@
                 return;
             }
             const rows = [
-                ['Date', 'Employee', 'Email', 'Company', 'Employee Code', 'Status', 'First IN', 'Last OUT', 'Hours', 'Punches', 'Devices', 'Mail Sent', 'Mail Issues'],
+                ['Date', 'Employee', 'Email', 'Company', 'Employee Code', 'Shift', 'Shift Window', 'Status',
+                 'First IN', 'Late By (min)', 'Last OUT', 'Early Out By (min)', 'Hours', 'Punches', 'Devices', 'Mail Sent', 'Mail Issues'],
                 ...(attReport.rows || []).map(r => [
                     attReport.date, r.full_name || '', r.email || '', r.company || '', r.employee_code || '',
-                    r.status, r.first_in_time || '', r.last_out_time || '', r.duration || '',
-                    r.punches ?? 0, (r.devices || []).join(' | '), r.mail_sent ?? 0, r.mail_problem ?? 0
+                    r.shift_name || '', r.shift_window || '', r.status,
+                    r.first_in_time || '', r.is_late ? (r.late_minutes ?? '') : '',
+                    r.last_out_time || '', r.is_early_out ? (r.early_out_minutes ?? '') : '',
+                    r.duration || '', r.punches ?? 0, (r.devices || []).join(' | '), r.mail_sent ?? 0, r.mail_problem ?? 0
                 ]),
                 ...(attReport.unknown || []).map(u => [
                     attReport.date, u.employee_name || '', '', '', u.employee_code,
-                    'Unmapped', u.first_in_time || '', u.last_out_time || '', u.duration || '',
-                    u.punches ?? 0, (u.devices || []).join(' | '), u.mail_sent ?? 0, u.mail_problem ?? 0
+                    '', '', 'Unmapped',
+                    u.first_in_time || '', '', u.last_out_time || '', '',
+                    u.duration || '', u.punches ?? 0, (u.devices || []).join(' | '), u.mail_sent ?? 0, u.mail_problem ?? 0
                 ])
             ];
             const csv = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -2113,6 +2208,254 @@
             attReport = null; loadAttendance();
         });
         document.getElementById('att-search').addEventListener('input', () => { if (attReport) renderAttendance(); });
+
+        // ================= SHIFTS =================
+        const DAY_NAMES = [null, 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        let shiftEditingId = null;
+
+        async function shiftApi(payload) {
+            const r = await fetch('/api/admin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: adminPassword, ...payload })
+            });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.error || data.detail || 'Request failed');
+            return data;
+        }
+
+        function hhmm(t) { return String(t || '').slice(0, 5); }
+
+        async function loadShifts() {
+            if (!adminPassword) return;
+            document.getElementById('shift-cards').innerHTML =
+                '<p class="text-slate-400 font-bold animate-pulse col-span-full">Loading shifts…</p>';
+            try {
+                shiftData = await shiftApi({ action: 'shift_list' });
+                renderShifts();
+            } catch (e) {
+                document.getElementById('shift-cards').innerHTML =
+                    `<p class="text-rose-300 font-bold col-span-full">${escapeHtml(e.message)}</p>`;
+            }
+        }
+
+        function renderShifts() {
+            if (!shiftData) return;
+            const shifts = shiftData.shifts || [];
+
+            // ---- templates ----
+            document.getElementById('shift-cards').innerHTML = shifts.length ? shifts.map(sh => `
+                <div class="glass rounded-2xl p-5">
+                    <div class="flex items-start justify-between mb-2">
+                        <div>
+                            <p class="text-white font-black text-lg">${escapeHtml(sh.name)}
+                                ${sh.is_default ? '<span class="text-[10px] uppercase tracking-widest text-blue-300 font-black ml-1">default</span>' : ''}</p>
+                            <p class="text-slate-300 font-bold text-sm">${escapeHtml(hhmm(sh.start_time))} – ${escapeHtml(hhmm(sh.end_time))}
+                                ${hhmm(sh.end_time) <= hhmm(sh.start_time) ? '<span title="ends next morning">🌙</span>' : ''}</p>
+                        </div>
+                        <span class="text-xs font-black text-slate-400">${sh.assigned_count} ${sh.assigned_count === 1 ? 'person' : 'people'}</span>
+                    </div>
+                    <p class="text-slate-400 text-xs font-bold mb-1">${escapeHtml(sh.working_days_label || '—')}</p>
+                    <p class="text-slate-500 text-xs font-bold mb-4">Grace ${sh.grace_minutes}m in · ${sh.early_out_grace_minutes}m out</p>
+                    <div class="flex gap-2">
+                        <button type="button" data-shift-edit="${sh.id}" class="glass flex-1 py-2 rounded-xl text-xs font-bold hover:bg-white/10">Edit</button>
+                        <button type="button" data-shift-del="${sh.id}" class="glass flex-1 py-2 rounded-xl text-xs font-bold text-rose-300 hover:bg-rose-500/10">Delete</button>
+                    </div>
+                </div>`).join('')
+                : '<p class="text-slate-400 font-bold col-span-full">No shifts yet — create one to start flagging late arrivals.</p>';
+
+            const un = shiftData.unassigned || 0;
+            document.getElementById('shift-unassigned').textContent = un
+                ? `${un} employee${un === 1 ? '' : 's'} without a shift — the default applies to them`
+                : 'Every employee has a shift';
+
+            // ---- bulk selector ----
+            const opts = '<option value="">— Assign shift —</option>'
+                + shifts.map(sh => `<option value="${sh.id}">${escapeHtml(sh.name)} (${escapeHtml(hhmm(sh.start_time))}–${escapeHtml(hhmm(sh.end_time))})</option>`).join('')
+                + '<option value="__none__">No shift</option>';
+            document.getElementById('shift-bulk-select').innerHTML = opts;
+
+            renderShiftEmployees();
+        }
+
+        function shiftVisibleEmployees() {
+            const q = document.getElementById('shift-emp-search').value.trim().toLowerCase();
+            const list = (shiftData.employees || []);
+            return q ? list.filter(e => [e.full_name, e.email, e.company].some(v => String(v || '').toLowerCase().includes(q))) : list;
+        }
+
+        function renderShiftEmployees() {
+            const shifts = shiftData.shifts || [];
+            const rows = shiftVisibleEmployees();
+            document.getElementById('shift-emp-tbody').innerHTML = rows.length ? rows.map(e => `
+                <tr>
+                    <td class="font-bold text-white">${escapeHtml(e.full_name || '—')}<br>
+                        <span class="text-slate-400 text-xs font-medium">${escapeHtml(e.email || '')}</span></td>
+                    <td class="text-slate-300 font-bold">${escapeHtml(e.company || '—')}</td>
+                    <td>
+                        <select data-shift-for="${escapeHtml(e.id)}" class="glass px-3 py-2 rounded-xl text-sm font-bold focus:outline-none min-w-[190px]">
+                            <option value="__none__"${!e.shift_id ? ' selected' : ''}>— No shift —</option>
+                            ${shifts.map(sh => `<option value="${sh.id}"${String(e.shift_id) === String(sh.id) ? ' selected' : ''}>${escapeHtml(sh.name)} (${escapeHtml(hhmm(sh.start_time))}–${escapeHtml(hhmm(sh.end_time))})</option>`).join('')}
+                        </select>
+                    </td>
+                </tr>`).join('')
+                : '<tr><td colspan="3" class="p-8 text-center text-slate-400 font-bold">No matching employees.</td></tr>';
+        }
+
+        // ---- modal ----
+        function shiftDayChips(selected) {
+            document.getElementById('shift-f-days').innerHTML = [1,2,3,4,5,6,7].map(d => `
+                <button type="button" data-day="${d}"
+                    class="px-3 py-2 rounded-xl text-xs font-black transition-all ${selected.includes(d) ? 'btn-primary text-white' : 'glass text-slate-300'}">
+                    ${DAY_NAMES[d]}
+                </button>`).join('');
+        }
+        function shiftSelectedDays() {
+            return [...document.querySelectorAll('#shift-f-days button')]
+                .filter(b => b.classList.contains('btn-primary'))
+                .map(b => Number(b.dataset.day));
+        }
+        function openShiftModal(sh) {
+            shiftEditingId = sh ? sh.id : null;
+            document.getElementById('shift-modal-title').textContent = sh ? 'Edit Shift' : 'New Shift';
+            document.getElementById('shift-f-name').value = sh ? sh.name : '';
+            document.getElementById('shift-f-start').value = sh ? hhmm(sh.start_time) : '09:30';
+            document.getElementById('shift-f-end').value = sh ? hhmm(sh.end_time) : '18:30';
+            document.getElementById('shift-f-grace').value = sh ? sh.grace_minutes : 10;
+            document.getElementById('shift-f-outgrace').value = sh ? sh.early_out_grace_minutes : 10;
+            document.getElementById('shift-f-default').checked = sh ? !!sh.is_default : false;
+            shiftDayChips(sh ? (sh.working_days || []).map(Number) : [1,2,3,4,5,6]);
+            document.getElementById('shift-err').classList.add('hidden');
+            shiftCheckOvernight();
+            const m = document.getElementById('shift-modal');
+            m.classList.remove('hidden'); m.classList.add('flex');
+        }
+        function closeShiftModal() {
+            const m = document.getElementById('shift-modal');
+            m.classList.add('hidden'); m.classList.remove('flex');
+        }
+        function shiftCheckOvernight() {
+            const a = document.getElementById('shift-f-start').value;
+            const b = document.getElementById('shift-f-end').value;
+            document.getElementById('shift-f-overnight').classList.toggle('hidden', !(a && b && b <= a));
+        }
+
+        document.getElementById('shift-new').addEventListener('click', () => openShiftModal(null));
+        document.getElementById('shift-refresh').addEventListener('click', () => { shiftData = null; loadShifts(); });
+        document.getElementById('shift-cancel').addEventListener('click', closeShiftModal);
+        document.getElementById('shift-f-start').addEventListener('change', shiftCheckOvernight);
+        document.getElementById('shift-f-end').addEventListener('change', shiftCheckOvernight);
+        document.getElementById('shift-emp-search').addEventListener('input', () => { if (shiftData) renderShiftEmployees(); });
+
+        document.getElementById('shift-f-days').addEventListener('click', ev => {
+            const b = ev.target.closest('[data-day]');
+            if (!b) return;
+            const on = b.classList.contains('btn-primary');
+            b.classList.toggle('btn-primary', !on);
+            b.classList.toggle('text-white', !on);
+            b.classList.toggle('glass', on);
+            b.classList.toggle('text-slate-300', on);
+        });
+
+        document.getElementById('shift-save').addEventListener('click', async () => {
+            const err = document.getElementById('shift-err');
+            const btn = document.getElementById('shift-save');
+            const payload = {
+                id: shiftEditingId || undefined,
+                name: document.getElementById('shift-f-name').value.trim(),
+                start_time: document.getElementById('shift-f-start').value,
+                end_time: document.getElementById('shift-f-end').value,
+                grace_minutes: Number(document.getElementById('shift-f-grace').value) || 0,
+                early_out_grace_minutes: Number(document.getElementById('shift-f-outgrace').value) || 0,
+                working_days: shiftSelectedDays(),
+                is_default: document.getElementById('shift-f-default').checked,
+            };
+            btn.disabled = true; btn.textContent = 'Saving…';
+            try {
+                await shiftApi({ action: 'shift_save', shift: payload });
+                closeShiftModal();
+                shiftData = null;
+                await loadShifts();
+            } catch (e) {
+                err.textContent = e.message;
+                err.classList.remove('hidden');
+            } finally {
+                btn.disabled = false; btn.textContent = 'Save';
+            }
+        });
+
+        document.getElementById('shift-cards').addEventListener('click', async ev => {
+            const edit = ev.target.closest('[data-shift-edit]');
+            const del  = ev.target.closest('[data-shift-del]');
+            if (edit) {
+                const sh = (shiftData.shifts || []).find(x => String(x.id) === edit.dataset.shiftEdit);
+                if (sh) openShiftModal(sh);
+                return;
+            }
+            if (del) {
+                const sh = (shiftData.shifts || []).find(x => String(x.id) === del.dataset.shiftDel);
+                if (!sh) return;
+                const ok = await wsDialog.confirm({
+                    icon: '⏰', danger: true, title: `Delete "${escapeHtml(sh.name)}"?`,
+                    message: sh.assigned_count
+                        ? `<b>${sh.assigned_count}</b> employee${sh.assigned_count === 1 ? '' : 's'} on this shift will be left without one. Attendance history is not affected.`
+                        : 'Attendance history is not affected.',
+                    okText: 'Delete'
+                });
+                if (!ok) return;
+                try {
+                    await shiftApi({ action: 'shift_delete', id: sh.id });
+                    shiftData = null;
+                    await loadShifts();
+                } catch (e) {
+                    wsDialog.alert({ icon: '⚠️', danger: true, title: 'Could not delete', message: escapeHtml(e.message) });
+                }
+            }
+        });
+
+        // Per-employee assignment — saves on change.
+        document.getElementById('shift-emp-tbody').addEventListener('change', async ev => {
+            const sel = ev.target.closest('[data-shift-for]');
+            if (!sel) return;
+            const userId = sel.dataset.shiftFor;
+            const val = sel.value === '__none__' ? null : sel.value;
+            sel.disabled = true;
+            try {
+                await shiftApi({ action: 'shift_assign', user_ids: [userId], shift_id: val });
+                const emp = (shiftData.employees || []).find(e => e.id === userId);
+                if (emp) emp.shift_id = val ? Number(val) : null;
+                // Refresh the headcount badges without losing the search box.
+                const fresh = await shiftApi({ action: 'shift_list' });
+                shiftData.shifts = fresh.shifts; shiftData.unassigned = fresh.unassigned;
+                renderShifts();
+            } catch (e) {
+                wsDialog.alert({ icon: '⚠️', danger: true, title: 'Could not assign shift', message: escapeHtml(e.message) });
+                loadShifts();
+            } finally {
+                sel.disabled = false;
+            }
+        });
+
+        document.getElementById('shift-bulk-apply').addEventListener('click', async () => {
+            const val = document.getElementById('shift-bulk-select').value;
+            if (!val) { wsDialog.alert({ icon: 'ℹ️', title: 'Pick a shift', message: 'Choose which shift to apply first.' }); return; }
+            const ids = shiftVisibleEmployees().map(e => e.id);
+            if (!ids.length) return;
+            const label = document.getElementById('shift-bulk-select').selectedOptions[0].text;
+            const ok = await wsDialog.confirm({
+                icon: '⏰', title: 'Apply to everyone shown?',
+                message: `<b>${ids.length}</b> employee${ids.length === 1 ? '' : 's'} will be set to <b>${escapeHtml(label)}</b>.`,
+                okText: 'Apply'
+            });
+            if (!ok) return;
+            try {
+                await shiftApi({ action: 'shift_assign', user_ids: ids, shift_id: val === '__none__' ? null : val });
+                shiftData = null;
+                await loadShifts();
+            } catch (e) {
+                wsDialog.alert({ icon: '⚠️', danger: true, title: 'Bulk assign failed', message: escapeHtml(e.message) });
+            }
+        });
 
         gatePassword.focus();
     </script>
