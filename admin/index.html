@@ -298,6 +298,7 @@
                 <button data-tab="employees" class="admin-tab" type="button">👥 Employees</button>
                 <button data-tab="wfh"       class="admin-tab" type="button">📷 WFH Check-ins</button>
                 <button data-tab="friday"    class="admin-tab" type="button">📅 Friday Report</button>
+                <button data-tab="attendance" class="admin-tab" type="button">🕐 Attendance</button>
             </div>
 
             <!-- Filters (RESULTS TAB) -->
@@ -564,6 +565,71 @@
                 </div>
                 <p class="text-slate-400 text-xs font-bold mt-4 text-center">⚠️ Policy: Friday typing test must be submitted between <span class="text-white">5:00 PM – 8:00 PM</span>. Missing the typing test or WFH device check videos is a violation — <span class="text-rose-300">1 day salary cut</span>.</p>
             </div>
+
+            <!-- ATTENDANCE TAB -->
+            <div id="attendance-panel" class="hidden">
+                <div class="glass rounded-2xl p-4 mb-6 flex flex-wrap gap-3 items-center">
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] uppercase tracking-widest text-slate-400 font-black">Date</span>
+                        <input id="att-date" type="date" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                    </div>
+                    <button id="att-today" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/10">Today</button>
+                    <button id="att-refresh" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh</button>
+                    <input id="att-search" type="text" placeholder="Search name, email or code…"
+                        class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
+                    <button id="att-resend" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold text-amber-200 hover:bg-amber-500/10">✉️ Resend failed</button>
+                    <button id="att-export" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">⬇ Export CSV</button>
+                </div>
+
+                <div id="att-summary" class="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6"></div>
+
+                <!-- Unmapped device codes -->
+                <div id="att-unmapped-wrap" class="hidden glass rounded-2xl p-5 mb-6" style="border:1px solid rgba(245,158,11,0.35);background:rgba(245,158,11,0.06);">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-amber-300 font-black">⚠️ Unmapped device codes</span>
+                    </div>
+                    <p class="text-slate-300 text-xs font-bold mb-4">These punches arrived from codes we can't match to anyone, so no email went out. Pick the right person to bind the code — future punches map automatically.</p>
+                    <div id="att-unmapped-list" class="flex flex-col gap-3"></div>
+                </div>
+
+                <!-- Daily report -->
+                <div class="glass rounded-2xl overflow-hidden mb-6">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr>
+                                    <th>Employee</th>
+                                    <th>Code</th>
+                                    <th>Status</th>
+                                    <th>First IN</th>
+                                    <th>Last OUT</th>
+                                    <th>Hours</th>
+                                    <th>Punches</th>
+                                    <th>Mail</th>
+                                </tr>
+                            </thead>
+                            <tbody id="att-tbody"></tbody>
+                        </table>
+                    </div>
+                    <div id="att-empty" class="hidden p-16 text-center text-slate-400">
+                        <p class="font-bold text-lg mb-1">No attendance for this date</p>
+                        <p class="text-sm">Punches appear here the moment the biometric device pushes them.</p>
+                    </div>
+                </div>
+
+                <!-- Live punch feed -->
+                <div class="section-head mb-3"><h3>🔴 Punch feed</h3><span class="sub">Every punch on this date, newest first</span></div>
+                <div class="glass rounded-2xl overflow-hidden">
+                    <div class="overflow-x-auto" style="max-height:420px;">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr><th>Time</th><th>Employee</th><th>Type</th><th>Device</th><th>Email</th></tr>
+                            </thead>
+                            <tbody id="att-feed-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 
@@ -660,6 +726,9 @@
         let allQuizzes = [];
         let allWfh = [];
         let allFriday = [];
+        let attReport = null;
+        let attFeed = [];
+        let attUnmapped = null;
         let currentTab = 'results';
         let editingEmployee = null;
         let deletingEmployee = null;
@@ -1084,10 +1153,12 @@
                 document.getElementById('employees-panel').classList.toggle('hidden', currentTab !== 'employees');
                 document.getElementById('wfh-panel').classList.toggle('hidden',       currentTab !== 'wfh');
                 document.getElementById('friday-panel').classList.toggle('hidden',    currentTab !== 'friday');
+                document.getElementById('attendance-panel').classList.toggle('hidden', currentTab !== 'attendance');
                 if (currentTab === 'employees' && allEmployees.length === 0) loadEmployees();
                 if (currentTab === 'quizzes'   && allQuizzes.length === 0)   loadQuizzes();
                 if (currentTab === 'wfh'       && allWfh.length === 0)       loadWfh();
                 if (currentTab === 'friday'    && allFriday.length === 0)    loadFriday();
+                if (currentTab === 'attendance' && !attReport)               loadAttendance();
             });
         });
 
@@ -1811,6 +1882,235 @@
         });
         document.getElementById('friday-refresh').addEventListener('click', loadFriday);
         document.getElementById('friday-week').addEventListener('change', loadFriday);
+
+        // ================= ATTENDANCE =================
+        function attIstToday() {
+            return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+        }
+
+        async function attApi(payload) {
+            const r = await fetch('/api/attendance', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: adminPassword, ...payload })
+            });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.error || data.detail || 'Request failed');
+            return data;
+        }
+
+        async function loadAttendance() {
+            if (!adminPassword) return;
+            const dateInput = document.getElementById('att-date');
+            if (!dateInput.value) dateInput.value = attIstToday();
+            const date = dateInput.value;
+
+            document.getElementById('att-tbody').innerHTML =
+                '<tr><td colspan="8" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading attendance…</td></tr>';
+            try {
+                const [report, feed, unmapped] = await Promise.all([
+                    attApi({ action: 'daily_report', date }),
+                    attApi({ action: 'logs', date, limit: 500 }),
+                    attApi({ action: 'unmapped' })
+                ]);
+                attReport = report;
+                attFeed = feed.logs || [];
+                attUnmapped = unmapped;
+                renderAttendance();
+            } catch (e) {
+                document.getElementById('att-tbody').innerHTML =
+                    `<tr><td colspan="8" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
+            }
+        }
+
+        function attBadge(status) {
+            if (status === 'Present')      return '<span class="text-emerald-300 font-black">✅ Present</span>';
+            if (status === 'No check-out') return '<span class="text-amber-300 font-black">⏳ No check-out</span>';
+            if (status === 'Unmapped')     return '<span class="text-amber-300 font-black">⚠️ Unmapped</span>';
+            return '<span class="text-rose-300 font-black">❌ Absent</span>';
+        }
+
+        function renderAttendance() {
+            if (!attReport) return;
+            const t = attReport.totals || {};
+
+            const tiles = [
+                { label: 'Employees',    value: t.employees ?? 0,      cls: 'slate'   },
+                { label: 'Present',      value: t.present ?? 0,        cls: 'emerald' },
+                { label: 'No check-out', value: t.no_checkout ?? 0,    cls: 'rose'    },
+                { label: 'Absent',       value: t.absent ?? 0,         cls: 'rose'    },
+                { label: 'Punches',      value: t.punches ?? 0,        cls: 'slate'   },
+                { label: 'Mail issues',  value: t.mail_problem ?? 0,   cls: (t.mail_problem ? 'rose' : 'emerald') },
+            ];
+            document.getElementById('att-summary').innerHTML = tiles.map(x => `
+                <div class="stat-card ${x.cls}">
+                    <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">${x.label}</p>
+                    <p class="text-3xl font-black text-white">${x.value}</p>
+                </div>`).join('');
+
+            // ---- unmapped codes ----
+            const wrap = document.getElementById('att-unmapped-wrap');
+            const codes = (attUnmapped && attUnmapped.unmapped_codes) || [];
+            const free  = (attUnmapped && attUnmapped.free_profiles) || [];
+            if (codes.length) {
+                wrap.classList.remove('hidden');
+                document.getElementById('att-unmapped-list').innerHTML = codes.map(c => `
+                    <div class="flex flex-wrap items-center gap-3 p-3 rounded-xl" style="background:rgba(255,255,255,0.04);">
+                        <div class="min-w-[160px]">
+                            <span class="text-white font-black">${escapeHtml(c.employee_code)}</span>
+                            <span class="text-slate-400 text-xs font-bold block">${escapeHtml(c.employee_name || 'no name from device')} · ${c.punches} punch${c.punches === 1 ? '' : 'es'}</span>
+                        </div>
+                        <select data-map-code="${escapeHtml(c.employee_code)}" class="glass px-3 py-2 rounded-xl text-sm font-bold focus:outline-none flex-1 min-w-[220px]">
+                            <option value="">— Select employee —</option>
+                            ${free.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.full_name || p.email)}${p.employee_code ? ` — currently code ${escapeHtml(p.employee_code)}` : ''}</option>`).join('')}
+                        </select>
+                        <button type="button" data-map-btn="${escapeHtml(c.employee_code)}" class="btn-primary text-white font-black px-4 py-2 rounded-xl text-sm">Bind code</button>
+                    </div>`).join('');
+            } else {
+                wrap.classList.add('hidden');
+            }
+
+            // ---- daily table ----
+            const search = document.getElementById('att-search').value.trim().toLowerCase();
+            const all = [
+                ...(attReport.rows || []),
+                ...(attReport.unknown || []).map(u => ({ ...u, full_name: u.employee_name || `Code ${u.employee_code}`, email: null }))
+            ];
+            const rows = search
+                ? all.filter(r => [r.full_name, r.email, r.employee_code].some(v => String(v || '').toLowerCase().includes(search)))
+                : all;
+
+            const tbody = document.getElementById('att-tbody');
+            const empty = document.getElementById('att-empty');
+            if (!rows.length) { tbody.innerHTML = ''; empty.classList.remove('hidden'); }
+            else {
+                empty.classList.add('hidden');
+                tbody.innerHTML = rows.map(r => `
+                    <tr>
+                        <td class="font-bold text-white">${escapeHtml(r.full_name || '—')}<br>
+                            <span class="text-slate-400 text-xs font-medium">${escapeHtml(r.email || r.company || '')}</span></td>
+                        <td class="text-slate-300 font-bold">${escapeHtml(r.employee_code || '—')}</td>
+                        <td>${attBadge(r.status)}</td>
+                        <td class="text-emerald-200 font-bold">${escapeHtml(r.first_in_time || '—')}</td>
+                        <td class="text-rose-200 font-bold">${escapeHtml(r.last_out_time || '—')}</td>
+                        <td class="text-white font-black">${escapeHtml(r.duration || '—')}</td>
+                        <td class="text-slate-300 font-bold">${r.punches ?? 0}</td>
+                        <td>${r.mail_problem
+                            ? `<span class="text-rose-300 font-black">⚠️ ${r.mail_problem}</span>`
+                            : (r.mail_sent ? `<span class="text-emerald-300 font-black">✅ ${r.mail_sent}</span>` : '<span class="text-slate-500 font-bold">—</span>')}</td>
+                    </tr>`).join('');
+            }
+
+            // ---- punch feed ----
+            const MAIL = {
+                sent:     '<span class="text-emerald-300 font-black">✅ Sent</span>',
+                failed:   '<span class="text-rose-300 font-black">❌ Failed</span>',
+                pending:  '<span class="text-amber-300 font-black">⏳ Pending</span>',
+                unmapped: '<span class="text-amber-300 font-black">⚠️ Unmapped</span>',
+                skipped:  '<span class="text-slate-400 font-bold">— Backfill</span>',
+            };
+            document.getElementById('att-feed-tbody').innerHTML = attFeed.length
+                ? attFeed.map(l => `
+                    <tr>
+                        <td class="text-white font-black">${escapeHtml(l.pretty_time || '—')}</td>
+                        <td class="font-bold text-white">${escapeHtml(l.full_name || l.employee_code || '—')}<br>
+                            <span class="text-slate-400 text-xs font-medium">${escapeHtml(l.employee_code || '')}</span></td>
+                        <td>${l.direction === 'IN'
+                            ? '<span class="text-emerald-300 font-black">→ IN</span>'
+                            : l.direction === 'OUT'
+                                ? '<span class="text-rose-300 font-black">← OUT</span>'
+                                : '<span class="text-slate-400 font-bold">• Punch</span>'}</td>
+                        <td class="text-slate-300 font-bold">${escapeHtml(l.device_name || l.device_sn || '—')}</td>
+                        <td title="${escapeHtml(l.email_error || '')}">${MAIL[l.email_status] || escapeHtml(l.email_status || '—')}</td>
+                    </tr>`).join('')
+                : '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold">No punches on this date.</td></tr>';
+        }
+
+        // Bind an unmapped device code to a person.
+        document.getElementById('att-unmapped-list').addEventListener('click', async (ev) => {
+            const btn = ev.target.closest('[data-map-btn]');
+            if (!btn) return;
+            const code = btn.getAttribute('data-map-btn');
+            const sel = document.querySelector(`[data-map-code="${CSS.escape(code)}"]`);
+            const userId = sel && sel.value;
+            if (!userId) {
+                wsDialog.alert({ icon: 'ℹ️', title: 'Pick an employee', message: `Choose who device code <b>${escapeHtml(code)}</b> belongs to first.` });
+                return;
+            }
+            const name = sel.options[sel.selectedIndex].text;
+            const ok = await wsDialog.confirm({
+                icon: '🔗', title: 'Bind device code?',
+                message: `Code <b>${escapeHtml(code)}</b> will belong to <b>${escapeHtml(name)}</b> from now on. Past punches are attached to them but not emailed.`,
+                okText: 'Bind'
+            });
+            if (!ok) return;
+            btn.disabled = true; btn.textContent = 'Binding…';
+            try {
+                const r = await attApi({ action: 'map_code', user_id: userId, employee_code: code });
+                wsDialog.alert({ icon: '✅', title: 'Code bound', message: `<b>${escapeHtml(name)}</b> is now code <b>${escapeHtml(code)}</b>. ${r.backfilled_logs} past punch${r.backfilled_logs === 1 ? '' : 'es'} attached.` });
+                attReport = null;
+                await loadAttendance();
+            } catch (e) {
+                btn.disabled = false; btn.textContent = 'Bind code';
+                wsDialog.alert({ icon: '⚠️', danger: true, title: 'Could not bind code', message: escapeHtml(e.message) });
+            }
+        });
+
+        document.getElementById('att-resend').addEventListener('click', async () => {
+            const date = document.getElementById('att-date').value || attIstToday();
+            const ok = await wsDialog.confirm({
+                icon: '✉️', title: 'Resend notifications?',
+                message: `Every punch on <b>${escapeHtml(date)}</b> whose email failed or is still pending will be sent again.`,
+                okText: 'Resend'
+            });
+            if (!ok) return;
+            try {
+                const r = await attApi({ action: 'resend', date });
+                wsDialog.alert({
+                    icon: r.failed ? '⚠️' : '✅',
+                    title: 'Resend finished',
+                    message: `Sent <b>${r.sent}</b> · failed <b>${r.failed}</b> · skipped <b>${r.skipped}</b> (of ${r.candidates}).`
+                });
+                attReport = null;
+                await loadAttendance();
+            } catch (e) {
+                wsDialog.alert({ icon: '⚠️', danger: true, title: 'Resend failed', message: escapeHtml(e.message) });
+            }
+        });
+
+        document.getElementById('att-export').addEventListener('click', () => {
+            if (!attReport) {
+                wsDialog.alert({ icon: 'ℹ️', title: 'Nothing to export', message: 'Load an attendance date first.' });
+                return;
+            }
+            const rows = [
+                ['Date', 'Employee', 'Email', 'Company', 'Employee Code', 'Status', 'First IN', 'Last OUT', 'Hours', 'Punches', 'Devices', 'Mail Sent', 'Mail Issues'],
+                ...(attReport.rows || []).map(r => [
+                    attReport.date, r.full_name || '', r.email || '', r.company || '', r.employee_code || '',
+                    r.status, r.first_in_time || '', r.last_out_time || '', r.duration || '',
+                    r.punches ?? 0, (r.devices || []).join(' | '), r.mail_sent ?? 0, r.mail_problem ?? 0
+                ]),
+                ...(attReport.unknown || []).map(u => [
+                    attReport.date, u.employee_name || '', '', '', u.employee_code,
+                    'Unmapped', u.first_in_time || '', u.last_out_time || '', u.duration || '',
+                    u.punches ?? 0, (u.devices || []).join(' | '), u.mail_sent ?? 0, u.mail_problem ?? 0
+                ])
+            ];
+            const csv = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `attendance-${attReport.date}.csv`;
+            link.click();
+        });
+
+        document.getElementById('att-refresh').addEventListener('click', () => { attReport = null; loadAttendance(); });
+        document.getElementById('att-date').addEventListener('change', () => { attReport = null; loadAttendance(); });
+        document.getElementById('att-today').addEventListener('click', () => {
+            document.getElementById('att-date').value = attIstToday();
+            attReport = null; loadAttendance();
+        });
+        document.getElementById('att-search').addEventListener('input', () => { if (attReport) renderAttendance(); });
 
         gatePassword.focus();
     </script>
