@@ -48,6 +48,48 @@
         .tag.ontime { background: rgba(16,185,129,0.16); color:#6ee7b7; }
         .tag.early { background: rgba(245,158,11,0.16); color:#fcd34d; }
 
+        .clock { padding: 20px; margin-bottom: 22px; }
+        .clock h2 { margin: 0 0 3px; font-size: 15px; font-weight: 900; }
+        .clock p.hint { margin: 0 0 15px; font-size: 12px; font-weight: 700; color: var(--ws-text-dim); }
+        .clock-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+        .clock-btn {
+            padding: 15px 8px; border-radius: var(--ws-r-md); border: 1px solid var(--ws-border);
+            background: var(--ws-surface-2); color: var(--ws-text); cursor: pointer;
+            font-weight: 900; font-size: 12.5px; transition: all var(--ws-motion);
+            display: flex; flex-direction: column; align-items: center; gap: 6px;
+        }
+        .clock-btn .ico { font-size: 19px; }
+        .clock-btn:hover:not(:disabled) { transform: translateY(-2px); border-color: var(--ws-border-2); }
+        .clock-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        .clock-btn.login  { background: linear-gradient(135deg,#10b981,#059669); border-color: transparent; color:#fff; }
+        .clock-btn.logout { background: linear-gradient(135deg,#f43f5e,#e11d48); border-color: transparent; color:#fff; }
+
+        .sheet { position: fixed; inset: 0; z-index: 80; display: none; align-items: center; justify-content: center;
+                 padding: 16px; background: rgba(11,17,32,0.9); backdrop-filter: blur(10px); }
+        .sheet.on { display: flex; }
+        .sheet-card { width: 100%; max-width: 420px; background: var(--ws-bg-2);
+                      border: 1px solid var(--ws-border); border-radius: var(--ws-r-lg); padding: 22px; }
+        .sheet-card h3 { margin: 0 0 4px; font-size: 18px; font-weight: 900; }
+        .sheet-card .sub { margin: 0 0 15px; font-size: 12px; font-weight: 700; color: var(--ws-text-dim); }
+        #cam-wrap { position: relative; border-radius: var(--ws-r-md); overflow: hidden; background: #000; aspect-ratio: 3/4; margin-bottom: 12px; }
+        #cam-video, #cam-canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
+        #cam-canvas { display: none; }
+        .step { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:800; margin-bottom:7px; }
+        .step .dot { width:15px; height:15px; border-radius:50%; display:inline-flex; align-items:center;
+                     justify-content:center; font-size:9px; flex:0 0 auto; }
+        .step.wait .dot { background: rgba(148,163,184,0.2); color:#94a3b8; }
+        .step.ok   .dot { background: rgba(16,185,129,0.2); color:#6ee7b7; }
+        .step.bad  .dot { background: rgba(244,63,94,0.2);  color:#fda4af; }
+        .step.wait { color: var(--ws-text-dim); }
+        .step.ok   { color: #6ee7b7; }
+        .step.bad  { color: #fda4af; }
+        .sheet-actions { display:flex; gap:10px; margin-top:14px; }
+        .sheet-actions button { flex:1; padding:12px; border-radius: var(--ws-r-md); font-weight:900; font-size:13px; cursor:pointer;
+                                border:1px solid var(--ws-border); background: var(--ws-surface-2); color: var(--ws-text); }
+        .sheet-actions button.primary { background: var(--ws-grad-cool); border-color: transparent; color:#fff; }
+        .sheet-actions button:disabled { opacity:0.4; cursor:not-allowed; }
+        .sheet-msg { margin-top:11px; font-size:12px; font-weight:800; text-align:center; }
+
         .back { display:inline-block; margin-bottom: 22px; color: var(--ws-text-muted);
                 font-size: 13px; font-weight: 800; text-decoration: none; }
         .back:hover { color: #fff; }
@@ -123,6 +165,18 @@
             </div>
         </div>
 
+        <!-- WFH selfie clock (shown only to work-from-home employees) -->
+        <div class="card clock" id="clock" style="display:none;">
+            <h2>📸 Selfie attendance</h2>
+            <p class="hint">A photo and your location are both required for every punch.</p>
+            <div class="clock-grid">
+                <button class="clock-btn login"  data-event="LOGIN"><span class="ico">🟢</span>Login</button>
+                <button class="clock-btn"        data-event="BREAK_OUT"><span class="ico">☕</span>Start break</button>
+                <button class="clock-btn"        data-event="BREAK_IN"><span class="ico">⏱️</span>End break</button>
+                <button class="clock-btn logout" data-event="LOGOUT"><span class="ico">🔴</span>Logout</button>
+            </div>
+        </div>
+
         <!-- Today -->
         <div class="today-grid">
             <div class="card tile">
@@ -170,6 +224,25 @@
         </p>
     </div>
 
+    <!-- Selfie capture sheet -->
+    <div class="sheet" id="sheet">
+        <div class="sheet-card">
+            <h3 id="sheet-title">Login</h3>
+            <p class="sub" id="sheet-sub">Look at the camera and hold still.</p>
+            <div id="cam-wrap">
+                <video id="cam-video" autoplay playsinline muted></video>
+                <canvas id="cam-canvas"></canvas>
+            </div>
+            <div class="step wait" id="step-loc"><span class="dot">1</span><span id="step-loc-txt">Getting your location…</span></div>
+            <div class="step wait" id="step-cam"><span class="dot">2</span><span id="step-cam-txt">Starting the camera…</span></div>
+            <div class="sheet-actions">
+                <button id="sheet-cancel">Cancel</button>
+                <button id="sheet-shoot" class="primary" disabled>Capture</button>
+            </div>
+            <p class="sheet-msg" id="sheet-msg"></p>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="/presence.js"></script>
     <script>
@@ -210,7 +283,8 @@
 
         async function loadMyShift() {
             try {
-                const { data: prof } = await sb.from('profiles').select('shift_id').eq('id', session.user.id).maybeSingle();
+                const { data: prof } = await sb.from('profiles').select('shift_id, is_wfh').eq('id', session.user.id).maybeSingle();
+                if (prof && prof.is_wfh === true) el('clock').style.display = '';
                 const { data: shifts } = await sb.from('shifts').select('*');
                 if (!shifts || !shifts.length) return;
                 myShift = shifts.find(s => prof && s.id === prof.shift_id) || shifts.find(s => s.is_default) || null;
@@ -375,6 +449,141 @@
                 }).join('');
             }
         }
+
+        // ================= SELFIE ATTENDANCE (WFH) =================
+        const EVENT_TITLE = { LOGIN: 'Login', LOGOUT: 'Logout', BREAK_OUT: 'Start break', BREAK_IN: 'End break' };
+        let camStream = null, pendingEvent = null, fixedCoords = null, busy = false;
+
+        function stepState(id, state, text) {
+            const elm = el(id);
+            elm.className = 'step ' + state;
+            elm.querySelector('.dot').textContent = state === 'ok' ? '✓' : state === 'bad' ? '!' : id === 'step-loc' ? '1' : '2';
+            if (text) el(id + '-txt').textContent = text;
+        }
+
+        function closeSheet() {
+            el('sheet').classList.remove('on');
+            if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+            el('cam-video').style.display = '';
+            el('cam-canvas').style.display = 'none';
+            el('sheet-msg').textContent = '';
+            pendingEvent = null; fixedCoords = null; busy = false;
+        }
+
+        // GPS is mandatory, so this resolves or the punch does not happen.
+        function getLocation() {
+            return new Promise((resolve, reject) => {
+                if (!navigator.geolocation) return reject(new Error('This device has no location support.'));
+                navigator.geolocation.getCurrentPosition(
+                    p => resolve({ latitude: p.coords.latitude, longitude: p.coords.longitude, accuracy_m: p.coords.accuracy }),
+                    e => reject(new Error(
+                        e.code === 1 ? 'Location permission denied. Allow it in your browser and try again.'
+                      : e.code === 2 ? 'Location unavailable right now. Move somewhere with a better signal.'
+                      : 'Getting your location timed out. Try again.')),
+                    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+                );
+            });
+        }
+
+        async function openSheet(event) {
+            pendingEvent = event; fixedCoords = null;
+            el('sheet-title').textContent = EVENT_TITLE[event];
+            el('sheet-sub').textContent = 'Look at the camera and hold still.';
+            el('sheet-msg').textContent = '';
+            el('sheet-shoot').disabled = true;
+            el('sheet-shoot').textContent = 'Capture';
+            el('cam-video').style.display = '';
+            el('cam-canvas').style.display = 'none';
+            stepState('step-loc', 'wait', 'Getting your location…');
+            stepState('step-cam', 'wait', 'Starting the camera…');
+            el('sheet').classList.add('on');
+
+            // Location and camera in parallel — both must succeed.
+            const locP = getLocation()
+                .then(c => { fixedCoords = c; stepState('step-loc', 'ok', `Location fixed (±${Math.round(c.accuracy_m)}m)`); })
+                .catch(e => { stepState('step-loc', 'bad', e.message); throw e; });
+
+            const camP = navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } }, audio: false })
+                .then(st => { camStream = st; el('cam-video').srcObject = st; stepState('step-cam', 'ok', 'Camera ready'); })
+                .catch(() => { stepState('step-cam', 'bad', 'Camera blocked. Allow camera access and try again.'); throw new Error('camera'); });
+
+            try {
+                await Promise.all([locP, camP]);
+                el('sheet-shoot').disabled = false;
+            } catch {
+                el('sheet-msg').style.color = '#fda4af';
+                el('sheet-msg').textContent = 'Both a photo and your location are required.';
+            }
+        }
+
+        // Downscale before upload — a raw phone photo is ~300KB and the free
+        // Supabase tier is 1GB; ~640px JPEG lands around 60KB.
+        function captureBlob() {
+            const v = el('cam-video'), c = el('cam-canvas');
+            const scale = Math.min(1, 640 / Math.max(v.videoWidth, v.videoHeight));
+            c.width = Math.round(v.videoWidth * scale);
+            c.height = Math.round(v.videoHeight * scale);
+            const ctx = c.getContext('2d');
+            ctx.drawImage(v, 0, 0, c.width, c.height);
+            v.style.display = 'none'; c.style.display = 'block';
+            return new Promise(r => c.toBlob(r, 'image/jpeg', 0.7));
+        }
+
+        async function submitPunch() {
+            if (busy || !pendingEvent) return;
+            if (!fixedCoords) {
+                el('sheet-msg').style.color = '#fda4af';
+                el('sheet-msg').textContent = 'No location fix — cannot record this punch.';
+                return;
+            }
+            busy = true;
+            const btn = el('sheet-shoot');
+            btn.disabled = true; btn.textContent = 'Capturing…';
+            try {
+                const blob = await captureBlob();
+                if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+
+                btn.textContent = 'Uploading…';
+                const day = fmtISO.format(new Date());
+                const path = `${session.user.id}/${day}/${pendingEvent}-${Date.now()}.jpg`;
+                const up = await sb.storage.from('selfies').upload(path, blob, { contentType: 'image/jpeg', upsert: false });
+                if (up.error) throw new Error('Upload failed: ' + up.error.message);
+
+                btn.textContent = 'Recording…';
+                const { data: { session: fresh } } = await sb.auth.getSession();
+                const r = await fetch('/api/attendance-webhook', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${(fresh || session).access_token}` },
+                    body: JSON.stringify({ mode: 'selfie', event_type: pendingEvent, selfie_path: path, ...fixedCoords })
+                });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.detail || data.error || 'Could not record the punch.');
+
+                el('sheet-msg').style.color = '#6ee7b7';
+                el('sheet-msg').textContent = `${data.label} recorded at ${data.at}`
+                    + (data.late_minutes ? ` · ${data.late_minutes}m late` : '')
+                    + (data.emailed ? ' · email sent' : '');
+                btn.textContent = 'Done';
+                setTimeout(() => { closeSheet(); load(); }, 1800);
+            } catch (e) {
+                el('sheet-msg').style.color = '#fda4af';
+                el('sheet-msg').textContent = e.message;
+                btn.disabled = false; btn.textContent = 'Try again';
+                busy = false;
+                // The photo is spent — reopen the camera for another attempt.
+                try {
+                    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+                    el('cam-video').srcObject = camStream;
+                    el('cam-video').style.display = ''; el('cam-canvas').style.display = 'none';
+                } catch { /* leave the still frame up */ }
+            }
+        }
+
+        document.querySelectorAll('.clock-btn').forEach(b =>
+            b.addEventListener('click', () => openSheet(b.dataset.event)));
+        el('sheet-cancel').addEventListener('click', closeSheet);
+        el('sheet-shoot').addEventListener('click', submitPunch);
 
         document.querySelectorAll('.seg button').forEach(b => {
             b.addEventListener('click', () => {
