@@ -4,11 +4,11 @@
   "crons": [
     {
       "path": "/api/wfh-remind",
-      "schedule": "30 3 * * 5"
+      "schedule": "30 3 * * *"
     },
     {
       "path": "/api/wfh-remind",
-      "schedule": "30 13 * * 5"
+      "schedule": "30 13 * * *"
     }
   ],
   "rewrites": [

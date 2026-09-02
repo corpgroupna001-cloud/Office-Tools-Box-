@@ -281,7 +281,27 @@ may have no biometric reader code at all).
 Admin → **👥 Employees** → the 🏠 toggle. The selfie panel only appears for
 people flagged `is_wfh`, and the server rejects a punch from anyone else.
 
-### 8.3 How it works
+### 8.3 Daily reminders
+
+Both Vercel cron slots now fire **daily** rather than Friday-only (Hobby
+allows 2 crons at daily granularity), and `/api/wfh-remind` decides what each
+run does:
+
+| Run | Who gets a push |
+|---|---|
+| 9:00 AM IST | WFH staff with no `LOGIN` recorded today |
+| 7:00 PM IST | WFH staff who logged in but never logged out, or who never logged in at all |
+
+The Friday WFH-video and typing reminders keep their own Friday guard, so
+that behaviour is unchanged.
+
+`/attendance` also shows an in-app prompt card: *"You haven't logged in
+today"* with a Login button, *"Still logged in"* after 5 PM, or a green
+*"Attendance complete"* once both are recorded. It stays hidden when there is
+nothing outstanding — a card that always says "all good" is one people learn
+to ignore.
+
+### 8.4 How it works
 
 Employee opens `/attendance` and sees four buttons — **Login**, **Start
 break**, **End break**, **Logout**. Each one asks for location and camera
@@ -297,7 +317,7 @@ Event → direction mapping, which is what keeps first-IN / last-OUT correct:
 | End break | `BREAK_IN` | IN |
 | Logout | `LOGOUT` | OUT |
 
-### 8.4 Why this needed no new API function
+### 8.5 Why this needed no new API function
 
 We are on Vercel Hobby's 12-function limit, so the browser posts to the
 existing `/api/attendance-webhook` with the employee's **own Supabase access
@@ -322,13 +342,40 @@ Other guards, each covered by a test:
 - Employees have **no** update or delete policy on the bucket: once a selfie
   punch is recorded, the person who made it cannot alter or remove it.
 
-### 8.5 Admin review
+### 8.6 Admin review
 
 Admin → **📸 Selfies**: photo, name, event, time, and the GPS fix as a
 Google Maps link, filterable by date and status, with Approve / Flag. Photos
 are served as 1-hour signed URLs — the bucket is private.
 
-### 8.6 Retention (1GB free tier)
+### 8.7 Capture quality gates
+
+Capture stays **disabled** until the frame passes three checks, shown live as
+steps in the sheet:
+
+| Check | Rule |
+|---|---|
+| Location | A GPS fix is mandatory — no fix, no punch. |
+| Lighting | Mean luma must be 45–238 of 255. A black frame or one pointed at a lamp is refused, with the measured value shown. |
+| Face | A face must be visible in the preview. |
+
+Face detection uses Chromium's built-in `FaceDetector` where it exists (free,
+instant) and otherwise loads BlazeFace from a CDN once.
+
+**If neither is available it deliberately fails OPEN** and records
+`face_method: 'unavailable'` on the punch. Blocking attendance entirely
+because a CDN is unreachable is a worse failure than an unverified photo —
+the admin review queue shows which punches were not checked, alongside the
+measured brightness.
+
+### 8.8 The photo carries its own evidence
+
+Before upload, the image is stamped with a footer showing the employee's
+name and event, the IST timestamp, and the latitude/longitude with accuracy.
+The location is therefore visible **in the picture**, not only in the
+database — which is what makes a screenshot of it worth anything.
+
+### 8.9 Retention (1GB free tier)
 
 Photos older than **90 days** are deleted and `selfie_path` cleared; the
 attendance row itself is kept forever, so historic reports stay intact.
