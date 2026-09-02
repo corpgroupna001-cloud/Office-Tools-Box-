@@ -15,14 +15,14 @@
         body {
             font-family: 'Inter', sans-serif;
             min-height: 100vh;
-            background: #0b1120;
+            background: var(--ws-bg);
             background-image:
                 radial-gradient(at 15% 12%, hsla(258, 90%, 55%, 0.55) 0, transparent 45%),
                 radial-gradient(at 85% 15%, hsla(200, 95%, 55%, 0.45) 0, transparent 45%),
                 radial-gradient(at 50% 90%, hsla(320, 80%, 55%, 0.45) 0, transparent 50%),
                 radial-gradient(at 90% 85%, hsla(160, 85%, 45%, 0.35) 0, transparent 45%);
             background-attachment: fixed;
-            color: #f8fafc;
+            color: var(--ws-text);
             overflow-x: hidden;
         }
         body::before {
@@ -30,22 +30,22 @@
             position: fixed;
             inset: 0;
             background-image:
-                radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
+                radial-gradient(var(--ws-surface) 1px, transparent 1px);
             background-size: 22px 22px;
             pointer-events: none;
             z-index: 0;
         }
         .glass {
-            background: rgba(255, 255, 255, 0.08);
+            background: var(--ws-surface);
             backdrop-filter: blur(24px) saturate(180%);
             -webkit-backdrop-filter: blur(24px) saturate(180%);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            border: 1px solid var(--ws-border-2);
             box-shadow:
                 0 8px 32px rgba(0, 0, 0, 0.35),
                 inset 0 1px 0 rgba(255, 255, 255, 0.25);
         }
         .glass-strong {
-            background: rgba(255, 255, 255, 0.12);
+            background: var(--ws-border);
             backdrop-filter: blur(30px) saturate(200%);
             -webkit-backdrop-filter: blur(30px) saturate(200%);
             border: 1px solid rgba(255, 255, 255, 0.22);
@@ -57,13 +57,13 @@
             background: rgba(15, 23, 42, 0.35);
             backdrop-filter: blur(28px) saturate(180%);
             -webkit-backdrop-filter: blur(28px) saturate(180%);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+            border-bottom: 1px solid var(--ws-border);
         }
         .glass-tool {
-            background: rgba(255, 255, 255, 0.07);
+            background: var(--ws-surface);
             backdrop-filter: blur(20px) saturate(180%);
             -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid rgba(255, 255, 255, 0.15);
+            border: 1px solid var(--ws-border);
             transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
             position: relative;
             overflow: hidden;
@@ -72,15 +72,15 @@
             content: '';
             position: absolute;
             inset: 0;
-            background: linear-gradient(135deg, rgba(255,255,255,0.12) 0%, transparent 50%);
+            background: linear-gradient(135deg, var(--ws-border) 0%, transparent 50%);
             pointer-events: none;
             opacity: 0.6;
         }
         .glass-tool:hover {
-            background: rgba(255, 255, 255, 0.12);
+            background: var(--ws-border);
             border-color: rgba(255, 255, 255, 0.3);
             transform: translateY(-6px);
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.1);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--ws-surface-2);
         }
         .icon-glow-blue { box-shadow: 0 8px 30px rgba(59, 130, 246, 0.5), inset 0 1px 0 rgba(255,255,255,0.3); }
         .icon-glow-emerald { box-shadow: 0 8px 30px rgba(16, 185, 129, 0.5), inset 0 1px 0 rgba(255,255,255,0.3); }
@@ -90,9 +90,9 @@
         .hero-eyebrow {
             display: inline-flex; align-items: center; gap: 8px;
             padding: 6px 14px; border-radius: 999px;
-            background: rgba(255,255,255,0.08);
-            border: 1px solid rgba(255,255,255,0.15);
-            color: #cbd5e1; font-weight: 700; font-size: 12px;
+            background: var(--ws-surface);
+            border: 1px solid var(--ws-border);
+            color: var(--ws-text-2); font-weight: 700; font-size: 12px;
             text-transform: uppercase; letter-spacing: 1.5px;
             backdrop-filter: blur(10px);
             margin-bottom: 14px;
@@ -109,14 +109,14 @@
             display: flex; align-items: center; gap: 14px;
             padding: 16px 20px;
             border-radius: 20px;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.1);
+            background: var(--ws-surface);
+            border: 1px solid var(--ws-border);
             backdrop-filter: blur(16px);
             margin-bottom: 24px;
         }
         .online-strip .label {
             font-size: 11px; font-weight: 900; letter-spacing: 1px;
-            text-transform: uppercase; color: #94a3b8;
+            text-transform: uppercase; color: var(--ws-text-muted);
             display: flex; align-items: center; gap: 8px; flex-shrink: 0;
         }
         .online-strip .label .live-dot {
@@ -129,7 +129,7 @@
             width: 40px; height: 40px; border-radius: 50%;
             display: inline-flex; align-items: center; justify-content: center;
             font-weight: 900; color: #fff; font-size: 14px;
-            border: 2.5px solid #0b1120;
+            border: 2.5px solid var(--ws-bg);
             box-shadow: 0 4px 12px rgba(0,0,0,.4);
             margin-left: -10px;
             transition: transform .15s ease, z-index .15s;
@@ -141,10 +141,10 @@
         .online-avatar:hover { transform: translateY(-3px) scale(1.08); z-index: 5; }
         .online-avatar img { width: 100%; height: 100%; object-fit: cover; }
         .online-avatar.more {
-            background: rgba(255,255,255,0.1); color: #cbd5e1; font-size: 11px;
+            background: var(--ws-surface-2); color: var(--ws-text-2); font-size: 11px;
         }
         .online-strip .empty {
-            font-size: 13px; color: #94a3b8; font-weight: 600;
+            font-size: 13px; color: var(--ws-text-muted); font-weight: 600;
         }
 
         /* Personal stats mini row inside tool cards */
@@ -152,21 +152,21 @@
             margin-top: 10px; margin-bottom: 10px;
             padding: 10px 14px;
             border-radius: 14px;
-            background: rgba(0,0,0,0.25);
-            border: 1px solid rgba(255,255,255,0.06);
+            background: var(--ws-surface-2);
+            border: 1px solid var(--ws-border);
             display: flex; align-items: center; justify-content: space-between;
             font-size: 12px; font-weight: 700;
         }
-        .tool-stat .stat-label { color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; font-size: 10px; font-weight: 900; }
-        .tool-stat .stat-value { color: #f1f5f9; font-weight: 900; font-size: 14px; }
-        .tool-stat .stat-value.pending { color: #94a3b8; font-weight: 700; font-size: 12px; }
+        .tool-stat .stat-label { color: var(--ws-text-muted); text-transform: uppercase; letter-spacing: 1px; font-size: 10px; font-weight: 900; }
+        .tool-stat .stat-value { color: var(--ws-text); font-weight: 900; font-size: 14px; }
+        .tool-stat .stat-value.pending { color: var(--ws-text-muted); font-weight: 700; font-size: 12px; }
         .tool-stat .stat-badge {
             display: inline-flex; align-items: center; gap: 4px;
             padding: 2px 8px; border-radius: 999px;
-            background: rgba(59,130,246,0.2); color: #93c5fd;
+            background: rgba(59,130,246,0.2); color: var(--ws-info-text);
             font-size: 11px; font-weight: 900;
         }
-        .tool-stat .stat-badge.new { background: rgba(244,63,94,0.2); color: #fda4af; }
+        .tool-stat .stat-badge.new { background: rgba(244,63,94,0.2); color: var(--ws-danger-text); }
     </style>
 </head>
 <body class="min-h-screen flex flex-col">
@@ -303,10 +303,10 @@
             width: 34px; height: 34px; border-radius: 10px;
             display: flex; align-items: center; justify-content: center;
             background: transparent; border: none;
-            color: #94a3b8; cursor: pointer;
+            color: var(--ws-text-muted); cursor: pointer;
             transition: color .15s, background .15s;
         }
-        .password-field .password-toggle:hover { color: #f8fafc; background: rgba(255,255,255,0.08); }
+        .password-field .password-toggle:hover { color: var(--ws-text); background: var(--ws-surface); }
         .password-field input[type="password"], .password-field input[type="text"] {
             padding-right: 52px !important;
         }
@@ -321,7 +321,7 @@
         }
         .password-strength .segment {
             height: 4px; border-radius: 2px;
-            background: rgba(255,255,255,0.08);
+            background: var(--ws-surface);
             transition: background .15s;
         }
         .password-strength[data-score="1"] .segment:nth-child(-n+1) { background: #ef4444; }
@@ -329,10 +329,10 @@
         .password-strength[data-score="3"] .segment:nth-child(-n+3) { background: #eab308; }
         .password-strength[data-score="4"] .segment:nth-child(-n+4) { background: #22c55e; }
         .password-strength .label {
-            font-size: 11px; font-weight: 800; color: #94a3b8;
+            font-size: 11px; font-weight: 800; color: var(--ws-text-muted);
             letter-spacing: 0.5px; text-transform: uppercase;
         }
-        .password-strength[data-score="1"] .label { color: #fca5a5; }
+        .password-strength[data-score="1"] .label { color: var(--ws-danger-text); }
         .password-strength[data-score="2"] .label { color: #fdba74; }
         .password-strength[data-score="3"] .label { color: #fde047; }
         .password-strength[data-score="4"] .label { color: #86efac; }
@@ -341,8 +341,8 @@
         .auth-trust {
             display: flex; align-items: center; justify-content: center; gap: 6px;
             margin-top: 14px; padding-top: 14px;
-            border-top: 1px solid rgba(255,255,255,0.06);
-            font-size: 11px; color: #64748b; font-weight: 700;
+            border-top: 1px solid var(--ws-border);
+            font-size: 11px; color: var(--ws-text-dim); font-weight: 700;
             letter-spacing: 0.3px;
         }
         .auth-trust svg { width: 12px; height: 12px; }

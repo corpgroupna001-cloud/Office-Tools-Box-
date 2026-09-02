@@ -748,11 +748,24 @@ body {
 :root[data-theme="light"] .ws-theme-toggle .sun  { display:block; }
 :root[data-theme="light"] .ws-theme-toggle .moon { display:none; }
 
-/* Light theme needs the frosted panels to read as paper, not as
-   translucent glass over a bright page - which just looks grey. */
+/* ------------------------------------------------------------
+   Light-theme corrections for things the utility shim cannot see.
+
+   Found by looking at the deployed pages in light rather than by
+   reading the CSS: the utilities were fine, but three page-level
+   patterns were still painting for a navy backdrop.
+   ------------------------------------------------------------ */
+
+/* 1. Frosted panels. Every page defines its own .glass-* variant as
+      white at 5-12% alpha - invisible on a light ground - and .glass-nav
+      as NAVY at 35%, which rendered as a dark bar across a light page.
+      They become paper here, not glass. */
 :root[data-theme="light"] .glass,
-:root[data-theme="light"] .ws-glass,
+:root[data-theme="light"] .glass-subtle,
+:root[data-theme="light"] .glass-tool,
 :root[data-theme="light"] .glass-strong,
+:root[data-theme="light"] .glass-nav,
+:root[data-theme="light"] .ws-glass,
 :root[data-theme="light"] .ws-glass-strong,
 :root[data-theme="light"] .ws-glass-max,
 :root[data-theme="light"] .ws-card {
@@ -761,3 +774,33 @@ body {
     box-shadow: var(--ws-shadow-sm);
     backdrop-filter: none;
 }
+:root[data-theme="light"] .glass-nav {
+    background: rgba(255,255,255,0.86);
+    backdrop-filter: saturate(180%) blur(14px);
+    border-bottom: 1px solid var(--ws-border);
+    box-shadow: none;
+}
+/* The white sheen along the top edge of a glass panel is invisible on
+   white and only adds haze. */
+:root[data-theme="light"] .ws-glass::before,
+:root[data-theme="light"] .ws-glass-strong::before,
+:root[data-theme="light"] .ws-glass-max::before { display: none; }
+
+/* 2. Page glow. Bodies carry radial gradients at up to 55% alpha -
+      a soft aurora over navy, a rainbow over white. Replaced with a
+      tenth of the strength rather than removed, so the pages keep
+      some depth. */
+:root[data-theme="light"] body {
+    background-image:
+        radial-gradient(at 14% 10%, var(--ws-bg-glow-2) 0px, transparent 44%),
+        radial-gradient(at 86% 14%, var(--ws-bg-glow-1) 0px, transparent 44%);
+    background-attachment: fixed;
+}
+
+/* 3. Slash-opacity text. Tailwind writes these as one class, so
+      text-slate-200/90 never matched the plain text-slate-200 rule
+      and stayed near-white on a white page. */
+:root .text-white\/50, :root .text-white\/60, :root .text-white\/70 { color: var(--ws-text-muted); }
+:root .text-white\/80, :root .text-white\/90 { color: var(--ws-text-2); }
+:root .text-slate-200\/80, :root .text-slate-200\/90,
+:root .text-slate-300\/80, :root .text-slate-300\/90 { color: var(--ws-text-2); }
