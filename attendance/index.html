@@ -41,6 +41,13 @@
         .hero h1 { font-size: 26px; font-weight: 900; letter-spacing: -0.01em; margin: 0; }
         .hero p  { margin: 2px 0 0; color: var(--ws-text-muted); font-size: 14px; font-weight: 600; }
 
+        .shift-line { margin: 6px 0 0; font-size: 12px; font-weight: 800; color: #7dd3fc; }
+        .shift-line .off { color: var(--ws-text-dim); font-weight: 700; }
+        .tag { display:inline-block; margin-top:6px; padding:2px 9px; border-radius:999px; font-size:10.5px; font-weight:900; }
+        .tag.late { background: rgba(244,63,94,0.16); color:#fda4af; }
+        .tag.ontime { background: rgba(16,185,129,0.16); color:#6ee7b7; }
+        .tag.early { background: rgba(245,158,11,0.16); color:#fcd34d; }
+
         .back { display:inline-block; margin-bottom: 22px; color: var(--ws-text-muted);
                 font-size: 13px; font-weight: 800; text-decoration: none; }
         .back:hover { color: #fff; }
@@ -112,6 +119,7 @@
             <div>
                 <h1>My Attendance</h1>
                 <p id="sub">Your biometric check-ins and check-outs</p>
+                <p id="shift-line" class="shift-line" style="display:none;"></p>
             </div>
         </div>
 
@@ -176,6 +184,7 @@
 
         let view = 'days';
         let rows = [];
+        let myShift = null;
 
         // ---- Supabase client (reuse whatever the guard/presence already made) ----
         let sb = window.__WS_SB__ || window.__WS_PRESENCE_SB__ || null;
@@ -190,6 +199,34 @@
         if (!session) { location.replace('/'); return; }
 
         el('month').value = fmtISO.format(new Date()).slice(0, 7);
+
+        // ---- My shift (read-only; RLS lets any signed-in user read shifts) ----
+        const DAY_NAMES = [null, 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        const hhmm = t => String(t || '').slice(0, 5);
+        const toMins = t => { const m = /^(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? +m[1] * 60 + +m[2] : null; };
+        // Rotate onto (-720, +720] so an overnight shift reads sensibly:
+        // 01:00 against a 22:00 start is 3h late, not 21h early.
+        const offset = (t, b) => { const r = (((t - b) % 1440) + 1440) % 1440; return r <= 720 ? r : r - 1440; };
+
+        async function loadMyShift() {
+            try {
+                const { data: prof } = await sb.from('profiles').select('shift_id').eq('id', session.user.id).maybeSingle();
+                const { data: shifts } = await sb.from('shifts').select('*');
+                if (!shifts || !shifts.length) return;
+                myShift = shifts.find(s => prof && s.id === prof.shift_id) || shifts.find(s => s.is_default) || null;
+                if (!myShift) return;
+                const days = (myShift.working_days || []).map(Number);
+                const label = days.length === 7 ? 'All days'
+                    : days.every((d, i) => i === 0 || d === days[i - 1] + 1) && days.length > 2
+                        ? `${DAY_NAMES[days[0]]}–${DAY_NAMES[days[days.length - 1]]}`
+                        : days.map(d => DAY_NAMES[d]).join(', ');
+                const overnight = hhmm(myShift.end_time) <= hhmm(myShift.start_time) ? ' 🌙' : '';
+                el('shift-line').innerHTML =
+                    `${esc(myShift.name)} · ${esc(hhmm(myShift.start_time))}–${esc(hhmm(myShift.end_time))}${overnight}` +
+                    ` <span class="off">· ${esc(label)} · ${myShift.grace_minutes}m grace</span>`;
+                el('shift-line').style.display = '';
+            } catch { /* shifts table may not exist yet — page works without it */ }
+        }
 
         function monthRange(ym) {
             const [y, m] = ym.split('-').map(Number);
@@ -264,13 +301,36 @@
                 el(id + '-sub').textContent = sub;
             };
 
-            if (s.firstIn) setTile('t-in', fmtTime.format(new Date(s.firstIn.log_datetime)), 'in',
-                s.firstIn.device_name || s.firstIn.device_sn || 'Biometric device');
-            else setTile('t-in', '—', 'none', 'No punch yet today');
+            const tagFor = (punch, boundary, kind) => {
+                if (!myShift || !punch) return '';
+                const t = toMins(new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', minute: '2-digit', hour12: false })
+                    .format(new Date(punch.log_datetime)));
+                const off = offset(t, toMins(boundary));
+                if (kind === 'in') {
+                    const late = off > 0 ? off : 0;
+                    return late > (myShift.grace_minutes || 0)
+                        ? `<span class="tag late">${late < 60 ? late + 'm' : Math.floor(late / 60) + 'h ' + String(late % 60).padStart(2, '0') + 'm'} late</span>`
+                        : '<span class="tag ontime">On time</span>';
+                }
+                const early = off < 0 ? -off : 0;
+                return early > (myShift.early_out_grace_minutes || 0)
+                    ? `<span class="tag early">${early < 60 ? early + 'm' : Math.floor(early / 60) + 'h ' + String(early % 60).padStart(2, '0') + 'm'} early</span>`
+                    : '<span class="tag ontime">Full shift</span>';
+            };
 
-            if (s.lastOut && s.lastOut !== s.firstIn) setTile('t-out', fmtTime.format(new Date(s.lastOut.log_datetime)), 'out',
-                s.lastOut.device_name || s.lastOut.device_sn || 'Biometric device');
-            else setTile('t-out', '—', 'none', 'Still on the clock');
+            if (s.firstIn) {
+                setTile('t-in', fmtTime.format(new Date(s.firstIn.log_datetime)), 'in',
+                    s.firstIn.device_name || s.firstIn.device_sn || 'Biometric device');
+                el('t-in-sub').innerHTML = tagFor(s.firstIn, myShift && myShift.start_time, 'in')
+                    || esc(s.firstIn.device_name || s.firstIn.device_sn || 'Biometric device');
+            } else setTile('t-in', '—', 'none', 'No punch yet today');
+
+            if (s.lastOut && s.lastOut !== s.firstIn) {
+                setTile('t-out', fmtTime.format(new Date(s.lastOut.log_datetime)), 'out',
+                    s.lastOut.device_name || s.lastOut.device_sn || 'Biometric device');
+                el('t-out-sub').innerHTML = tagFor(s.lastOut, myShift && myShift.end_time, 'out')
+                    || esc(s.lastOut.device_name || s.lastOut.device_sn || 'Biometric device');
+            } else setTile('t-out', '—', 'none', 'Still on the clock');
 
             if (s.duration) setTile('t-dur', s.duration, 'dur', `${s.count} punch${s.count === 1 ? '' : 'es'} today`);
             else setTile('t-dur', '—', 'none', 'Today');
@@ -325,6 +385,7 @@
         });
         el('month').addEventListener('change', load);
 
+        await loadMyShift();
         await load();
 
         // Live: a punch lands in the DB and the page updates without a refresh.
