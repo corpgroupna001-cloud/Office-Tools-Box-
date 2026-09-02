@@ -47,6 +47,8 @@ const {
   parseDeviceDateTime, istParts, normalizeDirection,
   matchProfileByName, buildPunchEmail,
   evaluateShift, timeToMinutes, offsetFromBoundary,
+  istToday, monthDates, buildMonth, classifyDay,
+  weekOffsFor, holidayOn, DAY_STATUS,
 } = require('../lib/attendance');
 
 // Vercel Hobby kills the function at 10s. Stop starting new sends at 7.5s and
@@ -125,9 +127,15 @@ module.exports = async function handler(req, res) {
     // employee filing their own selfie punch.
     let maybe = req.body;
     if (typeof maybe === 'string') { try { maybe = JSON.parse(maybe || '{}'); } catch { maybe = {}; } }
-    if (req.method === 'POST' && supplied && maybe && maybe.mode === 'selfie') {
+    if (req.method === 'POST' && supplied && maybe && USER_MODES.has(maybe.mode)) {
       if (!SUPABASE_URL || !SERVICE_KEY) return res.status(500).json({ error: 'Supabase server config missing.' });
-      return handleSelfiePunch({ res, token: supplied, body: maybe, SUPABASE_URL, SERVICE_KEY, startedAt });
+      if (maybe.mode === 'selfie') {
+        return handleSelfiePunch({ res, token: supplied, body: maybe, SUPABASE_URL, SERVICE_KEY, startedAt });
+      }
+      // Read-only views for the signed-in employee. They live here rather than
+      // in a new file because the Hobby plan allows 12 serverless functions and
+      // the repo has 12; and here they can reuse the token check above.
+      return handleUserView({ res, token: supplied, body: maybe, SUPABASE_URL, SERVICE_KEY });
     }
     await new Promise(r => setTimeout(r, 400)); // slow down guessing
     return res.status(401).json({ error: 'unauthorized' });
@@ -462,6 +470,195 @@ const EVENT_LABEL = {
 // A repeat of the same event inside this window is treated as a double-tap.
 const SELFIE_REPEAT_WINDOW_MS = 60 * 1000;
 
+// Modes a signed-in employee (Supabase JWT, not the device key) may ask for.
+const USER_MODES = new Set(['selfie', 'calendar', 'team_status']);
+
+/**
+ * Read-only views for a signed-in employee.
+ *
+ *   calendar     — the caller's OWN month, classified exactly the way the
+ *                  admin grid and the pay sheet classify it, because it runs
+ *                  through the same buildMonth().
+ *   team_status  — who is working / on leave / off today. Names and status
+ *                  only: no times, no coordinates, no photos, no salary.
+ *                  It needs the service key because leave_requests is RLS'd
+ *                  to "your own rows", which is right for the table and wrong
+ *                  for a team directory.
+ */
+async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
+  const H = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
+  const sb = (path) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: H });
+
+  try {
+    const anonKey = process.env.SUPABASE_ANON_KEY || SERVICE_KEY;
+    const uRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { apikey: anonKey, Authorization: `Bearer ${token}` },
+    });
+    if (!uRes.ok) return res.status(401).json({ error: 'session_expired', detail: 'Your session expired. Refresh the page and sign in again.' });
+    const user = await uRes.json();
+    const userId = user && user.id;
+    if (!userId) return res.status(401).json({ error: 'session_expired' });
+
+    const today = istToday();
+
+    // ---------------- team_status ----------------
+    if (body.mode === 'team_status') {
+      const [profiles, shifts, policies, holidays, leaves, types, logs] = await Promise.all([
+        sb('profiles?select=id,full_name,email,company,shift_id,is_wfh&limit=2000').then(r => r.ok ? r.json() : []),
+        sb('shifts?select=*').then(r => r.ok ? r.json() : []),
+        sb('company_policies?select=company,week_offs').then(r => r.ok ? r.json() : []),
+        sb(`holidays?select=holiday_date,name,company&holiday_date=eq.${today}`).then(r => r.ok ? r.json() : []),
+        sb(`leave_requests?select=user_id,leave_type_id,day_part,start_date,end_date&status=eq.approved&start_date=lte.${today}&end_date=gte.${today}`).then(r => r.ok ? r.json() : []),
+        sb('leave_types?select=id,name').then(r => r.ok ? r.json() : []),
+        sb(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type&log_date=eq.${today}&limit=3000`).then(r => r.ok ? r.json() : []),
+      ]);
+
+      const shiftById = new Map(shifts.map(s => [s.id, s]));
+      const defaultShift = shifts.find(s => s.is_default) || null;
+      const typeName = new Map(types.map(t => [t.id, t.name]));
+      const leaveBy = new Map(leaves.map(l => [l.user_id, { ...l, type_name: typeName.get(l.leave_type_id) || 'Leave' }]));
+      const logsBy = new Map();
+      logs.forEach(r => {
+        if (!r.user_id) return;
+        if (!logsBy.has(r.user_id)) logsBy.set(r.user_id, []);
+        logsBy.get(r.user_id).push(r);
+      });
+
+      const people = profiles.map(p => {
+        const shift = (p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+        const day = classifyDay({
+          date: today, shift,
+          weekOffs: weekOffsFor(p.company, policies),
+          holiday: holidayOn(today, holidays, p.company),
+          leave: leaveBy.get(p.id) || null,
+          punches: logsBy.get(p.id) || [],
+          today,
+        });
+        const meta = DAY_STATUS[day.status] || {};
+        return {
+          id: p.id,
+          email: p.email,
+          name: p.full_name || p.email,
+          is_wfh: p.is_wfh === true,
+          status: day.status,
+          label: day.status === 'holiday' ? (day.holidayName || 'Holiday')
+               : day.status === 'leave'   ? (day.leaveType || 'On leave')
+               : meta.label || day.status,
+          icon: meta.icon || '',
+          color: meta.color || null,
+        };
+      });
+      return res.status(200).json({ today, people });
+    }
+
+    // ---------------- calendar (own month only) ----------------
+    const month = /^\d{4}-\d{2}$/.test(String(body.month || '')) ? String(body.month) : today.slice(0, 7);
+    const dates = monthDates(month);
+    const from = dates[0], to = dates[dates.length - 1];
+
+    const [profileRows, shifts, policies, holidays, leaves, types, logs] = await Promise.all([
+      sb(`profiles?select=id,full_name,company,shift_id,is_wfh&id=eq.${encodeURIComponent(userId)}&limit=1`).then(r => r.ok ? r.json() : []),
+      sb('shifts?select=*').then(r => r.ok ? r.json() : []),
+      sb('company_policies?select=company,week_offs').then(r => r.ok ? r.json() : []),
+      sb(`holidays?select=holiday_date,name,company&holiday_date=gte.${from}&holiday_date=lte.${to}`).then(r => r.ok ? r.json() : []),
+      // Scoped to this user by id, not merely by RLS — the service key would
+      // happily return everyone's.
+      sb(`leave_requests?select=user_id,leave_type_id,day_part,start_date,end_date&status=eq.approved&user_id=eq.${encodeURIComponent(userId)}&start_date=lte.${to}&end_date=gte.${from}`).then(r => r.ok ? r.json() : []),
+      sb('leave_types?select=id,name').then(r => r.ok ? r.json() : []),
+      sb(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type,source&user_id=eq.${encodeURIComponent(userId)}&log_date=gte.${from}&log_date=lte.${to}&limit=2000`).then(r => r.ok ? r.json() : []),
+    ]);
+
+    const profile = profileRows[0] || {};
+    const shift = (profile.shift_id && shifts.find(s => s.id === profile.shift_id))
+               || shifts.find(s => s.is_default) || null;
+    const typeName = new Map(types.map(t => [t.id, t.name]));
+    const weekOffs = weekOffsFor(profile.company, policies);
+
+    const mon = buildMonth({
+      ym: month, company: profile.company, shift, weekOffs, holidays,
+      leaves: leaves.map(l => ({ ...l, type_name: typeName.get(l.leave_type_id) || 'Leave' })),
+      punches: logs, today,
+    });
+
+    const hhmm = iso => iso ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso)) : null;
+    return res.status(200).json({
+      month, today,
+      legend: DAY_STATUS,
+      week_offs: weekOffs,
+      shift_name: shift ? shift.name : null,
+      totals: mon.totals,
+      days: mon.days.map(d => ({
+        date: d.date, status: d.status,
+        in: hhmm(d.firstIn), out: hhmm(d.lastOut),
+        late: d.lateMinutes || 0,
+        note: d.holidayName || d.leaveType || null,
+      })),
+    });
+  } catch (e) {
+    return res.status(500).json({ error: 'view_failed', detail: String(e && e.message || e).slice(0, 200) });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Turning a GPS fix into a place a human can read.
+//
+// Coordinates are the record of truth and are always stored; this is only the
+// friendly label beside them. So it is deliberately fail-soft: a slow or
+// rate-limited geocoder must never cost somebody their attendance punch.
+// Nominatim is free and needs no key, but its usage policy requires a real
+// identifying User-Agent, and it will throttle abuse.
+//
+// Note on what GPS can and cannot tell you: this yields street, area, city and
+// postcode. A room number, a floor, or which gate to unload at is not derivable
+// from coordinates by any service — that has to be entered by a person.
+// ---------------------------------------------------------------------------
+const GEOCODE_TIMEOUT_MS = 2500;
+
+function formatAddress(j) {
+  const a = (j && j.address) || {};
+  const parts = [
+    [a.house_number, a.road].filter(Boolean).join(' '),
+    a.neighbourhood || a.suburb || a.city_district,
+    a.city || a.town || a.village || a.county,
+    a.postcode,
+  ].filter(Boolean);
+  // The same name often arrives twice (suburb == city_district, say).
+  const seen = new Set();
+  const out = parts.filter(x => {
+    const k = String(x).trim().toLowerCase();
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  const s = out.join(', ');
+  if (s) return s.slice(0, 300);
+  return j && j.display_name ? String(j.display_name).slice(0, 300) : null;
+}
+
+async function reverseGeocode(lat, lng) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), GEOCODE_TIMEOUT_MS);
+  try {
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1` +
+      `&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}`,
+      {
+        signal: ctrl.signal,
+        headers: {
+          'User-Agent': 'WorkSuite-Attendance/1.0 (internal HR tool; contact corpgroup.na001@gmail.com)',
+          'Accept-Language': 'en',
+        },
+      }
+    );
+    if (!r.ok) return null;
+    return formatAddress(await r.json());
+  } catch {
+    return null;   // timeout, throttle, DNS, anything: the punch still saves
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, startedAt }) {
   const H = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
 
@@ -539,6 +736,11 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
     } catch { /* worst case we omit the shift note */ }
 
     // ---- 5. Store ----
+    // The client sends its own lookup for the photo stamp; we do our own here
+    // so the stored address comes from the server, not from whatever a browser
+    // chose to post.
+    const locationAddress = await reverseGeocode(lat, lng);
+
     const insertRow = {
       user_id:       userId,
       employee_code: profile.employee_code || null,
@@ -555,6 +757,7 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
       latitude:      lat,
       longitude:     lng,
       accuracy_m:    Number.isFinite(Number(body.accuracy_m)) ? Number(body.accuracy_m) : null,
+      location_address: locationAddress,
       review_status: 'pending',
       email_status:  'pending',
       email_to:      profile.email || null,

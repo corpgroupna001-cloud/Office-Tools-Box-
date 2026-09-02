@@ -8,7 +8,8 @@
 //   SMTP_* (see lib/mailer.js) — used by the attendance resend action
 
 const { sendMail } = require('../lib/mailer');
-const { istParts, istToday, buildPunchEmail, evaluateShift, describeWorkingDays } = require('../lib/attendance');
+const { istParts, istToday, buildPunchEmail, evaluateShift, describeWorkingDays,
+        weekOffsFor, buildMonth, computePay, monthDates, DAY_STATUS } = require('../lib/attendance');
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -488,6 +489,175 @@ module.exports = async function handler(req, res) {
         return res.status(502).json({ error: 'Reset failed', detail: err });
       }
       return res.status(200).json({ success: true });
+    }
+
+    // ================= PAYROLL & CALENDAR =================
+    // pay_ and cal_ live here for the same reason att_, shift_ and leave_ do:
+    // the Hobby plan allows 12 serverless functions and the repo is at 12.
+    //
+    // Everything below runs on the SERVICE KEY behind the admin password.
+    // public.salaries has RLS on with no policies, so this is the only route
+    // to it in the entire system — an employee token reads zero rows.
+    if (String(action).startsWith('pay_') || String(action).startsWith('cal_')) {
+      const PH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
+      const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...PH, ...(opts.headers || {}) } });
+
+      // PostgREST caps a single response; page until a short one comes back so
+      // a busy month never silently loses its tail.
+      const fetchAll = async (path, pageSize = 1000, maxPages = 12) => {
+        const out = [];
+        for (let page = 0; page < maxPages; page++) {
+          const sep = path.includes('?') ? '&' : '?';
+          const r = await sb(`${path}${sep}limit=${pageSize}&offset=${page * pageSize}`);
+          if (!r.ok) break;
+          const chunk = await r.json();
+          out.push(...chunk);
+          if (chunk.length < pageSize) break;
+        }
+        return out;
+      };
+
+      // ---------- writes ----------
+      if (action === 'pay_set_rate') {
+        const userId = String(body.user_id || '');
+        if (!/^[0-9a-f-]{36}$/i.test(userId)) return res.status(400).json({ error: 'user_id required' });
+        // Same blank-guard as lib/attendance computePay: Number('') is 0, and a
+        // rate of zero saved by accident looks exactly like a real wage of zero.
+        const blank = v => v === null || v === undefined || v === '';
+        const rate = blank(body.per_day_rate) ? NaN : Number(body.per_day_rate);
+        if (!Number.isFinite(rate) || rate < 0 || rate >= 1000000) {
+          return res.status(400).json({ error: 'bad_rate', detail: 'Enter a per-day rate between 0 and 999999.' });
+        }
+        const r = await sb('salaries?on_conflict=user_id', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+          body: JSON.stringify({
+            user_id: userId,
+            per_day_rate: rate,
+            note: body.note ? String(body.note).slice(0, 300) : null,
+            updated_at: new Date().toISOString(),
+            updated_by: 'admin',
+          }),
+        });
+        if (!r.ok) return res.status(502).json({ error: 'save failed', detail: (await r.text()).slice(0, 200) });
+        return res.status(200).json({ success: true, salary: (await r.json())[0] || null });
+      }
+
+      if (action === 'pay_clear_rate') {
+        const userId = String(body.user_id || '');
+        if (!/^[0-9a-f-]{36}$/i.test(userId)) return res.status(400).json({ error: 'user_id required' });
+        const r = await sb(`salaries?user_id=eq.${encodeURIComponent(userId)}`, { method: 'DELETE' });
+        if (!r.ok) return res.status(502).json({ error: 'delete failed', detail: (await r.text()).slice(0, 200) });
+        return res.status(200).json({ success: true });
+      }
+
+      // ---------- reads ----------
+      const month = /^\d{4}-\d{2}$/.test(String(body.month || '')) ? String(body.month) : istToday().slice(0, 7);
+      const dates = monthDates(month);
+      if (!dates.length) return res.status(400).json({ error: 'bad_month', detail: 'Month must be YYYY-MM.' });
+      const from = dates[0], to = dates[dates.length - 1];
+      const today = istToday();
+
+      const [profiles, shifts, policies, holidays, leaveRows, leaveTypes, logs, salaries] = await Promise.all([
+        fetchAll('profiles?select=id,full_name,email,company,employee_code,shift_id,is_wfh&order=full_name.asc'),
+        sb('shifts?select=*').then(r => r.ok ? r.json() : []),
+        sb('company_policies?select=company,week_offs').then(r => r.ok ? r.json() : []),
+        sb(`holidays?select=holiday_date,name,company&holiday_date=gte.${from}&holiday_date=lte.${to}`).then(r => r.ok ? r.json() : []),
+        fetchAll(`leave_requests?select=user_id,leave_type_id,day_part,start_date,end_date&status=eq.approved&start_date=lte.${to}&end_date=gte.${from}`),
+        sb('leave_types?select=id,name').then(r => r.ok ? r.json() : []),
+        fetchAll(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type,source&log_date=gte.${from}&log_date=lte.${to}&order=log_datetime.asc`),
+        sb('salaries?select=user_id,per_day_rate,currency,note,updated_at').then(r => r.ok ? r.json() : []),
+      ]);
+
+      const shiftById   = new Map(shifts.map(s => [s.id, s]));
+      const defaultShift = shifts.find(s => s.is_default) || null;
+      const typeName    = new Map(leaveTypes.map(t => [t.id, t.name]));
+      const rateByUser  = new Map(salaries.map(s => [s.user_id, s]));
+
+      const logsByUser  = new Map();
+      logs.forEach(r => {
+        if (!r.user_id) return;                     // unmapped device codes
+        if (!logsByUser.has(r.user_id)) logsByUser.set(r.user_id, []);
+        logsByUser.get(r.user_id).push(r);
+      });
+      const leavesByUser = new Map();
+      leaveRows.forEach(l => {
+        if (!leavesByUser.has(l.user_id)) leavesByUser.set(l.user_id, []);
+        leavesByUser.get(l.user_id).push({ ...l, type_name: typeName.get(l.leave_type_id) || 'Leave' });
+      });
+
+      // One character per day keeps a 23-person month grid small on the wire.
+      const CODE = { present: 'P', late: 'L', absent: 'A', leave: 'V',
+                     holiday: 'H', weekoff: 'W', pending: 'T', future: 'F' };
+      const hhmm = iso => iso ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso)) : null;
+
+      const only = body.user_id ? String(body.user_id) : null;
+      const people = only ? profiles.filter(p => p.id === only) : profiles;
+
+      const rows = people.map(p => {
+        const shift = (p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+        const weekOffs = weekOffsFor(p.company, policies);
+        // Named `mon` on purpose: `month` is the validated YYYY-MM string from
+        // above, and shadowing it here would let a junk ?month= build a grid
+        // whose days did not line up with the `dates` header the UI renders.
+        const mon = buildMonth({
+          ym: month,
+          company: p.company, shift, weekOffs,
+          holidays, leaves: leavesByUser.get(p.id) || [],
+          punches: logsByUser.get(p.id) || [], today,
+        });
+
+        const sal = rateByUser.get(p.id) || null;
+        const pay = computePay({
+          perDayRate: sal ? sal.per_day_rate : null,
+          daysPresent: mon.totals.daysPresent,
+          currency: sal ? sal.currency : 'INR',
+        });
+
+        const times = {}, notes = {};
+        mon.days.forEach(d => {
+          if (d.worked) times[d.date] = [hhmm(d.firstIn), hhmm(d.lastOut), d.lateMinutes || 0];
+          if (d.status === 'holiday' && d.holidayName) notes[d.date] = d.holidayName;
+          if (d.status === 'leave' && d.leaveType) notes[d.date] = d.leaveType + (d.dayPart && d.dayPart !== 'full' ? ' (half)' : '');
+        });
+
+        return {
+          id: p.id,
+          name: p.full_name || p.email,
+          email: p.email,
+          company: p.company || null,
+          employee_code: p.employee_code || null,
+          is_wfh: p.is_wfh === true,
+          shift_name: shift ? shift.name : null,
+          shift_assigned: !!(p.shift_id && shiftById.get(p.shift_id)),
+          week_offs: weekOffs,
+          week_offs_label: describeWorkingDays(weekOffs),
+          codes: mon.days.map(d => CODE[d.status] || '?').join(''),
+          times, notes,
+          totals: mon.totals,
+          rate: sal ? Number(sal.per_day_rate) : null,
+          rate_note: sal ? sal.note : null,
+          currency: pay.currency,
+          gross: pay.gross,
+          has_rate: pay.hasRate,
+        };
+      });
+
+      const withRate = rows.filter(r => r.has_rate);
+      return res.status(200).json({
+        month, dates, today,
+        legend: DAY_STATUS,
+        employees: rows,
+        summary: {
+          people: rows.length,
+          with_rate: withRate.length,
+          without_rate: rows.length - withRate.length,
+          days_present: rows.reduce((a, r) => a + r.totals.daysPresent, 0),
+          // Only rows that actually have a rate contribute, so the total never
+          // silently treats "no rate entered" as zero rupees.
+          gross: Math.round(withRate.reduce((a, r) => a + (r.gross || 0), 0) * 100) / 100,
+        },
+      });
     }
 
     // ================= LEAVE & HOLIDAYS =================
