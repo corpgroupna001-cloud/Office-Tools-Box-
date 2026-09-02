@@ -47,7 +47,99 @@
     --ws-motion:       160ms cubic-bezier(.2,.9,.3,1);
     --ws-motion-slow:  280ms cubic-bezier(.2,.9,.3,1);
     --ws-ease-spring:  cubic-bezier(.34, 1.56, .64, 1);
+
+    /* ---- Semantic pairs (added for the light theme) ----
+       Every colour that appears as TEXT needs a light-theme sibling: the
+       pastel -300 shades that read well on navy are unreadable on white.
+       Tokenising them here is what lets one shim serve both themes. */
+    --ws-on-accent:    #ffffff;   /* text on a gradient/solid accent, both themes */
+
+    --ws-text-2:       #cbd5e1;   /* between text and text-muted */
+    --ws-success-text: #6ee7b7;
+    --ws-warning-text: #fcd34d;
+    --ws-danger-text:  #fda4af;
+    --ws-info-text:    #93c5fd;
+    --ws-accent-text:  #c4b5fd;
+
+    --ws-success-bg:   rgba(16,185,129,0.18);
+    --ws-warning-bg:   rgba(245,158,11,0.18);
+    --ws-danger-bg:    rgba(239,68,68,0.18);
+    --ws-info-bg:      rgba(59,130,246,0.18);
+
+    --ws-bg-glow-1:    rgba(59,130,246,0.16);
+    --ws-bg-glow-2:    rgba(139,92,246,0.14);
+
+    --ws-overlay:      rgba(11,17,32,0.85);
+    --ws-scrim:        rgba(0,0,0,0.5);
+
+    color-scheme: dark;
 }
+
+/* ============================================================
+   LIGHT THEME
+   ------------------------------------------------------------
+   Applied only by an explicit choice: :root[data-theme="light"],
+   which theme.js sets from localStorage before first paint.
+
+   Deliberately NOT following prefers-color-scheme yet.
+
+   An OS-preference rule here would have moved every employee whose
+   machine is set to light onto a theme none of us has reviewed on
+   real data - without them asking for it. Light is opt-in via the
+   toggle until each page has been checked in it; then add:
+
+       @media (prefers-color-scheme: light) {
+           :root:not([data-theme="dark"]) { ...light tokens... }
+       }
+
+   The :not([data-theme="dark"]) guard is what keeps an explicit
+   dark choice winning over the OS once that block is live.
+   ============================================================ */
+:root[data-theme="light"] { color-scheme: light;
+    --ws-bg:          #f5f7fb;
+    --ws-bg-2:        #eaeff7;
+    --ws-surface:     #ffffff;
+    --ws-surface-2:   #f1f5f9;
+    --ws-border:      rgba(15,23,42,0.10);
+    --ws-border-2:    rgba(15,23,42,0.17);
+
+    --ws-text:        #0f172a;
+    --ws-text-2:      #334155;
+    --ws-text-muted:  #52627a;
+    --ws-text-dim:    #5d6b80;   /* 5.0:1 on #f5f7fb - it styles placeholders, which are text */
+
+    /* A touch darker than the dark-theme blue: #3b82f6 on white is only
+       about 3:1 against body text size. */
+    --ws-primary:     #2563eb;
+    --ws-primary-2:   #4f46e5;
+    --ws-primary-glow: 0 8px 24px rgba(37,99,235,0.28);
+
+    --ws-success:     #059669;
+    --ws-warning:     #b45309;
+    --ws-danger:      #dc2626;
+
+    --ws-success-text: #047857;
+    --ws-warning-text: #92400e;
+    --ws-danger-text:  #be123c;
+    --ws-info-text:    #1d4ed8;
+    --ws-accent-text:  #6d28d9;
+
+    --ws-success-bg:   rgba(16,185,129,0.13);
+    --ws-warning-bg:   rgba(245,158,11,0.16);
+    --ws-danger-bg:    rgba(239,68,68,0.11);
+    --ws-info-bg:      rgba(59,130,246,0.12);
+
+    --ws-bg-glow-1:    rgba(59,130,246,0.10);
+    --ws-bg-glow-2:    rgba(139,92,246,0.08);
+
+    --ws-shadow-sm: 0 1px 2px rgba(15,23,42,0.06), 0 2px 8px rgba(15,23,42,0.05);
+    --ws-shadow-md: 0 2px 6px rgba(15,23,42,0.07), 0 10px 26px rgba(15,23,42,0.07);
+    --ws-shadow-lg: 0 6px 16px rgba(15,23,42,0.08), 0 24px 56px rgba(15,23,42,0.10);
+
+    --ws-overlay:     rgba(241,245,249,0.88);
+    --ws-scrim:       rgba(15,23,42,0.42);
+}
+
 
 /* ---------- Global refinements — apply on EVERY page ---------- */
 
@@ -510,4 +602,162 @@ body {
     border-radius: 5px;
     font-size: 10px; font-weight: 800;
     font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* ============================================================
+   TAILWIND COLOUR COMPATIBILITY
+   ------------------------------------------------------------
+   The eight pages carry 1,012 hard-coded Tailwind colour classes
+   (text-white x277, text-slate-400 x163, ...). Swapping tokens
+   alone would have left every one of them painting dark-theme
+   colours onto a white page, so the theme would only half work.
+   Rather than rewrite ~1,000 class attributes, the utilities are
+   redirected at the token layer, once, for both themes.
+
+   Specificity note: the Tailwind play CDN injects its stylesheet
+   at runtime, AFTER this file, so a bare .text-white would beat
+   us on source order at equal weight. The :root prefix raises
+   these to (0,2,0) and settles it.
+   ============================================================ */
+
+/* Page ground. Pages hard-code `background: #0b1120` on body; :root body
+   outranks a bare body selector, so this retints them without eight edits. */
+:root body { background-color: var(--ws-bg); color: var(--ws-text); }
+
+/* ---- Neutral text: 583 of the 1,012 uses ---- */
+:root .text-white      { color: var(--ws-text); }
+:root .text-white\/80  { color: var(--ws-text-2); }
+:root .text-white\/70,
+:root .text-white\/60  { color: var(--ws-text-muted); }
+:root .text-slate-100,
+:root .text-slate-200  { color: var(--ws-text-2); }
+:root .text-slate-200\/80 { color: var(--ws-text-muted); }
+:root .text-slate-300  { color: var(--ws-text-2); }
+:root .text-slate-400  { color: var(--ws-text-muted); }
+:root .text-slate-500  { color: var(--ws-text-dim); }
+:root .text-slate-600  { color: var(--ws-text-dim); }
+:root .placeholder-slate-400::placeholder { color: var(--ws-text-dim); }
+:root .placeholder-slate-500::placeholder { color: var(--ws-text-dim); }
+
+/* ---- Accent text: pastel on navy, saturated on white ---- */
+:root .text-emerald-200, :root .text-emerald-300, :root .text-emerald-400,
+:root .text-green-300   { color: var(--ws-success-text); }
+:root .text-rose-200, :root .text-rose-300, :root .text-rose-400,
+:root .text-red-300     { color: var(--ws-danger-text); }
+:root .text-amber-200, :root .text-amber-300, :root .text-amber-400,
+:root .text-yellow-300  { color: var(--ws-warning-text); }
+:root .text-orange-200, :root .text-orange-300, :root .text-orange-400
+                        { color: var(--ws-warning-text); }
+:root .text-blue-200, :root .text-blue-300, :root .text-blue-400,
+:root .text-sky-300, :root .text-cyan-300 { color: var(--ws-info-text); }
+:root .text-purple-200, :root .text-purple-300, :root .text-purple-400,
+:root .text-violet-300, :root .text-fuchsia-300, :root .text-pink-300
+                        { color: var(--ws-accent-text); }
+
+/* ---- Surfaces and borders ---- */
+:root .bg-white\/5   { background-color: var(--ws-surface); }
+:root .bg-white\/10  { background-color: var(--ws-surface); }
+:root .bg-white\/15,
+:root .bg-white\/20  { background-color: var(--ws-surface-2); }
+:root .border-white\/5   { border-color: var(--ws-border); }
+:root .border-white\/10,
+:root .border-white\/20  { border-color: var(--ws-border); }
+:root .divide-white\/10 > * + * { border-color: var(--ws-border); }
+
+:root .bg-rose-500\/10    { background-color: var(--ws-danger-bg); }
+:root .bg-emerald-500\/10 { background-color: var(--ws-success-bg); }
+:root .bg-amber-500\/10   { background-color: var(--ws-warning-bg); }
+:root .bg-blue-500\/10    { background-color: var(--ws-info-bg); }
+
+/* ---- Restore white on accent surfaces ------------------------
+   40 of the 277 text-white uses sit on a gradient button, where
+   dark text would be unreadable. These come last so they win the
+   tie on source order. */
+:root .btn-primary, :root .btn-primary *,
+:root .ws-btn-primary, :root .ws-btn-primary *,
+:root .btn-danger, :root .btn-danger *,
+:root .ws-btn-danger, :root .ws-btn-danger *,
+:root .p-btn:not(.ghost), :root .p-btn:not(.ghost) *,
+:root [class*="bg-gradient-to"], :root [class*="bg-gradient-to"] * {
+    color: var(--ws-on-accent);
+}
+
+/* ============================================================
+   COMPONENT LAYER
+   Shared shapes so a table in Admin and a table in Attendance are
+   the same table.
+   ============================================================ */
+
+.ws-page   { max-width: 1200px; margin: 0 auto; padding: 24px 20px 64px; }
+.ws-page-wide { max-width: 1600px; }
+
+.ws-section-head { display:flex; align-items:baseline; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+.ws-section-head h2, .ws-section-head h3 { margin:0; font-size:17px; font-weight:900; color:var(--ws-text); letter-spacing:-0.01em; }
+.ws-section-head .sub { font-size:12.5px; font-weight:700; color:var(--ws-text-muted); }
+
+.ws-toolbar {
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+    padding:12px 14px; margin-bottom:16px;
+    background:var(--ws-surface); border:1px solid var(--ws-border);
+    border-radius:var(--ws-r-md);
+}
+.ws-toolbar .spacer { flex:1 1 auto; }
+
+.ws-table { width:100%; border-collapse:collapse; font-size:13.5px; }
+.ws-table thead th {
+    text-align:left; padding:11px 14px; white-space:nowrap;
+    font-size:10.5px; font-weight:900; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--ws-text-muted); background:var(--ws-surface-2);
+    border-bottom:1px solid var(--ws-border);
+}
+.ws-table tbody td { padding:11px 14px; border-bottom:1px solid var(--ws-border); color:var(--ws-text-2); }
+.ws-table tbody tr:last-child td { border-bottom:none; }
+.ws-table tbody tr:hover td { background:var(--ws-surface-2); }
+.ws-table .num { text-align:right; font-variant-numeric:tabular-nums; }
+
+.ws-field { display:flex; flex-direction:column; gap:6px; }
+.ws-field > label {
+    font-size:10px; font-weight:900; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--ws-text-muted);
+}
+
+.ws-chip {
+    display:inline-flex; align-items:center; gap:5px;
+    padding:3px 9px; border-radius:var(--ws-r-pill);
+    font-size:10.5px; font-weight:900; letter-spacing:.02em;
+    border:1px solid var(--ws-border); color:var(--ws-text-muted);
+    background:var(--ws-surface);
+}
+.ws-chip.ok   { color:var(--ws-success-text); background:var(--ws-success-bg); border-color:transparent; }
+.ws-chip.warn { color:var(--ws-warning-text); background:var(--ws-warning-bg); border-color:transparent; }
+.ws-chip.bad  { color:var(--ws-danger-text);  background:var(--ws-danger-bg);  border-color:transparent; }
+.ws-chip.info { color:var(--ws-info-text);    background:var(--ws-info-bg);    border-color:transparent; }
+
+/* ---- Theme toggle ---- */
+.ws-theme-toggle {
+    display:inline-flex; align-items:center; justify-content:center;
+    width:36px; height:36px; flex:0 0 auto;
+    border-radius:var(--ws-r-pill); cursor:pointer;
+    background:var(--ws-surface); border:1px solid var(--ws-border);
+    color:var(--ws-text-muted); font-size:15px; line-height:1;
+    transition:background var(--ws-motion), color var(--ws-motion), transform var(--ws-motion);
+}
+.ws-theme-toggle:hover { background:var(--ws-surface-2); color:var(--ws-text); transform:translateY(-1px); }
+.ws-theme-toggle .sun  { display:none; }
+.ws-theme-toggle .moon { display:block; }
+:root[data-theme="light"] .ws-theme-toggle .sun  { display:block; }
+:root[data-theme="light"] .ws-theme-toggle .moon { display:none; }
+
+/* Light theme needs the frosted panels to read as paper, not as
+   translucent glass over a bright page - which just looks grey. */
+:root[data-theme="light"] .glass,
+:root[data-theme="light"] .ws-glass,
+:root[data-theme="light"] .glass-strong,
+:root[data-theme="light"] .ws-glass-strong,
+:root[data-theme="light"] .ws-glass-max,
+:root[data-theme="light"] .ws-card {
+    background: var(--ws-surface);
+    border-color: var(--ws-border);
+    box-shadow: var(--ws-shadow-sm);
+    backdrop-filter: none;
 }
