@@ -120,6 +120,27 @@
             border-radius: 14px;
             gap: 0;
         }
+        /* Month calendar grid */
+        .cal-grid { border-collapse: separate; border-spacing: 0; font-size: 12px; }
+        .cal-grid th, .cal-grid td { padding: 0; }
+        .cal-grid .cal-name { min-width: 168px; padding: 7px 12px; text-align: left; white-space: nowrap;
+                              position: sticky; left: 0; background: rgba(15,23,42,0.96); z-index: 2; }
+        .cal-grid thead .cal-name { z-index: 3; }
+        .cal-grid .cal-d { width: 22px; text-align: center; padding: 5px 0 6px; color: #94a3b8;
+                           font-weight: 900; font-size: 10px; line-height: 1.15; }
+        .cal-grid .cal-d span { display: block; font-size: 8px; opacity: .55; letter-spacing: .04em; }
+        .cal-grid .cal-wend { color: #64748b; background: rgba(148,163,184,0.06); }
+        .cal-grid .cal-c { text-align: center; padding: 2px 0; }
+        .cal-grid .cal-c span { display: inline-block; width: 15px; height: 15px; border-radius: 4px; }
+        .cal-grid .cal-tot { width: 30px; text-align: center; font-weight: 900; color: #e2e8f0; padding: 0 3px; }
+        .cal-grid .cal-bad { color: #fda4af; }
+        .cal-grid .cal-warn { color: #fcd34d; }
+        .cal-grid .cal-wfh { font-size: 10px; }
+        .cal-grid tbody tr:hover td { background: rgba(255,255,255,0.04); }
+        .cal-grid tbody tr:hover .cal-name { background: rgba(30,41,59,0.99); }
+        .cal-key { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px;
+                   font-weight: 800; color: #cbd5e1; text-transform: uppercase; letter-spacing: .03em; }
+        .cal-key i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
         .tab-bar .admin-tab {
             background: transparent !important;
             color: #94a3b8;
@@ -302,6 +323,8 @@
                 <button data-tab="attendance" class="admin-tab" type="button">🕐 Attendance</button>
                 <button data-tab="shifts"     class="admin-tab" type="button">⏰ Shifts</button>
                 <button data-tab="selfies"    class="admin-tab" type="button">📸 Selfies</button>
+                <button data-tab="calendar"   class="admin-tab" type="button">📅 Calendar</button>
+                <button data-tab="salary"     class="admin-tab" type="button">💰 Salary</button>
             </div>
 
             <!-- Filters (RESULTS TAB) -->
@@ -741,6 +764,62 @@
                         </table>
                     </div>
                 </div>
+            </div>
+
+            <!-- ================= MONTH CALENDAR ================= -->
+            <div id="calendar-panel" class="hidden">
+                <div class="section-head mb-3"><h3>📅 Month calendar</h3><span class="sub">Everyone, every day. Weekly offs follow each company's policy</span></div>
+                <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
+                    <input id="cal-month" type="month" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none" style="color-scheme: dark;">
+                    <select id="cal-company" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                        <option value="">All companies</option>
+                    </select>
+                    <button id="cal-reload" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Load</button>
+                    <div id="cal-legend" class="flex flex-wrap gap-2.5 ml-auto"></div>
+                </div>
+                <div class="glass rounded-2xl overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full cal-grid">
+                            <thead id="cal-head"></thead>
+                            <tbody id="cal-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <p class="text-slate-400 text-xs font-bold mt-3">Hover any cell for the in/out times, holiday name or leave type.</p>
+            </div>
+
+            <!-- ================= SALARY ================= -->
+            <div id="salary-panel" class="hidden">
+                <div class="section-head mb-3"><h3>💰 Salary</h3><span class="sub">Per-day rate × days actually present. Visible here only</span></div>
+                <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
+                    <input id="pay-month" type="month" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none" style="color-scheme: dark;">
+                    <select id="pay-company" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                        <option value="">All companies</option>
+                    </select>
+                    <button id="pay-reload" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Load</button>
+                    <button id="pay-export" type="button" class="glass text-white font-black px-5 py-2 rounded-xl text-sm">Export CSV</button>
+                    <div id="pay-summary" class="ml-auto text-right"></div>
+                </div>
+                <div class="glass rounded-2xl overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr>
+                                    <th>Employee</th><th>Company</th><th>Shift</th>
+                                    <th class="text-right">Days present</th>
+                                    <th class="text-right">Per-day rate</th>
+                                    <th class="text-right">Gross</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="pay-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <p class="text-slate-400 text-xs font-bold mt-3">
+                    Leave and holidays are not paid under this model — only days worked count.
+                    An employee with no rate set shows “—”, never ₹0, and is left out of the total.
+                </p>
             </div>
         </main>
     </div>
@@ -2815,5 +2894,6 @@
 
         gatePassword.focus();
     </script>
+    <script src="/admin/payroll.js"></script>
 </body>
 </html>
