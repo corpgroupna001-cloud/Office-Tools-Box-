@@ -208,6 +208,62 @@ click. Binding a code also re-points that code's past punches.
   is unique, so re-exporting a date range inserts nothing and emails nothing.
 - Naive timestamps from the device are read as **IST**.
 
+## Step 7 — Employee shift timings
+
+Named shift templates assigned to employees, used to flag late arrivals and
+early departures against the biometric data.
+
+### 7.1 Run the migration
+
+Supabase → SQL Editor → paste `supabase-shifts-migration.sql` → Run.
+Creates `shifts`, adds `profiles.shift_id`, and seeds a **General**
+09:30–18:30 shift (Mon–Sat, 10-minute grace) marked as the default.
+
+### 7.2 Set them up
+
+Admin → **⏰ Shifts**:
+
+- **Shift templates** — create/edit/delete. Each has a start, an end, a late
+  grace, an early-out grace, and its working days. One shift can be marked
+  *default*, which applies to anyone not explicitly assigned.
+- **Who works which shift** — a dropdown per employee, saved on change, plus
+  "Apply to all shown" for bulk assignment (respects the search box, so you
+  can filter to one company and assign in a single click).
+
+Deleting a shift leaves its people unassigned (`ON DELETE SET NULL`); their
+attendance history is untouched.
+
+### 7.3 What it changes
+
+| Where | Effect |
+|---|---|
+| Admin → 🕐 Attendance | Shift column, `▲ 22m late` under First IN, `▼ 50m early` under Last OUT, plus Late / Early-out / Week-off tiles. All of it in the CSV export. |
+| Punch email | Subject becomes `Checked In at 9:52 AM (22m late)`, with a coloured pill in the body. On-time punches read normally. |
+| `/attendance` | Shows the employee's shift window and tags today's check-in *On time* or *22m late*. |
+
+Non-working days show as **Week-off** rather than Absent, so Sundays no
+longer read as 24 people failing to turn up.
+
+### Overnight shifts
+
+`end_time <= start_time` means the shift crosses midnight (22:00 → 07:00).
+Comparisons rotate the clock difference onto ±12 hours, so a 01:00 punch on a
+22:00 shift reads as **3 hours late**, not 21 hours early. No extra flag to set.
+
+### When a late/early note is *not* shown on an email
+
+The email only annotates a boundary it can stand behind:
+
+- **Lateness** only on the day's **first** punch — a 2:10pm return from lunch
+  is not "4h 40m late for a 09:30 shift".
+- **Early-out** only from the shift's **midpoint** onwards, so stepping out at
+  1pm isn't reported as leaving early.
+
+The admin report has no such restriction: it works from the day's real first
+IN and last OUT.
+
+---
+
 ### Vercel Hobby: the 12-function cap
 
 A Hobby deployment may contain at most **12 serverless functions**, and this
@@ -215,6 +271,7 @@ project sits exactly on that line. Two consolidations keep it there:
 
 - The attendance admin actions live in `api/admin.js` (prefixed `att_`)
   instead of their own file — it was already the password-gated action router.
+- The shift actions live there too (prefixed `shift_`), for the same reason.
 - `api/send-verify.js` and `api/verify-code.js` were merged into
   `api/verify.js`. Both original URLs still work, via rewrites in
   `vercel.json`, so nothing on the front end changed.
