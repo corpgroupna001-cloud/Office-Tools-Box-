@@ -149,6 +149,38 @@ Parameter name mapping (tick the checkbox next to each one you fill in):
 
 `Log Date` and `Log Time` can be left blank — `log_datetime` covers both.
 
+### 6.3a IN/OUT is derived, not sent
+
+The Realtime "Third Party Api" export sends **six fields and no direction**:
+
+```json
+{ "employee_code": "00000008", "employee_name": "Vinay Sirimilla",
+  "log_datetime": "2026-09-01 19:05:02", "downloaded_at": "2026-09-02 13:16:53",
+  "device_sn": "RSS202512133933", "device_name": "" }
+```
+
+The In / Out boxes on their settings page produced no key in the payload, so
+the webhook **derives** the direction from the punch's position in that
+employee's IST day — 1st punch = IN, 2nd = OUT, 3rd = IN, and so on. Rows
+derived this way carry `direction_derived = true`.
+
+Consequences worth knowing:
+
+- If someone forgets to punch once, every later punch that day flips. This is
+  the normal trade-off for devices that log punches without in/out mode, and
+  it is what the vendor's own reports do.
+- Because direction is computed, it is deliberately **not** part of the
+  dedupe key — that is `(employee_code, log_datetime, device_sn)`. Were
+  direction included, a recomputed parity would insert a second row for the
+  same punch and email the employee twice.
+- An explicit direction from the device always wins. If Realtime support
+  enables in/out mode (ask about the **In / Out** boxes), no code change is
+  needed — the derivation only runs when no direction arrives.
+
+Run `supabase-attendance-direction-migration.sql` to add
+`direction_derived`, switch the dedupe index, and backfill any punches
+already stored as `UNKNOWN`.
+
 ### 6.4 Employee codes map themselves
 
 You do **not** need to type in 24 employee codes. The first time a code
