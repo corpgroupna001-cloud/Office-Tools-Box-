@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script src="/authguard.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Attendance · WorkSuite</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/design-system.css">
+    <link rel="stylesheet" href="/responsive.css">
+    <script defer src="/commandpalette.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            background: var(--ws-bg);
+            background-image:
+                radial-gradient(at 15% 12%, hsla(190, 90%, 50%, 0.42) 0, transparent 45%),
+                radial-gradient(at 85% 15%, hsla(160, 85%, 45%, 0.35) 0, transparent 45%),
+                radial-gradient(at 50% 90%, hsla(230, 80%, 55%, 0.35) 0, transparent 50%);
+            background-attachment: fixed;
+            color: var(--ws-text);
+            padding: 80px 20px 60px;
+        }
+        body::before {
+            content: ''; position: fixed; inset: 0; pointer-events: none;
+            background-image: radial-gradient(rgba(255,255,255,0.04) 1px, transparent 1px);
+            background-size: 22px 22px;
+        }
+        .container { max-width: 900px; margin: 0 auto; position: relative; z-index: 1; }
+
+        .hero { display: flex; align-items: center; gap: 16px; margin-bottom: 8px; }
+        .hero .ic {
+            width: 56px; height: 56px; border-radius: 18px;
+            display: inline-flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg,#06b6d4,#10b981);
+            box-shadow: 0 12px 30px rgba(6,182,212,0.45);
+            font-size: 26px;
+        }
+        .hero h1 { font-size: 26px; font-weight: 900; letter-spacing: -0.01em; margin: 0; }
+        .hero p  { margin: 2px 0 0; color: var(--ws-text-muted); font-size: 14px; font-weight: 600; }
+
+        .back { display:inline-block; margin-bottom: 22px; color: var(--ws-text-muted);
+                font-size: 13px; font-weight: 800; text-decoration: none; }
+        .back:hover { color: #fff; }
+
+        .card {
+            background: var(--ws-surface); border: 1px solid var(--ws-border);
+            border-radius: var(--ws-r-lg); backdrop-filter: blur(18px);
+            box-shadow: var(--ws-shadow-md);
+        }
+
+        .today-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 22px 0; }
+        .tile { padding: 20px; text-align: center; }
+        .tile .lbl { font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase;
+                     font-weight: 900; color: var(--ws-text-dim); margin-bottom: 8px; }
+        .tile .val { font-size: 28px; font-weight: 900; letter-spacing: -0.5px; line-height: 1.1; }
+        .tile .sub { font-size: 11px; font-weight: 700; color: var(--ws-text-dim); margin-top: 5px; }
+        .val.in  { color: #34d399; }
+        .val.out { color: #fb7185; }
+        .val.dur { color: #f1f5f9; }
+        .val.none { color: #475569; }
+
+        .toolbar { display:flex; flex-wrap: wrap; gap: 10px; align-items:center; padding: 14px 16px; margin-bottom: 16px; }
+        .toolbar input[type="month"] {
+            background: var(--ws-surface-2); border: 1px solid var(--ws-border);
+            color: var(--ws-text); border-radius: var(--ws-r-sm); padding: 8px 12px;
+            font-weight: 800; font-size: 13px; color-scheme: dark;
+        }
+        .seg { display:flex; gap: 6px; }
+        .seg button {
+            background: var(--ws-surface-2); border: 1px solid var(--ws-border);
+            color: var(--ws-text-muted); border-radius: var(--ws-r-pill);
+            padding: 7px 15px; font-weight: 800; font-size: 12px; cursor: pointer;
+            transition: all var(--ws-motion);
+        }
+        .seg button:hover { color: #fff; }
+        .seg button.on { background: var(--ws-grad-cool); color: #fff; border-color: transparent; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        thead th {
+            text-align: left; padding: 12px 16px; font-size: 10px; letter-spacing: 1.4px;
+            text-transform: uppercase; font-weight: 900; color: var(--ws-text-dim);
+            border-bottom: 1px solid var(--ws-border); white-space: nowrap;
+        }
+        tbody td { padding: 13px 16px; border-bottom: 1px solid rgba(255,255,255,0.06); font-weight: 700; }
+        tbody tr:last-child td { border-bottom: 0; }
+        tbody tr:hover { background: rgba(255,255,255,0.03); }
+        .pill { display:inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 900; }
+        .pill.in  { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+        .pill.out { background: rgba(244,63,94,0.15);  color: #fda4af; }
+        .pill.unk { background: rgba(148,163,184,0.15); color: #cbd5e1; }
+        .muted { color: var(--ws-text-dim); font-weight: 700; }
+        .empty { padding: 60px 20px; text-align: center; color: var(--ws-text-muted); }
+        .empty b { display:block; color: #fff; font-size: 16px; margin-bottom: 4px; }
+        .scroll { overflow-x: auto; }
+
+        @media (max-width: 640px) {
+            body { padding: 60px 12px 40px; }
+            .today-grid { grid-template-columns: 1fr; }
+            .hero h1 { font-size: 21px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="back">← Back to WorkSuite</a>
+
+        <div class="hero">
+            <span class="ic">🕐</span>
+            <div>
+                <h1>My Attendance</h1>
+                <p id="sub">Your biometric check-ins and check-outs</p>
+            </div>
+        </div>
+
+        <!-- Today -->
+        <div class="today-grid">
+            <div class="card tile">
+                <div class="lbl">First check-in</div>
+                <div class="val none" id="t-in">—</div>
+                <div class="sub" id="t-in-sub">No punch yet today</div>
+            </div>
+            <div class="card tile">
+                <div class="lbl">Last check-out</div>
+                <div class="val none" id="t-out">—</div>
+                <div class="sub" id="t-out-sub">Still on the clock</div>
+            </div>
+            <div class="card tile">
+                <div class="lbl">Time on site</div>
+                <div class="val none" id="t-dur">—</div>
+                <div class="sub" id="t-dur-sub">Today</div>
+            </div>
+        </div>
+
+        <!-- History -->
+        <div class="card toolbar">
+            <div class="seg">
+                <button type="button" data-view="days" class="on">By day</button>
+                <button type="button" data-view="punches">All punches</button>
+            </div>
+            <div style="flex:1"></div>
+            <input type="month" id="month">
+        </div>
+
+        <div class="card" style="overflow:hidden;">
+            <div class="scroll">
+                <table>
+                    <thead id="thead"></thead>
+                    <tbody id="tbody"></tbody>
+                </table>
+            </div>
+            <div class="empty" id="empty" style="display:none;">
+                <b>Nothing recorded</b>
+                <span>Punches show up here automatically after you use the biometric reader.</span>
+            </div>
+        </div>
+
+        <p class="muted" style="text-align:center;font-size:12px;margin-top:18px;">
+            Times are IST, straight from the biometric device. Something look wrong? Tell your admin.
+        </p>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/presence.js"></script>
+    <script>
+    (async function () {
+        const IST = 'Asia/Kolkata';
+        const fmtTime  = new Intl.DateTimeFormat('en-US', { timeZone: IST, hour: 'numeric', minute: '2-digit', hour12: true });
+        const fmtDay   = new Intl.DateTimeFormat('en-GB', { timeZone: IST, weekday: 'short', day: '2-digit', month: 'short' });
+        const fmtISO   = new Intl.DateTimeFormat('en-CA', { timeZone: IST, year: 'numeric', month: '2-digit', day: '2-digit' });
+
+        const el = id => document.getElementById(id);
+        const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+        let view = 'days';
+        let rows = [];
+
+        // ---- Supabase client (reuse whatever the guard/presence already made) ----
+        let sb = window.__WS_SB__ || window.__WS_PRESENCE_SB__ || null;
+        if (!sb) {
+            const cfg = await (await fetch('/api/config')).json();
+            sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
+                auth: { persistSession: true, autoRefreshToken: true }
+            });
+            window.__WS_SB__ = sb;
+        }
+        const { data: { session } } = await sb.auth.getSession();
+        if (!session) { location.replace('/'); return; }
+
+        el('month').value = fmtISO.format(new Date()).slice(0, 7);
+
+        function monthRange(ym) {
+            const [y, m] = ym.split('-').map(Number);
+            // IST midnight boundaries, expressed as absolute instants.
+            const start = new Date(`${ym}-01T00:00:00+05:30`);
+            const end   = new Date(`${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01T00:00:00+05:30`);
+            return { start, end };
+        }
+
+        async function load() {
+            const ym = el('month').value || fmtISO.format(new Date()).slice(0, 7);
+            const { start, end } = monthRange(ym);
+
+            // RLS restricts this to the signed-in user's own rows.
+            const { data, error } = await sb
+                .from('attendance_logs')
+                .select('id,direction,log_datetime,log_date,device_name,device_sn,employee_code')
+                .gte('log_datetime', start.toISOString())
+                .lt('log_datetime', end.toISOString())
+                .order('log_datetime', { ascending: false })
+                .limit(2000);
+
+            if (error) {
+                el('tbody').innerHTML = '';
+                el('empty').style.display = '';
+                el('empty').innerHTML = `<b>Couldn't load attendance</b><span>${esc(error.message)}</span>`;
+                return;
+            }
+            rows = data || [];
+            renderToday();
+            render();
+        }
+
+        function groupByDay(list) {
+            const days = new Map();
+            for (const r of list) {
+                const key = r.log_date || fmtISO.format(new Date(r.log_datetime));
+                if (!days.has(key)) days.set(key, []);
+                days.get(key).push(r);
+            }
+            // Each day's punches oldest-first so first/last read naturally.
+            for (const v of days.values()) v.sort((a, b) => new Date(a.log_datetime) - new Date(b.log_datetime));
+            return days;
+        }
+
+        function dayStats(punches) {
+            const ins  = punches.filter(p => p.direction === 'IN');
+            const outs = punches.filter(p => p.direction === 'OUT');
+            const firstIn = ins[0] || (punches.length > 1 ? punches[0] : null);
+            const lastOut = outs[outs.length - 1] || (punches.length > 1 ? punches[punches.length - 1] : null);
+            let mins = null;
+            if (firstIn && lastOut) {
+                const d = new Date(lastOut.log_datetime) - new Date(firstIn.log_datetime);
+                if (d > 0) mins = Math.round(d / 60000);
+            }
+            return {
+                firstIn, lastOut, mins,
+                duration: mins == null ? null : `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`,
+                count: punches.length
+            };
+        }
+
+        function renderToday() {
+            const today = fmtISO.format(new Date());
+            const mine = rows.filter(r => (r.log_date || fmtISO.format(new Date(r.log_datetime))) === today);
+            const s = dayStats(mine.slice().sort((a, b) => new Date(a.log_datetime) - new Date(b.log_datetime)));
+
+            const setTile = (id, value, cls, sub) => {
+                const v = el(id);
+                v.textContent = value;
+                v.className = 'val ' + cls;
+                el(id + '-sub').textContent = sub;
+            };
+
+            if (s.firstIn) setTile('t-in', fmtTime.format(new Date(s.firstIn.log_datetime)), 'in',
+                s.firstIn.device_name || s.firstIn.device_sn || 'Biometric device');
+            else setTile('t-in', '—', 'none', 'No punch yet today');
+
+            if (s.lastOut && s.lastOut !== s.firstIn) setTile('t-out', fmtTime.format(new Date(s.lastOut.log_datetime)), 'out',
+                s.lastOut.device_name || s.lastOut.device_sn || 'Biometric device');
+            else setTile('t-out', '—', 'none', 'Still on the clock');
+
+            if (s.duration) setTile('t-dur', s.duration, 'dur', `${s.count} punch${s.count === 1 ? '' : 'es'} today`);
+            else setTile('t-dur', '—', 'none', 'Today');
+        }
+
+        function render() {
+            const thead = el('thead'), tbody = el('tbody'), empty = el('empty');
+            if (!rows.length) {
+                thead.innerHTML = ''; tbody.innerHTML = '';
+                empty.style.display = '';
+                empty.innerHTML = '<b>Nothing recorded</b><span>No punches in this month.</span>';
+                return;
+            }
+            empty.style.display = 'none';
+
+            if (view === 'days') {
+                thead.innerHTML = '<tr><th>Day</th><th>First IN</th><th>Last OUT</th><th>Time on site</th><th>Punches</th></tr>';
+                const days = [...groupByDay(rows).entries()].sort((a, b) => b[0].localeCompare(a[0]));
+                tbody.innerHTML = days.map(([day, punches]) => {
+                    const s = dayStats(punches);
+                    return `<tr>
+                        <td>${esc(fmtDay.format(new Date(day + 'T00:00:00+05:30')))}</td>
+                        <td>${s.firstIn ? `<span style="color:#34d399">${esc(fmtTime.format(new Date(s.firstIn.log_datetime)))}</span>` : '<span class="muted">—</span>'}</td>
+                        <td>${s.lastOut && s.lastOut !== s.firstIn ? `<span style="color:#fb7185">${esc(fmtTime.format(new Date(s.lastOut.log_datetime)))}</span>` : '<span class="muted">—</span>'}</td>
+                        <td>${s.duration ? esc(s.duration) : '<span class="muted">—</span>'}</td>
+                        <td class="muted">${s.count}</td>
+                    </tr>`;
+                }).join('');
+            } else {
+                thead.innerHTML = '<tr><th>Day</th><th>Time</th><th>Type</th><th>Device</th></tr>';
+                tbody.innerHTML = rows.map(r => {
+                    const d = new Date(r.log_datetime);
+                    const pill = r.direction === 'IN'  ? '<span class="pill in">→ IN</span>'
+                               : r.direction === 'OUT' ? '<span class="pill out">← OUT</span>'
+                               : '<span class="pill unk">• Punch</span>';
+                    return `<tr>
+                        <td>${esc(fmtDay.format(d))}</td>
+                        <td style="font-weight:900">${esc(fmtTime.format(d))}</td>
+                        <td>${pill}</td>
+                        <td class="muted">${esc(r.device_name || r.device_sn || '—')}</td>
+                    </tr>`;
+                }).join('');
+            }
+        }
+
+        document.querySelectorAll('.seg button').forEach(b => {
+            b.addEventListener('click', () => {
+                document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b));
+                view = b.dataset.view;
+                render();
+            });
+        });
+        el('month').addEventListener('change', load);
+
+        await load();
+
+        // Live: a punch lands in the DB and the page updates without a refresh.
+        sb.channel('attendance-self')
+          .on('postgres_changes',
+              { event: 'INSERT', schema: 'public', table: 'attendance_logs', filter: `user_id=eq.${session.user.id}` },
+              () => load())
+          .subscribe();
+    })();
+    </script>
+</body>
+</html>
