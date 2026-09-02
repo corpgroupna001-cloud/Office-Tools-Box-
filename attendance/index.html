@@ -476,8 +476,8 @@
                 .filter(r => r.event_type)
                 .slice()
                 .sort((a, b) => new Date(a.log_datetime) - new Date(b.log_datetime));
-            const last = t => { for (let i = evs.length - 1; i >= 0; i--) if (evs[i].event_type === t) return evs[i]; return null; };
-            const has = t => !!last(t);
+            const last  = t => { for (let i = evs.length - 1; i >= 0; i--) if (evs[i].event_type === t) return evs[i]; return null; };
+            const first = t => evs.find(e => e.event_type === t) || null;
             const at = r => r ? new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', minute: '2-digit', hour12: false })
                                     .format(new Date(r.log_datetime)) : '';
 
@@ -498,7 +498,10 @@
             };
 
             const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', hour12: false }).format(new Date()));
-            const login = last('LOGIN'), logout = last('LOGOUT');
+            // FIRST login, LAST logout: someone who punches in twice started
+            // their day at the first one, and "logged in 17:45, logged out
+            // 13:00" is nonsense on the card.
+            const login = first('LOGIN'), logout = last('LOGOUT');
             // Whichever break event came last decides whether we're on a break.
             const lastBreak = evs.filter(r => r.event_type === 'BREAK_OUT' || r.event_type === 'BREAK_IN').pop();
             const onBreak = !!lastBreak && lastBreak.event_type === 'BREAK_OUT';
