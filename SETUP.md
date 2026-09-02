@@ -77,6 +77,8 @@ By default Supabase requires email confirmation. If you want employees to sign u
 | `https://work-suite-mauve.vercel.app/` | Landing page (hub) |
 | `https://work-suite-mauve.vercel.app/typingtest/` | ZenType — login required |
 | `https://work-suite-mauve.vercel.app/signature/` | Signature Gen |
+| `https://work-suite-mauve.vercel.app/attendance/` | My Attendance — login required |
+| `https://work-suite-mauve.vercel.app/api/attendance-webhook` | Biometric device push endpoint (Bearer key) |
 | `https://work-suite-mauve.vercel.app/Network.ADMIN` | Admin dashboard — password required |
 
 ---
@@ -86,3 +88,89 @@ By default Supabase requires email confirmation. If you want employees to sign u
 1. Visit `/typingtest/` → sign up with your email + password
 2. Complete a test → you should see the "Download Result" button and a saved record in Supabase (`test_results` table)
 3. Visit `/Network.ADMIN` → enter your `ADMIN_PASSWORD` → you should see your test result
+
+---
+
+## Step 6 — Biometric Attendance (in/out email notifications)
+
+Every time someone touches the biometric reader, the Realtime / OnlineRealSoft
+cloud POSTs the punch to WorkSuite, which stores it and emails that employee
+straight away.
+
+### 6.1 Run the migration
+
+Supabase → **SQL Editor → New query** → paste all of
+`supabase-attendance-migration.sql` → **Run**.
+
+This adds `profiles.employee_code` and the `attendance_logs` table.
+
+### 6.2 Add one environment variable
+
+Vercel → Project Settings → **Environment Variables**:
+
+| Name | Value |
+|---|---|
+| `BIOMETRIC_API_KEY` | a long random secret — this is what the device sends us |
+
+Optional:
+
+| Name | Default | What it does |
+|---|---|---|
+| `ATTENDANCE_EMAIL_MAX_AGE_HOURS` | `12` | Punches older than this are stored but **not** emailed. Stops the vendor's "Manual Data Export" replay from spamming everyone with last month's punches. |
+
+Redeploy after saving.
+
+### 6.3 Configure the device cloud
+
+Log in to `https://onlinerealsoft.com` → **ERP_Third_PartyApi.aspx**
+("Parallel Data Export Setting"), and set:
+
+| Setting | Value |
+|---|---|
+| API Type | Third Party Api |
+| Request Method | **POST** |
+| Authorization Auth Type | **Bearer Token** → paste `BIOMETRIC_API_KEY` |
+| Content-Type | `application/json` |
+| Data Sending Format | **Body** |
+| API URL | `https://work-suite-mauve.vercel.app/api/attendance-webhook` |
+| Active Parallel Third-party API Transfer | ✅ checked |
+
+Parameter name mapping (tick the checkbox next to each one you fill in):
+
+| Field on their page | Parameter name to type | Format |
+|---|---|---|
+| Emp.Code | `employee_code` | — |
+| Employee Name | `employee_name` | — |
+| In / Out | `IN` / `OUT` | — |
+| Log Date Time | `log_datetime` | `yyyy-MM-dd HH:mm:ss` |
+| Download Date Time | `downloaded_at` | `yyyy-MM-dd HH:mm:ss` |
+| Device Serial No | `device_sn` | — |
+| Device Name | `device_name` | — |
+
+`Log Date` and `Log Time` can be left blank — `log_datetime` covers both.
+
+### 6.4 Employee codes map themselves
+
+You do **not** need to type in 24 employee codes. The first time a code
+arrives, the webhook matches the **employee name** the device sends against
+`profiles.full_name` and remembers the code on that profile. It only ever
+does this when exactly one person matches — anything ambiguous is parked in
+**Admin → 🕐 Attendance → Unmapped device codes**, where you bind it with one
+click. Binding a code also re-points that code's past punches.
+
+### 6.5 Checking it works
+
+- `GET /api/attendance-webhook` with the Bearer key returns `{ ok: true }` —
+  handy for confirming the URL and key before you switch the transfer on.
+- Admin → **🕐 Attendance** shows the daily report (first IN, last OUT, hours,
+  absentees), a live punch feed, mail status per punch, CSV export, and a
+  **Resend failed** button.
+- Employees see their own punches at `/attendance/`.
+
+### Notes
+
+- The endpoint always answers `200` once a punch is stored — the vendor logs
+  any non-2xx as an error, and a mail failure is ours to retry, not theirs.
+- Replays are ignored: `(employee_code, log_datetime, direction, device_sn)`
+  is unique, so re-exporting a date range inserts nothing and emails nothing.
+- Naive timestamps from the device are read as **IST**.

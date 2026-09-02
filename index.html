@@ -568,6 +568,25 @@
                 </div>
             </a>
 
+            <!-- Tool: My Attendance -->
+            <a href="./attendance/" class="glass-tool group block rounded-[2rem] p-8 relative">
+                <div class="relative z-10">
+                    <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-white mb-6 group-hover:scale-110 transition-transform" style="background: linear-gradient(135deg,#06b6d4,#10b981); box-shadow: 0 8px 30px rgba(6,182,212,0.5), inset 0 1px 0 rgba(255,255,255,0.3);">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
+                    </div>
+                    <h2 class="text-2xl font-black text-white mb-2">My Attendance</h2>
+                    <p class="text-slate-200/80 font-medium mb-4">Your biometric check-ins and check-outs, live. You also get an email the moment you punch in or out.</p>
+                    <div id="stat-attendance" class="tool-stat">
+                        <span class="stat-label">Today</span>
+                        <span class="stat-value pending">— No punch recorded yet</span>
+                    </div>
+                    <div class="flex items-center text-cyan-300 font-bold group-hover:gap-2 group-hover:text-cyan-200 transition-all">
+                        Launch Tool
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="ml-1"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                    </div>
+                </div>
+            </a>
+
             <!-- Tool: WFH Weekly Recordings -->
             <a href="./recordings/" class="glass-tool group block rounded-[2rem] p-8 relative">
                 <div class="relative z-10">
@@ -1066,6 +1085,28 @@
                     }
                 }
             } catch (e) { /* silent */ }
+
+            // 4) Attendance — today's first punch (IST calendar day)
+            try {
+                const istToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+                const { data } = await rootSb.from('attendance_logs')
+                    .select('direction, log_datetime')
+                    .eq('user_id', currentUser.id)
+                    .eq('log_date', istToday)
+                    .order('log_datetime', { ascending: true })
+                    .limit(50);
+                const el = document.querySelector('#stat-attendance .stat-value');
+                if (el && data && data.length) {
+                    const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true });
+                    const ins  = data.filter(d => d.direction === 'IN');
+                    const outs = data.filter(d => d.direction === 'OUT');
+                    const firstIn = ins[0] || data[0];
+                    const lastOut = outs.length ? outs[outs.length - 1] : null;
+                    el.classList.remove('pending');
+                    el.innerHTML = `${fmt.format(new Date(firstIn.log_datetime))} <span style="color:#94a3b8;font-size:11px;font-weight:700;">in</span>`
+                        + (lastOut ? ` · ${fmt.format(new Date(lastOut.log_datetime))} <span style="color:#94a3b8;font-size:11px;font-weight:700;">out</span>` : '');
+                }
+            } catch (e) { /* table may not exist yet — silent */ }
         }
 
         function showCompanyModal() {
