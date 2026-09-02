@@ -300,6 +300,7 @@
                 <button data-tab="friday"    class="admin-tab" type="button">📅 Friday Report</button>
                 <button data-tab="attendance" class="admin-tab" type="button">🕐 Attendance</button>
                 <button data-tab="shifts"     class="admin-tab" type="button">⏰ Shifts</button>
+                <button data-tab="selfies"    class="admin-tab" type="button">📸 Selfies</button>
             </div>
 
             <!-- Filters (RESULTS TAB) -->
@@ -661,6 +662,28 @@
                     </div>
                 </div>
             </div>
+
+            <!-- SELFIES TAB -->
+            <div id="selfies-panel" class="hidden">
+                <div class="glass rounded-2xl p-4 mb-6 flex flex-wrap gap-3 items-center">
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] uppercase tracking-widest text-slate-400 font-black">Date</span>
+                        <input id="sf-date" type="date" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                    </div>
+                    <select id="sf-status" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                        <option value="">All statuses</option>
+                        <option value="pending">Pending review</option>
+                        <option value="approved">Approved</option>
+                        <option value="flagged">Flagged</option>
+                    </select>
+                    <button id="sf-refresh" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh</button>
+                    <button id="sf-alldates" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/10">All dates</button>
+                    <div class="flex-1"></div>
+                    <span id="sf-counts" class="text-xs font-bold text-slate-400"></span>
+                </div>
+                <p class="text-slate-400 text-xs font-bold mb-4">Photos are kept for 90 days, then deleted automatically — the attendance record itself is never removed.</p>
+                <div id="sf-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"></div>
+            </div>
         </main>
     </div>
 
@@ -803,6 +826,7 @@
         let attFeed = [];
         let attUnmapped = null;
         let shiftData = null;
+        let selfieData = null;
         let currentTab = 'results';
         let editingEmployee = null;
         let deletingEmployee = null;
@@ -1229,12 +1253,14 @@
                 document.getElementById('friday-panel').classList.toggle('hidden',    currentTab !== 'friday');
                 document.getElementById('attendance-panel').classList.toggle('hidden', currentTab !== 'attendance');
                 document.getElementById('shifts-panel').classList.toggle('hidden',     currentTab !== 'shifts');
+                document.getElementById('selfies-panel').classList.toggle('hidden',    currentTab !== 'selfies');
                 if (currentTab === 'employees' && allEmployees.length === 0) loadEmployees();
                 if (currentTab === 'quizzes'   && allQuizzes.length === 0)   loadQuizzes();
                 if (currentTab === 'wfh'       && allWfh.length === 0)       loadWfh();
                 if (currentTab === 'friday'    && allFriday.length === 0)    loadFriday();
                 if (currentTab === 'attendance' && !attReport)               loadAttendance();
                 if (currentTab === 'shifts'     && !shiftData)               loadShifts();
+                if (currentTab === 'selfies'    && !selfieData)              loadSelfies();
             });
         });
 
@@ -2455,6 +2481,104 @@
             } catch (e) {
                 wsDialog.alert({ icon: '⚠️', danger: true, title: 'Bulk assign failed', message: escapeHtml(e.message) });
             }
+        });
+
+        // ================= SELFIE REVIEW =================
+        const SF_EVENT = { LOGIN: '🟢 Login', LOGOUT: '🔴 Logout', BREAK_OUT: '☕ Break start', BREAK_IN: '⏱️ Break end' };
+
+        function sfIstToday() {
+            return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+        }
+
+        async function loadSelfies(allDates) {
+            if (!adminPassword) return;
+            const d = document.getElementById('sf-date');
+            if (!d.value && !allDates) d.value = sfIstToday();
+            document.getElementById('sf-grid').innerHTML =
+                '<p class="text-slate-400 font-bold animate-pulse col-span-full">Loading selfies…</p>';
+            try {
+                selfieData = await attApi({
+                    action: 'selfies',
+                    date: allDates ? null : (d.value || null),
+                    status: document.getElementById('sf-status').value || null
+                });
+                renderSelfies();
+            } catch (e) {
+                document.getElementById('sf-grid').innerHTML =
+                    `<p class="text-rose-300 font-bold col-span-full">${escapeHtml(e.message)}</p>`;
+            }
+        }
+
+        function sfBadge(st) {
+            if (st === 'approved') return '<span class="text-emerald-300 font-black text-xs">✅ Approved</span>';
+            if (st === 'flagged')  return '<span class="text-rose-300 font-black text-xs">🚩 Flagged</span>';
+            return '<span class="text-amber-300 font-black text-xs">⏳ Pending</span>';
+        }
+
+        function renderSelfies() {
+            if (!selfieData) return;
+            const c = selfieData.counts || {};
+            document.getElementById('sf-counts').textContent =
+                `${c.total || 0} selfie${c.total === 1 ? '' : 's'} · ${c.pending || 0} pending · ${c.approved || 0} approved · ${c.flagged || 0} flagged`;
+
+            const rows = selfieData.selfies || [];
+            document.getElementById('sf-grid').innerHTML = rows.length ? rows.map(s => `
+                <div class="glass rounded-2xl overflow-hidden">
+                    ${s.photo_url
+                        ? `<a href="${escapeHtml(s.photo_url)}" target="_blank" rel="noopener">
+                             <img src="${escapeHtml(s.photo_url)}" alt="selfie" loading="lazy"
+                                  style="width:100%;aspect-ratio:3/4;object-fit:cover;display:block;"></a>`
+                        : `<div style="width:100%;aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.04);">
+                             <span class="text-slate-500 text-xs font-bold text-center px-3">Photo purged<br>(over 90 days old)</span></div>`}
+                    <div class="p-4">
+                        <p class="text-white font-black text-sm">${escapeHtml(s.full_name || '—')}</p>
+                        <p class="text-slate-400 text-xs font-bold mb-2">${escapeHtml(s.company || '')}</p>
+                        <p class="text-slate-200 font-bold text-xs mb-1">${SF_EVENT[s.event_type] || s.event_type} · ${escapeHtml(s.pretty_time || '')}</p>
+                        <p class="text-slate-500 text-xs font-bold mb-2">${escapeHtml(s.pretty_date || '')}</p>
+                        ${s.map_url
+                            ? `<a href="${escapeHtml(s.map_url)}" target="_blank" rel="noopener"
+                                 class="text-blue-300 text-xs font-bold hover:text-blue-200">📍 ${Number(s.latitude).toFixed(4)}, ${Number(s.longitude).toFixed(4)}${s.accuracy_m ? ` (±${Math.round(s.accuracy_m)}m)` : ''}</a>`
+                            : '<span class="text-rose-300 text-xs font-bold">No location</span>'}
+                        <div class="mt-3 mb-3">${sfBadge(s.review_status)}</div>
+                        <div class="flex gap-2">
+                            <button type="button" data-sf-ok="${s.id}" class="glass flex-1 py-2 rounded-xl text-xs font-bold text-emerald-300 hover:bg-emerald-500/10">Approve</button>
+                            <button type="button" data-sf-flag="${s.id}" class="glass flex-1 py-2 rounded-xl text-xs font-bold text-rose-300 hover:bg-rose-500/10">Flag</button>
+                        </div>
+                    </div>
+                </div>`).join('')
+                : '<p class="text-slate-400 font-bold col-span-full p-8 text-center">No selfie punches for this filter.</p>';
+        }
+
+        document.getElementById('sf-grid').addEventListener('click', async ev => {
+            const ok = ev.target.closest('[data-sf-ok]');
+            const flag = ev.target.closest('[data-sf-flag]');
+            if (!ok && !flag) return;
+            const id = (ok || flag).dataset.sfOk || (ok || flag).dataset.sfFlag;
+            if (flag) {
+                const ok2 = await wsDialog.confirm({
+                    icon: '🚩', danger: true, title: 'Flag this selfie?',
+                    message: 'It stays in the attendance record — flagging just marks it for follow-up.',
+                    okText: 'Flag'
+                });
+                if (!ok2) return;
+            }
+            try {
+                await attApi({ action: 'review', id, review_status: ok ? 'approved' : 'flagged' });
+                const row = (selfieData.selfies || []).find(x => String(x.id) === String(id));
+                if (row) row.review_status = ok ? 'approved' : 'flagged';
+                selfieData.counts = null;
+                renderSelfies();
+            } catch (e) {
+                wsDialog.alert({ icon: '⚠️', danger: true, title: 'Review failed', message: escapeHtml(e.message) });
+            }
+        });
+
+        document.getElementById('sf-refresh').addEventListener('click', () => { selfieData = null; loadSelfies(); });
+        document.getElementById('sf-status').addEventListener('change', () => { selfieData = null; loadSelfies(); });
+        document.getElementById('sf-date').addEventListener('change', () => { selfieData = null; loadSelfies(); });
+        document.getElementById('sf-alldates').addEventListener('click', () => {
+            document.getElementById('sf-date').value = '';
+            selfieData = null; loadSelfies(true);
         });
 
         gatePassword.focus();
