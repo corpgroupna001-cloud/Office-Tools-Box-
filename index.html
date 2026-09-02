@@ -441,6 +441,20 @@
                 <button id="profile-name-save" class="px-4 py-3 rounded-xl text-white font-black text-sm" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 4px 12px rgba(59,130,246,0.4);">Save</button>
             </div>
 
+            <!-- Account email -->
+            <label class="text-[10px] font-black text-slate-400 tracking-widest mb-1 block">ACCOUNT EMAIL</label>
+            <div class="flex gap-2 mb-2">
+                <input id="profile-email-input" type="email" autocomplete="email" placeholder="new.address@company.com"
+                       class="flex-1 px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400"
+                       style="background: var(--ws-surface); border: 1px solid var(--ws-border);">
+                <button id="profile-email-save" class="px-4 py-3 rounded-xl text-white font-black text-sm whitespace-nowrap"
+                        style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 4px 12px rgba(59,130,246,0.4);">Send link</button>
+            </div>
+            <p id="profile-email-note" class="text-[11px] font-bold text-slate-400 mb-5 leading-relaxed">
+                We email a confirmation link to the new address. Your current address keeps
+                working until you open that link, so a typo locks nobody out.
+            </p>
+
             <!-- Company -->
             <label class="text-[10px] font-black text-slate-400 tracking-widest mb-1 block">COMPANY</label>
             <div class="flex gap-2 mb-5">
@@ -1592,6 +1606,60 @@
                 showToast('Name updated!', 'success');
             } catch (ex) {
                 showDialog({ type: 'error', title: "Couldn't save name", message: ex.message });
+            }
+        });
+
+        // Change account email.
+        //
+        // Deliberately does NOT write the new address anywhere yet. Supabase
+        // mails a confirmation link and only swaps auth.users.email when it is
+        // opened, so an address entered by mistake - or by someone at an
+        // unlocked desk - can never take over the account. public.profiles is
+        // brought into line by a database trigger on that same update, not from
+        // here, because the confirmation usually happens in a different browser
+        // session from the one that asked for it.
+        document.getElementById('profile-email-save').addEventListener('click', async () => {
+            const input = document.getElementById('profile-email-input');
+            const note  = document.getElementById('profile-email-note');
+            const btn   = document.getElementById('profile-email-save');
+            const next    = input.value.trim().toLowerCase();
+            const current = String(currentUser?.email || '').trim().toLowerCase();
+
+            if (!next) {
+                showDialog({ type: 'warning', title: 'Enter an address',
+                             message: 'Type the new email address you want to use.' });
+                return;
+            }
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(next)) {
+                showDialog({ type: 'warning', title: "That doesn't look like an email",
+                             message: `"${next}" is missing an @ or a domain.` });
+                return;
+            }
+            if (next === current) {
+                showDialog({ type: 'info', title: 'Already your address',
+                             message: 'That is the address on the account already.' });
+                return;
+            }
+
+            const label = btn.textContent;
+            btn.disabled = true; btn.textContent = 'Sending…';
+            try {
+                const { error } = await rootSb.auth.updateUser({ email: next });
+                if (error) throw error;
+                note.textContent = `Confirmation link sent to ${next}. Open it from that inbox to finish the change — until then you keep signing in with ${current}.`;
+                note.className = 'text-[11px] font-bold text-emerald-300 mb-5 leading-relaxed';
+                input.value = '';
+                showToast('Confirmation link sent', 'success');
+            } catch (ex) {
+                const raw = String(ex.message || ex);
+                const friendly = /already been registered|already registered|already exists/i.test(raw)
+                    ? 'Another account already uses that address.'
+                    : /rate|too many/i.test(raw)
+                        ? 'Too many attempts just now. Wait a minute and try again.'
+                        : raw;
+                showDialog({ type: 'error', title: "Couldn't change the email", message: friendly });
+            } finally {
+                btn.disabled = false; btn.textContent = label;
             }
         });
 

@@ -17,24 +17,24 @@
         body {
             font-family: 'Inter', sans-serif;
             min-height: 100vh;
-            background: #0b1120;
+            background: var(--ws-bg);
             background-image:
                 radial-gradient(at 15% 12%, hsla(258, 90%, 55%, 0.55) 0, transparent 45%),
                 radial-gradient(at 85% 15%, hsla(200, 95%, 55%, 0.45) 0, transparent 45%),
                 radial-gradient(at 50% 90%, hsla(320, 80%, 55%, 0.45) 0, transparent 50%);
             background-attachment: fixed;
-            color: #f8fafc;
+            color: var(--ws-text);
         }
         .mono { font-family: 'JetBrains Mono', monospace; }
         .glass {
-            background: rgba(255, 255, 255, 0.08);
+            background: var(--ws-surface);
             backdrop-filter: blur(24px) saturate(180%);
             -webkit-backdrop-filter: blur(24px) saturate(180%);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            border: 1px solid var(--ws-border-2);
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
         }
         .glass-strong {
-            background: rgba(255, 255, 255, 0.12);
+            background: var(--ws-border);
             backdrop-filter: blur(30px) saturate(200%);
             -webkit-backdrop-filter: blur(30px) saturate(200%);
             border: 1px solid rgba(255, 255, 255, 0.22);
@@ -46,21 +46,21 @@
         .btn-primary:hover:not(:disabled) { transform: translateY(-2px); }
         table { border-collapse: separate; border-spacing: 0; }
         th, td { padding: 12px 16px; text-align: left; }
-        th { font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: #94a3b8; border-bottom: 1px solid rgba(255,255,255,0.1); }
-        tbody tr { border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.15s; }
-        tbody tr:hover { background: rgba(255,255,255,0.04); }
+        th { font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--ws-text-muted); border-bottom: 1px solid var(--ws-border); }
+        tbody tr { border-bottom: 1px solid var(--ws-border); transition: background 0.15s; }
+        tbody tr:hover { background: var(--ws-surface); }
         select, input { color-scheme: dark; }
         .ws-back-btn { position: fixed; top: 14px; left: 14px; z-index: 100;
             display: inline-flex; align-items: center; gap: 8px;
             padding: 9px 14px 9px 12px; border-radius: 999px;
-            background: rgba(15,23,42,0.85); color: #fff;
+            background: var(--ws-bg-2); color: var(--ws-text);
             border: 1px solid rgba(255,255,255,.12);
             font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
             font-weight: 700; font-size: 13px; text-decoration: none;
             backdrop-filter: blur(14px);
             box-shadow: 0 6px 20px rgba(0,0,0,.35);
             transition: transform .15s ease, background .15s ease; }
-        .ws-back-btn:hover { background: rgba(30,41,59,0.95); transform: translateY(-1px); }
+        .ws-back-btn:hover { background: var(--ws-surface-2); transform: translateY(-1px); }
         .ws-back-btn svg { width: 16px; height: 16px; }
 
         /* ---- Polished admin components ---- */
@@ -70,8 +70,8 @@
             display: flex; align-items: center; gap: 14px;
             padding: 18px 20px;
             border-radius: 20px;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.08);
+            background: var(--ws-surface);
+            border: 1px solid var(--ws-border);
             backdrop-filter: blur(16px);
             transition: transform .15s ease, background .15s ease;
             position: relative; overflow: hidden;
@@ -81,7 +81,7 @@
             background: var(--card-glow, radial-gradient(circle at 100% 0%, rgba(59,130,246,0.15), transparent 60%));
             pointer-events: none;
         }
-        .stat-card:hover { transform: translateY(-2px); background: rgba(255,255,255,0.08); }
+        .stat-card:hover { transform: translateY(-2px); background: var(--ws-surface); }
         .stat-card .stat-icon {
             width: 46px; height: 46px; border-radius: 14px;
             display: flex; align-items: center; justify-content: center;
@@ -92,7 +92,7 @@
         .stat-card .stat-body { z-index: 1; min-width: 0; }
         .stat-card .stat-key {
             font-size: 10px; font-weight: 900;
-            color: #94a3b8;
+            color: var(--ws-text-muted);
             text-transform: uppercase; letter-spacing: 1.5px;
             margin-bottom: 2px;
         }
@@ -110,14 +110,54 @@
         .stat-card.rose    { --card-glow: radial-gradient(circle at 100% 0%, rgba(244,63,94,0.20), transparent 60%); }
         .stat-card.purple  .stat-icon { background: linear-gradient(135deg,#8b5cf6,#6366f1); }
         .stat-card.purple  { --card-glow: radial-gradient(circle at 100% 0%, rgba(139,92,246,0.22), transparent 60%); }
-        .stat-card.slate   .stat-icon { background: linear-gradient(135deg,#64748b,#475569); }
+        .stat-card.slate   .stat-icon { background: linear-gradient(135deg,var(--ws-text-dim),#475569); }
 
         /* Segmented tab bar (Typing / Quizzes / Employees) */
+        /* Admin section sidebar */
+        .admin-shell { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 22px; align-items: start; }
+        .admin-main  { min-width: 0; }
+        .admin-side {
+            position: sticky; top: 14px;
+            display: flex; flex-direction: column; gap: 16px;
+            padding: 14px 10px;
+            background: var(--ws-surface);
+            border: 1px solid var(--ws-border);
+            border-radius: var(--ws-r-md);
+        }
+        .side-head {
+            font-size: 10px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase;
+            color: var(--ws-text-dim); padding: 0 10px 6px;
+        }
+        .admin-side .admin-tab {
+            display: flex; align-items: center; gap: 9px; width: 100%;
+            text-align: left; background: transparent !important;
+            color: var(--ws-text-muted);
+            padding: 8px 10px; font-size: 13px; font-weight: 800;
+            border-radius: 10px; border: none;
+            transition: background .15s, color .15s;
+        }
+        .admin-side .admin-tab:hover { color: var(--ws-text); background: var(--ws-surface-2) !important; }
+        .admin-side .admin-tab.active {
+            background: linear-gradient(135deg,#3b82f6,#6366f1) !important;
+            color: #fff !important;
+            box-shadow: 0 6px 16px rgba(59,130,246,0.35);
+        }
+        .admin-side .ic { width: 18px; text-align: center; flex: 0 0 auto; }
+        /* Below 900px the sidebar would eat half the screen, so it lies down
+           into grouped rows rather than becoming a hamburger nobody opens. */
+        @media (max-width: 900px) {
+            .admin-shell { grid-template-columns: 1fr; }
+            .admin-side { position: static; flex-direction: column; gap: 10px; }
+            .side-group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+            .side-head { padding: 0 8px 0 2px; }
+            .admin-side .admin-tab { width: auto; }
+        }
+
         .tab-bar {
             display: inline-flex;
             padding: 4px;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.10);
+            background: var(--ws-surface);
+            border: 1px solid var(--ws-border);
             border-radius: 14px;
             gap: 0;
         }
@@ -125,33 +165,33 @@
         .cal-grid { border-collapse: separate; border-spacing: 0; font-size: 12px; }
         .cal-grid th, .cal-grid td { padding: 0; }
         .cal-grid .cal-name { min-width: 168px; padding: 7px 12px; text-align: left; white-space: nowrap;
-                              position: sticky; left: 0; background: rgba(15,23,42,0.96); z-index: 2; }
+                              position: sticky; left: 0; background: var(--ws-bg-2); z-index: 2; }
         .cal-grid thead .cal-name { z-index: 3; }
-        .cal-grid .cal-d { width: 22px; text-align: center; padding: 5px 0 6px; color: #94a3b8;
+        .cal-grid .cal-d { width: 22px; text-align: center; padding: 5px 0 6px; color: var(--ws-text-muted);
                            font-weight: 900; font-size: 10px; line-height: 1.15; }
         .cal-grid .cal-d span { display: block; font-size: 8px; opacity: .55; letter-spacing: .04em; }
-        .cal-grid .cal-wend { color: #64748b; background: rgba(148,163,184,0.06); }
+        .cal-grid .cal-wend { color: var(--ws-text-dim); background: rgba(148,163,184,0.06); }
         .cal-grid .cal-c { text-align: center; padding: 2px 0; }
         .cal-grid .cal-c span { display: inline-block; width: 15px; height: 15px; border-radius: 4px; }
-        .cal-grid .cal-tot { width: 30px; text-align: center; font-weight: 900; color: #e2e8f0; padding: 0 3px; }
-        .cal-grid .cal-bad { color: #fda4af; }
-        .cal-grid .cal-warn { color: #fcd34d; }
+        .cal-grid .cal-tot { width: 30px; text-align: center; font-weight: 900; color: var(--ws-text-2); padding: 0 3px; }
+        .cal-grid .cal-bad { color: var(--ws-danger-text); }
+        .cal-grid .cal-warn { color: var(--ws-warning-text); }
         .cal-grid .cal-wfh { font-size: 10px; }
-        .cal-grid tbody tr:hover td { background: rgba(255,255,255,0.04); }
-        .cal-grid tbody tr:hover .cal-name { background: rgba(30,41,59,0.99); }
+        .cal-grid tbody tr:hover td { background: var(--ws-surface); }
+        .cal-grid tbody tr:hover .cal-name { background: var(--ws-surface-2); }
         .cal-key { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px;
-                   font-weight: 800; color: #cbd5e1; text-transform: uppercase; letter-spacing: .03em; }
+                   font-weight: 800; color: var(--ws-text-2); text-transform: uppercase; letter-spacing: .03em; }
         .cal-key i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
         .tab-bar .admin-tab {
             background: transparent !important;
-            color: #94a3b8;
+            color: var(--ws-text-muted);
             padding: 8px 18px;
             font-size: 13px; font-weight: 800;
             border-radius: 10px;
             transition: background .15s, color .15s;
             border: none;
         }
-        .tab-bar .admin-tab:hover { color: #fff; background: rgba(255,255,255,0.05) !important; }
+        .tab-bar .admin-tab:hover { color: #fff; background: var(--ws-surface) !important; }
         .tab-bar .admin-tab.active {
             background: linear-gradient(135deg,#3b82f6,#6366f1) !important;
             color: #fff !important;
@@ -164,11 +204,11 @@
             margin-bottom: 14px;
         }
         .section-head h3 {
-            font-size: 15px; font-weight: 900; color: #f1f5f9;
+            font-size: 15px; font-weight: 900; color: var(--ws-text);
             display: flex; align-items: center; gap: 8px;
         }
         .section-head .sub {
-            font-size: 10px; font-weight: 900; color: #64748b;
+            font-size: 10px; font-weight: 900; color: var(--ws-text-dim);
             text-transform: uppercase; letter-spacing: 1.5px;
         }
 
@@ -180,8 +220,8 @@
         .wfh-switch input { opacity: 0; width: 0; height: 0; }
         .wfh-slider {
             position: absolute; inset: 0;
-            background: rgba(255,255,255,0.10);
-            border: 1px solid rgba(255,255,255,0.12);
+            background: var(--ws-surface-2);
+            border: 1px solid var(--ws-border);
             border-radius: 999px;
             transition: background .2s, border-color .2s;
         }
@@ -189,7 +229,7 @@
             content: ''; position: absolute;
             top: 2px; left: 2px;
             width: 16px; height: 16px; border-radius: 50%;
-            background: #cbd5e1;
+            background: var(--ws-text-2);
             transition: transform .2s, background .2s;
             box-shadow: 0 2px 4px rgba(0,0,0,0.35);
         }
@@ -206,8 +246,8 @@
         /* Per-device requirement chips (📱💻📲) next to the WFH toggle */
         .dev-chip {
             padding: 3px 8px; border-radius: 9px; font-size: 13px; line-height: 1;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.12);
+            background: var(--ws-surface);
+            border: 1px solid var(--ws-border);
             opacity: 0.35; cursor: pointer;
             transition: all .15s ease;
         }
@@ -243,7 +283,7 @@
 
     <!-- Dashboard (hidden until unlocked) -->
     <div id="dashboard" class="hidden">
-        <nav class="glass border-b border-white/10 sticky top-0 z-30" style="background: rgba(15,23,42,0.4);">
+        <nav class="glass-nav border-b sticky top-0 z-30">
             <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
                 <div class="flex items-center gap-3">
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background: linear-gradient(135deg,#f43f5e,#a855f7);">
@@ -313,20 +353,35 @@
                 </div>
             </div>
 
-            <!-- Section tabs -->
-            <div class="tab-bar mb-6">
-                <button data-tab="results"   class="admin-tab active" type="button">⌨️ Typing</button>
-                <button data-tab="quizzes"   class="admin-tab" type="button">🧠 Quizzes</button>
-                <button data-tab="employees" class="admin-tab" type="button">👥 Employees</button>
-                <button data-tab="leave"      class="admin-tab" type="button">🌴 Leave</button>
-                <button data-tab="wfh"       class="admin-tab" type="button">📷 WFH Check-ins</button>
-                <button data-tab="friday"    class="admin-tab" type="button">📅 Friday Report</button>
-                <button data-tab="attendance" class="admin-tab" type="button">🕐 Attendance</button>
-                <button data-tab="shifts"     class="admin-tab" type="button">⏰ Shifts</button>
-                <button data-tab="selfies"    class="admin-tab" type="button">📸 Selfies</button>
-                <button data-tab="calendar"   class="admin-tab" type="button">📅 Calendar</button>
-                <button data-tab="salary"     class="admin-tab" type="button">💰 Salary</button>
-            </div>
+            <!-- Section navigation.
+                 Eleven items had outgrown a single row. Grouped into a sidebar,
+                 but every button keeps its data-tab and .admin-tab class, so the
+                 switcher below and admin/payroll.js - which binds its own two
+                 panels to the same selector - carry on working untouched. -->
+            <div class="admin-shell">
+              <aside class="admin-side">
+                <div class="side-group">
+                    <div class="side-head">People</div>
+                    <button data-tab="employees"  class="admin-tab" type="button"><span class="ic">👥</span>Employees</button>
+                    <button data-tab="shifts"     class="admin-tab" type="button"><span class="ic">⏰</span>Shifts</button>
+                    <button data-tab="leave"      class="admin-tab" type="button"><span class="ic">🌴</span>Leave</button>
+                    <button data-tab="salary"     class="admin-tab" type="button"><span class="ic">💰</span>Salary</button>
+                </div>
+                <div class="side-group">
+                    <div class="side-head">Attendance</div>
+                    <button data-tab="attendance" class="admin-tab" type="button"><span class="ic">🕐</span>Attendance</button>
+                    <button data-tab="calendar"   class="admin-tab" type="button"><span class="ic">📅</span>Calendar</button>
+                    <button data-tab="selfies"    class="admin-tab" type="button"><span class="ic">📸</span>Selfies</button>
+                    <button data-tab="wfh"        class="admin-tab" type="button"><span class="ic">📷</span>WFH Check-ins</button>
+                    <button data-tab="friday"     class="admin-tab" type="button"><span class="ic">📋</span>Friday Report</button>
+                </div>
+                <div class="side-group">
+                    <div class="side-head">Tools</div>
+                    <button data-tab="results"    class="admin-tab active" type="button"><span class="ic">⌨️</span>Typing</button>
+                    <button data-tab="quizzes"    class="admin-tab" type="button"><span class="ic">🧠</span>Quizzes</button>
+                </div>
+              </aside>
+              <div class="admin-main">
 
             <!-- Filters (RESULTS TAB) -->
             <div id="results-panel">
@@ -822,6 +877,8 @@
                     An employee with no rate set shows “—”, never ₹0, and is left out of the total.
                 </p>
             </div>
+              </div><!-- /.admin-main -->
+            </div><!-- /.admin-shell -->
         </main>
     </div>
 
@@ -1233,7 +1290,7 @@
                 data: { labels, datasets: [{ label: 'Quizzes', data, backgroundColor: 'rgba(249, 115, 22, 0.6)', borderColor: '#f97316', borderWidth: 1, borderRadius: 6 }] },
                 options: {
                     responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: false }, tooltip: { backgroundColor: 'rgba(15,23,42,0.95)', titleColor: '#f8fafc', bodyColor: '#e2e8f0' } },
+                    plugins: { legend: { display: false }, tooltip: { backgroundColor: chartInk().bg, titleColor: chartInk().title, bodyColor: chartInk().body } },
                     scales: {
                         x: { ticks: { color: '#94a3b8', font: { size: 10 }, autoSkip: true, maxTicksLimit: 10 }, grid: { display: false } },
                         y: { ticks: { color: '#94a3b8', precision: 0 }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true }
@@ -1262,7 +1319,7 @@
                     responsive: true, maintainAspectRatio: false, cutout: '55%',
                     plugins: {
                         legend: { position: 'right', labels: { color: '#e2e8f0', font: { size: 10, weight: 'bold' }, boxWidth: 12, padding: 8 } },
-                        tooltip: { backgroundColor: 'rgba(15,23,42,0.95)', titleColor: '#f8fafc', bodyColor: '#e2e8f0' }
+                        tooltip: { backgroundColor: chartInk().bg, titleColor: chartInk().title, bodyColor: chartInk().body }
                     }
                 }
             });
@@ -1333,7 +1390,7 @@
                     plugins: {
                         legend: { display: false },
                         tooltip: {
-                            backgroundColor: 'rgba(15,23,42,0.95)',
+                            backgroundColor: chartInk().bg,
                             titleColor: '#f8fafc',
                             bodyColor: '#e2e8f0'
                         }
@@ -1379,6 +1436,17 @@
             link.download = `zentype-results-${new Date().toISOString().slice(0,10)}.csv`;
             link.click();
         });
+
+        // Chart.js paints to a canvas, so the CSS token layer cannot reach its
+        // tooltips - they would stay dark-on-dark in the light theme. Read the
+        // tokens at draw time instead.
+        function chartInk() {
+            const cs = getComputedStyle(document.documentElement);
+            const v = n => cs.getPropertyValue(n).trim();
+            return { bg: v('--ws-bg-2') || 'rgba(15,23,42,0.95)',
+                     title: v('--ws-text') || '#f8fafc',
+                     body: v('--ws-text-2') || '#e2e8f0' };
+        }
 
         // ---------- Tab switching ----------
         document.querySelectorAll('.admin-tab').forEach(btn => {
