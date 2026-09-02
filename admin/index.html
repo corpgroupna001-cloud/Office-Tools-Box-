@@ -296,6 +296,7 @@
                 <button data-tab="results"   class="admin-tab active" type="button">⌨️ Typing</button>
                 <button data-tab="quizzes"   class="admin-tab" type="button">🧠 Quizzes</button>
                 <button data-tab="employees" class="admin-tab" type="button">👥 Employees</button>
+                <button data-tab="leave"      class="admin-tab" type="button">🌴 Leave</button>
                 <button data-tab="wfh"       class="admin-tab" type="button">📷 WFH Check-ins</button>
                 <button data-tab="friday"    class="admin-tab" type="button">📅 Friday Report</button>
                 <button data-tab="attendance" class="admin-tab" type="button">🕐 Attendance</button>
@@ -481,6 +482,10 @@
                         <option value="best_wpm.desc">Highest WPM</option>
                         <option value="last_test_at.desc">Recently Active</option>
                     </select>
+                    <div class="flex gap-2">
+                        <button id="emp-who-all" type="button" class="btn-primary text-white px-4 py-2 rounded-xl text-sm font-black">👥 All</button>
+                        <button id="emp-who-wfh" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/10">🏠👥 Work from home</button>
+                    </div>
                     <button id="emp-refresh" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh</button>
                 </div>
 
@@ -684,6 +689,59 @@
                 <p class="text-slate-400 text-xs font-bold mb-4">Photos are kept for 90 days, then deleted automatically — the attendance record itself is never removed.</p>
                 <div id="sf-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"></div>
             </div>
+
+            <!-- LEAVE TAB -->
+            <div id="leave-panel" class="hidden">
+                <div class="section-head mb-3"><h3>🌴 Leave requests</h3><span class="sub">Approved leave shows as On leave in the attendance report</span></div>
+                <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
+                    <select id="lv-status" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                        <option value="pending">Pending</option>
+                        <option value="">All</option>
+                        <option value="approved">Approved</option>
+                        <option value="rejected">Rejected</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                    <button id="lv-refresh" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh</button>
+                    <div class="flex-1"></div>
+                    <span id="lv-counts" class="text-xs font-bold text-slate-400"></span>
+                </div>
+                <div class="glass rounded-2xl overflow-hidden mb-8">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+                            <tbody id="lv-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="section-head mb-3"><h3>🎉 Holiday calendar</h3><span class="sub">Holidays show as Holiday, not Absent</span></div>
+                <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
+                    <input id="hol-year" type="number" min="2020" max="2099" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none w-28">
+                    <input id="hol-date" type="date" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                    <input id="hol-name" type="text" placeholder="Holiday name" class="glass flex-1 min-w-[180px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none">
+                    <select id="hol-company" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                        <option value="">All companies</option>
+                        <option>Nova Sportsmart Private Limited</option>
+                        <option>CORPGROUP</option>
+                        <option>Protathlitis Sportsmart LLP</option>
+                        <option>Jobways Point LLP</option>
+                        <option>Genie Lamp Private Limited</option>
+                        <option>Navyug Raise A Player Foundation</option>
+                    </select>
+                    <label class="flex items-center gap-2 text-xs font-bold text-slate-300 cursor-pointer">
+                        <input id="hol-optional" type="checkbox" class="w-4 h-4"> Optional
+                    </label>
+                    <button id="hol-add" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Add</button>
+                </div>
+                <div class="glass rounded-2xl overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead><tr><th>Date</th><th>Holiday</th><th>Applies to</th><th>Type</th><th></th></tr></thead>
+                            <tbody id="hol-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 
@@ -827,6 +885,9 @@
         let attUnmapped = null;
         let shiftData = null;
         let selfieData = null;
+        let empWho = 'all';
+        let leaveData = null;
+        let holidayData = null;
         let currentTab = 'results';
         let editingEmployee = null;
         let deletingEmployee = null;
@@ -1254,6 +1315,7 @@
                 document.getElementById('attendance-panel').classList.toggle('hidden', currentTab !== 'attendance');
                 document.getElementById('shifts-panel').classList.toggle('hidden',     currentTab !== 'shifts');
                 document.getElementById('selfies-panel').classList.toggle('hidden',    currentTab !== 'selfies');
+                document.getElementById('leave-panel').classList.toggle('hidden',      currentTab !== 'leave');
                 if (currentTab === 'employees' && allEmployees.length === 0) loadEmployees();
                 if (currentTab === 'quizzes'   && allQuizzes.length === 0)   loadQuizzes();
                 if (currentTab === 'wfh'       && allWfh.length === 0)       loadWfh();
@@ -1261,6 +1323,7 @@
                 if (currentTab === 'attendance' && !attReport)               loadAttendance();
                 if (currentTab === 'shifts'     && !shiftData)               loadShifts();
                 if (currentTab === 'selfies'    && !selfieData)              loadSelfies();
+                if (currentTab === 'leave'      && !leaveData)               loadLeave();
             });
         });
 
@@ -1289,6 +1352,7 @@
             const [sortKey, sortDir] = sort.split('.');
 
             let filtered = allEmployees;
+            if (empWho === 'wfh') filtered = filtered.filter(e => e.is_wfh === true);
             if (search) {
                 filtered = filtered.filter(e =>
                     (e.full_name || '').toLowerCase().includes(search) ||
@@ -2037,6 +2101,9 @@
             if (status === 'No check-out') return '<span class="text-amber-300 font-black">⏳ No check-out</span>';
             if (status === 'Unmapped')     return '<span class="text-amber-300 font-black">⚠️ Unmapped</span>';
             if (status === 'Week-off')     return '<span class="text-slate-400 font-black">🌙 Week-off</span>';
+            if (status === 'Holiday')      return '<span class="text-violet-300 font-black">🎉 Holiday</span>';
+            if (status === 'On leave')     return '<span class="text-sky-300 font-black">🌴 On leave</span>';
+            if (status === 'Half day leave') return '<span class="text-sky-300 font-black">🌴 Half day</span>';
             return '<span class="text-rose-300 font-black">❌ Absent</span>';
         }
 
@@ -2051,11 +2118,13 @@
                 { label: 'Absent',       value: t.absent ?? 0,         cls: 'rose'    },
                 { label: 'Late in',      value: t.late ?? 0,           cls: (t.late ? 'rose' : 'emerald') },
                 { label: 'Early out',    value: t.early_out ?? 0,      cls: (t.early_out ? 'rose' : 'emerald') },
+                { label: 'On leave',     value: t.on_leave ?? 0,       cls: 'slate'   },
+                { label: 'Holiday',      value: t.holiday ?? 0,        cls: 'slate'   },
                 { label: 'Week-off',     value: t.week_off ?? 0,       cls: 'slate'   },
                 { label: 'Punches',      value: t.punches ?? 0,        cls: 'slate'   },
                 { label: 'Mail issues',  value: t.mail_problem ?? 0,   cls: (t.mail_problem ? 'rose' : 'emerald') },
             ];
-            document.getElementById('att-summary').className = 'grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-6';
+            document.getElementById('att-summary').className = 'grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-6';
             document.getElementById('att-summary').innerHTML = tiles.map(x => `
                 <div class="stat-card ${x.cls}">
                     <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">${x.label}</p>
@@ -2107,7 +2176,9 @@
                         <td class="text-slate-300 font-bold">${r.shift_name
                             ? `${escapeHtml(r.shift_name)}<br><span class="text-slate-500 text-xs font-bold">${escapeHtml(r.shift_window || '')}${r.shift_assigned ? '' : ' · default'}</span>`
                             : '<span class="text-slate-500">— none —</span>'}</td>
-                        <td>${attBadge(r.status)}</td>
+                        <td>${attBadge(r.status)}
+                            ${r.status === 'Holiday' && r.holiday_name ? `<br><span class="text-slate-500 text-xs font-bold">${escapeHtml(r.holiday_name)}</span>` : ''}
+                            ${(r.status === 'On leave' || r.status === 'Half day leave') && r.leave_type ? `<br><span class="text-slate-500 text-xs font-bold">${escapeHtml(r.leave_type)}</span>` : ''}</td>
                         <td class="text-emerald-200 font-bold">${escapeHtml(r.first_in_time || '—')}
                             ${r.is_late ? `<br><span class="text-rose-300 text-xs font-black">▲ ${attMins(r.late_minutes)} late</span>` : ''}</td>
                         <td class="text-rose-200 font-bold">${escapeHtml(r.last_out_time || '—')}
@@ -2203,18 +2274,18 @@
                 return;
             }
             const rows = [
-                ['Date', 'Employee', 'Email', 'Company', 'Employee Code', 'Shift', 'Shift Window', 'Status',
+                ['Date', 'Employee', 'Email', 'Company', 'Employee Code', 'Shift', 'Shift Window', 'Status', 'Reason',
                  'First IN', 'Late By (min)', 'Last OUT', 'Early Out By (min)', 'Hours', 'Punches', 'Devices', 'Mail Sent', 'Mail Issues'],
                 ...(attReport.rows || []).map(r => [
                     attReport.date, r.full_name || '', r.email || '', r.company || '', r.employee_code || '',
-                    r.shift_name || '', r.shift_window || '', r.status,
+                    r.shift_name || '', r.shift_window || '', r.status, r.holiday_name || r.leave_type || '',
                     r.first_in_time || '', r.is_late ? (r.late_minutes ?? '') : '',
                     r.last_out_time || '', r.is_early_out ? (r.early_out_minutes ?? '') : '',
                     r.duration || '', r.punches ?? 0, (r.devices || []).join(' | '), r.mail_sent ?? 0, r.mail_problem ?? 0
                 ]),
                 ...(attReport.unknown || []).map(u => [
                     attReport.date, u.employee_name || '', '', '', u.employee_code,
-                    '', '', 'Unmapped',
+                    '', '', 'Unmapped', '',
                     u.first_in_time || '', '', u.last_out_time || '', '',
                     u.duration || '', u.punches ?? 0, (u.devices || []).join(' | '), u.mail_sent ?? 0, u.mail_problem ?? 0
                 ])
@@ -2580,6 +2651,167 @@
             document.getElementById('sf-date').value = '';
             selfieData = null; loadSelfies(true);
         });
+
+        // ---------- Employees: 👥 All vs 🏠👥 Work from home ----------
+        function setEmpWho(who) {
+            empWho = who;
+            const all = document.getElementById('emp-who-all');
+            const wfh = document.getElementById('emp-who-wfh');
+            all.className = who === 'all'
+                ? 'btn-primary text-white px-4 py-2 rounded-xl text-sm font-black'
+                : 'glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/10';
+            wfh.className = who === 'wfh'
+                ? 'btn-primary text-white px-4 py-2 rounded-xl text-sm font-black'
+                : 'glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/10';
+            renderEmployees();
+        }
+        document.getElementById('emp-who-all').addEventListener('click', () => setEmpWho('all'));
+        document.getElementById('emp-who-wfh').addEventListener('click', () => setEmpWho('wfh'));
+
+        // ================= LEAVE & HOLIDAYS =================
+        async function leaveApi(payload) {
+            const r = await fetch('/api/admin', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: adminPassword, ...payload })
+            });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.error || data.detail || 'Request failed');
+            return data;
+        }
+
+        async function loadLeave() {
+            if (!adminPassword) return;
+            document.getElementById('lv-tbody').innerHTML =
+                '<tr><td colspan="7" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading…</td></tr>';
+            if (!document.getElementById('hol-year').value)
+                document.getElementById('hol-year').value = new Date().getFullYear();
+            try {
+                const [lv, hol] = await Promise.all([
+                    leaveApi({ action: 'leave_list', status: document.getElementById('lv-status').value || null }),
+                    leaveApi({ action: 'holiday_list', year: document.getElementById('hol-year').value })
+                ]);
+                leaveData = lv; holidayData = hol;
+                renderLeave(); renderHolidays();
+            } catch (e) {
+                document.getElementById('lv-tbody').innerHTML =
+                    `<tr><td colspan="7" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
+            }
+        }
+
+        function lvBadge(st) {
+            if (st === 'approved')  return '<span class="text-emerald-300 font-black">✅ Approved</span>';
+            if (st === 'rejected')  return '<span class="text-rose-300 font-black">❌ Rejected</span>';
+            if (st === 'cancelled') return '<span class="text-slate-400 font-black">— Cancelled</span>';
+            return '<span class="text-amber-300 font-black">⏳ Pending</span>';
+        }
+
+        function renderLeave() {
+            if (!leaveData) return;
+            const c = leaveData.counts || {};
+            document.getElementById('lv-counts').textContent =
+                `${c.pending || 0} pending · ${c.approved || 0} approved · ${c.rejected || 0} rejected`;
+            const rows = leaveData.requests || [];
+            document.getElementById('lv-tbody').innerHTML = rows.length ? rows.map(r => `
+                <tr>
+                    <td class="font-bold text-white">${escapeHtml(r.full_name || '—')}<br>
+                        <span class="text-slate-400 text-xs font-medium">${escapeHtml(r.company || '')}</span></td>
+                    <td class="text-slate-300 font-bold">${escapeHtml(r.type_name)}
+                        ${r.is_paid === false ? '<br><span class="text-amber-300 text-xs font-black">unpaid</span>' : ''}</td>
+                    <td class="text-slate-300 font-bold">${escapeHtml(r.start_date)}${r.end_date !== r.start_date ? ` → ${escapeHtml(r.end_date)}` : ''}<br>
+                        <span class="text-slate-500 text-xs font-bold">${escapeHtml(r.day_part_label)}</span></td>
+                    <td class="text-white font-black">${r.days}</td>
+                    <td class="text-slate-400 text-xs font-medium" style="max-width:220px;">${escapeHtml(r.reason || '—')}</td>
+                    <td>${lvBadge(r.status)}${r.decision_note ? `<br><span class="text-slate-500 text-xs font-bold">${escapeHtml(r.decision_note)}</span>` : ''}</td>
+                    <td>${r.status === 'pending' ? `
+                        <div class="flex gap-2">
+                            <button type="button" data-lv-ok="${r.id}" class="glass px-3 py-1.5 rounded-xl text-xs font-bold text-emerald-300 hover:bg-emerald-500/10">Approve</button>
+                            <button type="button" data-lv-no="${r.id}" class="glass px-3 py-1.5 rounded-xl text-xs font-bold text-rose-300 hover:bg-rose-500/10">Reject</button>
+                        </div>` : ''}</td>
+                </tr>`).join('')
+                : '<tr><td colspan="7" class="p-8 text-center text-slate-400 font-bold">No leave requests for this filter.</td></tr>';
+        }
+
+        function renderHolidays() {
+            if (!holidayData) return;
+            const rows = holidayData.holidays || [];
+            document.getElementById('hol-tbody').innerHTML = rows.length ? rows.map(h => `
+                <tr>
+                    <td class="text-white font-black">${escapeHtml(h.holiday_date)}</td>
+                    <td class="text-slate-200 font-bold">${escapeHtml(h.name)}</td>
+                    <td class="text-slate-400 font-bold">${escapeHtml(h.company || 'All companies')}</td>
+                    <td>${h.is_optional
+                        ? '<span class="text-amber-300 text-xs font-black">Optional</span>'
+                        : '<span class="text-violet-300 text-xs font-black">Public</span>'}</td>
+                    <td><button type="button" data-hol-del="${h.id}" class="glass px-3 py-1.5 rounded-xl text-xs font-bold text-rose-300 hover:bg-rose-500/10">Delete</button></td>
+                </tr>`).join('')
+                : '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold">No holidays set for this year.</td></tr>';
+        }
+
+        document.getElementById('lv-tbody').addEventListener('click', async ev => {
+            const ok = ev.target.closest('[data-lv-ok]');
+            const no = ev.target.closest('[data-lv-no]');
+            if (!ok && !no) return;
+            const id = (ok || no).dataset.lvOk || (ok || no).dataset.lvNo;
+            const req = (leaveData.requests || []).find(r => String(r.id) === String(id));
+            const confirmed = await wsDialog.confirm({
+                icon: ok ? '✅' : '❌', danger: !ok,
+                title: ok ? 'Approve this leave?' : 'Reject this leave?',
+                message: ok
+                    ? `<b>${escapeHtml(req?.full_name || '')}</b> will show as On leave in the attendance report for those dates — not Absent.`
+                    : `<b>${escapeHtml(req?.full_name || '')}</b>'s request will be rejected. Those days stay as Absent unless they punch in.`,
+                okText: ok ? 'Approve' : 'Reject'
+            });
+            if (!confirmed) return;
+            try {
+                await leaveApi({ action: 'leave_decide', id, status: ok ? 'approved' : 'rejected' });
+                leaveData = null; await loadLeave();
+            } catch (e) {
+                wsDialog.alert({ icon: '⚠️', danger: true, title: 'Could not save the decision', message: escapeHtml(e.message) });
+                leaveData = null; await loadLeave();
+            }
+        });
+
+        document.getElementById('hol-add').addEventListener('click', async () => {
+            const date = document.getElementById('hol-date').value;
+            const name = document.getElementById('hol-name').value.trim();
+            if (!date || !name) {
+                wsDialog.alert({ icon: 'ℹ️', title: 'Date and name needed', message: 'Pick a date and give the holiday a name.' });
+                return;
+            }
+            try {
+                await leaveApi({ action: 'holiday_save', holiday: {
+                    holiday_date: date, name,
+                    company: document.getElementById('hol-company').value || null,
+                    is_optional: document.getElementById('hol-optional').checked
+                }});
+                document.getElementById('hol-name').value = '';
+                document.getElementById('hol-optional').checked = false;
+                holidayData = null;
+                holidayData = await leaveApi({ action: 'holiday_list', year: document.getElementById('hol-year').value });
+                renderHolidays();
+            } catch (e) {
+                wsDialog.alert({ icon: '⚠️', danger: true, title: 'Could not add holiday', message: escapeHtml(e.message) });
+            }
+        });
+
+        document.getElementById('hol-tbody').addEventListener('click', async ev => {
+            const d = ev.target.closest('[data-hol-del]');
+            if (!d) return;
+            const ok = await wsDialog.confirm({ icon: '🎉', danger: true, title: 'Delete this holiday?',
+                message: 'That date will go back to being a normal working day in the report.', okText: 'Delete' });
+            if (!ok) return;
+            try {
+                await leaveApi({ action: 'holiday_delete', id: d.dataset.holDel });
+                holidayData = await leaveApi({ action: 'holiday_list', year: document.getElementById('hol-year').value });
+                renderHolidays();
+            } catch (e) {
+                wsDialog.alert({ icon: '⚠️', danger: true, title: 'Delete failed', message: escapeHtml(e.message) });
+            }
+        });
+
+        document.getElementById('lv-refresh').addEventListener('click', () => { leaveData = null; loadLeave(); });
+        document.getElementById('lv-status').addEventListener('change', () => { leaveData = null; loadLeave(); });
+        document.getElementById('hol-year').addEventListener('change', () => { leaveData = null; loadLeave(); });
 
         gatePassword.focus();
     </script>
