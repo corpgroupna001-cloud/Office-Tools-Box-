@@ -90,6 +90,19 @@
         .sheet-actions button:disabled { opacity:0.4; cursor:not-allowed; }
         .sheet-msg { margin-top:11px; font-size:12px; font-weight:800; text-align:center; }
 
+        .lv-lab { display:block; font-size:9.5px; letter-spacing:1.2px; text-transform:uppercase;
+                  font-weight:900; color: var(--ws-text-dim); margin-bottom:4px; }
+        .lv-in { background: var(--ws-surface-2); border:1px solid var(--ws-border); color: var(--ws-text);
+                 border-radius: var(--ws-r-sm); padding:8px 11px; font-weight:800; font-size:12.5px; color-scheme: dark; }
+        .lv-btn { background: var(--ws-grad-cool); border:none; color:#fff; border-radius: var(--ws-r-sm);
+                  padding:9px 20px; font-weight:900; font-size:12.5px; cursor:pointer; }
+        .lv-btn:disabled { opacity:0.5; cursor:not-allowed; }
+        .lv-pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:10.5px; font-weight:900; }
+        .lv-pill.ok   { background: rgba(16,185,129,0.16); color:#6ee7b7; }
+        .lv-pill.no   { background: rgba(244,63,94,0.16);  color:#fda4af; }
+        .lv-pill.wait { background: rgba(245,158,11,0.16); color:#fcd34d; }
+        .lv-pill.off  { background: rgba(148,163,184,0.16); color:#cbd5e1; }
+
         .back { display:inline-block; margin-bottom: 22px; color: var(--ws-text-muted);
                 font-size: 13px; font-weight: 800; text-decoration: none; }
         .back:hover { color: #fff; }
@@ -175,6 +188,28 @@
                 <button class="clock-btn"        data-event="BREAK_IN"><span class="ico">⏱️</span>End break</button>
                 <button class="clock-btn logout" data-event="LOGOUT"><span class="ico">🔴</span>Logout</button>
             </div>
+        </div>
+
+        <!-- Leave -->
+        <div class="card clock" id="leave-card">
+            <h2>🌴 Leave</h2>
+            <p class="hint" id="leave-hint">Approved leave shows as On leave in the attendance report, not Absent.</p>
+            <div style="display:flex;flex-wrap:wrap;gap:9px;align-items:flex-end;margin-bottom:14px;">
+                <div><label class="lv-lab">Type</label><select id="lv-type" class="lv-in"></select></div>
+                <div><label class="lv-lab">From</label><input id="lv-from" type="date" class="lv-in"></div>
+                <div><label class="lv-lab">To</label><input id="lv-to" type="date" class="lv-in"></div>
+                <div><label class="lv-lab">Part</label>
+                    <select id="lv-part" class="lv-in">
+                        <option value="full">Full day</option>
+                        <option value="first_half">First half</option>
+                        <option value="second_half">Second half</option>
+                    </select></div>
+                <div style="flex:1;min-width:150px;"><label class="lv-lab">Reason</label><input id="lv-reason" type="text" placeholder="Optional" class="lv-in" style="width:100%;"></div>
+                <button id="lv-apply" class="lv-btn">Request</button>
+            </div>
+            <p id="lv-msg" style="font-size:12px;font-weight:800;margin:0 0 12px;"></p>
+            <div class="scroll"><table><thead id="lv-head"></thead><tbody id="lv-body"></tbody></table></div>
+            <p id="lv-holidays" class="muted" style="font-size:12px;margin:14px 0 0;"></p>
         </div>
 
         <!-- Today -->
@@ -585,6 +620,95 @@
         el('sheet-cancel').addEventListener('click', closeSheet);
         el('sheet-shoot').addEventListener('click', submitPunch);
 
+        // ================= LEAVE =================
+        let leaveTypes = [];
+
+        async function loadLeave() {
+            try {
+                const today = fmtISO.format(new Date());
+                const [{ data: types }, { data: mine }, { data: hols }] = await Promise.all([
+                    sb.from('leave_types').select('*').eq('active', true).order('sort_order'),
+                    sb.from('leave_requests').select('*').order('start_date', { ascending: false }).limit(50),
+                    sb.from('holidays').select('*').gte('holiday_date', today).order('holiday_date').limit(5),
+                ]);
+                leaveTypes = types || [];
+                el('lv-type').innerHTML = leaveTypes.map(t =>
+                    `<option value="${t.id}">${esc(t.name)}${t.is_paid === false ? ' (unpaid)' : ''}</option>`).join('');
+                renderMyLeave(mine || []);
+
+                el('lv-holidays').innerHTML = (hols && hols.length)
+                    ? '🎉 Next holidays: ' + hols.map(h =>
+                        `<strong>${esc(h.name)}</strong> ${esc(h.holiday_date)}${h.is_optional ? ' (optional)' : ''}`).join(' · ')
+                    : '';
+            } catch {
+                // Leave tables may not exist yet — hide rather than show a broken card.
+                el('leave-card').style.display = 'none';
+            }
+        }
+
+        function renderMyLeave(rows) {
+            const pill = s => s === 'approved' ? '<span class="lv-pill ok">Approved</span>'
+                            : s === 'rejected' ? '<span class="lv-pill no">Rejected</span>'
+                            : s === 'cancelled' ? '<span class="lv-pill off">Cancelled</span>'
+                            : '<span class="lv-pill wait">Pending</span>';
+            const typeName = id => (leaveTypes.find(t => t.id === id) || {}).name || '—';
+            const PART = { full: 'Full day', first_half: 'First half', second_half: 'Second half' };
+            el('lv-head').innerHTML = rows.length
+                ? '<tr><th>Type</th><th>Dates</th><th>Part</th><th>Status</th><th></th></tr>' : '';
+            el('lv-body').innerHTML = rows.length ? rows.map(r => `
+                <tr>
+                    <td>${esc(typeName(r.leave_type_id))}</td>
+                    <td>${esc(r.start_date)}${r.end_date !== r.start_date ? ` → ${esc(r.end_date)}` : ''}</td>
+                    <td class="muted">${esc(PART[r.day_part] || r.day_part)}</td>
+                    <td>${pill(r.status)}${r.decision_note ? `<br><span class="muted" style="font-size:11px;">${esc(r.decision_note)}</span>` : ''}</td>
+                    <td>${r.status === 'pending'
+                        ? `<button data-lv-cancel="${r.id}" class="lv-btn" style="background:rgba(255,255,255,0.08);padding:6px 12px;">Withdraw</button>`
+                        : ''}</td>
+                </tr>`).join('')
+                : '<tr><td class="muted" style="padding:14px 16px;">No leave requests yet.</td></tr>';
+        }
+
+        el('lv-apply').addEventListener('click', async () => {
+            const msg = el('lv-msg'), btn = el('lv-apply');
+            const from = el('lv-from').value, to = el('lv-to').value || el('lv-from').value;
+            const part = el('lv-part').value;
+            msg.style.color = '#fda4af';
+            if (!from)              { msg.textContent = 'Pick a start date.'; return; }
+            if (to < from)          { msg.textContent = 'The end date is before the start date.'; return; }
+            // Mirrors the DB constraint, so the person gets a sentence rather than a Postgres error.
+            if (part !== 'full' && to !== from) { msg.textContent = 'A half day has to be a single date.'; return; }
+
+            btn.disabled = true; msg.textContent = '';
+            const { error } = await sb.from('leave_requests').insert({
+                user_id: session.user.id,
+                leave_type_id: Number(el('lv-type').value) || null,
+                start_date: from, end_date: to, day_part: part,
+                reason: el('lv-reason').value.trim() || null,
+                status: 'pending',
+            });
+            btn.disabled = false;
+            if (error) { msg.textContent = error.message; return; }
+            msg.style.color = '#6ee7b7';
+            msg.textContent = 'Request sent — your admin will approve or reject it.';
+            el('lv-reason').value = '';
+            loadLeave();
+        });
+
+        el('lv-body').addEventListener('click', async ev => {
+            const b = ev.target.closest('[data-lv-cancel]');
+            if (!b) return;
+            b.disabled = true;
+            const { error } = await sb.from('leave_requests')
+                .update({ status: 'cancelled' }).eq('id', b.dataset.lvCancel);
+            if (error) {
+                el('lv-msg').style.color = '#fda4af';
+                el('lv-msg').textContent = error.message;
+                b.disabled = false;
+                return;
+            }
+            loadLeave();
+        });
+
         document.querySelectorAll('.seg button').forEach(b => {
             b.addEventListener('click', () => {
                 document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b));
@@ -595,6 +719,7 @@
         el('month').addEventListener('change', load);
 
         await loadMyShift();
+        await loadLeave();
         await load();
 
         // Live: a punch lands in the DB and the page updates without a refresh.
