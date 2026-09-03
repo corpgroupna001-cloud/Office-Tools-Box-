@@ -192,6 +192,7 @@
         .pill { display:inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 900; }
         .pill.in  { background: rgba(16,185,129,0.15); color: #6ee7b7; }
         .pill.out { background: rgba(244,63,94,0.15);  color: #fda4af; }
+        .pill.brk { background: rgba(245,158,11,0.16); color: var(--ws-warning-text); }
         .pill.unk { background: rgba(148,163,184,0.15); color: #cbd5e1; }
         .muted { color: var(--ws-text-dim); font-weight: 700; }
         .empty { padding: 60px 20px; text-align: center; color: var(--ws-text-muted); }
@@ -474,7 +475,9 @@
             // Selfie events only. Biometric rows carry event_type null and say
             // nothing about a WFH day.
             const evs = todayPunches
-                .filter(r => r.event_type)
+                // source, not event_type: biometric punches now carry an event
+                // too, and an office punch must not drive the WFH card.
+                .filter(r => r.source === 'selfie' && r.event_type)
                 .slice()
                 .sort((a, b) => new Date(a.log_datetime) - new Date(b.log_datetime));
             const last  = t => { for (let i = evs.length - 1; i >= 0; i--) if (evs[i].event_type === t) return evs[i]; return null; };
@@ -681,7 +684,17 @@
                 thead.innerHTML = '<tr><th>Day</th><th>Time</th><th>Type</th><th>Device</th></tr>';
                 tbody.innerHTML = rows.map(r => {
                     const d = new Date(r.log_datetime);
-                    const pill = r.direction === 'IN'  ? '<span class="pill in">→ IN</span>'
+                    // Name the event where we have one. Login / Break out /
+                    // Break in / Logout is what people actually look for; a
+                    // column of identical "IN" pills told them nothing.
+                    const EV = {
+                        LOGIN:     ['in',  '→ Login'],
+                        BREAK_OUT: ['brk', '☕ Break out'],
+                        BREAK_IN:  ['in',  '↩ Break in'],
+                        LOGOUT:    ['out', '← Logout'],
+                    }[r.event_type];
+                    const pill = EV ? `<span class="pill ${EV[0]}">${EV[1]}</span>`
+                               : r.direction === 'IN'  ? '<span class="pill in">→ IN</span>'
                                : r.direction === 'OUT' ? '<span class="pill out">← OUT</span>'
                                : '<span class="pill unk">• Punch</span>';
                     return `<tr>

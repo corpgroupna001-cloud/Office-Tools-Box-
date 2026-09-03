@@ -49,6 +49,7 @@ const {
   evaluateShift, timeToMinutes, offsetFromBoundary,
   istToday, monthDates, buildMonth, classifyDay,
   weekOffsFor, holidayOn, DAY_STATUS,
+  deriveEventType,
 } = require('../lib/attendance');
 
 // Vercel Hobby kills the function at 10s. Stop starting new sends at 7.5s and
@@ -330,6 +331,17 @@ module.exports = async function handler(req, res) {
             item.insert.direction = priors % 2 === 0 ? 'IN' : 'OUT';
             item.insert.direction_derived = true;
           }
+          item.priorsToday = priors;
+          // Name the event, not just the direction: Login / Break out /
+          // Break in / Logout is what the email and the screens show. The
+          // reader never sends this, so it is derived from position in the
+          // day plus the shift end - see deriveEventType.
+          item.insert.event_type = deriveEventType({
+            priorsToday: priors,
+            direction: item.insert.direction,
+            when: item.insert.log_datetime,
+            shift: shiftFor(item.profile),
+          });
           stored.push(t);
         }
       }));
@@ -402,6 +414,7 @@ module.exports = async function handler(req, res) {
         const { subject, html, text } = buildPunchEmail({
           fullName: p.full_name,
           direction: row.direction,
+          eventType: row.event_type,
           when: meta.when,
           deviceName: row.device_name,
           employeeCode: row.employee_code,
