@@ -517,15 +517,29 @@ module.exports = async function handler(req, res) {
             targets, headcount, groups: [],
           });
         }
-        // whoAmI proves the token works at all; listGroups needs the extra
-        // sonet scope, so a failure there is reported separately rather than
-        // being mistaken for a broken webhook.
-        const [who, groups] = await Promise.all([bitrix.whoAmI(), bitrix.listGroups()]);
+        // whoAmI proves the token works at all; the two listings need the im
+        // and sonet scopes, so a failure in either is reported separately
+        // rather than being mistaken for a broken webhook.
+        const [who, convos, groups] = await Promise.all([
+          bitrix.whoAmI(), bitrix.listConversations(), bitrix.listGroups(),
+        ]);
+
+        // Conversations FIRST, because those are the ones this webhook can
+        // actually post to. Workgroups it has not joined are still offered -
+        // an admin may be about to add it - but flagged, so picking one and
+        // getting CANCELED back is no longer a surprise.
+        const joined = convos.ok ? convos.result : [];
+        const have = new Set(joined.map(g => g.dialog_id));
+        const notJoined = (groups.ok ? groups.result : [])
+          .filter(g => !have.has(g.dialog_id))
+          .map(g => ({ ...g, kind: 'group', joined: false }));
+
         return res.status(200).json({
           configured: true,
           connection: who.ok ? { ok: true, ...who.result } : { ok: false, reason: who.reason, detail: who.detail },
-          groups: groups.ok ? groups.result : [],
-          groups_error: groups.ok ? null : `${groups.reason}: ${groups.detail}`,
+          groups: joined.concat(notJoined),
+          groups_error: convos.ok ? null : `${convos.reason}: ${convos.detail}`,
+          workgroups_error: groups.ok ? null : `${groups.reason}: ${groups.detail}`,
           targets, headcount,
         });
       }

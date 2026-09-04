@@ -140,7 +140,8 @@
             conn.innerHTML =
                 `<div class="ws-chip warn">Not connected</div>` +
                 `<p class="text-slate-400 text-xs font-bold mt-2 leading-relaxed max-w-2xl">${esc(d.detail)}<br>` +
-                `In Bitrix24: <b>Developer resources &rarr; Other &rarr; Inbound webhook</b>, tick the <b>im</b> and <b>sonet_group</b> scopes, ` +
+                `In Bitrix24: <b>Developer resources &rarr; Other &rarr; Inbound webhook</b>, tick <b>Chat and Notifications (im)</b> and ` +
+                `<b>Workgroups (sonet_group)</b>, ` +
                 `then paste the whole URL into Vercel as <b>BITRIX_WEBHOOK_URL</b> and redeploy.</p>`;
         } else if (d.connection && d.connection.ok) {
             conn.innerHTML =
@@ -148,9 +149,11 @@
                 `<span class="text-slate-300 text-xs font-bold ml-2">posts as ${esc(d.connection.name)}` +
                 `${d.connection.portal ? ' on ' + esc(d.connection.portal.replace(/^https:\/\//, '')) : ''}</span>` +
                 (d.groups_error
-                    ? `<p class="text-amber-300 text-xs font-bold mt-2">Groups could not be listed (${esc(d.groups_error)}). ` +
-                      `Add the <b>sonet_group</b> scope to the webhook, or type the group id by hand.</p>`
-                    : '');
+                    ? `<p class="text-amber-300 text-xs font-bold mt-2">Chats could not be listed (${esc(d.groups_error)}). ` +
+                      `Add the <b>im</b> scope to the webhook, or type the id by hand.</p>`
+                    : `<p class="text-slate-400 text-xs font-bold mt-2 leading-relaxed max-w-2xl">` +
+                      `The menu lists the chats and workgroups <b>${esc(d.connection.name)}</b> belongs to \u2014 those are the ones ` +
+                      `it can post to. Anything under \u201cNot joined\u201d will be refused until you add them to it in Bitrix24.</p>`);
         } else {
             const c = d.connection || {};
             conn.innerHTML =
@@ -267,30 +270,39 @@
         }).join('');
     }
 
-    /* A datalist put the ID first and the name underneath, because that is how
-     * a browser renders <option value="sg15">Guess the Technology</option> -
-     * so the menu read as a list of sg-numbers and picking the right group
-     * meant already knowing its number. A <select> shows the NAME, which is
-     * the only part a person actually knows. */
+    /* A datalist put the ID first, because that is how a browser renders
+     * <option value="sg15">Guess the Technology</option> - so the menu read as
+     * a column of sg-numbers and picking the right group meant already knowing
+     * its number. A <select> shows the NAME, which is the only part a person
+     * actually knows.
+     *
+     * The options are split in two because those halves behave differently.
+     * The first half is what im.recent.get returned: conversations this
+     * webhook is a participant of, which is exactly what im.message.add will
+     * accept. The second half is workgroups it has not joined - still offered,
+     * because an admin may be about to add it, but posting to one of those
+     * comes back CANCELED, and a menu that hid that difference is what sent
+     * the last attempt at "Guess the Technology". */
     function groupPicker(t, groups) {
         const cls = 'bx-dialog glass px-3 py-1.5 rounded-lg text-white font-bold focus:outline-none';
-        if (!groups.length) {
-            // No list to choose from (the sonet_group scope is missing), so the
-            // id has to be typed. An empty menu would be worse than a text box.
-            return `<input class="${cls} w-40" placeholder="sg14" value="${esc(t.dialog_id || '')}">`;
+        const manual = t.dialog_id && !groups.some(g => g.dialog_id === t.dialog_id);
+        if (!groups.length || t._manual) {
+            // No list to choose from, or the admin asked to type one. An empty
+            // menu would be worse than a text box.
+            return `<input class="${cls} w-44" placeholder="chat287 or sg14" value="${esc(t.dialog_id || '')}">`;
         }
-        // A mapping pointing at a group the webhook cannot see must not be
-        // silently dropped just because it is missing from the menu.
-        const known = groups.some(g => g.dialog_id === t.dialog_id);
-        const opts = groups.map(g =>
-            `<option value="${esc(g.dialog_id)}"${g.dialog_id === t.dialog_id ? ' selected' : ''}>` +
-            `${esc(g.name)}${g.members != null ? ` (${g.members})` : ''}</option>`).join('');
-        return `<select class="${cls} w-60">` +
+        const opt = g => `<option value="${esc(g.dialog_id)}"${g.dialog_id === t.dialog_id ? ' selected' : ''}>` +
+            `${esc(g.name)}${g.members != null ? ` (${g.members})` : ''}</option>`;
+        const inGroup = groups.filter(g => g.joined !== false);
+        const outGroup = groups.filter(g => g.joined === false);
+        return `<select class="${cls} w-64">` +
                `<option value=""${t.dialog_id ? '' : ' selected'}>— not posting —</option>` +
-               opts +
-               (t.dialog_id && !known
-                   ? `<option value="${esc(t.dialog_id)}" selected>${esc(t.dialog_id)} — not in your group list</option>`
-                   : '') +
+               (inGroup.length ? `<optgroup label="Can post here">${inGroup.map(opt).join('')}</optgroup>` : '') +
+               (outGroup.length ? `<optgroup label="Not joined — will be refused">${outGroup.map(opt).join('')}</optgroup>` : '') +
+               // A saved id missing from both lists must keep its own option,
+               // or the next save would silently blank the mapping.
+               (manual ? `<option value="${esc(t.dialog_id)}" selected>${esc(t.dialog_id)} — not in either list</option>` : '') +
+               `<option value="__manual__">Type an id by hand…</option>` +
                `</select>` +
                (t.dialog_id ? `<div class="text-[11px] text-slate-400 font-bold mt-1">${esc(t.dialog_id)}</div>` : '');
     }
@@ -318,7 +330,17 @@
 
     async function save(tr) {
         const company = tr.dataset.company;
-        const dialog  = tr.querySelector('.bx-dialog').value.trim();
+        const raw = tr.querySelector('.bx-dialog').value.trim();
+        // The escape hatch is a menu entry, not a value: swap the row for a
+        // text box and save nothing until something is actually typed.
+        if (raw === '__manual__') {
+            const t = (bxData.targets || []).find(x => x.company === company);
+            if (t) { t._manual = true; renderBitrix();
+                     const el = document.querySelector(`#bx-body tr[data-company="${CSS.escape(company)}"] .bx-dialog`);
+                     if (el) el.focus(); }
+            return;
+        }
+        const dialog  = raw;
         const enabled = tr.querySelector('.bx-enabled').checked;
         try {
             const out = await api('bitrix_save', { company, dialog_id: dialog, enabled });
