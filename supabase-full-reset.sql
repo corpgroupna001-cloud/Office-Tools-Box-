@@ -1,9 +1,13 @@
 -- ============================================================================
 -- WorkSuite — FULL DATA RESET
 --
--- Deletes every row in every public table, and optionally every sign-in
--- account. It cannot be undone: no soft delete, no recycle bin, and no
--- point-in-time restore on the Supabase free plan.
+-- Deletes every row in every public table AND every sign-in account. It
+-- cannot be undone: no soft delete, no recycle bin, and no point-in-time
+-- restore on the Supabase free plan.
+--
+-- After this runs, nobody can log in until they register again — you
+-- included. The admin panel keeps working throughout; it is protected by the
+-- admin password, not by a user account.
 --
 -- BEFORE YOU RUN IT
 --   * device-enrolments-2026-09-04.csv is the ONLY copy of the biometric
@@ -101,20 +105,43 @@ end $$;
 
 
 -- ============================================================================
--- SECTION 3 — DELETE THE SIGN-IN ACCOUNTS.  Optional, separate on purpose.
+-- SECTION 3 — DELETE THE SIGN-IN ACCOUNTS.  ⚠️ ALSO IRREVERSIBLE.
 --
 -- Section 2 removes the profiles but leaves the auth accounts, so those people
--- could still sign in to a WorkSuite that knows nothing about them. Run this
--- if you want everyone to register again, so binding happens at registration.
+-- could still sign in to a WorkSuite that knows nothing about them. This
+-- removes the accounts themselves, so everybody registers again and binding
+-- happens at registration.
 --
 --   * This deletes YOUR OWN employee login too. You register again like
 --     everyone else.
 --   * It does NOT affect your Supabase dashboard access, and it does NOT
 --     affect the admin panel — that is protected by the admin password, not by
 --     a user account. You cannot lock yourself out of administration.
---   * If signups need approval, approve yourself from the admin panel.
+--   * If signups need approval, approve yourself from the admin panel
+--     afterwards.
+--
+-- Run this AFTER Section 2. Deleting the accounts while profiles still holds
+-- rows can trip a foreign key; emptying public first avoids that entirely.
 -- ============================================================================
--- delete from auth.users;          -- ← uncomment to actually run it
+do $$
+declare
+  n bigint;
+begin
+  -- storage.objects.owner points at auth.users, and on some Supabase versions
+  -- that constraint does not cascade — which makes the delete below fail with
+  -- a foreign key error that looks unrelated to what you asked for. Releasing
+  -- the reference first costs nothing: the files are being deleted anyway
+  -- (Section 4), and ownership means nothing once the owner is gone.
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'storage' and table_name = 'objects'
+                and column_name = 'owner') then
+    update storage.objects set owner = null where owner is not null;
+  end if;
+
+  select count(*) into n from auth.users;
+  delete from auth.users;
+  raise notice 'Deleted % sign-in account(s). Everyone registers again.', n;
+end $$;
 
 
 -- ============================================================================
