@@ -215,6 +215,21 @@ module.exports = async function handler(req, res) {
 
       const employeeName = pick(flat, 'employee_name', 'employeename', 'empname', 'name', 'username') || null;
 
+      // The device's own "Employee Code" (the CG-… string), when it sends one.
+      // It is NOT the enrolment number above, arrives late, and on this reader
+      // arrives truncated - so it is recorded for reference but nothing keys on
+      // it. Try named fields, then fall back to shape: a hyphenated code with
+      // letters, which the numeric enroll number never matches.
+      let staffCode = pick(flat, 'staff_code', 'staffcode', 'staff_id', 'staffid',
+                                 'badge_no', 'badgeno', 'card_no', 'cardno', 'emp_code2');
+      if (staffCode == null) {
+        for (const v of Object.values(flat)) {
+          const str = String(v == null ? '' : v).trim();
+          if (/^[A-Za-z]{2,}-[A-Za-z0-9-]{1,}$/.test(str) && str !== employeeName) { staffCode = str; break; }
+        }
+      }
+      staffCode = staffCode == null ? null : String(staffCode).trim() || null;
+
       // Direction: an explicit field, or separate in/out flags, or nothing.
       let direction = normalizeDirection(
         pick(flat, 'direction', 'punch_type', 'punchtype', 'inout', 'in_out', 'io', 'type', 'status', 'attendance_type')
@@ -288,6 +303,7 @@ module.exports = async function handler(req, res) {
         },
         profile,
         when,
+        staffCode,
       });
     }
 
@@ -370,6 +386,48 @@ module.exports = async function handler(req, res) {
       return res.status(502).json({ error: 'insert failed', detail });
     }
     const inserted = await insRes.json();
+
+    // The identity of a punch, matching the unique index (direction is derived).
+    const keyOfInsert = r => `${r.employee_code}|${new Date(r.log_datetime).getTime()}|${r.device_sn || ''}`;
+
+    // ---- 3b. Maintain the biometric roster (device_enrolments).
+    // One row per person the reader knows, upserted from the punches that
+    // actually landed (replays insert nothing, so they add nothing here). The
+    // roster is what the admin binds against, and keeping it in its own table
+    // is what lets it survive an attendance wipe. It must never break a punch,
+    // so its failure is swallowed - a missing roster row is a lesser problem
+    // than a 500 that makes the reader retry the whole export.
+    try {
+      const metaFor = new Map(rows.map(r => [keyOfInsert(r.insert), r]));
+      const byEnroll = new Map();
+      for (const ins of inserted) {
+        const meta = metaFor.get(keyOfInsert(ins));
+        const t = new Date(ins.log_datetime).getTime();
+        const cur = byEnroll.get(ins.employee_code) || {
+          enroll_no: ins.employee_code, device_name: null, staff_code: null,
+          device_sn: ins.device_sn || null, min: t, max: t, punches: 0,
+        };
+        cur.punches += 1;
+        cur.min = Math.min(cur.min, t);
+        cur.max = Math.max(cur.max, t);
+        if (ins.employee_name) cur.device_name = ins.employee_name;
+        if (meta && meta.staffCode) cur.staff_code = meta.staffCode;
+        if (ins.device_sn) cur.device_sn = ins.device_sn;
+        byEnroll.set(ins.employee_code, cur);
+      }
+      if (byEnroll.size) {
+        const items = [...byEnroll.values()].map(e => ({
+          enroll_no: e.enroll_no, device_name: e.device_name, staff_code: e.staff_code,
+          device_sn: e.device_sn, punches: e.punches,
+          first_seen: new Date(e.min).toISOString(), last_seen: new Date(e.max).toISOString(),
+        }));
+        const rr = await fetch(`${SUPABASE_URL}/rest/v1/rpc/record_enrolments`, {
+          method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items }),
+        });
+        if (!rr.ok) console.error('[attendance] roster upsert failed', (await rr.text()).slice(0, 200));
+      }
+    } catch (e) { console.error('[attendance] roster upsert threw', String(e && e.message || e)); }
 
     // Re-attach the resolved profile to each freshly inserted row.
     // Must match the unique index: direction is derived and therefore not

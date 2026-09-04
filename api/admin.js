@@ -493,6 +493,100 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ success: true });
     }
 
+    // ================= BIOMETRIC ROSTER =================
+    // The list of everyone the fingerprint reader knows, and which WorkSuite
+    // account each maps to. Reads device_enrolments (kept fresh by the punch
+    // webhook) rather than deriving from raw punches, so it survives a wipe.
+    if (String(action).startsWith('roster_')) {
+      const RH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
+      const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...RH, ...(opts.headers || {}) } });
+
+      if (action === 'roster_list') {
+        const r = await sb('device_enrolments?select=*&order=last_seen.desc.nullslast');
+        if (!r.ok) {
+          // The table only exists after its migration; say so plainly instead
+          // of an empty screen that reads as "nobody has ever punched".
+          return res.status(200).json({ rows: [], unavailable: true,
+            detail: 'device_enrolments is missing - run supabase-device-enrolments-migration.sql.' });
+        }
+        const enrol = await r.json();
+        // Who is available to bind: every profile, with a note of any code it
+        // already holds. The browser never sees more than name/email/company.
+        const pr = await sb('profiles?select=id,full_name,email,company,employee_code&order=full_name.asc&limit=2000');
+        const profiles = pr.ok ? await pr.json() : [];
+        const byId = new Map(profiles.map(p => [p.id, p]));
+        const rows = enrol.map(e => {
+          const p = e.user_id ? byId.get(e.user_id) : null;
+          return { ...e,
+            bound_name:  p ? (p.full_name || p.email) : null,
+            bound_email: p ? p.email : null,
+            bound_company: p ? p.company : null };
+        });
+        return res.status(200).json({
+          rows,
+          profiles: profiles.map(p => ({ id: p.id, full_name: p.full_name, email: p.email,
+                                         company: p.company, employee_code: p.employee_code || null })),
+          summary: {
+            total: rows.length,
+            bound: rows.filter(x => x.user_id).length,
+            unbound: rows.filter(x => !x.user_id).length,
+          },
+        });
+      }
+
+      if (action === 'roster_bind') {
+        const enroll = String(body.enroll_no || '').trim();
+        const userId = String(body.user_id || '').trim();
+        if (!enroll || !userId) return res.status(400).json({ error: 'enroll_no and user_id required' });
+
+        // One code, one person: if this account already holds a DIFFERENT
+        // enrolment, that stale mapping has to be cleared or the reader would
+        // match the person by their old number. Do it first.
+        await sb(`device_enrolments?user_id=eq.${encodeURIComponent(userId)}&enroll_no=neq.${encodeURIComponent(enroll)}`, {
+          method: 'PATCH', headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ user_id: null, bound_at: null, bound_by: null }),
+        });
+        await sb(`profiles?employee_code=eq.${encodeURIComponent(enroll)}&id=neq.${encodeURIComponent(userId)}`, {
+          method: 'PATCH', headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ employee_code: null }),
+        });
+
+        // Bind: the roster row points at the account, and the profile carries
+        // the code so the punch webhook's match-by-code keeps working.
+        const r1 = await sb(`device_enrolments?enroll_no=eq.${encodeURIComponent(enroll)}`, {
+          method: 'PATCH', headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ user_id: userId, bound_at: new Date().toISOString(), bound_by: 'admin' }),
+        });
+        if (!r1.ok) return res.status(502).json({ error: 'bind failed', detail: (await r1.text()).slice(0, 200) });
+        const patched = (await r1.json())[0] || null;
+        await sb(`profiles?id=eq.${encodeURIComponent(userId)}`, {
+          method: 'PATCH', headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ employee_code: enroll }),
+        });
+        return res.status(200).json({ success: true, row: patched });
+      }
+
+      if (action === 'roster_unbind') {
+        const enroll = String(body.enroll_no || '').trim();
+        if (!enroll) return res.status(400).json({ error: 'enroll_no required' });
+        // Read who holds it, so the matching profile code can be cleared too.
+        const cur = await sb(`device_enrolments?enroll_no=eq.${encodeURIComponent(enroll)}&select=user_id`).then(x => x.ok ? x.json() : []);
+        const uid = (cur[0] || {}).user_id || null;
+        const r1 = await sb(`device_enrolments?enroll_no=eq.${encodeURIComponent(enroll)}`, {
+          method: 'PATCH', headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ user_id: null, bound_at: null, bound_by: null }),
+        });
+        if (!r1.ok) return res.status(502).json({ error: 'unbind failed', detail: (await r1.text()).slice(0, 200) });
+        if (uid) await sb(`profiles?id=eq.${encodeURIComponent(uid)}&employee_code=eq.${encodeURIComponent(enroll)}`, {
+          method: 'PATCH', headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ employee_code: null }),
+        });
+        return res.status(200).json({ success: true });
+      }
+
+      return res.status(400).json({ error: 'unknown roster action' });
+    }
+
     // ================= BITRIX24 =================
     // Folded in here with the rest: the Hobby plan allows 12 serverless
     // functions and the repo is at 12. Everything runs on the service key

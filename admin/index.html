@@ -321,6 +321,7 @@
                     <button data-tab="selfies"    class="admin-tab" type="button"><span class="ic ic-camera"></span>Selfies</button>
                     <button data-tab="wfh"        class="admin-tab" type="button"><span class="ic ic-video"></span>WFH Check-ins</button>
                     <button data-tab="friday"     class="admin-tab" type="button"><span class="ic ic-report"></span>Friday Report</button>
+                    <button data-tab="roster"     class="admin-tab" type="button"><span class="ic ic-fingerprint"></span>Biometric</button>
                 </div>
                 <div class="side-group">
                     <div class="side-head">Tools</div>
@@ -673,7 +674,7 @@
                     <div class="flex items-center gap-2 mb-1">
                         <span class="text-amber-300 font-black">Unmapped device codes</span>
                     </div>
-                    <p class="text-slate-300 text-xs font-bold mb-4">These punches arrived from codes we can't match to anyone, so no email went out. Pick the right person to bind the code — future punches map automatically.</p>
+                    <p class="text-slate-300 text-xs font-bold mb-4">These punches arrived from codes not yet matched to anyone, so no email went out. Bind them in the <b>Biometric</b> tab &mdash; that is the full reader roster and the one place binding happens now, so a code is picked from the device rather than typed.</p>
                     <div id="att-unmapped-list" class="flex flex-col gap-3"></div>
                 </div>
 
@@ -878,6 +879,34 @@
             </div>
 
             <!-- ================= BITRIX24 ================= -->
+            <!-- ================= BIOMETRIC ROSTER ================= -->
+            <div id="roster-panel" class="hidden">
+                <div class="section-head mb-3"><h3><span class="ic ic-fingerprint"></span>Biometric roster</h3><span class="sub">Everyone the fingerprint reader knows &mdash; bind each to a WorkSuite account</span></div>
+                <div id="rost-summary" class="glass rounded-2xl p-4 mb-4"></div>
+                <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-4 items-center">
+                    <button id="rost-reload" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh</button>
+                    <input id="rost-search" type="text" placeholder="Search name or code&hellip;"
+                        class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium focus:outline-none">
+                    <label class="flex items-center gap-2 text-slate-300 text-xs font-black cursor-pointer">
+                        <input id="rost-unbound" type="checkbox" class="w-4 h-4"> Unbound only
+                    </label>
+                </div>
+                <div class="glass rounded-2xl overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr><th>Enroll No</th><th>Name on device</th><th>Employee Code</th><th>Punches</th><th>Last seen</th><th>WorkSuite account</th></tr>
+                            </thead>
+                            <tbody id="rost-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <p class="text-slate-400 text-xs font-bold mt-3 max-w-3xl leading-relaxed">
+                    Binding sets that person&rsquo;s enrolment number on their account, so their punches, calendar and payslip line up.
+                    This list is kept by the reader itself &mdash; it survives clearing attendance history, and a name here is how the device spells it, which need not match the account name.
+                </p>
+            </div>
+
             <div id="bitrix-panel" class="hidden">
                 <div class="section-head mb-3"><h3><span class="ic ic-chat"></span>Bitrix24</h3><span class="sub">Which Bitrix chat or workgroup each company's punches and leave go to</span></div>
                 <div class="glass rounded-2xl p-4 mb-4">
@@ -2347,15 +2376,11 @@
                 wrap.classList.remove('hidden');
                 document.getElementById('att-unmapped-list').innerHTML = codes.map(c => `
                     <div class="flex flex-wrap items-center gap-3 p-3 rounded-xl" style="background:rgba(255,255,255,0.04);">
-                        <div class="min-w-[160px]">
+                        <div class="min-w-[160px] flex-1">
                             <span class="text-white font-black">${escapeHtml(c.employee_code)}</span>
                             <span class="text-slate-400 text-xs font-bold block">${escapeHtml(c.employee_name || 'no name from device')} · ${c.punches} punch${c.punches === 1 ? '' : 'es'}</span>
                         </div>
-                        <select data-map-code="${escapeHtml(c.employee_code)}" class="glass px-3 py-2 rounded-xl text-sm font-bold focus:outline-none flex-1 min-w-[220px]">
-                            <option value="">— Select employee —</option>
-                            ${free.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.full_name || p.email)}${p.employee_code ? ` — currently code ${escapeHtml(p.employee_code)}` : ''}</option>`).join('')}
-                        </select>
-                        <button type="button" data-map-btn="${escapeHtml(c.employee_code)}" class="btn-primary text-white font-black px-4 py-2 rounded-xl text-sm">Bind code</button>
+                        <button type="button" data-goto-roster class="glass px-4 py-2 rounded-xl text-sm font-bold inline-flex items-center gap-2"><span class="ic ic-fingerprint sm"></span>Bind in Biometric</button>
                     </div>`).join('');
             } else {
                 wrap.classList.add('hidden');
@@ -2426,6 +2451,8 @@
 
         // Bind an unmapped device code to a person.
         document.getElementById('att-unmapped-list').addEventListener('click', async (ev) => {
+            const jump = ev.target.closest('[data-goto-roster]');
+            if (jump) { document.querySelector('.admin-tab[data-tab="roster"]')?.click(); return; }
             const btn = ev.target.closest('[data-map-btn]');
             if (!btn) return;
             const code = btn.getAttribute('data-map-btn');
@@ -3025,5 +3052,6 @@
     </script>
     <script src="/admin/payroll.js"></script>
     <script src="/admin/bitrix.js"></script>
+    <script src="/admin/roster.js"></script>
 </body>
 </html>
