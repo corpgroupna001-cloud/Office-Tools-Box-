@@ -48,18 +48,55 @@
         test:  { label: 'Test',   chip: '' },
     };
 
-    // The stored reason is a machine token; an admin should not have to guess
-    // what 'bad_dialog' means or which of the two ends is at fault.
+    /* The stored reason is a machine token - ours ('no_dialog') or Bitrix's
+     * ('CANCELED'). Neither tells an admin what to go and do, so each one gets
+     * a plain sentence and, where there is a concrete next step, a hint. */
+    const REASONS = {
+        not_configured: ['No webhook set in Vercel',
+            'Add BITRIX_WEBHOOK_URL in Vercel and redeploy.'],
+        no_dialog:      ['No group mapped',
+            'Pick a group for this company above.'],
+        bad_dialog:     ['Group id not understood', 'Expected something like sg14.'],
+        empty:          ['Nothing to send', ''],
+        timeout:        ['Bitrix did not answer in time',
+            'Usually a slow portal. Try the test again.'],
+        network:        ['Could not reach Bitrix',
+            'Check the portal address in BITRIX_WEBHOOK_URL.'],
+        // Bitrix's own codes. CANCELED is the one this setup hits first, and
+        // its wording ("You cannot send messages to the specified chat") sends
+        // people hunting through webhook scopes when the real cause is
+        // membership: a webhook posts AS a user, and that user has to be in
+        // the workgroup. sonet_group.get lists groups they can SEE, which is
+        // not the same as groups they can post to - hence picking a listed
+        // group and still being refused.
+        CANCELED:       ['Not allowed to post in that group', 'MEMBERSHIP'],
+        ACCESS_DENIED:  ['Not allowed to post in that group', 'MEMBERSHIP'],
+        ERROR_CORE:     ['Bitrix refused the message', 'MEMBERSHIP'],
+        INVALID_CHAT_ID:['No such chat', 'That group id does not exist on the portal.'],
+        CHAT_ID_EMPTY:  ['No chat id sent', ''],
+        NO_AUTH_FOUND:  ['Webhook not recognised',
+            'The webhook was deleted or regenerated in Bitrix. Make a new one and update Vercel.'],
+        INVALID_CREDENTIALS: ['Webhook not recognised',
+            'The webhook was deleted or regenerated in Bitrix. Make a new one and update Vercel.'],
+        expired_token:  ['Webhook expired', 'Create a fresh inbound webhook and update Vercel.'],
+        insufficient_scope: ['Webhook is missing a permission',
+            'Tick both Chat and Notifications (im) and Workgroups (sonet_group) on the webhook.'],
+        QUERY_LIMIT_EXCEEDED: ['Bitrix rate limit hit',
+            'About two requests a second is the ceiling. Wait a moment and retry.'],
+    };
     function reasonText(reason) {
         const r = String(reason || '');
-        if (r === 'not_configured') return 'No webhook set in Vercel';
-        if (r === 'no_dialog')      return 'No group mapped';
-        if (r === 'bad_dialog')     return 'Group id not understood';
-        if (r === 'empty')          return 'Nothing to send';
-        if (r === 'timeout')        return 'Bitrix did not answer in time';
-        if (r === 'network')        return 'Could not reach Bitrix';
-        if (/^http_\d+$/.test(r))   return 'Bitrix replied ' + r.slice(5);
+        if (REASONS[r]) return REASONS[r][0];
+        if (/^http_\d+$/.test(r)) return 'Bitrix replied ' + r.slice(5);
         return r || 'Failed';
+    }
+    function reasonHint(reason) {
+        const h = (REASONS[String(reason || '')] || [])[1] || '';
+        if (h !== 'MEMBERSHIP') return h;
+        // Name the actual account, so the admin knows who to add.
+        const who = (bxData && bxData.connection && bxData.connection.name) || 'the webhook user';
+        return `A webhook posts as a person, and ${who} is not a member of that workgroup. ` +
+               `Open the group in Bitrix24, add ${who} to it, then test again.`;
     }
 
     const esc = s => (window.escapeHtml ? window.escapeHtml(s) : String(s == null ? '' : s));
@@ -70,7 +107,13 @@
             body: JSON.stringify({ password: adminPassword, action, ...extra }),
         });
         const data = await r.json();
-        if (!r.ok) throw new Error(data.detail || data.error || 'Request failed');
+        if (!r.ok) {
+            // Keep the machine code alongside the prose: the code is what the
+            // reason table can translate into a next step.
+            const err = new Error(data.detail || data.error || 'Request failed');
+            err.code = data.error || '';
+            throw err;
+        }
         return data;
     }
 
@@ -115,26 +158,14 @@
                 `<p class="text-rose-300 text-xs font-bold mt-2">${esc(c.reason || '')}: ${esc(c.detail || '')}</p>`;
         }
 
-        // A datalist means the admin picks a real group instead of hunting for
-        // a numeric id, but can still type one if the scope is missing.
-        document.getElementById('bx-groups').innerHTML = (d.groups || [])
-            .map(g => `<option value="${esc(g.dialog_id)}">${esc(g.name)}${g.members != null ? ` · ${g.members} members` : ''}</option>`)
-            .join('');
-
         const rows = d.targets || [];
         document.getElementById('bx-body').innerHTML = rows.length ? rows.map(t => {
             const head = (d.headcount || {})[t.company] || 0;
-            const named = (d.groups || []).find(g => g.dialog_id === t.dialog_id);
             return `
             <tr data-company="${esc(t.company)}">
                 <td><b>${esc(t.company)}</b>
                     <div class="text-[11px] text-slate-400 font-bold">${head} employee${head === 1 ? '' : 's'}${t.label ? ' · ' + esc(t.label) : ''}</div></td>
-                <td>
-                    <input class="bx-dialog glass px-3 py-1.5 rounded-lg text-white font-bold w-40 focus:outline-none"
-                           list="bx-groups" placeholder="not posting"
-                           value="${esc(t.dialog_id || '')}">
-                    ${named ? `<div class="text-[11px] text-emerald-300 font-bold mt-1">${esc(named.name)}</div>` : ''}
-                </td>
+                <td>${groupPicker(t, d.groups || [])}</td>
                 <td class="text-center">
                     <input type="checkbox" class="bx-enabled w-4 h-4" ${t.enabled ? 'checked' : ''}
                            ${t.dialog_id ? '' : 'disabled'} title="Pause without losing the mapping">
@@ -236,15 +267,53 @@
         }).join('');
     }
 
-    // Admin has no showToast (the dashboard does), and a bare reference to an
-    // undeclared identifier throws rather than reading as falsy - so typeof.
-    function flash(tr, ok, note) {
+    /* A datalist put the ID first and the name underneath, because that is how
+     * a browser renders <option value="sg15">Guess the Technology</option> -
+     * so the menu read as a list of sg-numbers and picking the right group
+     * meant already knowing its number. A <select> shows the NAME, which is
+     * the only part a person actually knows. */
+    function groupPicker(t, groups) {
+        const cls = 'bx-dialog glass px-3 py-1.5 rounded-lg text-white font-bold focus:outline-none';
+        if (!groups.length) {
+            // No list to choose from (the sonet_group scope is missing), so the
+            // id has to be typed. An empty menu would be worse than a text box.
+            return `<input class="${cls} w-40" placeholder="sg14" value="${esc(t.dialog_id || '')}">`;
+        }
+        // A mapping pointing at a group the webhook cannot see must not be
+        // silently dropped just because it is missing from the menu.
+        const known = groups.some(g => g.dialog_id === t.dialog_id);
+        const opts = groups.map(g =>
+            `<option value="${esc(g.dialog_id)}"${g.dialog_id === t.dialog_id ? ' selected' : ''}>` +
+            `${esc(g.name)}${g.members != null ? ` (${g.members})` : ''}</option>`).join('');
+        return `<select class="${cls} w-60">` +
+               `<option value=""${t.dialog_id ? '' : ' selected'}>— not posting —</option>` +
+               opts +
+               (t.dialog_id && !known
+                   ? `<option value="${esc(t.dialog_id)}" selected>${esc(t.dialog_id)} — not in your group list</option>`
+                   : '') +
+               `</select>` +
+               (t.dialog_id ? `<div class="text-[11px] text-slate-400 font-bold mt-1">${esc(t.dialog_id)}</div>` : '');
+    }
+
+    /* This used to fall back to alert(), which threw a browser modal carrying a
+     * raw URL and a JSON blob at the admin - unreadable, and a modal blocks the
+     * page until it is dismissed. The panel has room to say it properly. */
+    function notice(ok, title, hint) {
+        const el = document.getElementById('bx-notice');
+        if (!el) return;
+        if (!title) { el.innerHTML = ''; return; }
+        el.innerHTML =
+            `<div class="glass rounded-2xl p-4 mb-4">` +
+                `<div class="ws-chip ${ok ? 'ok' : 'bad'}">${esc(title)}</div>` +
+                (hint ? `<p class="text-slate-300 text-xs font-bold mt-2 leading-relaxed max-w-2xl">${esc(hint)}</p>` : '') +
+            `</div>`;
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function flash(tr, ok) {
         tr.style.transition = 'background .4s';
         tr.style.background = ok ? 'rgba(16,185,129,.18)' : 'rgba(244,63,94,.18)';
         setTimeout(() => { tr.style.background = ''; }, ok ? 700 : 1800);
-        if (!note) return;
-        if (typeof showToast === 'function') showToast(note, ok ? 'success' : 'error');
-        else if (!ok) alert(note);
     }
 
     async function save(tr) {
@@ -256,9 +325,11 @@
             const t = (bxData.targets || []).find(x => x.company === company);
             if (t && out.target) Object.assign(t, out.target);
             renderBitrix();
+            notice(null, '');
             flash(document.querySelector(`#bx-body tr[data-company="${CSS.escape(company)}"]`) || tr, true);
         } catch (e) {
-            flash(tr, false, e.message);
+            flash(tr, false);
+            notice(false, 'Could not save that mapping', e.message);
         }
     }
 
@@ -274,9 +345,15 @@
         btn.disabled = true; btn.textContent = 'Sending…';
         try {
             await api('bitrix_test', { dialog_id: tr.querySelector('.bx-dialog').value.trim() });
-            flash(tr, true, 'Test message sent — check the group');
+            flash(tr, true);
+            notice(true, 'Test message sent — check the group in Bitrix24', '');
         } catch (e) {
-            flash(tr, false, e.message);
+            flash(tr, false);
+            // The API returns Bitrix's own code as `error`; api() puts the
+            // description in the message, so translate the code we were given.
+            const code = (e && e.code) || '';
+            notice(false, code ? reasonText(code) : 'Test failed',
+                   (reasonHint(code) || '') + (e.message ? '  (' + e.message + ')' : ''));
         } finally {
             btn.disabled = false; btn.textContent = label;
             // Refresh either way: a REJECTED test is logged too, and that row
