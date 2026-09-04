@@ -905,6 +905,38 @@
                     Punches are batched into one message per group per import, because Bitrix allows only
                     about two requests a second and a twenty-punch export sent one at a time would time out.
                 </p>
+
+                <!-- ---------- Delivery log ---------- -->
+                <div class="section-head mt-8 mb-3"><h3>📜 Delivery log</h3><span class="sub">Every message WorkSuite tried to send, newest first</span></div>
+                <div id="bx-log-summary" class="glass rounded-2xl p-4 mb-4"></div>
+                <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-4 items-center">
+                    <button id="bx-log-reload" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh log</button>
+                    <label class="flex items-center gap-2 text-slate-300 text-xs font-black cursor-pointer">
+                        <input id="bx-log-fails" type="checkbox" class="w-4 h-4"> Failures only
+                    </label>
+                    <label class="flex items-center gap-2 text-slate-300 text-xs font-black">
+                        Show
+                        <select id="bx-log-limit" class="glass px-3 py-1.5 rounded-lg text-white font-bold focus:outline-none">
+                            <option value="60">last 60</option>
+                            <option value="120">last 120</option>
+                            <option value="200">last 200</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="glass rounded-2xl overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr><th>When</th><th>What</th><th>Company</th><th>Group</th><th>Result</th><th class="text-right">Lines</th></tr>
+                            </thead>
+                            <tbody id="bx-log-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <p class="text-slate-400 text-xs font-bold mt-3 max-w-3xl leading-relaxed">
+                    Click any row to read the exact text that was sent. The log records the message but never the
+                    webhook URL — that is the credential, and it is stripped out of every error before it is written down.
+                </p>
             </div>
               </div><!-- /.admin-main -->
             </div><!-- /.admin-shell -->

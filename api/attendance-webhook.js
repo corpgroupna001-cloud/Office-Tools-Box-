@@ -471,8 +471,16 @@ module.exports = async function handler(req, res) {
           }));
         }
 
+        // dialog -> company, so the log row says which company it was for.
+        const companyOf = new Map();
+        targets.forEach(t => { if (t.dialog_id && !companyOf.has(t.dialog_id)) companyOf.set(t.dialog_id, t.company); });
+
         const posts = await Promise.all([...lines.entries()].map(([dialogId, list]) =>
-          bitrix.sendGroupMessage({ dialogId, message: list.join('\n') })
+          bitrix.sendAndLog({
+            SUPABASE_URL, H, kind: 'punch',
+            company: companyOf.get(dialogId), dialogId,
+            message: list.join('\n'),
+          })
         ));
         posts.forEach(r => { if (r.ok) bitrixSent++; else {
           bitrixFailed++;
@@ -539,7 +547,7 @@ const SELFIE_REPEAT_WINDOW_MS = 60 * 1000;
  * Silent when Bitrix is not configured or the company has no group - both
  * are ordinary states, not errors.
  */
-async function postToCompanyGroup({ SUPABASE_URL, H, company, message }) {
+async function postToCompanyGroup({ SUPABASE_URL, H, company, message, kind = 'punch' }) {
   if (!bitrix.isConfigured() || !company || !message) return { ok: false, reason: 'skipped' };
   const r = await fetch(
     `${SUPABASE_URL}/rest/v1/bitrix_targets?select=dialog_id,enabled&company=eq.${encodeURIComponent(company)}&limit=1`,
@@ -548,9 +556,7 @@ async function postToCompanyGroup({ SUPABASE_URL, H, company, message }) {
   if (!r.ok) return { ok: false, reason: 'targets_unavailable' };
   const t = (await r.json())[0];
   if (!t || !t.enabled || !t.dialog_id) return { ok: false, reason: 'no_group' };
-  const out = await bitrix.sendGroupMessage({ dialogId: t.dialog_id, message });
-  if (!out.ok) console.error('[bitrix] post failed:', out.reason, out.detail);
-  return out;
+  return bitrix.sendAndLog({ SUPABASE_URL, H, kind, company, dialogId: t.dialog_id, message });
 }
 
 // Modes a signed-in employee (Supabase JWT, not the device key) may ask for.
@@ -610,6 +616,7 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
       const typeName = (tRes.find(t => t.id === leave.leave_type_id) || {}).name || 'Leave';
       const out = await postToCompanyGroup({
         SUPABASE_URL, H, company: profile.company,
+        kind: 'leave',
         message: buildLeaveChatLine({
           kind: 'filed', fullName: profile.full_name || 'Employee', typeName,
           startDate: leave.start_date, endDate: leave.end_date,

@@ -559,7 +559,9 @@ module.exports = async function handler(req, res) {
           return res.status(400).json({ error: 'not_configured',
             detail: 'Set BITRIX_WEBHOOK_URL in Vercel first.' });
         }
-        const out = await bitrix.sendGroupMessage({
+        const out = await bitrix.sendAndLog({
+          SUPABASE_URL, H: BH, kind: 'test',
+          company: body.company ? String(body.company) : null,
           dialogId: String(body.dialog_id || ''),
           message: `\u2705 [B]WorkSuite[/B] is connected to this group.\n` +
                    `Attendance punches and leave updates will appear here.\n` +
@@ -567,6 +569,55 @@ module.exports = async function handler(req, res) {
         });
         if (!out.ok) return res.status(502).json({ error: out.reason, detail: out.detail });
         return res.status(200).json({ success: true, message_id: out.result });
+      }
+
+      if (action === 'bitrix_logs') {
+        const onlyFails = body.only_failures === true;
+        const limit = Math.min(Math.max(Number(body.limit) || 60, 1), 200);
+        const r = await sb(
+          'bitrix_log?select=*' + (onlyFails ? '&ok=is.false' : '') +
+          `&order=created_at.desc&limit=${limit}`
+        );
+        if (!r.ok) {
+          // The table only exists after its migration; say so plainly rather
+          // than showing an empty list that looks like "nothing was sent".
+          return res.status(200).json({ rows: [], unavailable: true,
+            detail: 'bitrix_log is missing — run supabase-bitrix-log-migration.sql.' });
+        }
+        const rows = await r.json();
+        const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+
+        // The 24h figures must NOT be counted out of `rows`. That page is
+        // capped at `limit`, so a busy day would report "60 sent", and a
+        // "failures only" page contains no successes at all and would claim
+        // nothing had ever been delivered - wrong, and wrong in the
+        // reassuring direction. Ask the database instead; both filters ride
+        // the (ok, created_at) index, and count=exact over an empty range
+        // returns the total in Content-Range without shipping any rows.
+        const countOf = async q => {
+          const c = await sb(`bitrix_log?select=id&${q}`, {
+            headers: { Prefer: 'count=exact', Range: '0-0' },
+          });
+          const m = /\/(\d+)$/.exec(c.headers.get('content-range') || '');
+          return m ? Number(m[1]) : null;
+        };
+        const [last24, fail24, lastOk] = await Promise.all([
+          countOf(`created_at=gte.${since}`),
+          countOf(`created_at=gte.${since}&ok=is.false`),
+          sb('bitrix_log?select=created_at&ok=is.true&order=created_at.desc&limit=1')
+            .then(x => x.ok ? x.json() : []).then(a => (a[0] || {}).created_at || null),
+        ]);
+
+        return res.status(200).json({
+          rows,
+          summary: {
+            shown: rows.length,
+            failures_shown: rows.filter(x => !x.ok).length,
+            last_24h: last24,
+            failures_24h: fail24,
+            last_sent_at: lastOk,
+          },
+        });
       }
 
       return res.status(400).json({ error: 'unknown bitrix action', action });
@@ -828,7 +879,8 @@ module.exports = async function handler(req, res) {
           const p = prof[0] || {};
           const t = targets.find(x => x.company === p.company);
           if (bitrix.isConfigured() && t && t.enabled && t.dialog_id) {
-            const out = await bitrix.sendGroupMessage({
+            const out = await bitrix.sendAndLog({
+              SUPABASE_URL, H: LH, kind: 'leave', company: p.company,
               dialogId: t.dialog_id,
               message: buildLeaveChatLine({
                 kind: decision,
