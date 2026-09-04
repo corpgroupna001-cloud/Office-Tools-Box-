@@ -563,7 +563,22 @@ module.exports = async function handler(req, res) {
           method: 'PATCH', headers: { Prefer: 'return=minimal' },
           body: JSON.stringify({ employee_code: enroll }),
         });
-        return res.status(200).json({ success: true, row: patched });
+
+        // Adopt every past punch parked under this code. Without this the
+        // person stays Absent with zero punches (their history is still
+        // user_id null) and the Attendance tab keeps listing the code as
+        // unmapped - which is exactly what "I bound it but it still shows"
+        // looks like. The webhook already attaches FUTURE punches via the
+        // profile code; this line fixes the ones that arrived before binding.
+        let adopted = 0;
+        const back = await sb(`attendance_logs?employee_code=eq.${encodeURIComponent(enroll)}&user_id=is.null`, {
+          method: 'PATCH', headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ user_id: userId, email_status: 'skipped',
+            email_error: 'Bound after the fact - historical punch, not emailed.' }),
+        });
+        if (back.ok) adopted = (await back.json()).length;
+
+        return res.status(200).json({ success: true, row: patched, backfilled_logs: adopted });
       }
 
       if (action === 'roster_unbind') {
@@ -580,6 +595,12 @@ module.exports = async function handler(req, res) {
         if (uid) await sb(`profiles?id=eq.${encodeURIComponent(uid)}&employee_code=eq.${encodeURIComponent(enroll)}`, {
           method: 'PATCH', headers: { Prefer: 'return=minimal' },
           body: JSON.stringify({ employee_code: null }),
+        });
+        // Release this code's punches back to unmapped, so the roster, the
+        // profile and the punch history all agree that nobody holds it.
+        if (uid) await sb(`attendance_logs?employee_code=eq.${encodeURIComponent(enroll)}&user_id=eq.${encodeURIComponent(uid)}`, {
+          method: 'PATCH', headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ user_id: null }),
         });
         return res.status(200).json({ success: true });
       }
