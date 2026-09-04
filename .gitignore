@@ -2,3 +2,8 @@ node_modules/
 .vercel/
 .DS_Store
 *.log
+
+# Data pulled out of Supabase for the admin's own use - staff names, emails,
+# attendance. It reaches Sekhar through the chat, never through the repo:
+# git history is effectively permanent, and this is other people's data.
+exports/
