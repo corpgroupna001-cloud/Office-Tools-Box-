@@ -812,6 +812,48 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ success: true });
       }
 
+      // ---- The second role (secondary_roles) ----
+      if (action === 'pay_role2_set') {
+        const userId = String(body.user_id || '');
+        if (!/^[0-9a-f-]{36}$/i.test(userId)) return res.status(400).json({ error: 'user_id required' });
+        const label = String(body.label || '').trim();
+        if (!label) return res.status(400).json({ error: 'label required', detail: 'Give the second role a name, e.g. Jobways.' });
+        const blank = v => v === null || v === undefined || v === '';
+        const rate = blank(body.per_day_rate) ? NaN : Number(body.per_day_rate);
+        if (!Number.isFinite(rate) || rate < 0 || rate >= 1000000) {
+          return res.status(400).json({ error: 'bad_rate', detail: 'Enter a per-day rate between 0 and 999999.' });
+        }
+        const shiftId = blank(body.shift_id) ? null : Number(body.shift_id);
+        if (shiftId != null && !Number.isInteger(shiftId)) return res.status(400).json({ error: 'bad_shift' });
+        const r = await sb('secondary_roles?on_conflict=user_id', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+          body: JSON.stringify({
+            user_id: userId, label, shift_id: shiftId, per_day_rate: rate,
+            note: body.note ? String(body.note).slice(0, 300) : null,
+            updated_at: new Date().toISOString(), updated_by: 'admin',
+          }),
+        });
+        if (!r.ok) {
+          // 42P01 = the table is missing (migration not run). Say so.
+          const detail = (await r.text()).slice(0, 200);
+          if (/does not exist|42P01/i.test(detail)) {
+            return res.status(200).json({ unavailable: true,
+              detail: 'secondary_roles is missing - run supabase-secondary-roles-migration.sql.' });
+          }
+          return res.status(502).json({ error: 'save failed', detail });
+        }
+        return res.status(200).json({ success: true, role: (await r.json())[0] || null });
+      }
+
+      if (action === 'pay_role2_clear') {
+        const userId = String(body.user_id || '');
+        if (!/^[0-9a-f-]{36}$/i.test(userId)) return res.status(400).json({ error: 'user_id required' });
+        const r = await sb(`secondary_roles?user_id=eq.${encodeURIComponent(userId)}`, { method: 'DELETE' });
+        if (!r.ok) return res.status(502).json({ error: 'delete failed', detail: (await r.text()).slice(0, 200) });
+        return res.status(200).json({ success: true });
+      }
+
       // ---------- reads ----------
       const month = /^\d{4}-\d{2}$/.test(String(body.month || '')) ? String(body.month) : istToday().slice(0, 7);
       const dates = monthDates(month);
@@ -819,7 +861,7 @@ module.exports = async function handler(req, res) {
       const from = dates[0], to = dates[dates.length - 1];
       const today = istToday();
 
-      const [profiles, shifts, policies, holidays, leaveRows, leaveTypes, logs, salaries] = await Promise.all([
+      const [profiles, shifts, policies, holidays, leaveRows, leaveTypes, logs, salaries, secondaries] = await Promise.all([
         fetchAll('profiles?select=id,full_name,email,company,employee_code,shift_id,is_wfh&order=full_name.asc'),
         sb('shifts?select=*').then(r => r.ok ? r.json() : []),
         sb('company_policies?select=company,week_offs').then(r => r.ok ? r.json() : []),
@@ -828,12 +870,16 @@ module.exports = async function handler(req, res) {
         sb('leave_types?select=id,name').then(r => r.ok ? r.json() : []),
         fetchAll(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type,source&log_date=gte.${from}&log_date=lte.${to}&order=log_datetime.asc`),
         sb('salaries?select=user_id,per_day_rate,currency,note,updated_at').then(r => r.ok ? r.json() : []),
+        sb('secondary_roles?select=user_id,label,shift_id,per_day_rate,currency,note').then(r => r.ok ? r.json() : []),
       ]);
 
       const shiftById   = new Map(shifts.map(s => [s.id, s]));
       const defaultShift = shifts.find(s => s.is_default) || null;
       const typeName    = new Map(leaveTypes.map(t => [t.id, t.name]));
       const rateByUser  = new Map(salaries.map(s => [s.user_id, s]));
+      // Second role, when a person has one. secondaries is [] when the
+      // migration has not run, so single-role payroll is untouched.
+      const role2ByUser = new Map((secondaries || []).map(s => [s.user_id, s]));
 
       const logsByUser  = new Map();
       logs.forEach(r => {
@@ -875,6 +921,30 @@ module.exports = async function handler(req, res) {
           currency: sal ? sal.currency : 'INR',
         });
 
+        // The second role, if any. Its days are the person's WORKED days that
+        // fall on the secondary shift's working days - not a re-derivation of
+        // presence, just the same worked days filtered to that shift's week.
+        const r2 = role2ByUser.get(p.id) || null;
+        let secondRole = null;
+        if (r2) {
+          const r2Shift = (r2.shift_id && shiftById.get(r2.shift_id)) || null;
+          const r2Days = (r2Shift && Array.isArray(r2Shift.working_days))
+            ? r2Shift.working_days.map(Number) : [1,2,3,4,5,6,7];
+          const daysPresent2 = mon.days.filter(d => d.worked && r2Days.includes(d.weekday)).length;
+          const pay2 = computePay({ perDayRate: r2.per_day_rate, daysPresent: daysPresent2, currency: r2.currency });
+          secondRole = {
+            label: r2.label || 'Second role',
+            shift_id: r2.shift_id || null,
+            shift_name: r2Shift ? r2Shift.name : null,
+            rate: Number(r2.per_day_rate),
+            days_present: daysPresent2,
+            gross: pay2.gross,
+            has_rate: pay2.hasRate,
+            currency: pay2.currency,
+            note: r2.note || null,
+          };
+        }
+
         const times = {}, notes = {};
         mon.days.forEach(d => {
           if (d.worked) times[d.date] = [hhmm(d.firstIn), hhmm(d.lastOut), d.lateMinutes || 0];
@@ -901,22 +971,27 @@ module.exports = async function handler(req, res) {
           currency: pay.currency,
           gross: pay.gross,
           has_rate: pay.hasRate,
+          second_role: secondRole,
         };
       });
 
       const withRate = rows.filter(r => r.has_rate);
+      const sumSecond = rows.reduce((a, r) => a + (r.second_role && r.second_role.gross || 0), 0);
       return res.status(200).json({
         month, dates, today,
         legend: DAY_STATUS,
         employees: rows,
+        // The shift list drives the secondary-role picker in the Salary UI.
+        shifts: shifts.map(sh => ({ id: sh.id, name: sh.name, working_days: sh.working_days })),
         summary: {
           people: rows.length,
           with_rate: withRate.length,
           without_rate: rows.length - withRate.length,
           days_present: rows.reduce((a, r) => a + r.totals.daysPresent, 0),
           // Only rows that actually have a rate contribute, so the total never
-          // silently treats "no rate entered" as zero rupees.
-          gross: Math.round(withRate.reduce((a, r) => a + (r.gross || 0), 0) * 100) / 100,
+          // silently treats "no rate entered" as zero rupees. Second roles add
+          // their own gross on top.
+          gross: Math.round((withRate.reduce((a, r) => a + (r.gross || 0), 0) + sumSecond) * 100) / 100,
         },
       });
     }
