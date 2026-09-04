@@ -174,21 +174,22 @@
     <!-- Top Navigation Bar -->
     <nav class="glass-nav w-full z-40 sticky top-0 content">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between items-center h-20">
+            <div class="flex justify-between items-center h-16">
                 <div class="flex items-center gap-3">
-                    <div class="glass p-2.5 rounded-2xl text-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 7h10"/><path d="M7 12h10"/><path d="M7 17h10"/></svg>
+                    <div class="w-9 h-9 rounded-lg flex items-center justify-center" style="background: var(--ws-primary); color: var(--ws-on-accent);">
+                        <span class="ic ic-shield lg"></span>
                     </div>
-                    <span class="font-black text-2xl text-white tracking-tight">WorkSuite</span>
+                    <span class="font-black text-[17px] text-white tracking-tight">WorkSuite</span>
                 </div>
                 <div class="flex items-center gap-3">
+                    <button type="button" class="ws-theme-toggle" data-ws-theme><span class="sun ic ic-sun"></span><span class="moon ic ic-moon"></span></button>
                     <button type="button" class="ws-cmdk-trigger hidden md:inline-flex" onclick="window.wsCmdK && window.wsCmdK.open()" title="Search & quick actions (Ctrl/Cmd + K)">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                         <span>Quick search</span>
                         <span class="kbd">⌘K</span>
                     </button>
                     <button id="profile-btn" class="hidden items-center gap-2 glass px-2 py-1.5 rounded-full hover:bg-white/10 transition-all">
-                        <span id="nav-avatar" class="w-8 h-8 rounded-full flex items-center justify-center text-white font-black text-sm overflow-hidden" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 4px 12px rgba(59,130,246,0.4);">S</span>
+                        <span id="nav-avatar" class="w-8 h-8 rounded-full flex items-center justify-center text-white font-black text-sm overflow-hidden" style="background: var(--ws-primary); color: var(--ws-on-accent);">S</span>
                         <span id="user-chip" class="text-xs font-bold text-slate-200 pr-2">—</span>
                     </button>
                 </div>
@@ -197,34 +198,34 @@
     </nav>
 
     <!-- Auth modal (root gate) -->
-    <div id="auth-modal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" style="background: rgba(11, 17, 32, 0.85); backdrop-filter: blur(20px);">
-        <div class="glass-strong w-full max-w-md rounded-[2.5rem] p-8" style="background: rgba(255,255,255,0.12); backdrop-filter: blur(30px); border: 1px solid rgba(255,255,255,0.22); box-shadow: 0 20px 60px rgba(0,0,0,0.45);">
-            <div class="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-5 text-3xl" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 15px 40px rgba(59,130,246,0.5);">🔐</div>
-            <h2 class="text-3xl font-black text-white mb-1 text-center">WorkSuite</h2>
+    <div id="auth-modal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" data-ws="scrim">
+        <div class="glass-strong w-full max-w-md rounded-[2.5rem] p-8" data-ws="panel">
+            <div class="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-5" data-ws="tile"><span class="ic ic-lock lg"></span></div>
+            <h2 class="text-2xl font-black text-white mb-1 text-center">WorkSuite</h2>
             <p class="text-slate-300 mb-6 text-sm font-semibold text-center">Sign in to access your tools</p>
 
-            <div class="rounded-2xl p-1 flex mb-5" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+            <div class="rounded-2xl p-1 flex mb-5" data-ws="inset">
                 <button type="button" data-tab="login" onclick="switchAuthTab('login'); return false;" class="auth-tab flex-1 py-2 rounded-xl font-black text-sm text-white bg-white/10" style="cursor: pointer;">Log In</button>
                 <button type="button" data-tab="signup" onclick="switchAuthTab('signup'); return false;" class="auth-tab flex-1 py-2 rounded-xl font-black text-sm text-slate-300" style="cursor: pointer;">Sign Up</button>
             </div>
 
             <form id="login-form" class="space-y-3">
-                <input type="email" name="email" placeholder="Email" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                <input type="email" name="email" placeholder="Email" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
                 <div class="password-field">
-                    <input type="password" name="password" placeholder="Password" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                    <input type="password" name="password" placeholder="Password" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
                     <button type="button" class="password-toggle" aria-label="Show password" data-target="prev">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                     </button>
                 </div>
                 <p id="login-error" class="text-rose-300 text-sm font-bold hidden"></p>
-                <button type="submit" class="w-full text-white font-extrabold py-4 rounded-2xl text-lg" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 10px 30px rgba(59,130,246,0.4);">Log In</button>
+                <button type="submit" class="w-full text-white font-extrabold py-4 rounded-2xl text-lg" data-ws="primary">Log In</button>
             </form>
 
             <form id="signup-form" class="space-y-3 hidden">
                 <!-- Mandatory profile photo -->
-                <div class="flex items-center gap-4 p-3 rounded-2xl" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                <div class="flex items-center gap-4 p-3 rounded-2xl" data-ws="inset">
                     <label for="signup-photo" class="cursor-pointer relative group">
-                        <div id="signup-photo-preview" class="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl overflow-hidden transition-all group-hover:scale-105" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 8px 20px rgba(59,130,246,0.4);">📷</div>
+                        <div id="signup-photo-preview" class="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl overflow-hidden transition-all group-hover:scale-105" data-ws="primary">📷</div>
                         <input id="signup-photo" type="file" accept="image/*" class="hidden" required>
                     </label>
                     <div class="flex-1">
@@ -232,9 +233,9 @@
                         <p id="signup-photo-hint" class="text-slate-400 text-xs mt-0.5">Tap the icon — required</p>
                     </div>
                 </div>
-                <input type="text" name="full_name" placeholder="Full Name" required minlength="2" class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
-                <input type="email" name="email" placeholder="Email" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
-                <select name="company" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white cursor-pointer" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color-scheme: dark;">
+                <input type="text" name="full_name" placeholder="Full Name" required minlength="2" class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
+                <input type="email" name="email" placeholder="Email" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
+                <select name="company" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white cursor-pointer" data-ws="inset">
                     <option value="" disabled selected>Select your company</option>
                     <option value="Nova Sportsmart Private Limited">Nova Sportsmart Private Limited</option>
                     <option value="Protathlitis Sportsmart LLP">Protathlitis Sportsmart LLP</option>
@@ -244,7 +245,7 @@
                     <option value="CORPGROUP">CORPGROUP</option>
                 </select>
                 <div class="password-field">
-                    <input id="signup-password" type="password" name="password" placeholder="Password (min 6 chars)" required minlength="6" class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
+                    <input id="signup-password" type="password" name="password" placeholder="Password (min 6 chars)" required minlength="6" class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
                     <button type="button" class="password-toggle" aria-label="Show password" data-target="prev">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                     </button>
@@ -257,7 +258,7 @@
                 </div>
                 <p id="signup-error" class="text-rose-300 text-sm font-bold hidden"></p>
                 <p id="signup-success" class="text-emerald-300 text-sm font-bold hidden"></p>
-                <button type="submit" class="w-full text-white font-extrabold py-4 rounded-2xl text-lg" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 10px 30px rgba(59,130,246,0.4);">Create Account</button>
+                <button type="submit" class="w-full text-white font-extrabold py-4 rounded-2xl text-lg" data-ws="primary">Create Account</button>
             </form>
 
             <div class="auth-trust">
@@ -268,8 +269,8 @@
     </div>
 
     <!-- Universal feedback dialog (success / error / info) -->
-    <div id="feedback-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: rgba(11, 17, 32, 0.85); backdrop-filter: blur(20px);">
-        <div id="feedback-card" class="w-full max-w-sm rounded-[2rem] p-8 text-center transform transition-all" style="background: rgba(255,255,255,0.12); backdrop-filter: blur(30px); border: 1px solid rgba(255,255,255,0.22); box-shadow: 0 20px 60px rgba(0,0,0,0.55); animation: pop-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);">
+    <div id="feedback-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" data-ws="scrim">
+        <div id="feedback-card" class="w-full max-w-sm rounded-[2rem] p-8 text-center transform transition-all" data-ws="panel" style="animation: pop-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);">
             <div id="feedback-icon" class="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-5 text-4xl">✓</div>
             <h3 id="feedback-title" class="text-2xl font-black text-white mb-2">Success</h3>
             <p id="feedback-message" class="text-slate-200/90 font-medium mb-6 leading-relaxed">Done.</p>
@@ -362,7 +363,7 @@
 
     <!-- Photo picker modal (shown to existing users without an avatar) -->
     <div id="photo-modal" class="fixed inset-0 z-[66] hidden items-center justify-center p-4" style="background: rgba(11, 17, 32, 0.92); backdrop-filter: blur(24px);">
-        <div class="w-full max-w-md rounded-[2.5rem] p-8" style="background: rgba(255,255,255,0.12); backdrop-filter: blur(30px); border: 1px solid rgba(255,255,255,0.22); box-shadow: 0 20px 60px rgba(0,0,0,0.55);">
+        <div class="w-full max-w-md rounded-[2.5rem] p-8" data-ws="panel">
             <div class="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-5 text-3xl" style="background: linear-gradient(135deg,#8b5cf6,#6366f1); box-shadow: 0 15px 40px rgba(139,92,246,0.5);">📸</div>
             <h2 class="text-2xl font-black text-white mb-1 text-center">Add your profile photo</h2>
             <p class="text-slate-300 mb-6 text-sm text-center">A photo is required so teammates recognise you in chat and calls. You only need to add it once.</p>
@@ -382,11 +383,11 @@
 
     <!-- Company picker modal (shown to existing users without a company set) -->
     <div id="company-modal" class="fixed inset-0 z-[65] hidden items-center justify-center p-4" style="background: rgba(11, 17, 32, 0.9); backdrop-filter: blur(24px);">
-        <div class="w-full max-w-md rounded-[2.5rem] p-8" style="background: rgba(255,255,255,0.12); backdrop-filter: blur(30px); border: 1px solid rgba(255,255,255,0.22); box-shadow: 0 20px 60px rgba(0,0,0,0.45);">
+        <div class="w-full max-w-md rounded-[2.5rem] p-8" data-ws="panel">
             <div class="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-5 text-3xl" style="background: linear-gradient(135deg,#f97316,#ef4444); box-shadow: 0 15px 40px rgba(249,115,22,0.5);">🏢</div>
             <h2 class="text-2xl font-black text-white mb-1 text-center">Select your company</h2>
             <p class="text-slate-300 mb-6 text-sm text-center">This helps route reports and analytics correctly. You only need to pick this once.</p>
-            <select id="company-picker" class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-orange-400/20 font-bold text-white cursor-pointer mb-4" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color-scheme: dark;">
+            <select id="company-picker" class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-orange-400/20 font-bold text-white cursor-pointer mb-4" data-ws="inset">
                 <option value="" disabled selected>Choose your company</option>
                 <option value="Nova Sportsmart Private Limited">Nova Sportsmart Private Limited</option>
                 <option value="Protathlitis Sportsmart LLP">Protathlitis Sportsmart LLP</option>
@@ -401,13 +402,13 @@
     </div>
 
     <!-- Profile Settings Modal (home-screen version) -->
-    <div id="profile-modal" class="fixed inset-0 z-[62] hidden items-center justify-center p-4" style="background: rgba(11, 17, 32, 0.85); backdrop-filter: blur(20px);">
+    <div id="profile-modal" class="fixed inset-0 z-[62] hidden items-center justify-center p-4" data-ws="scrim">
         <div class="w-full max-w-md rounded-[2.5rem] p-8 max-h-[92vh] overflow-y-auto" style="background: rgba(255,255,255,0.10); backdrop-filter: blur(30px); border: 1px solid rgba(255,255,255,0.22); box-shadow: 0 20px 60px rgba(0,0,0,0.55);">
 
             <!-- Avatar + name -->
             <div class="text-center mb-6">
                 <div class="relative inline-block group">
-                    <div id="profile-avatar" class="w-20 h-20 rounded-3xl flex items-center justify-center text-white font-black text-3xl mx-auto mb-3 overflow-hidden" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 15px 40px rgba(59,130,246,0.5);">S</div>
+                    <div id="profile-avatar" class="w-20 h-20 rounded-3xl flex items-center justify-center text-white font-black text-3xl mx-auto mb-3 overflow-hidden" data-ws="primary">S</div>
                     <label for="profile-photo-input" class="absolute -bottom-1 -right-1 w-8 h-8 rounded-full flex items-center justify-center text-white text-sm cursor-pointer transition-all hover:scale-110" style="background: linear-gradient(135deg,#10b981,#059669); box-shadow: 0 4px 12px rgba(16,185,129,0.5); border: 2px solid #0b1120;" title="Change photo">
                         ✎
                         <input id="profile-photo-input" type="file" accept="image/*" class="hidden">
@@ -437,8 +438,8 @@
             <!-- Display name -->
             <label class="text-[10px] font-black text-slate-400 tracking-widest mb-1 block">DISPLAY NAME</label>
             <div class="flex gap-2 mb-5">
-                <input id="profile-name-input" type="text" class="flex-1 px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
-                <button id="profile-name-save" class="px-4 py-3 rounded-xl text-white font-black text-sm" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 4px 12px rgba(59,130,246,0.4);">Save</button>
+                <input id="profile-name-input" type="text" class="flex-1 px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white" data-ws="inset">
+                <button id="profile-name-save" class="px-4 py-3 rounded-xl text-white font-black text-sm" data-ws="primary">Save</button>
             </div>
 
             <!-- Account email -->
@@ -448,7 +449,7 @@
                        class="flex-1 px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400"
                        style="background: var(--ws-surface); border: 1px solid var(--ws-border);">
                 <button id="profile-email-save" class="px-4 py-3 rounded-xl text-white font-black text-sm whitespace-nowrap"
-                        style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 4px 12px rgba(59,130,246,0.4);">Send link</button>
+                        data-ws="primary">Send link</button>
             </div>
             <p id="profile-email-note" class="text-[11px] font-bold text-slate-400 mb-5 leading-relaxed">
                 We email a confirmation link to the new address. Your current address keeps
@@ -458,7 +459,7 @@
             <!-- Company -->
             <label class="text-[10px] font-black text-slate-400 tracking-widest mb-1 block">COMPANY</label>
             <div class="flex gap-2 mb-5">
-                <select id="profile-company-select" class="flex-1 px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-orange-400/20 font-bold text-white cursor-pointer" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color-scheme: dark;">
+                <select id="profile-company-select" class="flex-1 px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-orange-400/20 font-bold text-white cursor-pointer" data-ws="inset">
                     <option value="" disabled>Select company</option>
                     <option value="Nova Sportsmart Private Limited">Nova Sportsmart Private Limited</option>
                     <option value="Protathlitis Sportsmart LLP">Protathlitis Sportsmart LLP</option>
@@ -473,9 +474,9 @@
             <!-- Change password -->
             <label class="text-[10px] font-black text-slate-400 tracking-widest mb-1 block">CHANGE PASSWORD</label>
             <div class="space-y-2 mb-5">
-                <input id="profile-pwd" type="password" placeholder="New password (min 6 chars)" class="w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
-                <input id="profile-pwd2" type="password" placeholder="Confirm new password" class="w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">
-                <button id="profile-pwd-save" class="w-full text-white font-extrabold py-3 rounded-xl text-sm" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 4px 12px rgba(59,130,246,0.4);">Update Password</button>
+                <input id="profile-pwd" type="password" placeholder="New password (min 6 chars)" class="w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
+                <input id="profile-pwd2" type="password" placeholder="Confirm new password" class="w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
+                <button id="profile-pwd-save" class="w-full text-white font-extrabold py-3 rounded-xl text-sm" data-ws="primary">Update Password</button>
             </div>
 
             <!-- Preferences -->
@@ -486,7 +487,7 @@
             </div>
 
             <button id="profile-signout" class="w-full py-3 rounded-2xl font-black text-rose-300 mb-2 transition-all hover:bg-white/5" style="background: rgba(244,63,94,0.08); border: 1px solid rgba(244,63,94,0.2);">Sign Out</button>
-            <button id="profile-close" class="w-full py-3 rounded-2xl font-black text-white/80 transition-all hover:bg-white/5" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);">Close</button>
+            <button id="profile-close" class="w-full py-3 rounded-2xl font-black text-white/80 transition-all hover:bg-white/5" data-ws="inset">Close</button>
         </div>
     </div>
 
@@ -495,7 +496,7 @@
 
         <div class="mb-10 text-center md:text-left">
             <span class="hero-eyebrow"><span class="live-dot"></span><span id="hero-time-of-day">Welcome</span></span>
-            <h1 id="hero-title" class="text-4xl md:text-6xl font-black text-white mb-4 tracking-tight drop-shadow-lg">Welcome to your Hub</h1>
+            <h1 id="hero-title" class="text-3xl md:text-5xl font-black text-white mb-3 tracking-tight">Welcome to your Hub</h1>
             <p class="text-lg text-slate-200/90 font-medium max-w-2xl">Access all your internal tools, utilities, and assessments from one centralized dashboard.</p>
         </div>
 
@@ -509,13 +510,11 @@
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
 
             <!-- Tool 1: Typing Test -->
-            <a href="./typingtest/" class="glass-tool group block rounded-[2rem] p-8 relative">
+            <a href="./typingtest/" class="glass-tool group block rounded-2xl p-6 relative">
                 <div class="relative z-10">
-                    <div class="bg-gradient-to-br from-blue-500 to-indigo-600 w-16 h-16 rounded-2xl flex items-center justify-center text-white mb-6 icon-glow-blue group-hover:scale-110 transition-transform">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20V14H14V20H19V12H22L12 3L2 12H5V20H10Z"/></svg>
-                    </div>
+                    <div class="tool-ic blue"><span class="ic ic-keyboard lg"></span></div>
 
-                    <h2 class="text-2xl font-black text-white mb-2">ZenType</h2>
+                    <h2 class="text-lg font-black text-white mb-1.5">ZenType</h2>
                     <p class="text-slate-200/80 font-medium mb-4">AI-powered typing assessment with dynamic motivational passages and live accuracy tracking.</p>
 
                     <div id="stat-typing" class="tool-stat">
@@ -532,10 +531,10 @@
 
             <!-- Tool 2: Email Signature Generator -->
             <!-- Tool: Chat & Calls -->
-            <a href="./chat/" class="glass-tool group block rounded-[2rem] p-8 relative">
+            <a href="./chat/" class="glass-tool group block rounded-2xl p-6 relative">
                 <div class="relative z-10">
-                    <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-white text-3xl mb-6 group-hover:scale-110 transition-transform" style="background: linear-gradient(135deg,#06b6d4,#3b82f6); box-shadow: 0 8px 30px rgba(6,182,212,0.5), inset 0 1px 0 rgba(255,255,255,0.3);">💬</div>
-                    <h2 class="text-2xl font-black text-white mb-2">Chat & Calls</h2>
+                    <div class="tool-ic blue"><span class="ic ic-chat lg"></span></div>
+                    <h2 class="text-lg font-black text-white mb-1.5">Chat & Calls</h2>
                     <p class="text-slate-200/80 font-medium mb-4">In-app messaging, audio and video calls with your teammates. Live presence and notifications built in.</p>
                     <div id="stat-chat" class="tool-stat">
                         <span class="stat-label">Activity</span>
@@ -549,12 +548,10 @@
             </a>
 
             <!-- Tool 3: MCQ Quiz -->
-            <a href="./mcqquiz/" class="glass-tool group block rounded-[2rem] p-8 relative">
+            <a href="./mcqquiz/" class="glass-tool group block rounded-2xl p-6 relative">
                 <div class="relative z-10">
-                    <div class="bg-gradient-to-br from-orange-500 to-red-600 w-16 h-16 rounded-2xl flex items-center justify-center text-white text-3xl mb-6 group-hover:scale-110 transition-transform" style="box-shadow: 0 8px 30px rgba(249,115,22,0.5), inset 0 1px 0 rgba(255,255,255,0.3);">
-                        🧠
-                    </div>
-                    <h2 class="text-2xl font-black text-white mb-2">MCQ Quiz</h2>
+                    <div class="tool-ic amber"><span class="ic ic-quiz lg"></span></div>
+                    <h2 class="text-lg font-black text-white mb-1.5">MCQ Quiz</h2>
                     <p class="text-slate-200/80 font-medium mb-4">Brain-train with 10 categories: shortcuts (Mac/Win/VS Code/Chrome/Excel) + Logic, Math, GK, Aptitude, Riddles.</p>
                     <div id="stat-quiz" class="tool-stat">
                         <span class="stat-label">Your Best</span>
@@ -567,13 +564,11 @@
                 </div>
             </a>
 
-            <a href="./signature/" class="glass-tool group block rounded-[2rem] p-8 relative">
+            <a href="./signature/" class="glass-tool group block rounded-2xl p-6 relative">
                 <div class="relative z-10">
-                    <div class="bg-gradient-to-br from-emerald-500 to-teal-600 w-16 h-16 rounded-2xl flex items-center justify-center text-white mb-6 icon-glow-emerald group-hover:scale-110 transition-transform">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.2 8.4c.5.5.8 1.1.8 1.6 0 1.1-.9 2-2 2h-4l-3 3-3-3H6a2 2 0 0 1-2-2 2 2 0 0 1 2-2h4l3-3 3 3h4c.5 0 1.1.3 1.6.8z"/><path d="M2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6"/></svg>
-                    </div>
+                    <div class="tool-ic violet"><span class="ic ic-pen lg"></span></div>
 
-                    <h2 class="text-2xl font-black text-white mb-2">Signature Gen</h2>
+                    <h2 class="text-lg font-black text-white mb-1.5">Signature Gen</h2>
                     <p class="text-slate-200/80 font-medium mb-6">Standardized corporate email signature generator. Ensure brand consistency across employee comms.</p>
 
                     <div class="flex items-center text-emerald-300 font-bold group-hover:gap-2 group-hover:text-emerald-200 transition-all">
@@ -584,12 +579,10 @@
             </a>
 
             <!-- Tool: My Attendance -->
-            <a href="./attendance/" class="glass-tool group block rounded-[2rem] p-8 relative">
+            <a href="./attendance/" class="glass-tool group block rounded-2xl p-6 relative">
                 <div class="relative z-10">
-                    <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-white mb-6 group-hover:scale-110 transition-transform" style="background: linear-gradient(135deg,#06b6d4,#10b981); box-shadow: 0 8px 30px rgba(6,182,212,0.5), inset 0 1px 0 rgba(255,255,255,0.3);">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>
-                    </div>
-                    <h2 class="text-2xl font-black text-white mb-2">My Attendance</h2>
+                    <div class="tool-ic green"><span class="ic ic-attend lg"></span></div>
+                    <h2 class="text-lg font-black text-white mb-1.5">My Attendance</h2>
                     <p class="text-slate-200/80 font-medium mb-4">Your biometric check-ins and check-outs, live. You also get an email the moment you punch in or out.</p>
                     <div id="stat-attendance" class="tool-stat">
                         <span class="stat-label">Today</span>
@@ -603,12 +596,10 @@
             </a>
 
             <!-- Tool: WFH Weekly Recordings -->
-            <a href="./recordings/" class="glass-tool group block rounded-[2rem] p-8 relative">
+            <a href="./recordings/" class="glass-tool group block rounded-2xl p-6 relative">
                 <div class="relative z-10">
-                    <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-white mb-6 group-hover:scale-110 transition-transform" style="background: linear-gradient(135deg,#f43f5e,#a855f7); box-shadow: 0 8px 30px rgba(168,92,246,0.5), inset 0 1px 0 rgba(255,255,255,0.3);">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-                    </div>
-                    <h2 class="text-2xl font-black text-white mb-2">Friday Check-in</h2>
+                    <div class="tool-ic rose"><span class="ic ic-video lg"></span></div>
+                    <h2 class="text-lg font-black text-white mb-1.5">Friday Check-in</h2>
                     <p class="text-slate-200/80 font-medium mb-6">WFH employees record three short back-camera clips — mobile, laptop and tab — every Friday. Assigned by admin.</p>
                     <div class="flex items-center text-pink-300 font-bold group-hover:gap-2 group-hover:text-pink-200 transition-all">
                         Launch Tool
@@ -717,7 +708,7 @@
                         <p id="vc-sub" class="text-slate-300 text-sm mb-4">We sent a 6-digit code to <b id="vc-email"></b>. It can take <b>up to 2–3 minutes</b> to arrive — also check Spam. The code stays valid for 15 minutes.<br><span class="text-slate-400 text-xs">Your account is created only after you enter this code.</span></p>
                         <input id="vc-input" type="text" inputmode="numeric" pattern="\\d{6}" maxlength="6" autocomplete="one-time-code" placeholder="••••••" class="w-full text-center tracking-[.6em] text-2xl font-black py-4 px-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/30 text-white placeholder-slate-500" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); font-family: 'JetBrains Mono', ui-monospace, monospace;">
                         <p id="vc-error" class="text-rose-300 text-sm font-bold mt-3 hidden"></p>
-                        <button id="vc-submit" type="button" class="w-full mt-4 text-white font-black py-4 rounded-2xl text-lg" style="background: linear-gradient(135deg,#3b82f6,#6366f1); box-shadow: 0 10px 30px rgba(59,130,246,0.4);">Verify & Continue</button>
+                        <button id="vc-submit" type="button" class="w-full mt-4 text-white font-black py-4 rounded-2xl text-lg" data-ws="primary">Verify & Continue</button>
                         <div class="flex items-center justify-center gap-6 mt-3">
                             <button id="vc-resend" type="button" class="text-blue-300 hover:text-blue-200 text-sm font-bold">Didn't get it? Resend</button>
                             <button id="vc-cancel" type="button" class="text-slate-400 hover:text-slate-200 text-sm font-bold">Cancel</button>

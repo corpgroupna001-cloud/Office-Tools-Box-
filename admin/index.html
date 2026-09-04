@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
-    <title>Network Admin</title>
+    <title>WorkSuite Admin</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
@@ -261,18 +261,12 @@
     </style>
 </head>
 <body>
-    <a href="/" class="ws-back-btn" title="Back to WorkSuite home">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
-        <span>Home</span>
-    </a>
 
     <!-- Password gate -->
-    <div id="gate" class="fixed inset-0 z-50 flex items-center justify-center p-4" style="background: rgba(11,17,32,0.8); backdrop-filter: blur(20px);">
+    <div id="gate" class="fixed inset-0 z-50 flex items-center justify-center p-4" data-ws="scrim">
         <form id="gate-form" class="glass-strong w-full max-w-md rounded-[2.5rem] p-12 text-center">
-            <div class="w-20 h-20 rounded-3xl mx-auto mb-6 flex items-center justify-center" style="background: linear-gradient(135deg,#f43f5e,#a855f7);">
-                <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            </div>
-            <h1 class="text-3xl font-black mb-2">Network Admin</h1>
+            <div class="w-14 h-14 rounded-2xl mx-auto mb-6 flex items-center justify-center" data-ws="tile"><span class="ic ic-lock lg"></span></div>
+            <h1 class="text-2xl font-black mb-2">WorkSuite Admin</h1>
             <p class="text-slate-400 mb-8 text-sm">Restricted area. Enter password to continue.</p>
             <input id="gate-password" type="password" placeholder="Admin password" autocomplete="off"
                 class="glass w-full px-6 py-4 rounded-2xl mb-4 font-bold text-lg text-center focus:outline-none focus:ring-4 focus:ring-blue-400/20 focus:border-blue-400">
@@ -286,22 +280,59 @@
         <nav class="glass-nav border-b sticky top-0 z-30">
             <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
                 <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background: linear-gradient(135deg,#f43f5e,#a855f7);">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                    <a href="/" class="glass px-3 py-2 rounded-xl text-sm font-bold inline-flex items-center gap-2 mr-1" title="Back to WorkSuite home"><span class="ic ic-home sm"></span>Home</a>
+                    <div class="w-9 h-9 rounded-lg flex items-center justify-center" style="background: var(--ws-primary); color: var(--ws-on-accent);">
+                        <span class="ic ic-shield lg"></span>
                     </div>
                     <div>
-                        <div class="font-black text-lg">Network Admin</div>
-                        <div class="text-xs text-slate-400">ZenType Employee Analytics</div>
+                        <div class="font-black text-[15px] leading-tight">WorkSuite Admin</div>
+                        <div class="text-[12px] text-slate-400 leading-tight">People, attendance and tools</div>
                     </div>
                 </div>
-                <div class="flex items-center gap-3">
-                    <button id="refresh-btn" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/20">Refresh</button>
-                    <button id="logout-btn" class="glass px-4 py-2 rounded-xl text-sm font-bold text-rose-300 hover:bg-rose-500/20">Lock</button>
+                <div class="flex items-center gap-2">
+                    <button type="button" class="ws-theme-toggle" data-ws-theme>
+                        <span class="sun ic ic-sun"></span><span class="moon ic ic-moon"></span>
+                    </button>
+                    <button id="refresh-btn" class="glass px-3 py-2 rounded-xl text-sm font-bold inline-flex items-center gap-2"><span class="ic ic-refresh sm"></span>Refresh</button>
+                    <button id="logout-btn" class="glass px-3 py-2 rounded-xl text-sm font-bold text-rose-300 inline-flex items-center gap-2"><span class="ic ic-lock sm"></span>Lock</button>
                 </div>
             </div>
         </nav>
 
-        <main class="max-w-7xl mx-auto px-6 py-10">
+        <main class="max-w-7xl mx-auto px-6 py-7">
+            <!-- Section navigation.
+                 Eleven items had outgrown a single row. Grouped into a sidebar,
+                 but every button keeps its data-tab and .admin-tab class, so the
+                 switcher below and admin/payroll.js - which binds its own two
+                 panels to the same selector - carry on working untouched. -->
+            <div class="admin-shell">
+              <aside class="admin-side">
+                <div class="side-group">
+                    <div class="side-head">People</div>
+                    <button data-tab="employees"  class="admin-tab" type="button"><span class="ic ic-users"></span>Employees</button>
+                    <button data-tab="shifts"     class="admin-tab" type="button"><span class="ic ic-clock"></span>Shifts</button>
+                    <button data-tab="leave"      class="admin-tab" type="button"><span class="ic ic-leave"></span>Leave</button>
+                    <button data-tab="salary"     class="admin-tab" type="button"><span class="ic ic-salary"></span>Salary</button>
+                </div>
+                <div class="side-group">
+                    <div class="side-head">Attendance</div>
+                    <button data-tab="attendance" class="admin-tab" type="button"><span class="ic ic-attend"></span>Attendance</button>
+                    <button data-tab="calendar"   class="admin-tab" type="button"><span class="ic ic-calendar"></span>Calendar</button>
+                    <button data-tab="selfies"    class="admin-tab" type="button"><span class="ic ic-camera"></span>Selfies</button>
+                    <button data-tab="wfh"        class="admin-tab" type="button"><span class="ic ic-video"></span>WFH Check-ins</button>
+                    <button data-tab="friday"     class="admin-tab" type="button"><span class="ic ic-report"></span>Friday Report</button>
+                </div>
+                <div class="side-group">
+                    <div class="side-head">Tools</div>
+                    <button data-tab="results"    class="admin-tab active" type="button"><span class="ic ic-keyboard"></span>Typing</button>
+                    <button data-tab="quizzes"    class="admin-tab" type="button"><span class="ic ic-quiz"></span>Quizzes</button>
+                    <button data-tab="bitrix"     class="admin-tab" type="button"><span class="ic ic-chat"></span>Bitrix24</button>
+                </div>
+              </aside>
+              <div class="admin-main">
+
+            <!-- Filters (RESULTS TAB) -->
+            <div id="results-panel">
             <!-- Stats -->
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                 <div class="stat-card slate">
@@ -328,7 +359,7 @@
                     </div>
                     <div class="stat-body">
                         <div class="stat-key">Avg WPM</div>
-                        <div id="stat-wpm" class="stat-num" style="color:#93c5fd;">0</div>
+                        <div id="stat-wpm" class="stat-num text-blue-300">0</div>
                     </div>
                 </div>
                 <div class="stat-card emerald">
@@ -337,7 +368,7 @@
                     </div>
                     <div class="stat-body">
                         <div class="stat-key">Avg Accuracy</div>
-                        <div id="stat-acc" class="stat-num" style="color:#6ee7b7;">0%</div>
+                        <div id="stat-acc" class="stat-num text-emerald-300">0%</div>
                     </div>
                 </div>
             </div>
@@ -345,7 +376,7 @@
             <!-- Trend chart -->
             <div class="glass rounded-2xl p-5 mb-6">
                 <div class="section-head">
-                    <h3>📈 Tests per Day</h3>
+                    <h3><span class="ic ic-chart"></span>Tests per Day</h3>
                     <span class="sub">Last 30 days</span>
                 </div>
                 <div style="height: 180px; position: relative;">
@@ -353,39 +384,6 @@
                 </div>
             </div>
 
-            <!-- Section navigation.
-                 Eleven items had outgrown a single row. Grouped into a sidebar,
-                 but every button keeps its data-tab and .admin-tab class, so the
-                 switcher below and admin/payroll.js - which binds its own two
-                 panels to the same selector - carry on working untouched. -->
-            <div class="admin-shell">
-              <aside class="admin-side">
-                <div class="side-group">
-                    <div class="side-head">People</div>
-                    <button data-tab="employees"  class="admin-tab" type="button"><span class="ic">👥</span>Employees</button>
-                    <button data-tab="shifts"     class="admin-tab" type="button"><span class="ic">⏰</span>Shifts</button>
-                    <button data-tab="leave"      class="admin-tab" type="button"><span class="ic">🌴</span>Leave</button>
-                    <button data-tab="salary"     class="admin-tab" type="button"><span class="ic">💰</span>Salary</button>
-                </div>
-                <div class="side-group">
-                    <div class="side-head">Attendance</div>
-                    <button data-tab="attendance" class="admin-tab" type="button"><span class="ic">🕐</span>Attendance</button>
-                    <button data-tab="calendar"   class="admin-tab" type="button"><span class="ic">📅</span>Calendar</button>
-                    <button data-tab="selfies"    class="admin-tab" type="button"><span class="ic">📸</span>Selfies</button>
-                    <button data-tab="wfh"        class="admin-tab" type="button"><span class="ic">📷</span>WFH Check-ins</button>
-                    <button data-tab="friday"     class="admin-tab" type="button"><span class="ic">📋</span>Friday Report</button>
-                </div>
-                <div class="side-group">
-                    <div class="side-head">Tools</div>
-                    <button data-tab="results"    class="admin-tab active" type="button"><span class="ic">⌨️</span>Typing</button>
-                    <button data-tab="quizzes"    class="admin-tab" type="button"><span class="ic">🧠</span>Quizzes</button>
-                    <button data-tab="bitrix"     class="admin-tab" type="button"><span class="ic">💬</span>Bitrix24</button>
-                </div>
-              </aside>
-              <div class="admin-main">
-
-            <!-- Filters (RESULTS TAB) -->
-            <div id="results-panel">
             <div class="glass rounded-2xl p-4 mb-6 flex flex-wrap gap-3 items-center">
                 <input id="search-input" type="text" placeholder="Search by name or email…"
                     class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
@@ -446,7 +444,7 @@
                         </div>
                         <div class="stat-body">
                             <div class="stat-key">Avg Score</div>
-                            <div id="qstat-score" class="stat-num" style="color:#fdba74;">0</div>
+                            <div id="qstat-score" class="stat-num text-orange-300">0</div>
                         </div>
                     </div>
                     <div class="stat-card emerald">
@@ -455,7 +453,7 @@
                         </div>
                         <div class="stat-body">
                             <div class="stat-key">Avg Accuracy</div>
-                            <div id="qstat-acc" class="stat-num" style="color:#6ee7b7;">0%</div>
+                            <div id="qstat-acc" class="stat-num text-emerald-300">0%</div>
                         </div>
                     </div>
                     <div class="stat-card rose">
@@ -464,7 +462,7 @@
                         </div>
                         <div class="stat-body">
                             <div class="stat-key">Violations</div>
-                            <div id="qstat-violations" class="stat-num" style="color:#fda4af;">0</div>
+                            <div id="qstat-violations" class="stat-num text-rose-300">0</div>
                         </div>
                     </div>
                     <div class="stat-card purple">
@@ -473,7 +471,7 @@
                         </div>
                         <div class="stat-body">
                             <div class="stat-key">AI Quizzes</div>
-                            <div id="qstat-ai" class="stat-num" style="color:#c4b5fd;">0</div>
+                            <div id="qstat-ai" class="stat-num text-purple-300">0</div>
                         </div>
                     </div>
                 </div>
@@ -482,7 +480,7 @@
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
                     <div class="glass rounded-2xl p-5">
                         <div class="section-head">
-                            <h3>📊 Quizzes per Day</h3>
+                            <h3><span class="ic ic-chart"></span>Quizzes per Day</h3>
                             <span class="sub">Last 30 days</span>
                         </div>
                         <div style="height: 180px; position: relative;">
@@ -491,7 +489,7 @@
                     </div>
                     <div class="glass rounded-2xl p-5">
                         <div class="section-head">
-                            <h3>🎯 Attempts by Category</h3>
+                            <h3><span class="ic ic-quiz"></span>Attempts by Category</h3>
                             <span class="sub">All time</span>
                         </div>
                         <div style="height: 180px; position: relative;">
@@ -563,8 +561,8 @@
                         <option value="last_test_at.desc">Recently Active</option>
                     </select>
                     <div class="flex gap-2">
-                        <button id="emp-who-all" type="button" class="btn-primary text-white px-4 py-2 rounded-xl text-sm font-black">👥 All</button>
-                        <button id="emp-who-wfh" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/10">🏠👥 Work from home</button>
+                        <button id="emp-who-all" type="button" class="btn-primary text-white px-4 py-2 rounded-xl text-sm font-black inline-flex items-center gap-2"><span class="ic ic-users sm"></span>All</button>
+                        <button id="emp-who-wfh" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold inline-flex items-center gap-2"><span class="ic ic-home sm"></span>Work from home</button>
                     </div>
                     <button id="emp-refresh" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh</button>
                 </div>
@@ -577,10 +575,10 @@
                                     <th>Name</th>
                                     <th>Email</th>
                                     <th>Joined</th>
-                                    <th title="Assign as Work-From-Home — enables the Friday video check-in">🏠 WFH</th>
-                                    <th>⌨️ Tests</th>
+                                    <th title="Assign as Work-From-Home — enables the Friday video check-in">WFH</th>
+                                    <th>Tests</th>
                                     <th>Best WPM</th>
-                                    <th>🧠 Quizzes</th>
+                                    <th>Quizzes</th>
                                     <th>Best Score</th>
                                     <th>Strikes</th>
                                     <th>Last Active</th>
@@ -637,9 +635,9 @@
                                 <tr>
                                     <th>Employee</th>
                                     <th>Company</th>
-                                    <th>⌨️ Typing Test (5–8 PM)</th>
-                                    <th>📷 WFH Device Videos</th>
-                                    <th>⚠️ Violation</th>
+                                    <th>Typing Test (5–8 PM)</th>
+                                    <th>WFH Device Videos</th>
+                                    <th>Violation</th>
                                 </tr>
                             </thead>
                             <tbody id="friday-tbody"></tbody>
@@ -650,7 +648,7 @@
                         <p class="text-sm">Mark employees as Work From Home in the Employees tab to see them here.</p>
                     </div>
                 </div>
-                <p class="text-slate-400 text-xs font-bold mt-4 text-center">⚠️ Policy: Friday typing test must be submitted between <span class="text-white">5:00 PM – 8:00 PM</span>. Missing the typing test or WFH device check videos is a violation — <span class="text-rose-300">1 day salary cut</span>.</p>
+                <p class="text-slate-400 text-xs font-bold mt-4 text-center">Policy: Friday typing test must be submitted between <span class="text-white">5:00 PM – 8:00 PM</span>. Missing the typing test or WFH device check videos is a violation — <span class="text-rose-300">1 day salary cut</span>.</p>
             </div>
 
             <!-- ATTENDANCE TAB -->
@@ -664,7 +662,7 @@
                     <button id="att-refresh" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh</button>
                     <input id="att-search" type="text" placeholder="Search name, email or code…"
                         class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
-                    <button id="att-resend" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold text-amber-200 hover:bg-amber-500/10">✉️ Resend failed</button>
+                    <button id="att-resend" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold text-amber-200 inline-flex items-center gap-2 hover:bg-amber-500/10"><span class="ic ic-refresh sm"></span>Resend failed</button>
                     <button id="att-export" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">⬇ Export CSV</button>
                 </div>
 
@@ -673,7 +671,7 @@
                 <!-- Unmapped device codes -->
                 <div id="att-unmapped-wrap" class="hidden glass rounded-2xl p-5 mb-6" style="border:1px solid rgba(245,158,11,0.35);background:rgba(245,158,11,0.06);">
                     <div class="flex items-center gap-2 mb-1">
-                        <span class="text-amber-300 font-black">⚠️ Unmapped device codes</span>
+                        <span class="text-amber-300 font-black">Unmapped device codes</span>
                     </div>
                     <p class="text-slate-300 text-xs font-bold mb-4">These punches arrived from codes we can't match to anyone, so no email went out. Pick the right person to bind the code — future punches map automatically.</p>
                     <div id="att-unmapped-list" class="flex flex-col gap-3"></div>
@@ -706,7 +704,7 @@
                 </div>
 
                 <!-- Live punch feed -->
-                <div class="section-head mb-3"><h3>🔴 Punch feed</h3><span class="sub">Every punch on this date, newest first</span></div>
+                <div class="section-head mb-3"><h3><span class="ic ic-attend"></span>Punch feed</h3><span class="sub">Every punch on this date, newest first</span></div>
                 <div class="glass rounded-2xl overflow-hidden">
                     <div class="overflow-x-auto" style="max-height:420px;">
                         <table class="w-full text-sm">
@@ -728,10 +726,10 @@
                     <span id="shift-unassigned" class="text-xs font-bold text-slate-400"></span>
                 </div>
 
-                <div class="section-head mb-3"><h3>⏰ Shift templates</h3><span class="sub">Define once, assign to people below</span></div>
+                <div class="section-head mb-3"><h3><span class="ic ic-clock"></span>Shift templates</h3><span class="sub">Define once, assign to people below</span></div>
                 <div id="shift-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8"></div>
 
-                <div class="section-head mb-3"><h3>👥 Who works which shift</h3><span class="sub">Changes save immediately</span></div>
+                <div class="section-head mb-3"><h3><span class="ic ic-users"></span>Who works which shift</h3><span class="sub">Changes save immediately</span></div>
                 <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
                     <input id="shift-emp-search" type="text" placeholder="Search employee…"
                         class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
@@ -772,7 +770,7 @@
 
             <!-- LEAVE TAB -->
             <div id="leave-panel" class="hidden">
-                <div class="section-head mb-3"><h3>🌴 Leave requests</h3><span class="sub">Approved leave shows as On leave in the attendance report</span></div>
+                <div class="section-head mb-3"><h3><span class="ic ic-leave"></span>Leave requests</h3><span class="sub">Approved leave shows as On leave in the attendance report</span></div>
                 <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
                     <select id="lv-status" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
                         <option value="pending">Pending</option>
@@ -794,7 +792,7 @@
                     </div>
                 </div>
 
-                <div class="section-head mb-3"><h3>🎉 Holiday calendar</h3><span class="sub">Holidays show as Holiday, not Absent</span></div>
+                <div class="section-head mb-3"><h3><span class="ic ic-calendar"></span>Holiday calendar</h3><span class="sub">Holidays show as Holiday, not Absent</span></div>
                 <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
                     <input id="hol-year" type="number" min="2020" max="2099" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none w-28">
                     <input id="hol-date" type="date" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
@@ -825,7 +823,7 @@
 
             <!-- ================= MONTH CALENDAR ================= -->
             <div id="calendar-panel" class="hidden">
-                <div class="section-head mb-3"><h3>📅 Month calendar</h3><span class="sub">Everyone, every day. Weekly offs follow each company's policy</span></div>
+                <div class="section-head mb-3"><h3><span class="ic ic-calendar"></span>Month calendar</h3><span class="sub">Everyone, every day. Weekly offs follow each company's policy</span></div>
                 <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
                     <input id="cal-month" type="month" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none" style="color-scheme: dark;">
                     <select id="cal-company" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
@@ -847,7 +845,7 @@
 
             <!-- ================= SALARY ================= -->
             <div id="salary-panel" class="hidden">
-                <div class="section-head mb-3"><h3>💰 Salary</h3><span class="sub">Per-day rate × days actually present. Visible here only</span></div>
+                <div class="section-head mb-3"><h3><span class="ic ic-salary"></span>Salary</h3><span class="sub">Per-day rate × days actually present. Visible here only</span></div>
                 <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
                     <input id="pay-month" type="month" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none" style="color-scheme: dark;">
                     <select id="pay-company" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
@@ -881,7 +879,7 @@
 
             <!-- ================= BITRIX24 ================= -->
             <div id="bitrix-panel" class="hidden">
-                <div class="section-head mb-3"><h3>💬 Bitrix24</h3><span class="sub">Which Bitrix chat or workgroup each company's punches and leave go to</span></div>
+                <div class="section-head mb-3"><h3><span class="ic ic-chat"></span>Bitrix24</h3><span class="sub">Which Bitrix chat or workgroup each company's punches and leave go to</span></div>
                 <div class="glass rounded-2xl p-4 mb-4">
                     <div id="bx-conn" class="flex flex-wrap items-center gap-1"></div>
                 </div>
@@ -908,7 +906,7 @@
                 </p>
 
                 <!-- ---------- Delivery log ---------- -->
-                <div class="section-head mt-8 mb-3"><h3>📜 Delivery log</h3><span class="sub">Every message WorkSuite tried to send, newest first</span></div>
+                <div class="section-head mt-8 mb-3"><h3><span class="ic ic-report"></span>Delivery log</h3><span class="sub">Every message WorkSuite tried to send, newest first</span></div>
                 <div id="bx-log-summary" class="glass rounded-2xl p-4 mb-4"></div>
                 <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-4 items-center">
                     <button id="bx-log-reload" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh log</button>
@@ -946,7 +944,7 @@
 
 
     <!-- Shift editor modal -->
-    <div id="shift-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);">
+    <div id="shift-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" data-ws="scrim">
         <div class="glass-strong w-full max-w-lg rounded-3xl p-8">
             <h3 id="shift-modal-title" class="text-2xl font-black text-white mb-6 text-center">New Shift</h3>
             <label class="text-[10px] uppercase tracking-widest text-slate-400 font-black block mb-2">Shift name</label>
@@ -962,7 +960,7 @@
                     <input id="shift-f-end" type="time" class="glass w-full px-4 py-3 rounded-xl text-white font-bold focus:outline-none" style="color-scheme: dark;">
                 </div>
             </div>
-            <p id="shift-f-overnight" class="text-amber-300 text-xs font-bold mb-4 hidden">🌙 Ends the next morning — treated as an overnight shift.</p>
+            <p id="shift-f-overnight" class="text-amber-300 text-xs font-bold mb-4 hidden">Ends the next morning — treated as an overnight shift.</p>
             <div class="grid grid-cols-2 gap-3 mb-4">
                 <div>
                     <label class="text-[10px] uppercase tracking-widest text-slate-400 font-black block mb-2">Late grace (min)</label>
@@ -987,7 +985,7 @@
         </div>
     </div>
     <!-- Edit Employee modal -->
-    <div id="edit-emp-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);">
+    <div id="edit-emp-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" data-ws="scrim">
         <div class="glass-strong w-full max-w-md rounded-3xl p-8">
             <h3 class="text-2xl font-black text-white mb-1 text-center">Edit Employee</h3>
             <p id="edit-emp-email" class="text-slate-400 text-sm text-center mb-6">—</p>
@@ -1002,7 +1000,7 @@
     </div>
 
     <!-- WFH clip delete confirmation modal -->
-    <div id="wfh-del-modal" class="fixed inset-0 z-[75] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);">
+    <div id="wfh-del-modal" class="fixed inset-0 z-[75] hidden items-center justify-center p-4" data-ws="scrim">
         <div class="glass-strong w-full max-w-md rounded-3xl p-8 text-center">
             <div class="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center" style="background: linear-gradient(135deg,#f43f5e,#dc2626); box-shadow: 0 15px 40px rgba(244,63,94,0.4);">
                 <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
@@ -1024,7 +1022,7 @@
             <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
                 <h3 id="wfh-player-title" class="text-white font-black text-lg truncate">Video</h3>
                 <div class="flex gap-2 flex-shrink-0">
-                    <button id="wfh-player-fs" type="button" class="glass text-white font-bold px-4 py-2 rounded-xl text-sm">⛶ Fullscreen</button>
+                    <button id="wfh-player-fs" type="button" class="glass text-white font-bold px-4 py-2 rounded-xl text-sm">Fullscreen</button>
                     <button id="wfh-player-close" type="button" class="glass text-white font-bold px-4 py-2 rounded-xl text-sm">✕ Close</button>
                 </div>
             </div>
@@ -1034,7 +1032,7 @@
     </div>
 
     <!-- WFH QC review modal (approve / reject) -->
-    <div id="wfh-review-modal" class="fixed inset-0 z-[76] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);">
+    <div id="wfh-review-modal" class="fixed inset-0 z-[76] hidden items-center justify-center p-4" data-ws="scrim">
         <div class="glass-strong w-full max-w-md rounded-3xl p-8 text-center">
             <div id="wfh-review-ic" class="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-white text-3xl font-black" style="background: linear-gradient(135deg,#059669,#047857); box-shadow: 0 15px 40px rgba(0,0,0,0.4);">✓</div>
             <h3 id="wfh-review-title" class="text-2xl font-black text-white mb-2">Approve?</h3>
@@ -1055,7 +1053,7 @@
     </div>
 
     <!-- Delete confirmation modal -->
-    <div id="delete-emp-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);">
+    <div id="delete-emp-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" data-ws="scrim">
         <div class="glass-strong w-full max-w-md rounded-3xl p-8 text-center">
             <div class="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center" style="background: linear-gradient(135deg,#f43f5e,#dc2626);">
                 <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>

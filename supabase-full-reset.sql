@@ -27,16 +27,58 @@
 
 
 -- ============================================================================
--- SECTION 1 — LOOK FIRST.  Safe. Deletes nothing.
+-- SECTION 1 — THE COMPLETE INVENTORY.  Safe. Deletes nothing. Run it first.
+--
+-- Everything the project contains, not just the tables that happen to have
+-- rows: empty tables count too, because TRUNCATE in Section 2 will visit
+-- them, and buckets are listed by name so Section 4 stops being guesswork.
+--
+-- Read this before anything else. If a row here surprises you, stop.
 -- ============================================================================
-select 'public table' as kind, relname as name, n_live_tup as rows
-  from pg_stat_user_tables
- where schemaname = 'public' and n_live_tup > 0
+select 'TABLE' as kind,
+       c.relname as name,
+       coalesce(s.n_live_tup, 0)::text as rows,
+       case when c.relrowsecurity
+            then 'RLS on, ' || (select count(*) from pg_policies p
+                                 where p.schemaname = 'public'
+                                   and p.tablename = c.relname)::text || ' policies'
+            else 'RLS OFF' end as notes
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+  left join pg_stat_user_tables s on s.relid = c.oid
+ where n.nspname = 'public' and c.relkind = 'r'
+
 union all
-select 'auth.users', 'accounts that can sign in', count(*)::bigint from auth.users
+select 'BUCKET', b.id,
+       (select count(*) from storage.objects o where o.bucket_id = b.id)::text,
+       case when b.public then 'PUBLIC — anyone with the URL' else 'private' end
+       || coalesce(', ' || pg_size_pretty((select sum((o.metadata->>'size')::bigint)
+                                             from storage.objects o
+                                            where o.bucket_id = b.id)), ', empty')
+  from storage.buckets b
+
 union all
-select 'storage',    'files in buckets',          count(*)::bigint from storage.objects
-order by kind, rows desc;
+select 'VIEW', c.relname, '', ''
+  from pg_class c join pg_namespace n on n.oid = c.relnamespace
+ where n.nspname = 'public' and c.relkind in ('v', 'm')
+
+union all
+select 'FUNCTION', p.proname, '', pg_get_function_identity_arguments(p.oid)
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public'
+
+union all
+select 'TRIGGER', t.tgname, '', 'on ' || c.relname
+  from pg_trigger t
+  join pg_class c on c.oid = t.tgrelid
+  join pg_namespace n on n.oid = c.relnamespace
+ where n.nspname = 'public' and not t.tgisinternal
+
+union all
+select 'ACCOUNTS', 'auth.users', count(*)::text, 'people who can sign in'
+  from auth.users
+
+order by 1, 2;
 
 
 -- ============================================================================
@@ -145,18 +187,32 @@ end $$;
 
 
 -- ============================================================================
--- SECTION 4 — THE FILES.  Not SQL; do this in the dashboard.
+-- SECTION 4 — THE FILES.  Mostly not SQL.
 --
 -- Avatars, attendance selfies, WFH clips, chat attachments and recordings are
 -- real files in Storage. Section 2 emptied the tables that POINT at them; the
--- files themselves are still there using quota. Deleting rows from
+-- files themselves are still there, still using quota. Deleting rows from
 -- storage.objects by hand would orphan them — the row vanishes, the file does
--- not.
+-- not, and nothing in the dashboard will ever show it to you again.
 --
--- Empty them properly: Dashboard → Storage → each bucket → select all → Delete.
--- The buckets themselves survive Section 2 (they live in the storage schema),
--- so nothing needs recreating.
+-- So empty them through Storage, which deletes the actual files:
+--   Dashboard → Storage → <bucket> → select all → Delete.
+--
+-- This lists exactly which buckets to visit and how much is in each, so you
+-- are not guessing. Run it, work through the list, then run it again to
+-- confirm every count is 0.
 -- ============================================================================
+select b.id as bucket,
+       case when b.public then 'PUBLIC' else 'private' end as visibility,
+       (select count(*) from storage.objects o where o.bucket_id = b.id) as files,
+       coalesce(pg_size_pretty((select sum((o.metadata->>'size')::bigint)
+                                  from storage.objects o
+                                 where o.bucket_id = b.id)), '0 bytes') as size
+  from storage.buckets b
+ order by files desc, b.id;
+
+-- The buckets themselves survive Section 2 (they live in the storage schema,
+-- not public), so nothing needs recreating afterwards.
 
 
 -- ============================================================================

@@ -7,3 +7,4 @@ node_modules/
 # attendance. It reaches Sekhar through the chat, never through the repo:
 # git history is effectively permanent, and this is other people's data.
 exports/
+__cdn

@@ -9,16 +9,15 @@
  * it, so every load would flash the dark theme for a frame before turning
  * light. That flash is the single most noticeable bug in a theme switcher.
  *
- * Light is OPT-IN for now: with nothing stored the site stays dark, even on a
- * machine set to light. Following the OS would have moved everyone whose
- * machine prefers light onto a theme nobody has reviewed on real data. The CSS
- * omits its prefers-color-scheme block for the same reason, and the two must be
- * flipped together - if one follows the OS and the other does not, the button
- * shows the wrong icon for the theme actually on screen.
+ * Light is the DEFAULT. With nothing stored the site is light, on every
+ * machine, regardless of the OS setting. Dark is an explicit choice made with
+ * the toggle and remembered per browser.
  *
- * set(null) already clears the stored choice, so the day the CSS block is
- * uncommented, unset simply means "follow the OS" and this file needs one edit:
- * current() returning the OS preference instead of "dark".
+ * The CSS agrees: :root carries the light tokens and only
+ * :root[data-theme="dark"] switches them. There is deliberately no
+ * prefers-color-scheme rule in either file. If one of them ever starts
+ * following the OS, the other has to change in the same commit, or the
+ * toggle's icon and the theme actually on screen will disagree.
  * =========================================================================== */
 (function () {
     'use strict';
@@ -44,14 +43,12 @@
     // Runs at parse time, before the body exists. This is the anti-flash step.
     apply(read());
 
-    // Dark is the floor until every page has been reviewed in light. The CSS
-    // has no prefers-color-scheme rule yet for the same reason, so these two
-    // must stay in step: if one starts following the OS and the other does
-    // not, the button ends up showing the wrong icon for the actual theme.
+    // "No stored choice" means light. Keep this in step with the CSS - see
+    // the header comment.
     var Theme = {
         /** "light" or "dark" - what is actually on screen right now. */
         current: function () {
-            return read() || 'dark';
+            return read() || 'light';
         },
         /** null = go back to following the OS. */
         set: function (v) {
@@ -66,9 +63,11 @@
     };
     window.WSTheme = Theme;
 
+    // Same line icons the rest of the site uses (design-system.css .ic-*),
+    // so a page that gets the fallback button does not get a different glyph.
     var BUTTON_INNER =
-        '<span class="moon" aria-hidden="true">☽</span>' +
-        '<span class="sun" aria-hidden="true">☀</span>';
+        '<span class="moon ic ic-moon" aria-hidden="true"></span>' +
+        '<span class="sun ic ic-sun" aria-hidden="true"></span>';
 
     function dress(btn) {
         if (btn.dataset.wsThemeReady) return;
