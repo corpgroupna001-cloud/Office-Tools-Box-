@@ -1117,15 +1117,31 @@
             if (part !== 'full' && to !== from) { msg.textContent = 'A half day has to be a single date.'; return; }
 
             btn.disabled = true; msg.textContent = '';
-            const { error } = await sb.from('leave_requests').insert({
+            const { data: filed, error } = await sb.from('leave_requests').insert({
                 user_id: session.user.id,
                 leave_type_id: Number(el('lv-type').value) || null,
                 start_date: from, end_date: to, day_part: part,
                 reason: el('lv-reason').value.trim() || null,
                 status: 'pending',
-            });
+            }).select('id').single();
             btn.disabled = false;
             if (error) { msg.textContent = error.message; return; }
+
+            // Announce it in the company's Bitrix group. This has to go through
+            // the server: the Bitrix webhook URL is itself the credential and
+            // must never reach a page. We send only the row id - the server
+            // reads the row back and checks it belongs to the caller.
+            // Fire and forget: the request is already filed, and a chat
+            // message failing must not make it look otherwise.
+            if (filed && filed.id) {
+                const { data: { session: fresh } } = await sb.auth.getSession();
+                fetch('/api/attendance-webhook', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json',
+                               Authorization: `Bearer ${(fresh || session).access_token}` },
+                    body: JSON.stringify({ mode: 'leave_filed', leave_id: filed.id }),
+                }).catch(() => {});
+            }
             msg.style.color = '#6ee7b7';
             msg.textContent = 'Request sent — your admin will approve or reject it.';
             el('lv-reason').value = '';

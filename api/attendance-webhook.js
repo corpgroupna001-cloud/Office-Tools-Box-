@@ -43,13 +43,14 @@
 // ============================================================
 
 const { sendMail } = require('../lib/mailer');
+const bitrix = require('../lib/bitrix');
 const {
   parseDeviceDateTime, istParts, normalizeDirection,
   matchProfileByName, buildPunchEmail,
   evaluateShift, timeToMinutes, offsetFromBoundary,
   istToday, monthDates, buildMonth, classifyDay,
   weekOffsFor, holidayOn, DAY_STATUS,
-  deriveEventType,
+  deriveEventType, buildPunchChatLine, buildLeaveChatLine,
 } = require('../lib/attendance');
 
 // Vercel Hobby kills the function at 10s. Stop starting new sends at 7.5s and
@@ -411,6 +412,8 @@ module.exports = async function handler(req, res) {
           date: meta.when,
         }) : null;
 
+        meta.shiftEval = shiftEval;   // reused by the Bitrix line below
+
         const { subject, html, text } = buildPunchEmail({
           fullName: p.full_name,
           direction: row.direction,
@@ -437,6 +440,52 @@ module.exports = async function handler(req, res) {
       () => { deferred++; } // left 'pending' — resend from the admin tab
     );
 
+    // ---- 5. Bitrix ----
+    // One message per GROUP per batch, not per punch. Bitrix allows roughly
+    // two requests a second per portal, so a twenty-punch export sent one
+    // call at a time would spend ten seconds and blow the function's budget.
+    // Batched, the worst case is three calls - one per configured group - and
+    // every punch still appears, one line each.
+    let bitrixSent = 0, bitrixFailed = 0;
+    if (bitrix.isConfigured() && toEmail.length) {
+      try {
+        const tRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/bitrix_targets?select=company,dialog_id,enabled`,
+          { headers: H }
+        );
+        const targets = tRes.ok ? await tRes.json() : [];
+        const byCompany = new Map(targets.map(t => [t.company, t]));
+
+        const lines = new Map();   // dialog_id -> [line, ...]
+        for (const { row, meta } of toEmail) {
+          const t = byCompany.get(meta.profile.company);
+          if (!t || !t.enabled || !t.dialog_id) continue;   // unmapped = silent, by design
+          if (!lines.has(t.dialog_id)) lines.set(t.dialog_id, []);
+          lines.get(t.dialog_id).push(buildPunchChatLine({
+            fullName:  meta.profile.full_name,
+            eventType: row.event_type,
+            direction: row.direction,
+            when:      meta.when,
+            shift:     meta.shiftEval || null,
+            source:    row.source,
+          }));
+        }
+
+        const posts = await Promise.all([...lines.entries()].map(([dialogId, list]) =>
+          bitrix.sendGroupMessage({ dialogId, message: list.join('\n') })
+        ));
+        posts.forEach(r => { if (r.ok) bitrixSent++; else {
+          bitrixFailed++;
+          console.error('[attendance] bitrix post failed:', r.reason, r.detail);
+        } });
+      } catch (e) {
+        // A Bitrix problem must never turn a stored punch into a 500 - the
+        // vendor would retry the whole export.
+        bitrixFailed++;
+        console.error('[attendance] bitrix step threw', String(e && e.message || e));
+      }
+    }
+
     // Always 200 once the punches are safely stored: the vendor logs a failure
     // for any non-2xx, and a mail problem is ours to retry, not theirs.
     return res.status(200).json({
@@ -449,6 +498,8 @@ module.exports = async function handler(req, res) {
       deferred,
       unmapped: inserted.filter(r => r.email_status === 'unmapped').length,
       backfill_skipped: inserted.filter(r => r.email_status === 'skipped').length,
+      bitrix_sent: bitrixSent,
+      bitrix_failed: bitrixFailed,
       auto_linked: autoLinked,
       rejected,
       ms: Date.now() - startedAt,
@@ -483,8 +534,27 @@ const EVENT_LABEL = {
 // A repeat of the same event inside this window is treated as a double-tap.
 const SELFIE_REPEAT_WINDOW_MS = 60 * 1000;
 
+/**
+ * Post one message into whichever Bitrix group a company is mapped to.
+ * Silent when Bitrix is not configured or the company has no group - both
+ * are ordinary states, not errors.
+ */
+async function postToCompanyGroup({ SUPABASE_URL, H, company, message }) {
+  if (!bitrix.isConfigured() || !company || !message) return { ok: false, reason: 'skipped' };
+  const r = await fetch(
+    `${SUPABASE_URL}/rest/v1/bitrix_targets?select=dialog_id,enabled&company=eq.${encodeURIComponent(company)}&limit=1`,
+    { headers: H }
+  );
+  if (!r.ok) return { ok: false, reason: 'targets_unavailable' };
+  const t = (await r.json())[0];
+  if (!t || !t.enabled || !t.dialog_id) return { ok: false, reason: 'no_group' };
+  const out = await bitrix.sendGroupMessage({ dialogId: t.dialog_id, message });
+  if (!out.ok) console.error('[bitrix] post failed:', out.reason, out.detail);
+  return out;
+}
+
 // Modes a signed-in employee (Supabase JWT, not the device key) may ask for.
-const USER_MODES = new Set(['selfie', 'calendar', 'team_status']);
+const USER_MODES = new Set(['selfie', 'calendar', 'team_status', 'leave_filed']);
 
 /**
  * Read-only views for a signed-in employee.
@@ -513,6 +583,41 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
     if (!userId) return res.status(401).json({ error: 'session_expired' });
 
     const today = istToday();
+
+    // ---------------- leave_filed ----------------
+    // The page files leave straight into Supabase under RLS, which is right -
+    // but that means no server ever sees it, and the Bitrix webhook URL is a
+    // credential that must not reach a browser. So the page tells us the id
+    // of the row it just created and we read it back and announce it. The
+    // client is not trusted for any of the content: only for the id, and the
+    // row is then checked to belong to the caller.
+    if (body.mode === 'leave_filed') {
+      const id = String(body.leave_id || '');
+      if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'bad_leave_id' });
+
+      const [lRes, tRes, pRes] = await Promise.all([
+        sb(`leave_requests?id=eq.${id}&select=*&limit=1`).then(r => r.ok ? r.json() : []),
+        sb('leave_types?select=id,name').then(r => r.ok ? r.json() : []),
+        sb(`profiles?id=eq.${encodeURIComponent(userId)}&select=full_name,company&limit=1`).then(r => r.ok ? r.json() : []),
+      ]);
+      const leave = lRes[0];
+      // Announce only your own request, and only while it is still pending -
+      // so this route can never be replayed to re-announce a decided one.
+      if (!leave || leave.user_id !== userId || leave.status !== 'pending') {
+        return res.status(200).json({ ok: true, posted: false, reason: 'not_announceable' });
+      }
+      const profile = pRes[0] || {};
+      const typeName = (tRes.find(t => t.id === leave.leave_type_id) || {}).name || 'Leave';
+      const out = await postToCompanyGroup({
+        SUPABASE_URL, H, company: profile.company,
+        message: buildLeaveChatLine({
+          kind: 'filed', fullName: profile.full_name || 'Employee', typeName,
+          startDate: leave.start_date, endDate: leave.end_date,
+          dayPart: leave.day_part, reason: leave.reason,
+        }),
+      });
+      return res.status(200).json({ ok: true, posted: !!out.ok });
+    }
 
     // ---------------- team_status ----------------
     if (body.mode === 'team_status') {
@@ -826,7 +931,8 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
       const { subject, html, text } = buildPunchEmail({
         fullName: profile.full_name,
         direction: insertRow.direction,
-        when,
+        eventType,                       // the selfie path KNOWS the event -
+        when,                            // it was never a guess here
         deviceName: `WFH selfie · ${EVENT_LABEL[eventType]}`,
         employeeCode: profile.employee_code,
         shift: shiftEval,
@@ -845,6 +951,16 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
         email_error:  emailed ? null : emailError,
       }),
     }).catch(() => {});
+
+    // Same group post as a biometric punch - a WFH selfie is a punch. Awaited
+    // but never allowed to fail the request: the photo is already stored.
+    try {
+      await postToCompanyGroup({ SUPABASE_URL, H, company: profile.company, message:
+        buildPunchChatLine({
+          fullName: profile.full_name, eventType, direction: insertRow.direction,
+          when, shift: shiftEval, source: 'selfie',
+        }) });
+    } catch (e) { console.error('[selfie] bitrix', String(e && e.message || e)); }
 
     return res.status(200).json({
       success: true,

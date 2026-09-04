@@ -8,8 +8,10 @@
 //   SMTP_* (see lib/mailer.js) — used by the attendance resend action
 
 const { sendMail } = require('../lib/mailer');
+const bitrix = require('../lib/bitrix');
 const { istParts, istToday, buildPunchEmail, evaluateShift, describeWorkingDays,
-        weekOffsFor, buildMonth, computePay, monthDates, DAY_STATUS } = require('../lib/attendance');
+        weekOffsFor, buildMonth, computePay, monthDates, DAY_STATUS,
+        buildLeaveChatLine } = require('../lib/attendance');
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -491,6 +493,85 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ success: true });
     }
 
+    // ================= BITRIX24 =================
+    // Folded in here with the rest: the Hobby plan allows 12 serverless
+    // functions and the repo is at 12. Everything runs on the service key
+    // behind the admin password, which is also the only place the webhook
+    // URL is ever read - it is a credential and must not reach a browser.
+    if (String(action).startsWith('bitrix_')) {
+      const BH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
+      const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...BH, ...(opts.headers || {}) } });
+
+      if (action === 'bitrix_status') {
+        const [targets, profiles] = await Promise.all([
+          sb('bitrix_targets?select=*&order=company.asc').then(r => r.ok ? r.json() : []),
+          sb('profiles?select=company&limit=2000').then(r => r.ok ? r.json() : []),
+        ]);
+        const headcount = {};
+        profiles.forEach(p => { const c = p.company || '(none)'; headcount[c] = (headcount[c] || 0) + 1; });
+
+        if (!bitrix.isConfigured()) {
+          return res.status(200).json({
+            configured: false,
+            detail: 'BITRIX_WEBHOOK_URL is not set in Vercel, or is not a https://<portal>/rest/<id>/<secret>/ URL.',
+            targets, headcount, groups: [],
+          });
+        }
+        // whoAmI proves the token works at all; listGroups needs the extra
+        // sonet scope, so a failure there is reported separately rather than
+        // being mistaken for a broken webhook.
+        const [who, groups] = await Promise.all([bitrix.whoAmI(), bitrix.listGroups()]);
+        return res.status(200).json({
+          configured: true,
+          connection: who.ok ? { ok: true, ...who.result } : { ok: false, reason: who.reason, detail: who.detail },
+          groups: groups.ok ? groups.result : [],
+          groups_error: groups.ok ? null : `${groups.reason}: ${groups.detail}`,
+          targets, headcount,
+        });
+      }
+
+      if (action === 'bitrix_save') {
+        const company = String(body.company || '').trim();
+        if (!company) return res.status(400).json({ error: 'company required' });
+        const raw = String(body.dialog_id || '').trim();
+        // Blank clears the mapping, which is how a company is switched off.
+        if (raw && !/^(sg|chat)?\d+$/i.test(raw)) {
+          return res.status(400).json({ error: 'bad_dialog',
+            detail: `"${raw}" is not a group id. Expected sg14, chat14 or 14.` });
+        }
+        const dialog = raw ? (/^\d+$/.test(raw) ? 'sg' + raw : raw.toLowerCase()) : null;
+        const r = await sb('bitrix_targets?on_conflict=company', {
+          method: 'POST',
+          headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+          body: JSON.stringify({
+            company, dialog_id: dialog,
+            label: body.label ? String(body.label).slice(0, 120) : null,
+            enabled: body.enabled !== false,
+            updated_at: new Date().toISOString(), updated_by: 'admin',
+          }),
+        });
+        if (!r.ok) return res.status(502).json({ error: 'save failed', detail: (await r.text()).slice(0, 200) });
+        return res.status(200).json({ success: true, target: (await r.json())[0] || null });
+      }
+
+      if (action === 'bitrix_test') {
+        if (!bitrix.isConfigured()) {
+          return res.status(400).json({ error: 'not_configured',
+            detail: 'Set BITRIX_WEBHOOK_URL in Vercel first.' });
+        }
+        const out = await bitrix.sendGroupMessage({
+          dialogId: String(body.dialog_id || ''),
+          message: `\u2705 [B]WorkSuite[/B] is connected to this group.\n` +
+                   `Attendance punches and leave updates will appear here.\n` +
+                   `Test sent ${istParts(new Date()).prettyTime} on ${istParts(new Date()).prettyDate}.`,
+        });
+        if (!out.ok) return res.status(502).json({ error: out.reason, detail: out.detail });
+        return res.status(200).json({ success: true, message_id: out.result });
+      }
+
+      return res.status(400).json({ error: 'unknown bitrix action', action });
+    }
+
     // ================= PAYROLL & CALENDAR =================
     // pay_ and cal_ live here for the same reason att_, shift_ and leave_ do:
     // the Hobby plan allows 12 serverless functions and the repo is at 12.
@@ -732,7 +813,39 @@ module.exports = async function handler(req, res) {
         if (!r.ok) return res.status(502).json({ error: 'decision failed', detail: (await r.text()).slice(0, 200) });
         const updated = await r.json();
         if (!updated.length) return res.status(409).json({ error: 'not_pending', detail: 'That request has already been decided.' });
-        return res.status(200).json({ success: true, request: updated[0] });
+
+        // Tell the group. After the decision is committed, never before, and
+        // never allowed to undo it: an approval that saved but failed to post
+        // is still an approval.
+        let posted = false;
+        try {
+          const lv = updated[0];
+          const [prof, types, targets] = await Promise.all([
+            sb(`profiles?id=eq.${encodeURIComponent(lv.user_id)}&select=full_name,company&limit=1`).then(x => x.ok ? x.json() : []),
+            sb('leave_types?select=id,name').then(x => x.ok ? x.json() : []),
+            sb('bitrix_targets?select=company,dialog_id,enabled').then(x => x.ok ? x.json() : []),
+          ]);
+          const p = prof[0] || {};
+          const t = targets.find(x => x.company === p.company);
+          if (bitrix.isConfigured() && t && t.enabled && t.dialog_id) {
+            const out = await bitrix.sendGroupMessage({
+              dialogId: t.dialog_id,
+              message: buildLeaveChatLine({
+                kind: decision,
+                fullName: p.full_name || 'Employee',
+                typeName: (types.find(x => x.id === lv.leave_type_id) || {}).name || 'Leave',
+                startDate: lv.start_date, endDate: lv.end_date,
+                dayPart: lv.day_part, note: lv.decision_note, decidedBy: 'Admin',
+              }),
+            });
+            posted = !!out.ok;
+            if (!out.ok) console.error('[admin] bitrix leave post failed:', out.reason, out.detail);
+          }
+        } catch (e) {
+          console.error('[admin] bitrix leave step threw', String(e && e.message || e));
+        }
+
+        return res.status(200).json({ success: true, request: updated[0], bitrix_posted: posted });
       }
 
       // ---- Holidays ----
