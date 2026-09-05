@@ -389,10 +389,11 @@
         const missing = (s.total || 0) - (s.configured || 0);
         const sum = document.getElementById('bx-hooks-summary');
         const testable = (d.employees || []).filter(e => e.configured && e.valid).length;
-        const tested = [...hookResults.values()];
-        const passed = tested.filter(r => r.ok && r.match !== false).length;
+        const tested = [...hookResults.values()].filter(r => r && !r.pending);
         const failed = tested.filter(r => !r.ok).length;
         const mismatched = tested.filter(r => r.ok && r.match === false).length;
+        const dups = tested.filter(r => r.ok && r.dup).length;
+        const passed = tested.length - failed - mismatched - dups;
         sum.innerHTML =
             `<div class="flex flex-wrap items-center gap-2">` +
                 `<div class="ws-chip ${missing === 0 ? 'ok' : 'warn'}">${s.configured || 0} of ${s.total || 0} employees have a webhook</div>` +
@@ -401,6 +402,7 @@
                 (tested.length
                     ? `<span class="text-slate-300 text-xs font-bold">tested ${tested.length}: ` +
                       `<span class="text-emerald-300">${passed} ok</span>` +
+                      (dups ? `, <span class="text-amber-300">${dups} same webhook twice</span>` : '') +
                       (mismatched ? `, <span class="text-amber-300">${mismatched} wrong person</span>` : '') +
                       (failed ? `, <span class="text-rose-300">${failed} failed</span>` : '') +
                       `</span>`
@@ -446,27 +448,66 @@
     /* ---- testing one person's webhook ------------------------------------
      * The server calls Bitrix's read-only `profile` through that person's
      * BITRIX_HOOK_ and tells us who the webhook acts as. Nothing is sent to
-     * anyone. The name that comes back is compared to the WorkSuite name, so
-     * a URL pasted against the wrong enroll number is caught here rather
-     * than by the wrong employee getting someone else's punches later.
+     * anyone. Two things are checked on what comes back:
+     *
+     *   1. The Bitrix user id. Every personal webhook answers as a different
+     *      user, so two enroll numbers answering as the SAME user means one
+     *      URL was pasted twice - the one exact check we can make, and the
+     *      mistake that would send two people's punches to one person.
+     *   2. The name, loosely. On this portal Bitrix display names are staff
+     *      codes ("CG-ITSA-SNA-NA-001"), which WorkSuite does not hold, so a
+     *      code is shown as-is for the admin to eyeball, not flagged. Only a
+     *      real name that clearly is not this person's is flagged amber.
      * -------------------------------------------------------------------- */
     function hookResultHtml(r) {
         if (!r) return '';
         if (r.pending) return `<span class="text-slate-400 text-xs font-bold animate-pulse">Testing…</span>`;
-        const chip = r.ok ? (r.match === false ? 'warn' : 'ok') : 'bad';
+        const chip = r.ok ? ((r.match === false || r.dup) ? 'warn' : 'ok') : 'bad';
         return `<span class="ws-chip ${chip}" title="${esc(r.hint || '')}">${esc(r.title)}</span>` +
                (r.sub ? `<div class="text-slate-400 text-[11px] font-bold mt-1">${esc(r.sub)}</div>` : '');
     }
 
+    // A staff code rather than a person's name: dashed upper-case segments,
+    // or anything with a digit in it. Not comparable to a WorkSuite name.
+    function looksLikeCode(s) {
+        const t = String(s || '').trim();
+        return /\d/.test(t) || /^[A-Z]{1,8}(-[A-Z0-9]{1,8}){2,}$/.test(t);
+    }
+
     // Does the Bitrix name plausibly belong to the WorkSuite name? A shared
     // token of 3+ letters is enough - "Bharath" vs "Bharath Gurrala",
-    // "Sirimilla Vinay" vs "Vinay Sirimilla". Unknown when we have no name to
-    // compare, so an unlinked device entry is never flagged as a mismatch.
+    // "Sirimilla Vinay" vs "Vinay Sirimilla". Unknown (null) when either side
+    // is missing or the Bitrix side is a code, so those are never flagged.
     function namesAgree(ours, theirs) {
+        if (looksLikeCode(theirs)) return null;
         const toks = s => String(s || '').toLowerCase().split(/[^a-z]+/).filter(t => t.length >= 3);
         const a = toks(ours), b = new Set(toks(theirs));
         if (!a.length || !b.size) return null;
         return a.some(t => b.has(t));
+    }
+
+    // Two enroll numbers answering as the same Bitrix user = one webhook
+    // pasted twice. Re-evaluated after every test so both rows get the flag.
+    function markDuplicates() {
+        const byUser = new Map();
+        for (const [enroll, r] of hookResults) {
+            if (!r || !r.ok || !r.userId) continue;
+            if (!byUser.has(r.userId)) byUser.set(r.userId, []);
+            byUser.get(r.userId).push(enroll);
+        }
+        for (const [enroll, r] of hookResults) {
+            if (!r || !r.ok || !r.userId) continue;
+            const others = (byUser.get(r.userId) || []).filter(e => e !== enroll);
+            const wasDup = !!r.dup;
+            r.dup = others.length ? others : null;
+            if (r.dup) {
+                r.title = `Same webhook as ${r.dup.join(', ')}`;
+                r.hint = `Enroll ${enroll} and ${r.dup.join(', ')} both answer as Bitrix user ${r.userId} (${r.bitrixName}). One of them has the wrong URL.`;
+            } else if (wasDup) {
+                r.title = r.baseTitle; r.hint = r.baseHint;
+            }
+            if (wasDup !== !!r.dup) paintHookResult(enroll);
+        }
     }
 
     async function testHook(enroll, ourName) {
@@ -477,13 +518,19 @@
             const d = await api('bitrix_hook_test', { enroll });
             const u = d.bitrix_user || {};
             const match = namesAgree(ourName, u.name);
+            const code = looksLikeCode(u.name);
+            const title = match === false ? `Works — but this is ${u.name || 'someone else'}`
+                        : code            ? `OK · answers as ${u.name}`
+                        :                   `OK · ${u.name || 'works'}`;
+            const hint = match === false
+                ? `The webhook answers as "${u.name}", not "${ourName}". Check which person created it.`
+                : code
+                ? `Bitrix shows this account as a staff code, not a name. Confirm ${u.name} is ${ourName || 'this person'}'s code.`
+                : 'Read-only check: Bitrix confirmed the webhook and who it belongs to.';
             r = {
-                ok: true, match,
-                title: match === false ? `Works — but this is ${u.name || 'someone else'}` : `OK · ${u.name || 'works'}`,
+                ok: true, match, userId: u.id ? String(u.id) : '', bitrixName: u.name || '',
+                title, hint, baseTitle: title, baseHint: hint,
                 sub: [u.id ? `user ${u.id}` : '', u.portal || ''].filter(Boolean).join(' · '),
-                hint: match === false
-                    ? `The webhook answers as "${u.name}", not "${ourName}". Check which person created it.`
-                    : 'Read-only check: Bitrix confirmed the webhook and who it belongs to.',
             };
         } catch (e) {
             const code = (e && e.code) || '';
@@ -492,6 +539,7 @@
         }
         hookResults.set(enroll, r);
         paintHookResult(enroll);
+        markDuplicates();
         return r;
     }
 
