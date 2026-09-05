@@ -15,6 +15,9 @@
     let bxData = null;
     let bxLogs = null;
     let bxHooks = null;
+    // Per-employee test results, by enroll number, so a re-render (Recheck)
+    // does not wipe what the admin just learned. { ok, title, hint, match }
+    const hookResults = new Map();
 
     /* ---- the delivery log ------------------------------------------------
      * Sends used to leave no trace outside Vercel's function log, so "did the
@@ -84,6 +87,11 @@
             'Tick both Chat and Notifications (im) and Workgroups (sonet_group) on the webhook.'],
         QUERY_LIMIT_EXCEEDED: ['Bitrix rate limit hit',
             'About two requests a second is the ceiling. Wait a moment and retry.'],
+        // Per-employee webhook tests.
+        not_set:        ['Not set', 'Add BITRIX_HOOK_<enroll> in Vercel and redeploy.'],
+        not_a_webhook_url: ['Not a webhook URL',
+            'The value must look like https://<portal>.bitrix24.in/rest/<id>/<secret>/.'],
+        bad_enroll:     ['Bad enroll number', ''],
     };
     function reasonText(reason) {
         const r = String(reason || '');
@@ -363,14 +371,14 @@
     async function loadHooks() {
         if (!adminPassword) return;
         const body = document.getElementById('bx-hooks-body');
-        body.innerHTML = '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold animate-pulse">Reading the environment…</td></tr>';
+        body.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-400 font-bold animate-pulse">Reading the environment…</td></tr>';
         try {
             bxHooks = await api('bitrix_hooks');
             renderHooks();
         } catch (e) {
             document.getElementById('bx-hooks-summary').innerHTML =
                 `<div class="ws-chip bad">Could not read the webhook list</div>`;
-            body.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-rose-300 font-bold">${esc(e.message)}</td></tr>`;
+            body.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-rose-300 font-bold">${esc(e.message)}</td></tr>`;
         }
     }
 
@@ -380,13 +388,28 @@
         const s = d.summary || {};
         const missing = (s.total || 0) - (s.configured || 0);
         const sum = document.getElementById('bx-hooks-summary');
+        const testable = (d.employees || []).filter(e => e.configured && e.valid).length;
+        const tested = [...hookResults.values()];
+        const passed = tested.filter(r => r.ok && r.match !== false).length;
+        const failed = tested.filter(r => !r.ok).length;
+        const mismatched = tested.filter(r => r.ok && r.match === false).length;
         sum.innerHTML =
             `<div class="flex flex-wrap items-center gap-2">` +
                 `<div class="ws-chip ${missing === 0 ? 'ok' : 'warn'}">${s.configured || 0} of ${s.total || 0} employees have a webhook</div>` +
                 (missing > 0 ? `<span class="text-slate-300 text-xs font-bold">${missing} still to add</span>` : '') +
                 (s.invalid ? `<div class="ws-chip bad">${s.invalid} set but not a URL</div>` : '') +
+                (tested.length
+                    ? `<span class="text-slate-300 text-xs font-bold">tested ${tested.length}: ` +
+                      `<span class="text-emerald-300">${passed} ok</span>` +
+                      (mismatched ? `, <span class="text-amber-300">${mismatched} wrong person</span>` : '') +
+                      (failed ? `, <span class="text-rose-300">${failed} failed</span>` : '') +
+                      `</span>`
+                    : '') +
                 ((d.orphans || []).length
-                    ? `<span class="text-amber-300 text-xs font-bold ml-auto">${d.orphans.length} env var${d.orphans.length === 1 ? '' : 's'} match no enroll number: ${esc(d.orphans.join(', '))}</span>`
+                    ? `<span class="text-amber-300 text-xs font-bold">${d.orphans.length} env var${d.orphans.length === 1 ? '' : 's'} match no enroll number: ${esc(d.orphans.join(', '))}</span>`
+                    : '') +
+                (testable
+                    ? `<button type="button" id="bx-hooks-test-all" class="glass px-3 py-1.5 rounded-lg text-xs font-black text-slate-300 ml-auto">Test all ${testable}</button>`
                     : '') +
             `</div>`;
 
@@ -400,16 +423,107 @@
             const name = e.name
                 ? esc(e.name)
                 : `<span class="text-slate-500 italic">no name on device</span>`;
+            const canTest = e.configured && e.valid;
+            const test = canTest
+                ? `<div class="flex items-start gap-2">` +
+                      `<button type="button" class="bx-hook-test glass px-3 py-1.5 rounded-lg text-xs font-black text-slate-300 whitespace-nowrap" ` +
+                              `data-enroll="${esc(e.enroll_no)}" data-name="${esc(e.name || '')}">Test</button>` +
+                      `<span class="bx-hook-result" data-for="${esc(e.enroll_no)}">${hookResultHtml(hookResults.get(e.enroll_no))}</span>` +
+                  `</div>`
+                : `<span class="text-slate-500 text-xs font-bold">—</span>`;
             return `
-            <tr>
+            <tr data-enroll="${esc(e.enroll_no)}">
                 <td class="font-mono text-white font-black">${esc(e.enroll_no)}</td>
                 <td class="text-slate-200 font-bold">${name}${e.bound ? '' : ' <span class="text-slate-500 text-[11px]">(no account)</span>'}</td>
                 <td class="text-slate-400 font-bold">${esc(e.company || '—')}</td>
                 <td class="font-mono text-slate-400 text-[11px]">${esc(e.env_key)}</td>
                 <td class="text-center">${status}</td>
+                <td>${test}</td>
             </tr>`;
-        }).join('') : '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold">No enrolled employees yet.</td></tr>';
+        }).join('') : '<tr><td colspan="6" class="p-8 text-center text-slate-400 font-bold">No enrolled employees yet.</td></tr>';
     }
+
+    /* ---- testing one person's webhook ------------------------------------
+     * The server calls Bitrix's read-only `profile` through that person's
+     * BITRIX_HOOK_ and tells us who the webhook acts as. Nothing is sent to
+     * anyone. The name that comes back is compared to the WorkSuite name, so
+     * a URL pasted against the wrong enroll number is caught here rather
+     * than by the wrong employee getting someone else's punches later.
+     * -------------------------------------------------------------------- */
+    function hookResultHtml(r) {
+        if (!r) return '';
+        if (r.pending) return `<span class="text-slate-400 text-xs font-bold animate-pulse">Testing…</span>`;
+        const chip = r.ok ? (r.match === false ? 'warn' : 'ok') : 'bad';
+        return `<span class="ws-chip ${chip}" title="${esc(r.hint || '')}">${esc(r.title)}</span>` +
+               (r.sub ? `<div class="text-slate-400 text-[11px] font-bold mt-1">${esc(r.sub)}</div>` : '');
+    }
+
+    // Does the Bitrix name plausibly belong to the WorkSuite name? A shared
+    // token of 3+ letters is enough - "Bharath" vs "Bharath Gurrala",
+    // "Sirimilla Vinay" vs "Vinay Sirimilla". Unknown when we have no name to
+    // compare, so an unlinked device entry is never flagged as a mismatch.
+    function namesAgree(ours, theirs) {
+        const toks = s => String(s || '').toLowerCase().split(/[^a-z]+/).filter(t => t.length >= 3);
+        const a = toks(ours), b = new Set(toks(theirs));
+        if (!a.length || !b.size) return null;
+        return a.some(t => b.has(t));
+    }
+
+    async function testHook(enroll, ourName) {
+        hookResults.set(enroll, { pending: true });
+        paintHookResult(enroll);
+        let r;
+        try {
+            const d = await api('bitrix_hook_test', { enroll });
+            const u = d.bitrix_user || {};
+            const match = namesAgree(ourName, u.name);
+            r = {
+                ok: true, match,
+                title: match === false ? `Works — but this is ${u.name || 'someone else'}` : `OK · ${u.name || 'works'}`,
+                sub: [u.id ? `user ${u.id}` : '', u.portal || ''].filter(Boolean).join(' · '),
+                hint: match === false
+                    ? `The webhook answers as "${u.name}", not "${ourName}". Check which person created it.`
+                    : 'Read-only check: Bitrix confirmed the webhook and who it belongs to.',
+            };
+        } catch (e) {
+            const code = (e && e.code) || '';
+            r = { ok: false, title: code ? reasonText(code) : 'Failed',
+                  hint: (reasonHint(code) || '') + (e.message ? ' ' + e.message : ''), sub: '' };
+        }
+        hookResults.set(enroll, r);
+        paintHookResult(enroll);
+        return r;
+    }
+
+    function paintHookResult(enroll) {
+        const el = document.querySelector(`#bx-hooks-body .bx-hook-result[data-for="${CSS.escape(enroll)}"]`);
+        if (el) el.innerHTML = hookResultHtml(hookResults.get(enroll));
+        const btn = document.querySelector(`#bx-hooks-body .bx-hook-test[data-enroll="${CSS.escape(enroll)}"]`);
+        if (btn) btn.disabled = !!(hookResults.get(enroll) || {}).pending;
+    }
+
+    document.getElementById('bx-hooks-body').addEventListener('click', ev => {
+        const btn = ev.target.closest('.bx-hook-test');
+        if (!btn || btn.disabled) return;
+        testHook(btn.dataset.enroll, btn.dataset.name);
+    });
+
+    // Test every configured webhook, one at a time: Bitrix allows about two
+    // requests a second per portal, and all of these hooks share one portal.
+    document.getElementById('bx-hooks-summary').addEventListener('click', async ev => {
+        const btn = ev.target.closest('#bx-hooks-test-all');
+        if (!btn || btn.disabled || !bxHooks) return;
+        const list = (bxHooks.employees || []).filter(e => e.configured && e.valid);
+        btn.disabled = true;
+        let n = 0;
+        for (const e of list) {
+            n += 1;
+            btn.textContent = `Testing ${n} of ${list.length}…`;
+            await testHook(e.enroll_no, e.name || '');
+            await new Promise(r => setTimeout(r, 600));
+        }
+        renderHooks();   // refresh the ok / wrong person / failed tally
+    });
 
     document.getElementById('bx-body').addEventListener('change', ev => {
         const tr = ev.target.closest('tr[data-company]');

@@ -938,7 +938,7 @@
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm">
                             <thead>
-                                <tr><th>Enroll</th><th>Employee</th><th>Company</th><th>Env var</th><th class="text-center">Webhook</th></tr>
+                                <tr><th>Enroll</th><th>Employee</th><th>Company</th><th>Env var</th><th class="text-center">Webhook</th><th>Test</th></tr>
                             </thead>
                             <tbody id="bx-hooks-body"></tbody>
                         </table>
@@ -949,6 +949,8 @@
                     <b>BITRIX_HOOK_&lt;enroll&gt;</b>. WorkSuite only ever checks whether each is set — the webhook URL is a
                     credential and never leaves Vercel, so it is never shown here. Add or change a URL in
                     <b>Vercel → Settings → Environment Variables</b> and redeploy; then Recheck to refresh this list.
+                    <b>Test</b> asks Bitrix who the webhook belongs to — a read-only check that sends nobody anything — so a
+                    URL pasted against the wrong enroll number shows up as a name that does not match.
                 </p>
 
                 <!-- ---------- Delivery log ---------- -->

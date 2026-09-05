@@ -724,6 +724,44 @@ module.exports = async function handler(req, res) {
         });
       }
 
+      // Test one person's webhook. This is READ-ONLY: it calls Bitrix's
+      // `profile` method through BITRIX_HOOK_<enroll>, which returns the user
+      // the webhook acts as and changes nothing - no message is sent to
+      // anyone. So the admin learns two things at once: the webhook works,
+      // and whose it is (a hook pasted against the wrong enroll number shows
+      // up as a name that does not match). The URL never leaves this
+      // function; even Bitrix's error text is redacted before it goes back.
+      if (action === 'bitrix_hook_test') {
+        const enroll = String(body.enroll || '').trim();
+        if (!/^\d{1,12}$/.test(enroll)) {
+          return res.status(400).json({ error: 'bad_enroll', detail: 'Enroll number must be digits only.' });
+        }
+        const key = 'BITRIX_HOOK_' + enroll;
+        const raw = String(process.env[key] || '').trim();
+        if (!raw) {
+          return res.status(400).json({ error: 'not_set', detail: `${key} is not set in Vercel.` });
+        }
+        const base = bitrix.hookBaseFor(enroll);
+        if (!base) {
+          return res.status(400).json({ error: 'not_a_webhook_url',
+            detail: `${key} is set, but it is not a https://<portal>/rest/<id>/<secret>/ URL.` });
+        }
+        const who = await bitrix.whoAmI(base);
+        if (!who.ok) {
+          return res.status(502).json({ error: who.reason, detail: bitrix.redact(who.detail || '') });
+        }
+        return res.status(200).json({
+          success: true,
+          enroll,
+          bitrix_user: {
+            id: who.result.id,
+            name: who.result.name,
+            admin: !!who.result.admin,
+            portal: String(who.result.portal || '').replace(/^https:\/\//, ''),
+          },
+        });
+      }
+
       if (action === 'bitrix_save') {
         const company = String(body.company || '').trim();
         if (!company) return res.status(400).json({ error: 'company required' });
