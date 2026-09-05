@@ -10,7 +10,7 @@
 const { sendMail } = require('../lib/mailer');
 const bitrix = require('../lib/bitrix');
 const { istParts, istToday, buildPunchEmail, evaluateShift, describeWorkingDays,
-        weekOffsFor, buildMonth, computePay, monthDates, DAY_STATUS,
+        weekOffsFor, buildMonth, computePay, computeMonthlyPay, monthDates, DAY_STATUS,
         buildLeaveChatLine } = require('../lib/attendance');
 
 module.exports = async function handler(req, res) {
@@ -782,25 +782,36 @@ module.exports = async function handler(req, res) {
       if (action === 'pay_set_rate') {
         const userId = String(body.user_id || '');
         if (!/^[0-9a-f-]{36}$/i.test(userId)) return res.status(400).json({ error: 'user_id required' });
-        // Same blank-guard as lib/attendance computePay: Number('') is 0, and a
-        // rate of zero saved by accident looks exactly like a real wage of zero.
+        // A monthly salary now, not a per-day rate: payroll divides it by the
+        // month's working days to get per-day, then multiplies by days present.
+        // Same blank-guard as computeMonthlyPay: Number('') is 0, and a salary
+        // of zero saved by accident looks exactly like a real wage of zero.
         const blank = v => v === null || v === undefined || v === '';
-        const rate = blank(body.per_day_rate) ? NaN : Number(body.per_day_rate);
-        if (!Number.isFinite(rate) || rate < 0 || rate >= 1000000) {
-          return res.status(400).json({ error: 'bad_rate', detail: 'Enter a per-day rate between 0 and 999999.' });
+        // Accept monthly_salary; fall back to per_day_rate for any old caller.
+        const raw = blank(body.monthly_salary) ? body.per_day_rate : body.monthly_salary;
+        const salary = blank(raw) ? NaN : Number(raw);
+        if (!Number.isFinite(salary) || salary < 0 || salary >= 100000000) {
+          return res.status(400).json({ error: 'bad_salary', detail: 'Enter a monthly salary between 0 and 99,999,999.' });
         }
         const r = await sb('salaries?on_conflict=user_id', {
           method: 'POST',
           headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
           body: JSON.stringify({
             user_id: userId,
-            per_day_rate: rate,
+            monthly_salary: salary,
             note: body.note ? String(body.note).slice(0, 300) : null,
             updated_at: new Date().toISOString(),
             updated_by: 'admin',
           }),
         });
-        if (!r.ok) return res.status(502).json({ error: 'save failed', detail: (await r.text()).slice(0, 200) });
+        if (!r.ok) {
+          const detail = (await r.text()).slice(0, 200);
+          if (/monthly_salary|does not exist|42703|42P01|PGRST204/i.test(detail)) {
+            return res.status(200).json({ unavailable: true,
+              detail: 'The salaries table has no monthly_salary column yet — run supabase-monthly-salary-migration.sql.' });
+          }
+          return res.status(502).json({ error: 'save failed', detail });
+        }
         return res.status(200).json({ success: true, salary: (await r.json())[0] || null });
       }
 
@@ -869,7 +880,7 @@ module.exports = async function handler(req, res) {
         fetchAll(`leave_requests?select=user_id,leave_type_id,day_part,start_date,end_date&status=eq.approved&start_date=lte.${to}&end_date=gte.${from}`),
         sb('leave_types?select=id,name').then(r => r.ok ? r.json() : []),
         fetchAll(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type,source&log_date=gte.${from}&log_date=lte.${to}&order=log_datetime.asc`),
-        sb('salaries?select=user_id,per_day_rate,currency,note,updated_at').then(r => r.ok ? r.json() : []),
+        sb('salaries?select=*').then(r => r.ok ? r.json() : []),
         sb('secondary_roles?select=user_id,label,shift_id,per_day_rate,currency,note').then(r => r.ok ? r.json() : []),
       ]);
 
@@ -915,8 +926,12 @@ module.exports = async function handler(req, res) {
         });
 
         const sal = rateByUser.get(p.id) || null;
-        const pay = computePay({
-          perDayRate: sal ? sal.per_day_rate : null,
+        // Monthly salary ÷ this month's working days × days present. When the
+        // migration has not run, sal.monthly_salary is undefined and this
+        // reports "no rate" — the row shows "—", never a bogus ₹0.
+        const pay = computeMonthlyPay({
+          monthlySalary: sal ? sal.monthly_salary : null,
+          workingDays: mon.totals.workingDays,
           daysPresent: mon.totals.daysPresent,
           currency: sal ? sal.currency : 'INR',
         });
@@ -966,7 +981,9 @@ module.exports = async function handler(req, res) {
           codes: mon.days.map(d => CODE[d.status] || '?').join(''),
           times, notes,
           totals: mon.totals,
-          rate: sal ? Number(sal.per_day_rate) : null,
+          working_days: mon.totals.workingDays,
+          monthly_salary: pay.monthlySalary,
+          per_day: pay.perDay,
           rate_note: sal ? sal.note : null,
           currency: pay.currency,
           gross: pay.gross,

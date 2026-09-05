@@ -46,7 +46,7 @@
         document.getElementById('cal-body').innerHTML =
             '<tr><td colspan="40" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading…</td></tr>';
         document.getElementById('pay-tbody').innerHTML =
-            '<tr><td colspan="7" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading…</td></tr>';
+            '<tr><td colspan="9" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading…</td></tr>';
         try {
             const r = await fetch('/api/admin', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -63,7 +63,7 @@
         } catch (e) {
             const msg = `<tr><td colspan="40" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
             document.getElementById('cal-body').innerHTML = msg;
-            document.getElementById('pay-tbody').innerHTML = msg.replace('40', '7');
+            document.getElementById('pay-tbody').innerHTML = msg.replace('40', '9');
         }
     }
 
@@ -154,16 +154,19 @@
 
         document.getElementById('pay-tbody').innerHTML = rows.length ? rows.map(e => {
             const r2 = e.second_role;
+            const perDay = e.has_rate ? payMoney(e.per_day, e.currency) + '<span class="text-slate-500">/day</span>' : '—';
             const main = `
             <tr data-uid="${e.id}">
                 <td><b>${escapeHtml(e.name)}</b><div class="text-[11px] text-slate-400 font-bold">${escapeHtml(e.email || '')}</div></td>
                 <td class="text-slate-300 font-bold">${escapeHtml(e.company || '—')}</td>
                 <td class="text-slate-300 font-bold">${escapeHtml(e.shift_name || '—')}${e.shift_assigned ? '' : ' <span class="text-slate-500">(default)</span>'}</td>
+                <td class="text-right font-black text-slate-300">${e.working_days}</td>
                 <td class="text-right font-black text-white">${e.totals.daysPresent}</td>
                 <td class="text-right">
-                    <input type="number" min="0" step="0.01" class="pay-rate glass px-3 py-1.5 rounded-lg text-right text-white font-bold w-28 focus:outline-none"
-                           value="${e.rate == null ? '' : e.rate}" placeholder="not set">
+                    <input type="number" min="0" step="0.01" class="pay-rate glass px-3 py-1.5 rounded-lg text-right text-white font-bold w-32 focus:outline-none"
+                           value="${e.monthly_salary == null ? '' : e.monthly_salary}" placeholder="monthly">
                 </td>
+                <td class="text-right font-bold text-slate-300 whitespace-nowrap">${perDay}</td>
                 <td class="text-right font-black ${e.has_rate ? 'text-emerald-300' : 'text-slate-500'}">${payMoney(e.gross, e.currency)}</td>
                 <td class="text-right whitespace-nowrap">
                     ${r2 ? '' : `<button type="button" class="role2-add glass px-2.5 py-1.5 rounded-lg text-xs font-black text-slate-300" title="This person has a second job paid separately">+ 2nd role</button>`}
@@ -175,24 +178,26 @@
                 <td class="pl-6 text-slate-300 font-bold"><span class="text-slate-500">↳ 2nd role</span> ${escapeHtml(r2.label)}</td>
                 <td class="text-slate-500 text-xs font-bold">paid separately</td>
                 <td class="text-slate-300 font-bold">${escapeHtml(r2.shift_name || '—')}</td>
+                <td class="text-right text-slate-500">—</td>
                 <td class="text-right font-black text-white">${r2.days_present}</td>
                 <td class="text-right">
-                    <input type="number" min="0" step="0.01" class="role2-rate glass px-3 py-1.5 rounded-lg text-right text-white font-bold w-28 focus:outline-none"
-                           value="${r2.rate == null ? '' : r2.rate}" placeholder="rate">
+                    <input type="number" min="0" step="0.01" class="role2-rate glass px-3 py-1.5 rounded-lg text-right text-white font-bold w-32 focus:outline-none"
+                           value="${r2.rate == null ? '' : r2.rate}" placeholder="per-day">
                 </td>
+                <td class="text-right font-bold text-slate-300 whitespace-nowrap">${r2.has_rate ? payMoney(r2.rate, r2.currency) + '<span class="text-slate-500">/day</span>' : '—'}</td>
                 <td class="text-right font-black ${r2.has_rate ? 'text-emerald-300' : 'text-slate-500'}">${payMoney(r2.gross, r2.currency)}</td>
                 <td class="text-right"><button type="button" class="role2-clear glass px-3 py-1.5 rounded-lg text-xs font-black text-rose-300">Remove</button></td>
             </tr>` : '';
             return main + second;
         }).join('')
-            : '<tr><td colspan="7" class="p-8 text-center text-slate-400 font-bold">Nobody in this company.</td></tr>';
+            : '<tr><td colspan="9" class="p-8 text-center text-slate-400 font-bold">Nobody in this company.</td></tr>';
     }
 
     // The inline editor for adding a second role, injected under a row on demand.
     function role2EditorRow(e) {
         return `
         <tr data-uid="${e.id}" class="role2-edit">
-          <td colspan="7" class="p-3" style="background:rgba(255,255,255,0.03);">
+          <td colspan="9" class="p-3" style="background:rgba(255,255,255,0.03);">
             <div class="flex flex-wrap items-end gap-3">
               <div><label class="block text-[10px] uppercase tracking-widest text-slate-400 font-black mb-1">Second role</label>
                 <input class="r2-label glass px-3 py-1.5 rounded-lg text-white font-bold w-40 focus:outline-none" placeholder="e.g. Jobways"></div>
@@ -215,18 +220,22 @@
                 body: JSON.stringify({
                     password: adminPassword,
                     action: blank ? 'pay_clear_rate' : 'pay_set_rate',
-                    user_id: uid, per_day_rate: blank ? undefined : value
+                    user_id: uid, monthly_salary: blank ? undefined : value
                 })
             });
             const data = await r.json();
+            if (data && data.unavailable) { alert(data.detail); return; }
             if (!r.ok) throw new Error(data.detail || data.error || 'Save failed');
             // Recompute locally so the row and the header total agree at once,
-            // without another full month fetch.
+            // without another full month fetch: per-day = salary ÷ working days,
+            // gross = per-day × present. Mirrors computeMonthlyPay on the server.
             const emp = payrollData.employees.find(e => e.id === uid);
             if (emp) {
-                emp.rate = blank ? null : Number(value);
-                emp.has_rate = !blank;
-                emp.gross = blank ? null : Math.round(Number(value) * emp.totals.daysPresent * 100) / 100;
+                const wd = emp.working_days || 0;
+                emp.monthly_salary = blank ? null : Number(value);
+                emp.has_rate = !blank && wd > 0;
+                emp.per_day = emp.has_rate ? Math.round((Number(value) / wd) * 100) / 100 : null;
+                emp.gross = emp.has_rate ? Math.round((Number(value) / wd) * emp.totals.daysPresent * 100) / 100 : null;
             }
             renderSalary();
             const row = document.querySelector(`#pay-tbody tr[data-uid="${uid}"]`);
@@ -365,13 +374,18 @@
         if (!payrollData) return;
         const rows = visibleEmployees('pay-company');
         const q = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
-        const head = ['Employee','Email','Company','Shift','Days present','Per-day rate','Gross',
+        const head = ['Employee','Email','Company','Shift','Working days','Days present',
+                      'Monthly salary','Per-day','Gross',
                       '2nd role','2nd shift','2nd days','2nd rate','2nd gross','Currency','Month'];
         const csv = [head.join(',')]
             .concat(rows.map(e => {
                 const r2 = e.second_role;
                 return [e.name, e.email, e.company || '', e.shift_name || '',
-                        e.totals.daysPresent, e.rate == null ? '' : e.rate, e.gross == null ? '' : e.gross,
+                        e.working_days == null ? '' : e.working_days,
+                        e.totals.daysPresent,
+                        e.monthly_salary == null ? '' : e.monthly_salary,
+                        e.per_day == null ? '' : e.per_day,
+                        e.gross == null ? '' : e.gross,
                         r2 ? r2.label : '', r2 ? (r2.shift_name || '') : '', r2 ? r2.days_present : '',
                         r2 ? r2.rate : '', r2 ? (r2.gross == null ? '' : r2.gross) : '',
                         e.currency, payrollData.month].map(q).join(',');

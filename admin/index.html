@@ -812,14 +812,7 @@
                     </label>
                     <button id="hol-add" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Add</button>
                 </div>
-                <div class="glass rounded-2xl overflow-hidden">
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm">
-                            <thead><tr><th>Date</th><th>Holiday</th><th>Applies to</th><th>Type</th><th></th></tr></thead>
-                            <tbody id="hol-tbody"></tbody>
-                        </table>
-                    </div>
-                </div>
+                <div id="hol-sections" class="space-y-5"></div>
             </div>
 
             <!-- ================= MONTH CALENDAR ================= -->
@@ -846,7 +839,7 @@
 
             <!-- ================= SALARY ================= -->
             <div id="salary-panel" class="hidden">
-                <div class="section-head mb-3"><h3><span class="ic ic-salary"></span>Salary</h3><span class="sub">Per-day rate × days actually present. Visible here only</span></div>
+                <div class="section-head mb-3"><h3><span class="ic ic-salary"></span>Salary</h3><span class="sub">Monthly salary ÷ working days × days present. Visible here only</span></div>
                 <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
                     <input id="pay-month" type="month" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none" style="color-scheme: dark;">
                     <select id="pay-company" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
@@ -862,8 +855,10 @@
                             <thead>
                                 <tr>
                                     <th>Employee</th><th>Company</th><th>Shift</th>
-                                    <th class="text-right">Days present</th>
-                                    <th class="text-right">Per-day rate</th>
+                                    <th class="text-right">Working days</th>
+                                    <th class="text-right">Present</th>
+                                    <th class="text-right">Monthly salary</th>
+                                    <th class="text-right">Per-day</th>
                                     <th class="text-right">Gross</th>
                                     <th></th>
                                 </tr>
@@ -873,8 +868,10 @@
                     </div>
                 </div>
                 <p class="text-slate-400 text-xs font-bold mt-3">
-                    Leave and holidays are not paid under this model — only days worked count.
-                    An employee with no rate set shows “—”, never ₹0, and is left out of the total.
+                    Enter each person's <b>monthly salary</b>. Per-day = salary ÷ that month's working days
+                    (shift days minus company holidays and week-offs); gross = per-day × days present.
+                    Leave is unpaid and holidays are days off, so neither is paid — a full salary is reached
+                    only by being present every working day. No salary set shows “—”, never ₹0, and is left out of the total.
                 </p>
             </div>
 
@@ -2966,20 +2963,73 @@
                 : '<tr><td colspan="7" class="p-8 text-center text-slate-400 font-bold">No leave requests for this filter.</td></tr>';
         }
 
+        // The companies, in a fixed order, so every company gets its own
+        // holiday list even before anyone has added a holiday for it. Mirrors
+        // the options in the #hol-company picker above.
+        const HOL_COMPANIES = [
+            'Nova Sportsmart Private Limited',
+            'CORPGROUP',
+            'Protathlitis Sportsmart LLP',
+            'Jobways Point LLP',
+            'Genie Lamp Private Limited',
+            'Navyug Raise A Player Foundation',
+        ];
+
         function renderHolidays() {
             if (!holidayData) return;
             const rows = holidayData.holidays || [];
-            document.getElementById('hol-tbody').innerHTML = rows.length ? rows.map(h => `
-                <tr>
-                    <td class="text-white font-black">${escapeHtml(h.holiday_date)}</td>
-                    <td class="text-slate-200 font-bold">${escapeHtml(h.name)}</td>
-                    <td class="text-slate-400 font-bold">${escapeHtml(h.company || 'All companies')}</td>
-                    <td>${h.is_optional
-                        ? '<span class="text-amber-300 text-xs font-black">Optional</span>'
-                        : '<span class="text-violet-300 text-xs font-black">Public</span>'}</td>
-                    <td><button type="button" data-hol-del="${h.id}" class="glass px-3 py-1.5 rounded-xl text-xs font-bold text-rose-300 hover:bg-rose-500/10">Delete</button></td>
-                </tr>`).join('')
-                : '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold">No holidays set for this year.</td></tr>';
+            const year = document.getElementById('hol-year').value;
+
+            // Group by company. A null/blank company is the shared "All
+            // companies" list that applies to everyone unless a company has its
+            // own row for that date.
+            const byCompany = new Map();
+            rows.forEach(h => {
+                const key = h.company || '';   // '' == All companies
+                if (!byCompany.has(key)) byCompany.set(key, []);
+                byCompany.get(key).push(h);
+            });
+
+            // Section order: All companies first, then the fixed company list,
+            // then any other company that somehow has rows (kept, never hidden).
+            const order = ['', ...HOL_COMPANIES];
+            [...byCompany.keys()].forEach(k => { if (!order.includes(k)) order.push(k); });
+
+            const section = (key) => {
+                const list = (byCompany.get(key) || [])
+                    .slice().sort((a, b) => a.holiday_date.localeCompare(b.holiday_date));
+                const title = key === '' ? 'All companies' : key;
+                const badge = key === ''
+                    ? '<span class="text-[10px] uppercase tracking-widest text-violet-300 font-black ml-2">applies to everyone</span>'
+                    : `<span class="text-[10px] uppercase tracking-widest text-slate-500 font-black ml-2">${list.length} holiday${list.length === 1 ? '' : 's'}</span>`;
+                const body = list.length ? `
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead><tr><th>Date</th><th>Holiday</th><th>Type</th><th></th></tr></thead>
+                            <tbody>${list.map(h => `
+                                <tr>
+                                    <td class="text-white font-black whitespace-nowrap">${escapeHtml(h.holiday_date)}</td>
+                                    <td class="text-slate-200 font-bold">${escapeHtml(h.name)}</td>
+                                    <td>${h.is_optional
+                                        ? '<span class="text-amber-300 text-xs font-black">Optional</span>'
+                                        : '<span class="text-violet-300 text-xs font-black">Public</span>'}</td>
+                                    <td class="text-right"><button type="button" data-hol-del="${h.id}" class="glass px-3 py-1.5 rounded-xl text-xs font-bold text-rose-300 hover:bg-rose-500/10">Delete</button></td>
+                                </tr>`).join('')}</tbody>
+                        </table>
+                    </div>`
+                    : `<p class="px-4 py-6 text-center text-slate-500 text-xs font-bold">No holidays set for ${escapeHtml(title)} in ${escapeHtml(String(year))}.</p>`;
+                return `
+                    <div class="glass rounded-2xl overflow-hidden">
+                        <div class="px-4 py-3 flex items-center border-b border-white/5">
+                            <span class="ic ic-calendar"></span>
+                            <h4 class="text-white font-black ml-2">${escapeHtml(title)}</h4>${badge}
+                        </div>
+                        ${body}
+                    </div>`;
+            };
+
+            document.getElementById('hol-sections').innerHTML =
+                order.map(section).join('');
         }
 
         document.getElementById('lv-tbody').addEventListener('click', async ev => {
@@ -3029,7 +3079,7 @@
             }
         });
 
-        document.getElementById('hol-tbody').addEventListener('click', async ev => {
+        document.getElementById('hol-sections').addEventListener('click', async ev => {
             const d = ev.target.closest('[data-hol-del]');
             if (!d) return;
             const ok = await wsDialog.confirm({ icon: '🎉', danger: true, title: 'Delete this holiday?',
