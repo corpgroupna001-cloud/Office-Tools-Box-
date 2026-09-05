@@ -57,7 +57,7 @@
      * a plain sentence and, where there is a concrete next step, a hint. */
     const REASONS = {
         not_configured: ['No webhook set in Vercel',
-            'Add BITRIX_WEBHOOK_URL in Vercel and redeploy.'],
+            'Add each person\'s webhook as BITRIX_HOOK_<enroll> in Vercel and redeploy.'],
         no_dialog:      ['No group mapped',
             'Pick a group for this company above.'],
         bad_dialog:     ['Group id not understood', 'Expected something like sg14.'],
@@ -65,7 +65,7 @@
         timeout:        ['Bitrix did not answer in time',
             'Usually a slow portal. Try the test again.'],
         network:        ['Could not reach Bitrix',
-            'Check the portal address in BITRIX_WEBHOOK_URL.'],
+            'Check the portal address in the webhook URL.'],
         // Bitrix's own codes. CANCELED is the one this setup hits first, and
         // its wording ("You cannot send messages to the specified chat") sends
         // people hunting through webhook scopes when the real cause is
@@ -102,7 +102,11 @@
     function reasonHint(reason) {
         const h = (REASONS[String(reason || '')] || [])[1] || '';
         if (h !== 'MEMBERSHIP') return h;
-        // Name the actual account, so the admin knows who to add.
+        // A webhook posts as a person, so the fix is membership, not scopes.
+        if (bxData && bxData.mode === 'per_employee') {
+            return 'A webhook posts as the person it belongs to, and that person is not a member of this chat. ' +
+                   'Open the chat in Bitrix24 and add them (every employee whose punches should appear must be in it), then test again.';
+        }
         const who = (bxData && bxData.connection && bxData.connection.name) || 'the webhook user';
         return `A webhook posts as a person, and ${who} is not a member of that workgroup. ` +
                `Open the group in Bitrix24, add ${who} to it, then test again.`;
@@ -129,14 +133,14 @@
     async function loadBitrix() {
         if (!adminPassword) return;
         const body = document.getElementById('bx-body');
-        body.innerHTML = '<tr><td colspan="4" class="p-8 text-center text-slate-400 font-bold animate-pulse">Checking the connection…</td></tr>';
+        body.innerHTML = '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold animate-pulse">Checking the connection…</td></tr>';
         try {
             bxData = await api('bitrix_status');
             renderBitrix();
         } catch (e) {
             document.getElementById('bx-conn').innerHTML =
                 `<div class="ws-chip bad">Could not reach the admin API</div>`;
-            body.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-rose-300 font-bold">${esc(e.message)}</td></tr>`;
+            body.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-rose-300 font-bold">${esc(e.message)}</td></tr>`;
         }
     }
 
@@ -145,39 +149,64 @@
         if (!d) return;
         const conn = document.getElementById('bx-conn');
 
+        const h = d.hooks || {};
         if (!d.configured) {
             conn.innerHTML =
                 `<div class="ws-chip warn">Not connected</div>` +
                 `<p class="text-slate-400 text-xs font-bold mt-2 leading-relaxed max-w-2xl">${esc(d.detail)}<br>` +
-                `In Bitrix24: <b>Developer resources &rarr; Other &rarr; Inbound webhook</b>, tick <b>Chat and Notifications (im)</b> and ` +
-                `<b>Workgroups (sonet_group)</b>, ` +
-                `then paste the whole URL into Vercel as <b>BITRIX_WEBHOOK_URL</b> and redeploy.</p>`;
+                `In Bitrix24, each person: <b>Developer resources &rarr; Other &rarr; Inbound webhook</b>, tick <b>Chat and Notifications (im)</b>, ` +
+                `then paste the whole URL into Vercel as <b>BITRIX_HOOK_&lt;their enroll number&gt;</b> and redeploy.</p>`;
         } else if (d.connection && d.connection.ok) {
+            const errs = d.groups_error && typeof d.groups_error === 'object' ? Object.entries(d.groups_error) : [];
             conn.innerHTML =
                 `<div class="ws-chip ok">Connected</div>` +
-                `<span class="text-slate-300 text-xs font-bold ml-2">posts as ${esc(d.connection.name)}` +
-                `${d.connection.portal ? ' on ' + esc(d.connection.portal.replace(/^https:\/\//, '')) : ''}</span>` +
-                (d.groups_error
-                    ? `<p class="text-amber-300 text-xs font-bold mt-2">Chats could not be listed (${esc(d.groups_error)}). ` +
-                      `Add the <b>im</b> scope to the webhook, or type the id by hand.</p>`
-                    : `<p class="text-slate-400 text-xs font-bold mt-2 leading-relaxed max-w-2xl">` +
-                      `The menu lists the chats and workgroups <b>${esc(d.connection.name)}</b> belongs to \u2014 those are the ones ` +
-                      `it can post to. Anything under \u201cNot joined\u201d will be refused until you add them to it in Bitrix24.</p>`);
+                `<span class="text-slate-300 text-xs font-bold ml-2">` +
+                (d.mode === 'per_employee'
+                    ? `${h.with_hook || 0} of ${h.employees || 0} people post as themselves`
+                    : `posts as ${esc(d.connection.name)}`) +
+                `${d.connection.portal ? ' · ' + esc(String(d.connection.portal).replace(/^https:\/\//, '')) : ''}</span>` +
+                (errs.length
+                    ? `<p class="text-amber-300 text-xs font-bold mt-2">Chats could not be listed for ` +
+                      errs.map(([c, e]) => `<b>${esc(c)}</b> (${esc(e)})`).join(', ') +
+                      `. Add the <b>im</b> scope to that person's webhook, or type the id by hand.</p>`
+                    : '') +
+                `<p class="text-slate-400 text-xs font-bold mt-2 leading-relaxed max-w-2xl">` +
+                (d.mode === 'per_employee'
+                    ? `Each punch is posted through that person's own webhook, so it appears in the group as them. ` +
+                      `The menu for a company lists the chats its people are members of — the ones they can post to.`
+                    : `The menu lists the chats and workgroups <b>${esc(d.connection.name)}</b> belongs to — those are the ones ` +
+                      `it can post to. Anything under “Not joined” will be refused until you add them to it in Bitrix24.`) +
+                `</p>`;
         } else {
             const c = d.connection || {};
             conn.innerHTML =
                 `<div class="ws-chip bad">Webhook rejected</div>` +
-                `<p class="text-rose-300 text-xs font-bold mt-2">${esc(c.reason || '')}: ${esc(c.detail || '')}</p>`;
+                `<p class="text-rose-300 text-xs font-bold mt-2">${esc(reasonText(c.reason))}: ${esc(c.detail || '')}</p>`;
         }
 
         const rows = d.targets || [];
+        const byCompany = d.groups_by_company || {};
         document.getElementById('bx-body').innerHTML = rows.length ? rows.map(t => {
             const head = (d.headcount || {})[t.company] || 0;
+            // The chats this company's own people can post to; every chat
+            // anyone can see when nobody in the company has a hook yet.
+            const ids = byCompany[t.company] || byCompany['*'] || null;
+            const groups = ids ? (d.groups || []).filter(g => ids.includes(g.dialog_id)) : (d.groups || []);
+            const hk = t.hooks || {};
+            const sender = t.sender
+                ? `<b class="text-slate-200">${esc(t.sender.name || t.sender.enroll)}</b>` +
+                  `<div class="text-[11px] text-slate-400 font-bold">${hk.have > 1 ? `and ${hk.have - 1} more as themselves` : 'as themselves'}` +
+                  `${hk.of > hk.have ? ` · ${hk.of - hk.have} via a colleague` : ''}</div>`
+                : (d.mode === 'company'
+                    ? `<span class="text-slate-300 font-bold">${esc((d.connection || {}).name || 'company webhook')}</span>`
+                    : `<span class="text-amber-300 text-xs font-bold">Nobody here has a webhook yet</span>` +
+                      `<div class="text-[11px] text-slate-400 font-bold">posts go via the first webhook found</div>`);
             return `
             <tr data-company="${esc(t.company)}">
                 <td><b>${esc(t.company)}</b>
                     <div class="text-[11px] text-slate-400 font-bold">${head} employee${head === 1 ? '' : 's'}${t.label ? ' · ' + esc(t.label) : ''}</div></td>
-                <td>${groupPicker(t, d.groups || [])}</td>
+                <td>${groupPicker(t, groups)}</td>
+                <td>${sender}</td>
                 <td class="text-center">
                     <input type="checkbox" class="bx-enabled w-4 h-4" ${t.enabled ? 'checked' : ''}
                            ${t.dialog_id ? '' : 'disabled'} title="Pause without losing the mapping">
@@ -187,7 +216,7 @@
                             ${t.dialog_id ? '' : 'disabled style="opacity:.3"'}>Send test</button>
                 </td>
             </tr>`;
-        }).join('') : '<tr><td colspan="4" class="p-8 text-center text-slate-400 font-bold">No companies found.</td></tr>';
+        }).join('') : '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold">No companies found.</td></tr>';
     }
 
     async function loadLogs() {
@@ -584,7 +613,7 @@
         const label = btn.textContent;
         btn.disabled = true; btn.textContent = 'Sending…';
         try {
-            await api('bitrix_test', { dialog_id: tr.querySelector('.bx-dialog').value.trim() });
+            await api('bitrix_test', { company: tr.dataset.company, dialog_id: tr.querySelector('.bx-dialog').value.trim() });
             flash(tr, true);
             notice(true, 'Test message sent — check the group in Bitrix24', '');
         } catch (e) {

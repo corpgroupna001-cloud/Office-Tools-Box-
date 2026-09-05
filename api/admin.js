@@ -7,11 +7,91 @@
 //   ADMIN_PASSWORD            (the shared admin password)
 //   SMTP_* (see lib/mailer.js) — used by the attendance resend action
 
-const { sendMail } = require('../lib/mailer');
+const { sendMail, senderFor: mailSenderFor, COMPANY_TO_USER, COMING_SOON_COMPANIES } = require('../lib/mailer');
 const bitrix = require('../lib/bitrix');
 const { istParts, istToday, buildPunchEmail, evaluateShift, describeWorkingDays,
         weekOffsFor, buildMonth, computePay, computeMonthlyPay, monthDates, DAY_STATUS,
-        buildLeaveChatLine } = require('../lib/attendance');
+        buildLeaveChatLine, assignDays } = require('../lib/attendance');
+
+/* ---------------------------------------------------------------------------
+ * Re-derive attendance days, directions and events for stored punches.
+ *
+ * The rules live in lib/attendance assignDays and are applied as punches
+ * arrive; this re-applies them to what is already stored - after the rules
+ * change (the 6pm-3am shift used to be split at midnight), or after a shift
+ * assignment does (everyone was on the default day shift for their first
+ * evening), or when a code is bound to a person and their shift becomes
+ * known. Reads a window of punches, re-derives each person's days, and
+ * patches only the rows that come out different. Dry run unless `apply`.
+ * ------------------------------------------------------------------------- */
+async function recomputePunches({ sb, from, to, apply, employeeCode, deadlineAt }) {
+  const [pRes, shiftsRes, logsRes] = await Promise.all([
+    sb('profiles?select=id,full_name,company,employee_code,shift_id&limit=2000'),
+    sb('shifts?select=*'),
+    sb(`attendance_logs?select=id,user_id,employee_code,log_datetime,log_date,direction,direction_derived,event_type,source` +
+       (employeeCode ? `&employee_code=eq.${encodeURIComponent(employeeCode)}` : '') +
+       `&log_datetime=gte.${encodeURIComponent(new Date(`${from}T00:00:00+05:30`).toISOString())}` +
+       `&log_datetime=lte.${encodeURIComponent(new Date(`${to}T23:59:59+05:30`).toISOString())}` +
+       `&order=log_datetime.asc&limit=5000`),
+  ]);
+  if (!logsRes.ok) return { error: 'logs fetch failed', detail: (await logsRes.text()).slice(0, 200) };
+  const logs = await logsRes.json();
+  const profiles = pRes.ok ? await pRes.json() : [];
+  const shifts = shiftsRes.ok ? await shiftsRes.json() : [];
+  const shiftById = new Map(shifts.map(s => [s.id, s]));
+  const defaultShift = shifts.find(s => s.is_default) || null;
+  const profById = new Map(profiles.map(p => [p.id, p]));
+  const shiftOf = row => {
+    const p = row.user_id ? profById.get(row.user_id) : null;
+    return (p && p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+  };
+
+  // One person = one employee code (or, for selfie-only people, one user).
+  const byPerson = new Map();
+  logs.forEach(l => {
+    const key = l.employee_code ? `c:${l.employee_code}` : `u:${l.user_id}`;
+    if (!byPerson.has(key)) byPerson.set(key, []);
+    byPerson.get(key).push(l);
+  });
+
+  const changes = [];
+  for (const list of byPerson.values()) {
+    // The shift of whoever the punches belong to now - a row bound after the
+    // fact carries the user_id, so this picks up their real shift.
+    const owner = list.find(x => x.user_id) || list[0];
+    const shift = shiftOf(owner);
+    for (const m of assignDays(list, { shiftFor: () => shift })) {
+      const s = list.find(x => x.id === m.id);
+      if (s.log_date !== m.log_date || s.direction !== m.direction || s.event_type !== m.event_type) {
+        changes.push({ id: s.id, employee_code: s.employee_code, log_datetime: s.log_datetime,
+                       before: { log_date: s.log_date, direction: s.direction, event_type: s.event_type },
+                       after:  { log_date: m.log_date, direction: m.direction, event_type: m.event_type,
+                                 direction_derived: m.direction_derived } });
+      }
+    }
+  }
+
+  let patched = 0, failed = 0;
+  if (apply) {
+    const CAP = 300;
+    for (let i = 0; i < Math.min(changes.length, CAP); i += 10) {
+      if (deadlineAt && Date.now() > deadlineAt) break;
+      await Promise.all(changes.slice(i, i + 10).map(async c => {
+        const r = await sb(`attendance_logs?id=eq.${c.id}`, {
+          method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(c.after),
+        });
+        if (r.ok) patched++; else failed++;
+      }));
+    }
+  }
+  return {
+    from, to, apply: !!apply,
+    scanned: logs.length, people: byPerson.size,
+    changes: changes.length, patched, failed,
+    remaining: apply ? Math.max(0, changes.length - patched - failed) : changes.length,
+    sample: changes.slice(0, 40),
+  };
+}
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -578,7 +658,20 @@ module.exports = async function handler(req, res) {
         });
         if (back.ok) adopted = (await back.json()).length;
 
-        return res.status(200).json({ success: true, row: patched, backfilled_logs: adopted });
+        // Those punches were labelled with the DEFAULT shift, because nobody
+        // knew whose they were. Now that they belong to someone with a real
+        // shift, relabel them - a night worker's evening breaks stop reading
+        // as Logouts. Best effort, last 14 days.
+        let relabelled = 0;
+        try {
+          const to = istToday();
+          const d = new Date(`${to}T12:00:00+05:30`); d.setUTCDate(d.getUTCDate() - 14);
+          const out = await recomputePunches({ sb, from: istParts(d).isoDate, to, apply: true,
+                                               employeeCode: enroll, deadlineAt: Date.now() + 4000 });
+          relabelled = out.patched || 0;
+        } catch { /* the admin's Recompute button can redo it */ }
+
+        return res.status(200).json({ success: true, row: patched, backfilled_logs: adopted, relabelled });
       }
 
       if (action === 'roster_unbind') {
@@ -608,6 +701,65 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: 'unknown roster action' });
     }
 
+    // ================= EMAIL =================
+    // Is the mail side actually able to send, and for whom? The attendance
+    // webhook records the outcome of every notification on its row; this is
+    // the view of the configuration itself plus a way to fire a test mail,
+    // so "emails are not going out" can be split into "SMTP is down",
+    // "this company has no mailbox" and "the address on the profile is wrong"
+    // without reading Vercel logs.
+    if (String(action).startsWith('mail_')) {
+      const MH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
+      const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...MH, ...(opts.headers || {}) } });
+
+      if (action === 'mail_status') {
+        const profiles = await sb('profiles?select=company,email&limit=2000').then(r => r.ok ? r.json() : []);
+        const companies = [...new Set([...Object.keys(COMPANY_TO_USER), ...COMING_SOON_COMPANIES,
+                                       ...profiles.map(p => p.company).filter(Boolean)])].sort();
+        const rows = companies.map(c => {
+          const s = mailSenderFor(c);
+          return { company: c, people: profiles.filter(p => p.company === c).length,
+                   env: COMPANY_TO_USER[c] || null,
+                   ok: s.ok, reason: s.ok ? null : s.reason, detail: s.ok ? null : s.detail,
+                   from: s.ok ? s.user : null };
+        });
+        // What the last week's notifications actually did.
+        const since = istParts(new Date(Date.now() - 7 * 86400000)).isoDate;
+        const logs = await sb(`attendance_logs?select=email_status,email_error&log_date=gte.${since}&limit=5000`).then(r => r.ok ? r.json() : []);
+        const tally = {};
+        logs.forEach(l => { const k = l.email_status || 'null'; tally[k] = (tally[k] || 0) + 1; });
+        const reasons = {};
+        logs.filter(l => l.email_status === 'failed').forEach(l => {
+          const k = String(l.email_error || '').split(':')[0].slice(0, 60) || 'unknown';
+          reasons[k] = (reasons[k] || 0) + 1;
+        });
+        return res.status(200).json({
+          smtp: { host: !!process.env.SMTP_HOST, pass: !!process.env.SMTP_PASS,
+                  from_name: process.env.SMTP_FROM_NAME || 'WorkSuite' },
+          companies: rows,
+          last7: { since, tally, failure_reasons: reasons },
+        });
+      }
+
+      if (action === 'mail_test') {
+        const to = String(body.to || '').trim();
+        const company = String(body.company || '').trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return res.status(400).json({ error: 'bad_address', detail: 'Enter a valid email address.' });
+        if (!company) return res.status(400).json({ error: 'company required' });
+        const t = istParts(new Date());
+        const out = await sendMail({
+          company, to,
+          subject: `WorkSuite test email — ${t.prettyTime}, ${t.prettyDate}`,
+          text: `This is a test from the WorkSuite admin panel, sent through the ${company} mailbox at ${t.prettyTime} IST on ${t.prettyDate}.\n\nIf you can read this, attendance notifications for ${company} can be delivered.`,
+          html: `<p>This is a test from the <b>WorkSuite</b> admin panel, sent through the <b>${company}</b> mailbox at ${t.prettyTime} IST on ${t.prettyDate}.</p><p>If you can read this, attendance notifications for ${company} can be delivered.</p>`,
+        });
+        if (!out.ok) return res.status(502).json({ error: out.reason, detail: out.detail });
+        return res.status(200).json({ success: true, from: out.from, message_id: out.messageId });
+      }
+
+      return res.status(400).json({ error: 'unknown mail action', action });
+    }
+
     // ================= BITRIX24 =================
     // Folded in here with the rest: the Hobby plan allows 12 serverless
     // functions and the repo is at 12. Everything runs on the service key
@@ -620,42 +772,96 @@ module.exports = async function handler(req, res) {
       if (action === 'bitrix_status') {
         const [targets, profiles] = await Promise.all([
           sb('bitrix_targets?select=*&order=company.asc').then(r => r.ok ? r.json() : []),
-          sb('profiles?select=company&limit=2000').then(r => r.ok ? r.json() : []),
+          sb('profiles?select=id,full_name,company,employee_code&limit=2000').then(r => r.ok ? r.json() : []),
         ]);
         const headcount = {};
         profiles.forEach(p => { const c = p.company || '(none)'; headcount[c] = (headcount[c] || 0) + 1; });
 
+        // Every company that has people OR a saved mapping gets a row, so the
+        // screen never depends on the seed rows in bitrix_targets existing.
+        const companies = [...new Set([
+          ...targets.map(t => t.company),
+          ...profiles.map(p => p.company).filter(Boolean),
+        ])].sort();
+        const targetByCompany = new Map(targets.map(t => [t.company, t]));
+
+        // Who can post for each company: the people in it who have their own
+        // BITRIX_HOOK_<enroll>. The first of them is the company's
+        // representative - the one used to list that company's chats and to
+        // send a test, and the one who carries the line of a colleague with
+        // no hook yet. Names only; the URLs stay in the environment.
+        const senders = new Map();     // company -> [{ enroll, name }]
+        profiles.forEach(p => {
+          if (!p.company || !p.employee_code) return;
+          if (!bitrix.hookBaseFor(p.employee_code)) return;
+          if (!senders.has(p.company)) senders.set(p.company, []);
+          senders.get(p.company).push({ enroll: String(p.employee_code), name: p.full_name || '' });
+        });
+        senders.forEach(list => list.sort((a, b) => a.enroll.localeCompare(b.enroll)));
+
+        const rows = companies.map(c => {
+          const t = targetByCompany.get(c) || { company: c, dialog_id: null, label: null, enabled: true, updated_at: null };
+          const withCode = profiles.filter(p => p.company === c && p.employee_code).length;
+          const list = senders.get(c) || [];
+          return { ...t, company: c,
+                   sender: list[0] || null,
+                   hooks: { have: list.length, of: withCode, people: headcount[c] || 0 } };
+        });
+
+        const hooks = bitrix.allHooks();
+        const global = bitrix.webhookBase();
         if (!bitrix.isConfigured()) {
           return res.status(200).json({
-            configured: false,
-            detail: 'BITRIX_WEBHOOK_URL is not set in Vercel, or is not a https://<portal>/rest/<id>/<secret>/ URL.',
-            targets, headcount, groups: [],
+            configured: false, mode: 'none',
+            detail: 'No Bitrix webhook is set in Vercel. Add each person\'s inbound webhook as BITRIX_HOOK_<enroll> ' +
+                    '(see the per-employee list below), or a company-wide one as BITRIX_WEBHOOK_URL, and redeploy.',
+            targets: rows, headcount, groups: [], hooks: { count: 0 },
           });
         }
-        // whoAmI proves the token works at all; the two listings need the im
-        // and sonet scopes, so a failure in either is reported separately
-        // rather than being mistaken for a broken webhook.
-        const [who, convos, groups] = await Promise.all([
-          bitrix.whoAmI(), bitrix.listConversations(), bitrix.listGroups(),
-        ]);
 
-        // Conversations FIRST, because those are the ones this webhook can
-        // actually post to. Workgroups it has not joined are still offered -
-        // an admin may be about to add it - but flagged, so picking one and
-        // getting CANCELED back is no longer a surprise.
-        const joined = convos.ok ? convos.result : [];
-        const have = new Set(joined.map(g => g.dialog_id));
-        const notJoined = (groups.ok ? groups.result : [])
-          .filter(g => !have.has(g.dialog_id))
-          .map(g => ({ ...g, kind: 'group', joined: false }));
+        // Prove the connection through whatever anyBase() picks, then list
+        // the chats each company's representative is in - those are exactly
+        // the ones that person's webhook can post to. Sequential, because all
+        // the hooks share one portal and its rate limit.
+        const who = await bitrix.whoAmI();
+        const groups = new Map();           // dialog_id -> group
+        const byCompany = {};               // company -> [dialog_id]
+        const errors = {};
+        const listings = new Map();         // enroll -> listConversations result (one call per hook)
+        const addGroups = (company, list) => {
+          byCompany[company] = list.map(g => g.dialog_id);
+          list.forEach(g => {
+            const cur = groups.get(g.dialog_id) || { ...g, seen_by: [] };
+            if (!cur.seen_by.includes(company)) cur.seen_by.push(company);
+            groups.set(g.dialog_id, cur);
+          });
+        };
+        if (global) {
+          const r = await bitrix.listConversations(global, { pages: 2 });
+          if (r.ok) addGroups('*', r.result); else errors['*'] = `${r.reason}: ${bitrix.redact(r.detail || '')}`;
+        }
+        for (const row of rows) {
+          if (!row.sender) continue;
+          const enroll = row.sender.enroll;
+          if (!listings.has(enroll)) {
+            listings.set(enroll, await bitrix.listConversations(bitrix.hookBaseFor(enroll), { pages: 1 }));
+          }
+          const r = listings.get(enroll);
+          if (r.ok) addGroups(row.company, r.result);
+          else errors[row.company] = `${r.reason}: ${bitrix.redact(r.detail || '')}`;
+        }
 
         return res.status(200).json({
           configured: true,
-          connection: who.ok ? { ok: true, ...who.result } : { ok: false, reason: who.reason, detail: who.detail },
-          groups: joined.concat(notJoined),
-          groups_error: convos.ok ? null : `${convos.reason}: ${convos.detail}`,
-          workgroups_error: groups.ok ? null : `${groups.reason}: ${groups.detail}`,
-          targets, headcount,
+          mode: global ? 'company' : 'per_employee',
+          connection: who.ok ? { ok: true, ...who.result } : { ok: false, reason: who.reason, detail: bitrix.redact(who.detail || '') },
+          groups: [...groups.values()],
+          groups_by_company: byCompany,
+          groups_error: Object.keys(errors).length ? errors : null,
+          hooks: { count: hooks.length,
+                   employees: profiles.filter(p => p.employee_code).length,
+                   with_hook: profiles.filter(p => p.employee_code && bitrix.hookBaseFor(p.employee_code)).length },
+          targets: rows, headcount,
         });
       }
 
@@ -789,18 +995,29 @@ module.exports = async function handler(req, res) {
       if (action === 'bitrix_test') {
         if (!bitrix.isConfigured()) {
           return res.status(400).json({ error: 'not_configured',
-            detail: 'Set BITRIX_WEBHOOK_URL in Vercel first.' });
+            detail: 'No Bitrix webhook is set in Vercel. Add BITRIX_HOOK_<enroll> for at least one person first.' });
         }
+        const company = body.company ? String(body.company) : null;
+        // Post as one of this company's own people, the way a real punch
+        // would - so a refusal here means a refusal then, and not the other
+        // way round.
+        let companyEnrolls = [];
+        if (company) {
+          const pr = await sb(`profiles?select=employee_code&company=eq.${encodeURIComponent(company)}&employee_code=not.is.null&limit=500`);
+          companyEnrolls = pr.ok ? (await pr.json()).map(p => String(p.employee_code)).sort() : [];
+        }
+        const sender = bitrix.senderFor({ enroll: null, companyEnrolls });
         const out = await bitrix.sendAndLog({
-          SUPABASE_URL, H: BH, kind: 'test',
-          company: body.company ? String(body.company) : null,
+          SUPABASE_URL, H: BH, kind: 'test', company,
           dialogId: String(body.dialog_id || ''),
+          base: sender.base,
           message: `\u2705 [B]WorkSuite[/B] is connected to this group.\n` +
-                   `Attendance punches and leave updates will appear here.\n` +
+                   `Attendance punches and leave updates will appear here, each posted by the person they are about.\n` +
                    `Test sent ${istParts(new Date()).prettyTime} on ${istParts(new Date()).prettyDate}.`,
         });
-        if (!out.ok) return res.status(502).json({ error: out.reason, detail: out.detail });
-        return res.status(200).json({ success: true, message_id: out.result });
+        if (!out.ok) return res.status(502).json({ error: out.reason, detail: bitrix.redact(out.detail || '') });
+        return res.status(200).json({ success: true, message_id: out.result,
+                                      sent_as: sender.enroll ? `BITRIX_HOOK_${sender.enroll}` : sender.via });
       }
 
       if (action === 'bitrix_logs') {
@@ -1380,6 +1597,30 @@ module.exports = async function handler(req, res) {
         if (!r.ok) throw new Error('profiles fetch failed: ' + (await r.text()).slice(0, 160));
         return r.json();
       };
+
+    // ------------------------------------------------------------------
+    // Recompute days, directions and events for stored punches.
+    //
+    // The rules live in lib/attendance assignDays and are applied at ingest;
+    // this re-applies them to what is already stored, for when the rules
+    // change (the 6pm-3am shift used to be split at midnight), or a shift
+    // assignment does (everyone was on the default day shift for their first
+    // evening). Reads a window of punches, re-derives every person's days,
+    // and patches only the rows that come out different. Dry run by default.
+    // ------------------------------------------------------------------
+    if (action === 'att_recompute') {
+      const to   = String(body.to   || istToday()).slice(0, 10);
+      const from = String(body.from || '').slice(0, 10) || (() => {
+        const d = new Date(`${to}T12:00:00+05:30`); d.setUTCDate(d.getUTCDate() - 14); return istParts(d).isoDate;
+      })();
+      const out = await recomputePunches({
+        sb, from, to, apply: body.apply === true,
+        employeeCode: body.employee_code ? String(body.employee_code) : null,
+        deadlineAt: attStartedAt + 8000,
+      });
+      if (out.error) return res.status(502).json(out);
+      return res.status(200).json(out);
+    }
 
     // ------------------------------------------------------------------
     // Daily report — the sheet an admin actually wants each morning.

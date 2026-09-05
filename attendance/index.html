@@ -355,7 +355,8 @@
         const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
         let view = 'days';
-        let rows = [];
+        let rows = [];       // this month's punches (newest first)
+        let allRows = [];    // plus the day before the month, for the today card
         let myShift = null;
         let isWfh = false;
         let myName = '';
@@ -417,12 +418,19 @@
             const ym = el('month').value || fmtISO.format(new Date()).slice(0, 7);
             const { start, end } = monthRange(ym);
 
-            // RLS restricts this to the signed-in user's own rows.
+            // RLS restricts this to the signed-in user's own rows. Keyed on
+            // log_date - the ATTENDANCE day, which for the night shift runs
+            // past midnight - so the 1am punches of the 30th sit with the 30th.
+            // One extra day before the month, so that on the 1st at 1am the
+            // "today" card still sees the day that began on the 31st.
+            const firstDate = `${ym}-01`;
+            const prevDate  = fmtISO.format(new Date(start.getTime() - 12 * 3600 * 1000));
+            const lastDate  = fmtISO.format(new Date(end.getTime() - 12 * 3600 * 1000));
             const { data, error } = await sb
                 .from('attendance_logs')
                 .select('id,direction,log_datetime,log_date,device_name,device_sn,employee_code,event_type,source')
-                .gte('log_datetime', start.toISOString())
-                .lt('log_datetime', end.toISOString())
+                .gte('log_date', prevDate)
+                .lte('log_date', lastDate)
                 .order('log_datetime', { ascending: false })
                 .limit(2000);
 
@@ -432,9 +440,28 @@
                 el('empty').innerHTML = `<b>Couldn't load attendance</b><span>${esc(error.message)}</span>`;
                 return;
             }
-            rows = data || [];
+            allRows = data || [];
+            rows = allRows.filter(r => (r.log_date || fmtISO.format(new Date(r.log_datetime))) >= firstDate);
             renderToday();
             render();
+        }
+
+        // A working day is cut by the gap between punches, not by midnight
+        // (see lib/attendance on the server). "Today" on this page is the
+        // most recent day that is still open: its last punch is under eight
+        // hours old, or it is literally today's date. So at 1am a night
+        // worker sees the day they logged into at 6pm, not an empty card.
+        const NEW_DAY_GAP_MS = 8 * 3600 * 1000;
+        function currentDayRows(list) {
+            const today = fmtISO.format(new Date());
+            const days = groupByDay(list);
+            if (days.has(today)) return days.get(today);
+            const dates = [...days.keys()].sort();
+            const latest = dates[dates.length - 1];
+            if (!latest || latest > today) return [];
+            const punches = days.get(latest);
+            const last = Math.max(...punches.map(p => new Date(p.log_datetime).getTime()));
+            return Date.now() - last < NEW_DAY_GAP_MS ? punches : [];
         }
 
         function groupByDay(list) {
@@ -502,6 +529,12 @@
             };
 
             const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', hour12: false }).format(new Date()));
+            // "Still logged in" nags only once the shift has ended - for the
+            // 6pm-3am shift that is after 3am, not after 5pm.
+            const nowMins = toMins(new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()));
+            const pastShiftEnd = myShift && myShift.end_time
+                ? offset(nowMins, toMins(myShift.end_time)) >= 0
+                : hour >= 17;
             // FIRST login, LAST logout: someone who punches in twice started
             // their day at the first one, and "logged in 17:45, logged out
             // 13:00" is nonsense on the card.
@@ -521,7 +554,7 @@
                 show('brk', '☕', `On a break since ${at(lastBreak)}`,
                      'Break in when you are back so the day adds up.',
                      ['Break in', 'BREAK_IN'], null);
-            } else if (hour >= 17) {
+            } else if (pastShiftEnd) {
                 show('warn', '⏰', 'Still logged in',
                      `Logged in at ${at(login)}. Log out when you finish, or today shows no check-out.`,
                      ['Logout', 'LOGOUT'], ['Break out', 'BREAK_OUT']);
@@ -533,8 +566,7 @@
         }
 
         function renderToday() {
-            const today = fmtISO.format(new Date());
-            const mine = rows.filter(r => (r.log_date || fmtISO.format(new Date(r.log_datetime))) === today);
+            const mine = currentDayRows(allRows);
             const s = dayStats(mine.slice().sort((a, b) => new Date(a.log_datetime) - new Date(b.log_datetime)));
             renderPrompt(mine);
 

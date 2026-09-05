@@ -716,6 +716,52 @@
                         </table>
                     </div>
                 </div>
+
+                <!-- ---------- Email delivery ---------- -->
+                <div class="section-head mt-8 mb-3"><h3><span class="ic ic-report"></span>Email notifications</h3><span class="sub">Which mailbox each company sends from, and whether it can</span></div>
+                <div id="mail-status" class="glass rounded-2xl p-4 mb-4"><span class="text-slate-400 text-xs font-bold animate-pulse">Checking the mail setup…</span></div>
+                <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
+                    <select id="mail-test-company" class="glass px-3 py-2 rounded-xl text-white font-bold focus:outline-none"></select>
+                    <input id="mail-test-to" type="email" placeholder="Send a test to… (your address)"
+                        class="glass flex-1 min-w-[220px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
+                    <button id="mail-test-send" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Send test email</button>
+                    <span id="mail-test-result" class="text-xs font-bold"></span>
+                </div>
+                <p class="text-slate-400 text-xs font-bold mb-2 max-w-3xl leading-relaxed">
+                    Every punch notification is sent from the mailbox of the employee's company (SMTP_USER_1/2/3 in Vercel),
+                    to the email on their profile. The outcome of each one is on the punch itself &mdash; the <b>Mail</b> column above.
+                    A test here goes through exactly the same path.
+                </p>
+
+                <!-- ---------- Attendance days ---------- -->
+                <div class="section-head mt-8 mb-3"><h3><span class="ic ic-attend"></span>Attendance days</h3><span class="sub">Re-derive day, IN/OUT and Login/Break/Logout for stored punches</span></div>
+                <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] uppercase tracking-widest text-slate-400 font-black">From</span>
+                        <input id="recompute-from" type="date" class="glass px-3 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] uppercase tracking-widest text-slate-400 font-black">To</span>
+                        <input id="recompute-to" type="date" class="glass px-3 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                    </div>
+                    <button id="recompute-check" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/10">Check</button>
+                    <button id="recompute-apply" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm" disabled style="opacity:.4">Apply changes</button>
+                    <span id="recompute-result" class="text-xs font-bold"></span>
+                </div>
+                <div id="recompute-sample" class="hidden glass rounded-2xl overflow-hidden mb-4">
+                    <div class="overflow-x-auto" style="max-height:320px;">
+                        <table class="w-full text-sm">
+                            <thead><tr><th>Employee</th><th>Punch</th><th>Was</th><th>Becomes</th></tr></thead>
+                            <tbody id="recompute-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <p class="text-slate-400 text-xs font-bold max-w-3xl leading-relaxed">
+                    A working day is cut where there is a gap of 8 hours or more between a person's punches, not at midnight &mdash;
+                    so the 6pm&ndash;3am shift is one day, and its 1am break is a break. New punches are labelled this way as they
+                    arrive; use this after changing someone's shift, or to relabel punches that arrived before the rules did.
+                    <b>Check</b> only shows what would change; nothing is written until you <b>Apply</b>.
+                </p>
             </div>
 
             <!-- SHIFTS TAB -->
@@ -918,7 +964,7 @@
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm">
                             <thead>
-                                <tr><th>Company</th><th>Bitrix group</th><th class="text-center">On</th><th></th></tr>
+                                <tr><th>Company</th><th>Bitrix group</th><th>Posted by</th><th class="text-center">On</th><th></th></tr>
                             </thead>
                             <tbody id="bx-body"></tbody>
                         </table>
@@ -926,9 +972,10 @@
                 </div>
                 <p class="text-slate-400 text-xs font-bold mt-3 max-w-3xl leading-relaxed">
                     A blank group means that company posts nothing — which is where everything starts.
-                    Most “groups” here are ordinary group chats rather than workgroups, so the menu lists both.
-                    Punches are batched into one message per group per import, because Bitrix allows only
-                    about two requests a second and a twenty-punch export sent one at a time would time out.
+                    Every punch is posted <b>by the person it is about</b>, through their own webhook from the list
+                    below, so the group reads like people reporting in rather than a bot. Someone whose webhook is
+                    not in Vercel yet is posted by a colleague from the same company until it is. The menu lists the
+                    chats that company's people are actually members of — those are the only ones they can post to.
                 </p>
 
                 <!-- ---------- Per-employee webhooks ---------- -->
@@ -3125,5 +3172,6 @@
     <script src="/admin/payroll.js"></script>
     <script src="/admin/bitrix.js"></script>
     <script src="/admin/roster.js"></script>
+    <script src="/admin/attendance-tools.js"></script>
 </body>
 </html>

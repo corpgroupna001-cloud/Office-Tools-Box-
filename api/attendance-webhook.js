@@ -17,9 +17,11 @@
 // IN/OUT: the Realtime export does NOT actually send a direction — its
 // payload is only employee_code, employee_name, log_datetime, downloaded_at,
 // device_sn and device_name. So when no direction arrives we DERIVE it from
-// the punch's position in that employee's IST day (1st = IN, 2nd = OUT, …)
-// and flag the row direction_derived. An explicit direction from the device
-// always wins, so this needs no change if the vendor ever starts sending one.
+// the punch's position in that employee's ATTENDANCE day (1st = IN, 2nd =
+// OUT, …) and flag the row direction_derived. An attendance day is cut by
+// the gap between punches, not by midnight, so the 6pm-3am shift is one day
+// (lib/attendance assignDays). An explicit direction from the device always
+// wins, so this needs no change if the vendor ever starts sending one.
 //
 // It is deliberately forgiving about shape: keys are matched
 // case/underscore-insensitively, a single object or an array (or {data:[…]})
@@ -50,7 +52,8 @@ const {
   evaluateShift, timeToMinutes, offsetFromBoundary,
   istToday, monthDates, buildMonth, classifyDay,
   weekOffsFor, holidayOn, DAY_STATUS,
-  deriveEventType, buildPunchChatLine, buildLeaveChatLine,
+  assignDays, attendanceDateFor, NEW_DAY_GAP_MS,
+  buildPunchChatLine, buildLeaveChatLine,
 } = require('../lib/attendance');
 
 // Vercel Hobby kills the function at 10s. Stop starting new sends at 7.5s and
@@ -87,6 +90,42 @@ function truthy(v) {
   if (v === undefined || v === null) return false;
   const s = String(v).trim().toLowerCase();
   return s !== '' && s !== '0' && s !== 'false' && s !== 'no' && s !== 'null';
+}
+
+/** YYYY-MM-DD of the day before an IST date. */
+function yesterdayOf(isoDate) {
+  const d = new Date(`${isoDate}T12:00:00+05:30`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return istParts(d).isoDate;
+}
+
+/**
+ * The punches that count as "today" for each person, from a set covering
+ * today and yesterday. A day is still open while its last punch is less than
+ * NEW_DAY_GAP_MS old, so somebody two hours into a night shift that began
+ * yesterday evening is working today, not absent today. Returns a Map of
+ * user_id -> punches.
+ */
+function currentDayPunches(logs, today) {
+  const byUser = new Map();
+  for (const r of logs || []) {
+    if (!r.user_id) continue;
+    if (!byUser.has(r.user_id)) byUser.set(r.user_id, new Map());
+    const days = byUser.get(r.user_id);
+    if (!days.has(r.log_date)) days.set(r.log_date, []);
+    days.get(r.log_date).push(r);
+  }
+  const out = new Map();
+  const now = Date.now();
+  for (const [uid, days] of byUser) {
+    if (days.has(today)) { out.set(uid, days.get(today)); continue; }
+    const dates = [...days.keys()].sort();
+    const latest = dates[dates.length - 1];
+    const punches = days.get(latest) || [];
+    const last = punches.reduce((m, p) => Math.max(m, new Date(p.log_datetime).getTime()), 0);
+    if (latest < today && now - last < NEW_DAY_GAP_MS) out.set(uid, punches);
+  }
+  return out;
 }
 
 /** Run tasks with bounded concurrency, stopping cleanly at a wall-clock deadline. */
@@ -307,77 +346,99 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // ---- 2b. Derive IN/OUT for anything the device didn't label ----
-    // Counted by position within the employee's IST day, using both what is
-    // already stored and the earlier records in this same batch.
-    // Runs over EVERY row, not just undirected ones: the ordinal also tells
-    // us whether a punch is the day's first, which is what makes a "late"
-    // note on the email trustworthy.
+    // ---- 2b. Which day, which direction, which event ----
+    // The reader sends a bare timestamp. Everything else - the attendance
+    // date, IN/OUT, Login/Break/Logout - is derived from the punch's place
+    // among the person's OTHER punches, stored and in this batch. A working
+    // day is not a calendar day here (the night shift runs 6pm-3am), so days
+    // are cut where there is a long gap between punches; see assignDays in
+    // lib/attendance.js, which is the single place those rules live.
+    //
+    // The stored punches around the batch are re-derived along with it, and
+    // any whose day, direction or event changed in hindsight are patched -
+    // a 22:00 "Logout" becomes a "Break out" the moment a 23:00 punch shows
+    // it was not the last of the day. That is a handful of rows at most.
+    const storedPatches = [];
     {
-      const groups = new Map();
+      const byCode = new Map();
       for (const r of rows) {
-        const key = `${r.insert.employee_code}|${r.insert.log_date}`;
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(r);
+        const code = r.insert.employee_code;
+        if (!byCode.has(code)) byCode.set(code, []);
+        byCode.get(code).push(r);
       }
 
-      await Promise.all([...groups.entries()].map(async ([key, list]) => {
-        const sep  = key.lastIndexOf('|');
-        const code = key.slice(0, sep);
-        const day  = key.slice(sep + 1);
-
+      await Promise.all([...byCode.entries()].map(async ([code, list]) => {
+        const times = list.map(r => new Date(r.insert.log_datetime).getTime());
+        const from = new Date(Math.min(...times) - 36 * 3600 * 1000).toISOString();
+        const to   = new Date(Math.max(...times) + 36 * 3600 * 1000).toISOString();
         let stored = [];
         try {
           const r = await fetch(
             `${SUPABASE_URL}/rest/v1/attendance_logs` +
-            `?employee_code=eq.${encodeURIComponent(code)}&log_date=eq.${day}` +
-            `&select=log_datetime&limit=1000`,
+            `?employee_code=eq.${encodeURIComponent(code)}` +
+            `&log_datetime=gte.${encodeURIComponent(from)}&log_datetime=lte.${encodeURIComponent(to)}` +
+            `&select=id,log_datetime,log_date,direction,direction_derived,event_type,source&limit=1000`,
             { headers: H }
           );
-          if (r.ok) stored = (await r.json()).map(x => new Date(x.log_datetime).getTime());
+          if (r.ok) stored = await r.json();
         } catch { /* fall back to batch-only ordering */ }
 
-        // Compare against absolute instants, so an out-of-order or replayed
-        // batch still lands on the same parity as a live sequence would.
-        list.sort((a, b) => new Date(a.insert.log_datetime) - new Date(b.insert.log_datetime));
-        for (const item of list) {
-          const t = new Date(item.insert.log_datetime).getTime();
-          const priors = stored.filter(x => x < t).length;
-          item.isFirstOfDay = priors === 0;
-          if (item.insert.direction === 'UNKNOWN') {
-            item.insert.direction = priors % 2 === 0 ? 'IN' : 'OUT';
-            item.insert.direction_derived = true;
+        // A replayed export carries punches we already hold. They insert
+        // nothing (ON CONFLICT DO NOTHING below) and must not be counted
+        // twice here either, or every later punch's parity would flip.
+        const storedAt = new Set(stored.map(s => new Date(s.log_datetime).getTime()));
+        const fresh = list.filter(r => {
+          r.isReplay = storedAt.has(new Date(r.insert.log_datetime).getTime());
+          return !r.isReplay;
+        });
+        const shift = shiftFor(list[0].profile);
+        const merged = assignDays(
+          stored.map(s => ({ ...s, _stored: true }))
+            .concat(fresh.map(r => ({ ...r.insert, _item: r }))),
+          { shiftFor: () => shift }
+        );
+
+        for (const m of merged) {
+          if (m._item) {
+            const item = m._item;
+            item.insert.log_date = m.log_date;
+            item.insert.direction = m.direction;
+            if (m.direction_derived) item.insert.direction_derived = true;
+            item.insert.event_type = m.event_type;
+            item.priorsToday = m.priors;
+            item.isFirstOfDay = m.priors === 0;
+            item.dayStartedAt = m.day_started_at;
+          } else if (m._stored) {
+            const s = stored.find(x => x.id === m.id);
+            if (s && (s.log_date !== m.log_date || s.direction !== m.direction || s.event_type !== m.event_type)) {
+              storedPatches.push({ id: s.id, log_date: m.log_date, direction: m.direction,
+                                   direction_derived: m.direction_derived, event_type: m.event_type });
+            }
           }
-          item.priorsToday = priors;
-          // Name the event, not just the direction: Login / Break out /
-          // Break in / Logout is what the email and the screens show. The
-          // reader never sends this, so it is derived from position in the
-          // day plus the shift end - see deriveEventType.
-          item.insert.event_type = deriveEventType({
-            priorsToday: priors,
-            direction: item.insert.direction,
-            when: item.insert.log_datetime,
-            shift: shiftFor(item.profile),
-          });
-          stored.push(t);
         }
       }));
     }
 
-    if (!rows.length) {
-      return res.status(200).json({ success: true, received: records.length, stored: 0, emailed: 0, rejected });
+    // Punches we already hold (2b spotted them) are not sent to the database
+    // at all; the unique index would ignore them anyway, this just saves the
+    // round trip and keeps the duplicate count honest.
+    const toInsert = rows.filter(r => !r.isReplay);
+
+    if (!toInsert.length) {
+      return res.status(200).json({ success: true, received: records.length, stored: 0, emailed: 0,
+                                    duplicates: rows.length, bitrix_sent: 0, rejected, ms: Date.now() - startedAt });
     }
 
     // ---- 3. One insert for the whole batch. ON CONFLICT DO NOTHING means a
     //         replayed export inserts nothing and therefore emails nothing.
-//         Keyed on (employee_code, log_datetime, device_sn) — not direction,
-//         which is derived and can legitimately be recomputed.
+    //         Keyed on (employee_code, log_datetime, device_sn) — not
+    //         direction, which is derived and can legitimately be recomputed.
     const insRes = await fetch(
       `${SUPABASE_URL}/rest/v1/attendance_logs?on_conflict=employee_code,log_datetime,device_sn`,
       {
         method: 'POST',
         headers: { ...H, Prefer: 'return=representation,resolution=ignore-duplicates' },
-        body: JSON.stringify(rows.map(r => r.insert)),
+        body: JSON.stringify(toInsert.map(r => r.insert)),
       }
     );
     if (!insRes.ok) {
@@ -386,6 +447,25 @@ module.exports = async function handler(req, res) {
       return res.status(502).json({ error: 'insert failed', detail });
     }
     const inserted = await insRes.json();
+
+    // ---- 3a. Hindsight corrections to punches already stored (see 2b).
+    // Bounded and best-effort: a failed patch leaves an old label on an old
+    // row, which the admin's "Recompute days" can redo; it must never fail
+    // the request. Sent in parallel, a few at a time.
+    let relabelled = 0;
+    if (storedPatches.length) {
+      const batch = storedPatches.slice(0, 40);
+      await Promise.all(batch.map(async p => {
+        try {
+          const r = await fetch(`${SUPABASE_URL}/rest/v1/attendance_logs?id=eq.${p.id}`, {
+            method: 'PATCH', headers: { ...H, Prefer: 'return=minimal' },
+            body: JSON.stringify({ log_date: p.log_date, direction: p.direction,
+                                   direction_derived: p.direction_derived, event_type: p.event_type }),
+          });
+          if (r.ok) relabelled++;
+        } catch { /* best effort */ }
+      }));
+    }
 
     // The identity of a punch, matching the unique index (direction is derived).
     const keyOfInsert = r => `${r.employee_code}|${new Date(r.log_datetime).getTime()}|${r.device_sn || ''}`;
@@ -441,9 +521,18 @@ module.exports = async function handler(req, res) {
 
     const duplicates = rows.length - inserted.length;
 
-    // ---- 4. Notify ----
+    // ---- 4. Notify: an email to the person, and a line in their company's
+    //         Bitrix group posted AS them, through their own webhook ----
+    // Both happen in the same worker so they share one deadline: the Hobby
+    // function dies at 10s, and a slow SMTP host must not leave Bitrix with
+    // no time, or the other way round.
     let emailed = 0, failed = 0, deferred = 0;
+    let bitrixSent = 0, bitrixFailed = 0, bitrixSkipped = 0;
     const deadlineAt = startedAt + EMAIL_DEADLINE_MS;
+
+    // Group mapping and, for people with no hook of their own yet, the
+    // enroll numbers of colleagues whose hook can carry their line instead.
+    const bx = await loadBitrixContext({ SUPABASE_URL, H, profiles, byCode });
 
     await runBounded(
       toEmail, EMAIL_CONCURRENCY, deadlineAt,
@@ -454,23 +543,14 @@ module.exports = async function handler(req, res) {
         // Only annotate a boundary we can actually stand behind:
         //  - lateness, only on the day's FIRST punch (a 2pm return from lunch
         //    is not "4 hours late for a 9:30 shift");
-        //  - leaving early, only from the shift's midpoint onwards, so a
-        //    lunch-break exit isn't reported as going home early.
-        let pastMidpoint = false;
-        if (shift) {
-          const st = timeToMinutes(shift.start_time), en = timeToMinutes(shift.end_time);
-          const span = (((en - st) % 1440) + 1440) % 1440 || 1440;
-          const mid  = (st + Math.floor(span / 2)) % 1440;
-          pastMidpoint = offsetFromBoundary(timeToMinutes(istParts(meta.when).isoTime), mid) >= 0;
-        }
+        //  - leaving early, only on a Logout, so a lunch-break exit isn't
+        //    reported as going home early.
         const shiftEval = shift ? evaluateShift({
           shift,
-          firstIn:  (row.direction === 'IN'  && meta.isFirstOfDay) ? meta.when : null,
-          lastOut:  (row.direction === 'OUT' && pastMidpoint)      ? meta.when : null,
+          firstIn:  (row.direction === 'IN'  && meta.isFirstOfDay)       ? meta.when : null,
+          lastOut:  (row.direction === 'OUT' && row.event_type === 'LOGOUT') ? meta.when : null,
           date: meta.when,
         }) : null;
-
-        meta.shiftEval = shiftEval;   // reused by the Bitrix line below
 
         const { subject, html, text } = buildPunchEmail({
           fullName: p.full_name,
@@ -494,63 +574,24 @@ module.exports = async function handler(req, res) {
             email_error:  result.ok ? null : `${result.reason}: ${result.detail}`.slice(0, 400),
           }),
         }).catch(() => {});
+
+        // Bitrix, as the person. Silent when the company has no group mapped
+        // - that is a choice, not a fault - but a mapped group with nothing
+        // to post through is a failure worth logging.
+        if (Date.now() > deadlineAt) { bitrixSkipped++; return; }
+        const out = await postPunchToGroup({
+          SUPABASE_URL, H, bx, company: p.company, enroll: row.employee_code,
+          message: buildPunchChatLine({
+            fullName: p.full_name, eventType: row.event_type, direction: row.direction,
+            when: meta.when, shift: shiftEval, source: row.source,
+          }),
+        });
+        if (out.reason === 'no_group') bitrixSkipped++;
+        else if (out.ok) bitrixSent++;
+        else bitrixFailed++;
       },
       () => { deferred++; } // left 'pending' — resend from the admin tab
     );
-
-    // ---- 5. Bitrix ----
-    // One message per GROUP per batch, not per punch. Bitrix allows roughly
-    // two requests a second per portal, so a twenty-punch export sent one
-    // call at a time would spend ten seconds and blow the function's budget.
-    // Batched, the worst case is three calls - one per configured group - and
-    // every punch still appears, one line each.
-    let bitrixSent = 0, bitrixFailed = 0;
-    if (bitrix.isConfigured() && toEmail.length) {
-      try {
-        const tRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/bitrix_targets?select=company,dialog_id,enabled`,
-          { headers: H }
-        );
-        const targets = tRes.ok ? await tRes.json() : [];
-        const byCompany = new Map(targets.map(t => [t.company, t]));
-
-        const lines = new Map();   // dialog_id -> [line, ...]
-        for (const { row, meta } of toEmail) {
-          const t = byCompany.get(meta.profile.company);
-          if (!t || !t.enabled || !t.dialog_id) continue;   // unmapped = silent, by design
-          if (!lines.has(t.dialog_id)) lines.set(t.dialog_id, []);
-          lines.get(t.dialog_id).push(buildPunchChatLine({
-            fullName:  meta.profile.full_name,
-            eventType: row.event_type,
-            direction: row.direction,
-            when:      meta.when,
-            shift:     meta.shiftEval || null,
-            source:    row.source,
-          }));
-        }
-
-        // dialog -> company, so the log row says which company it was for.
-        const companyOf = new Map();
-        targets.forEach(t => { if (t.dialog_id && !companyOf.has(t.dialog_id)) companyOf.set(t.dialog_id, t.company); });
-
-        const posts = await Promise.all([...lines.entries()].map(([dialogId, list]) =>
-          bitrix.sendAndLog({
-            SUPABASE_URL, H, kind: 'punch',
-            company: companyOf.get(dialogId), dialogId,
-            message: list.join('\n'),
-          })
-        ));
-        posts.forEach(r => { if (r.ok) bitrixSent++; else {
-          bitrixFailed++;
-          console.error('[attendance] bitrix post failed:', r.reason, r.detail);
-        } });
-      } catch (e) {
-        // A Bitrix problem must never turn a stored punch into a 500 - the
-        // vendor would retry the whole export.
-        bitrixFailed++;
-        console.error('[attendance] bitrix step threw', String(e && e.message || e));
-      }
-    }
 
     // Always 200 once the punches are safely stored: the vendor logs a failure
     // for any non-2xx, and a mail problem is ours to retry, not theirs.
@@ -566,6 +607,8 @@ module.exports = async function handler(req, res) {
       backfill_skipped: inserted.filter(r => r.email_status === 'skipped').length,
       bitrix_sent: bitrixSent,
       bitrix_failed: bitrixFailed,
+      bitrix_skipped: bitrixSkipped,
+      relabelled,
       auto_linked: autoLinked,
       rejected,
       ms: Date.now() - startedAt,
@@ -600,21 +643,75 @@ const EVENT_LABEL = {
 // A repeat of the same event inside this window is treated as a double-tap.
 const SELFIE_REPEAT_WINDOW_MS = 60 * 1000;
 
-/**
- * Post one message into whichever Bitrix group a company is mapped to.
- * Silent when Bitrix is not configured or the company has no group - both
- * are ordinary states, not errors.
- */
-async function postToCompanyGroup({ SUPABASE_URL, H, company, message, kind = 'punch' }) {
-  if (!bitrix.isConfigured() || !company || !message) return { ok: false, reason: 'skipped' };
-  const r = await fetch(
-    `${SUPABASE_URL}/rest/v1/bitrix_targets?select=dialog_id,enabled&company=eq.${encodeURIComponent(company)}&limit=1`,
-    { headers: H }
-  );
-  if (!r.ok) return { ok: false, reason: 'targets_unavailable' };
-  const t = (await r.json())[0];
+/* ---------------------------------------------------------------------------
+ * Bitrix: who posts, and where
+ *
+ * WHERE is the company's mapped group (bitrix_targets). WHO is the person
+ * the punch is about, through their own BITRIX_HOOK_<enroll> - so the group
+ * reads "Kishan · Login 6:02 PM" posted by Kishan. Someone whose hook is not
+ * in Vercel yet is posted by a colleague from the same company (see
+ * bitrix.senderFor), so nobody silently disappears from the group.
+ *
+ * loadBitrixContext gathers both once per request; postPunchToGroup uses it
+ * per punch. Both are fail-soft: nothing here may cost a stored punch.
+ * ------------------------------------------------------------------------- */
+async function loadBitrixContext({ SUPABASE_URL, H, profiles, byCode }) {
+  const ctx = { targets: new Map(), enrollsByCompany: new Map(), configured: bitrix.isConfigured() };
+  if (!ctx.configured) return ctx;
+  try {
+    const tRes = await fetch(`${SUPABASE_URL}/rest/v1/bitrix_targets?select=company,dialog_id,enabled`, { headers: H });
+    const targets = tRes.ok ? await tRes.json() : [];
+    targets.forEach(t => ctx.targets.set(t.company, t));
+  } catch { /* no mapping = nothing posts, which the log will show */ }
+  // Colleagues' enroll numbers per company, for the fallback sender. Built
+  // from the profiles already fetched, so this costs no extra query.
+  const list = profiles || (byCode ? [...byCode.values()] : []);
+  for (const p of list) {
+    if (!p || !p.company || !p.employee_code) continue;
+    if (!ctx.enrollsByCompany.has(p.company)) ctx.enrollsByCompany.set(p.company, []);
+    ctx.enrollsByCompany.get(p.company).push(String(p.employee_code));
+  }
+  return ctx;
+}
+
+async function postPunchToGroup({ SUPABASE_URL, H, bx, company, enroll, message, kind = 'punch' }) {
+  if (!bx || !bx.configured || !company || !message) return { ok: false, reason: 'no_group' };
+  const t = bx.targets.get(company);
   if (!t || !t.enabled || !t.dialog_id) return { ok: false, reason: 'no_group' };
-  return bitrix.sendAndLog({ SUPABASE_URL, H, kind, company, dialogId: t.dialog_id, message });
+  const sender = bitrix.senderFor({ enroll, companyEnrolls: bx.enrollsByCompany.get(company) || [] });
+  if (!sender.base) {
+    const out = { ok: false, reason: 'not_configured', detail: 'No BITRIX_HOOK_<enroll> set for anyone.' };
+    await bitrix.logAttempt({ SUPABASE_URL, H, kind, company, dialogId: t.dialog_id, message, out });
+    return out;
+  }
+  try {
+    // Shorter timeout than the library default: this runs inside the punch
+    // handler's deadline, next to the email.
+    return await bitrix.sendAndLog({ SUPABASE_URL, H, kind, company, dialogId: t.dialog_id,
+                                     message, base: sender.base, timeoutMs: 3000 });
+  } catch (e) {
+    console.error('[attendance] bitrix post threw', String(e && e.message || e));
+    return { ok: false, reason: 'network', detail: String(e && e.message || e).slice(0, 200) };
+  }
+}
+
+/**
+ * Post one message into whichever Bitrix group a company is mapped to, as a
+ * particular person. Used by the selfie and leave paths, which handle one
+ * event at a time and so build their context on the spot.
+ */
+async function postToCompanyGroup({ SUPABASE_URL, H, company, enroll, message, kind = 'punch' }) {
+  if (!bitrix.isConfigured() || !company || !message) return { ok: false, reason: 'no_group' };
+  let profiles = [];
+  try {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/profiles?select=company,employee_code&company=eq.${encodeURIComponent(company)}&employee_code=not.is.null&limit=500`,
+      { headers: H }
+    );
+    if (r.ok) profiles = await r.json();
+  } catch { /* fallback sender list stays empty */ }
+  const bx = await loadBitrixContext({ SUPABASE_URL, H, profiles });
+  return postPunchToGroup({ SUPABASE_URL, H, bx, company, enroll, message, kind });
 }
 
 // Modes a signed-in employee (Supabase JWT, not the device key) may ask for.
@@ -662,7 +759,7 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
       const [lRes, tRes, pRes] = await Promise.all([
         sb(`leave_requests?id=eq.${id}&select=*&limit=1`).then(r => r.ok ? r.json() : []),
         sb('leave_types?select=id,name').then(r => r.ok ? r.json() : []),
-        sb(`profiles?id=eq.${encodeURIComponent(userId)}&select=full_name,company&limit=1`).then(r => r.ok ? r.json() : []),
+        sb(`profiles?id=eq.${encodeURIComponent(userId)}&select=full_name,company,employee_code&limit=1`).then(r => r.ok ? r.json() : []),
       ]);
       const leave = lRes[0];
       // Announce only your own request, and only while it is still pending -
@@ -673,7 +770,7 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
       const profile = pRes[0] || {};
       const typeName = (tRes.find(t => t.id === leave.leave_type_id) || {}).name || 'Leave';
       const out = await postToCompanyGroup({
-        SUPABASE_URL, H, company: profile.company,
+        SUPABASE_URL, H, company: profile.company, enroll: profile.employee_code,
         kind: 'leave',
         message: buildLeaveChatLine({
           kind: 'filed', fullName: profile.full_name || 'Employee', typeName,
@@ -693,19 +790,16 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
         sb(`holidays?select=holiday_date,name,company&holiday_date=eq.${today}`).then(r => r.ok ? r.json() : []),
         sb(`leave_requests?select=user_id,leave_type_id,day_part,start_date,end_date&status=eq.approved&start_date=lte.${today}&end_date=gte.${today}`).then(r => r.ok ? r.json() : []),
         sb('leave_types?select=id,name').then(r => r.ok ? r.json() : []),
-        sb(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type&log_date=eq.${today}&limit=3000`).then(r => r.ok ? r.json() : []),
+        // Today AND yesterday: a night shift that started at 6pm yesterday is
+        // still "today" for the people on it until they log out.
+        sb(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type&log_date=gte.${yesterdayOf(today)}&limit=3000`).then(r => r.ok ? r.json() : []),
       ]);
 
       const shiftById = new Map(shifts.map(s => [s.id, s]));
       const defaultShift = shifts.find(s => s.is_default) || null;
       const typeName = new Map(types.map(t => [t.id, t.name]));
       const leaveBy = new Map(leaves.map(l => [l.user_id, { ...l, type_name: typeName.get(l.leave_type_id) || 'Leave' }]));
-      const logsBy = new Map();
-      logs.forEach(r => {
-        if (!r.user_id) return;
-        if (!logsBy.has(r.user_id)) logsBy.set(r.user_id, []);
-        logsBy.get(r.user_id).push(r);
-      });
+      const logsBy = currentDayPunches(logs, today);
 
       const people = profiles.map(p => {
         const shift = (p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
@@ -908,15 +1002,30 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
       return res.status(429).json({ error: 'too_soon', detail: `You already recorded ${EVENT_LABEL[eventType]} moments ago.` });
     }
 
+    // Which attendance day this punch belongs to - the same gap rule as a
+    // biometric punch (see lib/attendance attendanceDateFor), so a WFH night
+    // worker's 01:00 Logout lands on the day they logged in, not on tomorrow.
+    let logDate = t.isoDate;
     let priorToday = 0;
     try {
-      const cRes = await fetch(
+      const pRes2 = await fetch(
         `${SUPABASE_URL}/rest/v1/attendance_logs?user_id=eq.${encodeURIComponent(userId)}` +
-        `&log_date=eq.${t.isoDate}&select=id&limit=200`,
+        `&select=log_datetime,log_date&order=log_datetime.desc&limit=1`,
         { headers: H }
       );
-      if (cRes.ok) priorToday = (await cRes.json()).length;
-    } catch { /* worst case we omit the shift note */ }
+      const prev = pRes2.ok ? (await pRes2.json())[0] : null;
+      if (prev) {
+        // day_started_at: the first punch of the previous punch's day.
+        const fRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/attendance_logs?user_id=eq.${encodeURIComponent(userId)}` +
+          `&log_date=eq.${prev.log_date}&select=log_datetime&order=log_datetime.asc&limit=200`,
+          { headers: H }
+        );
+        const dayRows = fRes.ok ? await fRes.json() : [];
+        logDate = attendanceDateFor(when, { ...prev, day_started_at: dayRows[0] ? dayRows[0].log_datetime : prev.log_datetime });
+        if (logDate === prev.log_date) priorToday = dayRows.length;
+      }
+    } catch { /* worst case: calendar date, and no shift note */ }
 
     // ---- 5. Store ----
     // The client sends its own lookup for the photo stamp; we do our own here
@@ -930,7 +1039,7 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
       employee_name: profile.full_name || null,
       direction:     EVENT_DIRECTION[eventType],
       log_datetime:  when.toISOString(),
-      log_date:      t.isoDate,
+      log_date:      logDate,
       log_time:      t.isoTime,
       device_sn:     '',
       device_name:   'WFH selfie',
@@ -1017,10 +1126,11 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
       }),
     }).catch(() => {});
 
-    // Same group post as a biometric punch - a WFH selfie is a punch. Awaited
-    // but never allowed to fail the request: the photo is already stored.
+    // Same group post as a biometric punch - a WFH selfie is a punch, posted
+    // as the person. Awaited but never allowed to fail the request: the
+    // photo is already stored.
     try {
-      await postToCompanyGroup({ SUPABASE_URL, H, company: profile.company, message:
+      await postToCompanyGroup({ SUPABASE_URL, H, company: profile.company, enroll: profile.employee_code, message:
         buildPunchChatLine({
           fullName: profile.full_name, eventType, direction: insertRow.direction,
           when, shift: shiftEval, source: 'selfie',

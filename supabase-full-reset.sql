@@ -250,7 +250,8 @@ select b.id as bucket,
 --        no rows to map until this runs.
 --
 -- Re-run them in that order in the SQL Editor. They are all idempotent, so
--- running one twice is harmless.
+-- running one twice is harmless. Or run supabase-reseed-after-reset.sql,
+-- which is those seeds (except shifts) in one file.
 --
 -- Then, still to do by hand:
 --   * your 2026 holiday list   → Admin → 🌴 Leave
