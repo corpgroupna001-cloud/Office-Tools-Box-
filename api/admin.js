@@ -659,6 +659,71 @@ module.exports = async function handler(req, res) {
         });
       }
 
+      // Per-employee webhooks: one Vercel env var BITRIX_HOOK_<enroll> holds
+      // each person's personal Bitrix webhook URL. This lists every enrolled
+      // person against their env var and says whether it is set - it NEVER
+      // returns the URL itself, which is a credential. It reads the env at
+      // request time, so it reflects whatever is in Vercel right now.
+      if (action === 'bitrix_hooks') {
+        const PREFIX = 'BITRIX_HOOK_';
+        // Which BITRIX_HOOK_* keys exist in the environment, and (privately)
+        // whether each value looks like a real https webhook. Values never
+        // leave this function.
+        const envKeys = Object.keys(process.env).filter(k => k.startsWith(PREFIX));
+        const setEnroll = new Map();   // enroll -> { set, valid }
+        envKeys.forEach(k => {
+          const enroll = k.slice(PREFIX.length);
+          const v = String(process.env[k] || '').trim();
+          setEnroll.set(enroll, { set: v.length > 0, valid: /^https:\/\/\S+$/.test(v) });
+        });
+
+        const [enrolments, profiles] = await Promise.all([
+          sb('device_enrolments?select=enroll_no,device_name,staff_code,user_id,punches&limit=2000').then(r => r.ok ? r.json() : []),
+          sb('profiles?select=id,full_name,company&limit=2000').then(r => r.ok ? r.json() : []),
+        ]);
+        const profById = new Map(profiles.map(p => [p.id, p]));
+
+        const employees = (enrolments || []).map(e => {
+          const enroll = String(e.enroll_no || '');
+          const prof = e.user_id ? profById.get(e.user_id) : null;
+          // Real name first (linked profile), then the device's own name, and
+          // only fall back to nothing when the device just echoes the number.
+          const deviceName = (e.device_name && e.device_name !== enroll) ? e.device_name : '';
+          const name = (prof && prof.full_name) || deviceName || '';
+          const env = setEnroll.get(enroll) || { set: false, valid: false };
+          return {
+            enroll_no: enroll,
+            env_key: PREFIX + enroll,
+            name,
+            company: (prof && prof.company) || null,
+            bound: !!e.user_id,
+            punches: e.punches || 0,
+            configured: env.set,
+            valid: env.valid,
+          };
+        }).sort((a, b) => a.enroll_no.length - b.enroll_no.length || a.enroll_no.localeCompare(b.enroll_no));
+
+        // Env keys that match no enrolled person - usually a typo in the enroll
+        // number, or someone who has not punched yet. Flag them so a webhook
+        // does not sit dead against a number the device never sends.
+        const enrolledSet = new Set(employees.map(e => e.enroll_no));
+        const orphans = envKeys
+          .map(k => k.slice(PREFIX.length))
+          .filter(en => !enrolledSet.has(en))
+          .sort();
+
+        return res.status(200).json({
+          employees,
+          orphans,
+          summary: {
+            total: employees.length,
+            configured: employees.filter(e => e.configured).length,
+            invalid: employees.filter(e => e.configured && !e.valid).length,
+            env_keys: envKeys.length,
+          },
+        });
+      }
+
       if (action === 'bitrix_save') {
         const company = String(body.company || '').trim();
         if (!company) return res.status(400).json({ error: 'company required' });

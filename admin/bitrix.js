@@ -14,6 +14,7 @@
 
     let bxData = null;
     let bxLogs = null;
+    let bxHooks = null;
 
     /* ---- the delivery log ------------------------------------------------
      * Sends used to leave no trace outside Vercel's function log, so "did the
@@ -355,6 +356,61 @@
         }
     }
 
+    /* ---- per-employee webhooks -----------------------------------------
+     * One Vercel env var, BITRIX_HOOK_<enroll>, per person. The API tells us
+     * only whether each is set (and looks like a URL) - never the URL itself.
+     * ------------------------------------------------------------------- */
+    async function loadHooks() {
+        if (!adminPassword) return;
+        const body = document.getElementById('bx-hooks-body');
+        body.innerHTML = '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold animate-pulse">Reading the environment…</td></tr>';
+        try {
+            bxHooks = await api('bitrix_hooks');
+            renderHooks();
+        } catch (e) {
+            document.getElementById('bx-hooks-summary').innerHTML =
+                `<div class="ws-chip bad">Could not read the webhook list</div>`;
+            body.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-rose-300 font-bold">${esc(e.message)}</td></tr>`;
+        }
+    }
+
+    function renderHooks() {
+        const d = bxHooks;
+        if (!d) return;
+        const s = d.summary || {};
+        const missing = (s.total || 0) - (s.configured || 0);
+        const sum = document.getElementById('bx-hooks-summary');
+        sum.innerHTML =
+            `<div class="flex flex-wrap items-center gap-2">` +
+                `<div class="ws-chip ${missing === 0 ? 'ok' : 'warn'}">${s.configured || 0} of ${s.total || 0} employees have a webhook</div>` +
+                (missing > 0 ? `<span class="text-slate-300 text-xs font-bold">${missing} still to add</span>` : '') +
+                (s.invalid ? `<div class="ws-chip bad">${s.invalid} set but not a URL</div>` : '') +
+                ((d.orphans || []).length
+                    ? `<span class="text-amber-300 text-xs font-bold ml-auto">${d.orphans.length} env var${d.orphans.length === 1 ? '' : 's'} match no enroll number: ${esc(d.orphans.join(', '))}</span>`
+                    : '') +
+            `</div>`;
+
+        const rows = d.employees || [];
+        document.getElementById('bx-hooks-body').innerHTML = rows.length ? rows.map(e => {
+            const status = !e.configured
+                ? `<span class="ws-chip warn">Not set</span>`
+                : (e.valid
+                    ? `<span class="ws-chip ok">Set</span>`
+                    : `<span class="ws-chip bad">Set — not a URL</span>`);
+            const name = e.name
+                ? esc(e.name)
+                : `<span class="text-slate-500 italic">no name on device</span>`;
+            return `
+            <tr>
+                <td class="font-mono text-white font-black">${esc(e.enroll_no)}</td>
+                <td class="text-slate-200 font-bold">${name}${e.bound ? '' : ' <span class="text-slate-500 text-[11px]">(no account)</span>'}</td>
+                <td class="text-slate-400 font-bold">${esc(e.company || '—')}</td>
+                <td class="font-mono text-slate-400 text-[11px]">${esc(e.env_key)}</td>
+                <td class="text-center">${status}</td>
+            </tr>`;
+        }).join('') : '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold">No enrolled employees yet.</td></tr>';
+    }
+
     document.getElementById('bx-body').addEventListener('change', ev => {
         const tr = ev.target.closest('tr[data-company]');
         if (tr && (ev.target.classList.contains('bx-dialog') || ev.target.classList.contains('bx-enabled'))) save(tr);
@@ -383,7 +439,7 @@
             if (bxLogs) loadLogs();
         }
     });
-    document.getElementById('bx-reload').addEventListener('click', () => loadBitrix());
+    document.getElementById('bx-reload').addEventListener('click', () => { loadBitrix(); loadHooks(); });
     document.getElementById('bx-log-reload').addEventListener('click', () => loadLogs());
     document.getElementById('bx-log-fails').addEventListener('change', () => loadLogs());
     document.getElementById('bx-log-limit').addEventListener('change', () => loadLogs());
@@ -403,6 +459,7 @@
             // bxData.groups, and falls back to the raw id when it is not there.
             if (!bxData) loadBitrix().then(loadLogs);
             else if (!bxLogs) loadLogs();
+            if (!bxHooks) loadHooks();
         });
     });
 })();

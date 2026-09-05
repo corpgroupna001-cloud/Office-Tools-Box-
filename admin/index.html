@@ -931,6 +931,26 @@
                     about two requests a second and a twenty-punch export sent one at a time would time out.
                 </p>
 
+                <!-- ---------- Per-employee webhooks ---------- -->
+                <div class="section-head mt-8 mb-3"><h3><span class="ic ic-chat"></span>Per-employee webhooks</h3><span class="sub">Each person's own Bitrix webhook, set in Vercel as BITRIX_HOOK_&lt;enroll no&gt;</span></div>
+                <div id="bx-hooks-summary" class="glass rounded-2xl p-4 mb-4"></div>
+                <div class="glass rounded-2xl overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr><th>Enroll</th><th>Employee</th><th>Company</th><th>Env var</th><th class="text-center">Webhook</th></tr>
+                            </thead>
+                            <tbody id="bx-hooks-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <p class="text-slate-400 text-xs font-bold mt-3 max-w-3xl leading-relaxed">
+                    The list is every biometric enroll number seen by the device, matched to the Vercel env var
+                    <b>BITRIX_HOOK_&lt;enroll&gt;</b>. WorkSuite only ever checks whether each is set — the webhook URL is a
+                    credential and never leaves Vercel, so it is never shown here. Add or change a URL in
+                    <b>Vercel → Settings → Environment Variables</b> and redeploy; then Recheck to refresh this list.
+                </p>
+
                 <!-- ---------- Delivery log ---------- -->
                 <div class="section-head mt-8 mb-3"><h3><span class="ic ic-report"></span>Delivery log</h3><span class="sub">Every message WorkSuite tried to send, newest first</span></div>
                 <div id="bx-log-summary" class="glass rounded-2xl p-4 mb-4"></div>
