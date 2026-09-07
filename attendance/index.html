@@ -491,15 +491,25 @@
                 if (!shifts || !shifts.length) return;
                 myShift = shifts.find(s => prof && s.id === prof.shift_id) || shifts.find(s => s.is_default) || null;
                 if (!myShift) return;
-                const days = (myShift.working_days || []).map(Number);
-                const label = days.length === 7 ? 'All days'
-                    : days.every((d, i) => i === 0 || d === days[i - 1] + 1) && days.length > 2
-                        ? `${DAY_NAMES[days[0]]}–${DAY_NAMES[days[days.length - 1]]}`
-                        : days.map(d => DAY_NAMES[d]).join(', ');
+                // A second shift (dual), if the columns exist and one is set
+                let shift2 = null, company2 = '';
+                try {
+                    const { data: d2 } = await sb.from('profiles').select('shift2_id, company2').eq('id', session.user.id).maybeSingle();
+                    if (d2 && d2.shift2_id) { shift2 = shifts.find(s => s.id === d2.shift2_id) || null; company2 = d2.company2 || ''; }
+                } catch { /* before the migration */ }
+                const dayLabel = sh => {
+                    const days = (sh.working_days || []).map(Number);
+                    return days.length === 7 ? 'All days'
+                        : days.every((d, i) => i === 0 || d === days[i - 1] + 1) && days.length > 2
+                            ? `${DAY_NAMES[days[0]]}–${DAY_NAMES[days[days.length - 1]]}`
+                            : days.map(d => DAY_NAMES[d]).join(', ');
+                };
                 const overnight = hhmm(myShift.end_time) <= hhmm(myShift.start_time) ? ' 🌙' : '';
                 el('shift-line').innerHTML =
                     `${esc(myShift.name)} · ${esc(hhmm(myShift.start_time))}–${esc(hhmm(myShift.end_time))}${overnight}` +
-                    ` <span class="off">· ${esc(label)} · ${myShift.grace_minutes}m grace</span>`;
+                    ` <span class="off">· ${esc(dayLabel(myShift))} · ${myShift.grace_minutes}m grace</span>` +
+                    (shift2 ? `<br>+ ${esc(shift2.name)} · ${esc(hhmm(shift2.start_time))}–${esc(hhmm(shift2.end_time))}` +
+                        ` <span class="off">· ${esc(dayLabel(shift2))}${company2 ? ' · for ' + esc(company2) : ''} · one window ${esc(hhmm(myShift.start_time))}–${esc(hhmm(shift2.end_time))} on shared days</span>` : '');
                 el('shift-line').style.display = '';
             } catch { /* shifts table may not exist yet — page works without it */ }
         }

@@ -795,7 +795,8 @@
                 <div class="section-head mb-3"><h3><span class="ic ic-clock"></span>Shift templates</h3><span class="sub">Define once, assign to people below</span></div>
                 <div id="shift-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8"></div>
 
-                <div class="section-head mb-3"><h3><span class="ic ic-users"></span>Who works which shift</h3><span class="sub">Changes save immediately</span></div>
+                <div class="section-head mb-3"><h3><span class="ic ic-users"></span>Who works which shift</h3><span class="sub">Changes save immediately · a second shift makes the day one window (first start to last end) and, for another company, posts an automatic Logout / Login to both Bitrix chats when it starts</span></div>
+                <p id="shift-dual-note" class="text-xs font-bold text-amber-300 mb-3" hidden>Second shifts are switched off until <b>supabase-dual-shift-migration.sql</b> has been run in Supabase.</p>
                 <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
                     <input id="shift-emp-search" type="text" placeholder="Search employee…"
                         class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
@@ -805,7 +806,7 @@
                 <div class="glass rounded-2xl overflow-hidden">
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm">
-                            <thead><tr><th>Employee</th><th>Company</th><th>Shift</th></tr></thead>
+                            <thead><tr><th>Employee</th><th>Company</th><th>Shift</th><th>Second shift <span class="text-slate-500 font-medium normal-case tracking-normal">(dual)</span></th><th>For company</th></tr></thead>
                             <tbody id="shift-emp-tbody"></tbody>
                         </table>
                     </div>
@@ -2753,19 +2754,35 @@
         function renderShiftEmployees() {
             const shifts = shiftData.shifts || [];
             const rows = shiftVisibleEmployees();
+            const companies = shiftData.companies || [];
+            const dualReady = shiftData.dual_ready !== false;
+            const shiftOpts = (sel, blank) => `<option value="__none__"${!sel ? ' selected' : ''}>${blank}</option>` +
+                shifts.map(sh => `<option value="${sh.id}"${String(sel) === String(sh.id) ? ' selected' : ''}>${escapeHtml(sh.name)} (${escapeHtml(hhmm(sh.start_time))}–${escapeHtml(hhmm(sh.end_time))})</option>`).join('');
             document.getElementById('shift-emp-tbody').innerHTML = rows.length ? rows.map(e => `
-                <tr>
+                <tr${e.shift2_id ? ' class="dual"' : ''}>
                     <td class="font-bold text-white">${escapeHtml(e.full_name || '—')}<br>
                         <span class="text-slate-400 text-xs font-medium">${escapeHtml(e.email || '')}</span></td>
                     <td class="text-slate-300 font-bold">${escapeHtml(e.company || '—')}</td>
                     <td>
                         <select data-shift-for="${escapeHtml(e.id)}" class="glass px-3 py-2 rounded-xl text-sm font-bold focus:outline-none min-w-[190px]">
-                            <option value="__none__"${!e.shift_id ? ' selected' : ''}>— No shift —</option>
-                            ${shifts.map(sh => `<option value="${sh.id}"${String(e.shift_id) === String(sh.id) ? ' selected' : ''}>${escapeHtml(sh.name)} (${escapeHtml(hhmm(sh.start_time))}–${escapeHtml(hhmm(sh.end_time))})</option>`).join('')}
+                            ${shiftOpts(e.shift_id, '— No shift —')}
+                        </select>
+                    </td>
+                    <td>
+                        <select data-shift2-for="${escapeHtml(e.id)}" class="glass px-3 py-2 rounded-xl text-sm font-bold focus:outline-none min-w-[190px]"${dualReady ? '' : ' disabled title="Run supabase-dual-shift-migration.sql first"'}>
+                            ${shiftOpts(e.shift2_id, '— None —')}
+                        </select>
+                    </td>
+                    <td>
+                        <select data-company2-for="${escapeHtml(e.id)}" class="glass px-3 py-2 rounded-xl text-sm font-bold focus:outline-none min-w-[170px]"${e.shift2_id && dualReady ? '' : ' disabled'}>
+                            <option value="__none__"${!e.company2 ? ' selected' : ''}>Same company</option>
+                            ${companies.map(c => `<option value="${escapeHtml(c)}"${e.company2 === c ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('')}
                         </select>
                     </td>
                 </tr>`).join('')
-                : '<tr><td colspan="3" class="p-8 text-center text-slate-400 font-bold">No matching employees.</td></tr>';
+                : '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold">No matching employees.</td></tr>';
+            const note = document.getElementById('shift-dual-note');
+            if (note) note.hidden = dualReady;
         }
 
         // ---- modal ----
@@ -2879,23 +2896,35 @@
             }
         });
 
-        // Per-employee assignment — saves on change.
+        // Per-employee assignment — saves on change. Three pickers per row:
+        // the shift, the optional second shift (dual), and which company the
+        // second shift is for (its Bitrix chat gets the 5pm auto login).
         document.getElementById('shift-emp-tbody').addEventListener('change', async ev => {
-            const sel = ev.target.closest('[data-shift-for]');
+            const sel = ev.target.closest('[data-shift-for],[data-shift2-for],[data-company2-for]');
             if (!sel) return;
-            const userId = sel.dataset.shiftFor;
+            const userId = sel.dataset.shiftFor || sel.dataset.shift2For || sel.dataset.company2For;
             const val = sel.value === '__none__' ? null : sel.value;
+            const emp = (shiftData.employees || []).find(e => e.id === userId);
+            const body = { action: 'shift_assign', user_ids: [userId] };
+            if (sel.dataset.shiftFor) body.shift_id = val;
+            else if (sel.dataset.shift2For) { body.shift2_id = val; if (!val) body.company2 = null; }
+            else body.company2 = val;
             sel.disabled = true;
             try {
-                await shiftApi({ action: 'shift_assign', user_ids: [userId], shift_id: val });
-                const emp = (shiftData.employees || []).find(e => e.id === userId);
-                if (emp) emp.shift_id = val ? Number(val) : null;
+                await shiftApi(body);
+                if (emp) {
+                    if ('shift_id' in body) emp.shift_id = val ? Number(val) : null;
+                    if ('shift2_id' in body) emp.shift2_id = val ? Number(val) : null;
+                    if ('company2' in body) emp.company2 = body.company2;
+                }
                 // Refresh the headcount badges without losing the search box.
                 const fresh = await shiftApi({ action: 'shift_list' });
                 shiftData.shifts = fresh.shifts; shiftData.unassigned = fresh.unassigned;
                 renderShifts();
             } catch (e) {
-                wsDialog.alert({ icon: '⚠️', danger: true, title: 'Could not assign shift', message: escapeHtml(e.message) });
+                const migration = /migration_needed|shift2_id|company2/.test(e.message);
+                wsDialog.alert({ icon: '⚠️', danger: true, title: migration ? 'Dual shifts need the migration' : 'Could not assign shift',
+                    message: migration ? 'Run <b>supabase-dual-shift-migration.sql</b> in the Supabase SQL editor once, then try again.' : escapeHtml(e.message) });
                 loadShifts();
             } finally {
                 sel.disabled = false;

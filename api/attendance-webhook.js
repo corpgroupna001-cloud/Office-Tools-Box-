@@ -54,6 +54,7 @@ const {
   weekOffsFor, holidayOn, DAY_STATUS,
   assignDays, attendanceDateFor, NEW_DAY_GAP_MS,
   computeMonthlyPay, computePay,
+  effectiveShift, shiftPartAt, shiftDays, istIsoWeekday,
   buildPunchChatLine, buildLeaveChatLine,
 } = require('../lib/attendance');
 
@@ -129,6 +130,21 @@ function currentDayPunches(logs, today) {
   return out;
 }
 
+/**
+ * profiles with the dual-shift columns (shift2_id, company2). Until the
+ * migration adds them PostgREST rejects the select, so fall back to the old
+ * column list rather than let a punch fail over a missing column.
+ */
+const PROFILE_COLS = 'id,email,full_name,company,employee_code,shift_id,is_wfh';
+const PROFILE_COLS_DUAL = PROFILE_COLS + ',shift2_id,company2';
+async function fetchProfiles(SUPABASE_URL, H, extra = '') {
+  let r = await fetch(`${SUPABASE_URL}/rest/v1/profiles?select=${PROFILE_COLS_DUAL}${extra}&limit=2000`, { headers: H });
+  if (!r.ok && /shift2_id|company2/.test(await r.clone().text().catch(() => ''))) {
+    r = await fetch(`${SUPABASE_URL}/rest/v1/profiles?select=${PROFILE_COLS}${extra}&limit=2000`, { headers: H });
+  }
+  return r;
+}
+
 /** Run tasks with bounded concurrency, stopping cleanly at a wall-clock deadline. */
 async function runBounded(items, limit, deadlineAt, worker, onSkipped) {
   let i = 0;
@@ -164,7 +180,12 @@ module.exports = async function handler(req, res) {
 
   if (!API_KEY) return res.status(500).json({ error: 'BIOMETRIC_API_KEY not configured on server.' });
 
-  if (supplied !== API_KEY) {
+  // The scheduler that fires the dual-shift switch may carry its own secret
+  // (CRON_SECRET) instead of the device key; nothing else accepts it.
+  const CRON_SECRET = process.env.CRON_SECRET || '';
+  const isJobCall = String(req.query && req.query.job || '') === 'shift_switch' && CRON_SECRET && supplied === CRON_SECRET;
+
+  if (supplied !== API_KEY && !isJobCall) {
     // Not the device key — the only other accepted caller is a signed-in
     // employee filing their own selfie punch.
     let maybe = req.body;
@@ -181,6 +202,14 @@ module.exports = async function handler(req, res) {
     }
     await new Promise(r => setTimeout(r, 400)); // slow down guessing
     return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  // The dual-shift switch job (pg_cron / any scheduler, every few minutes):
+  // posts "Logout" to the first company's chat and "Login" to the second's
+  // at the moment the second shift starts, for people who are on site.
+  if (String(req.query && req.query.job || '') === 'shift_switch') {
+    if (!SUPABASE_URL || !SERVICE_KEY) return res.status(500).json({ error: 'Supabase server config missing.' });
+    return runShiftSwitchJob({ res, SUPABASE_URL, SERVICE_KEY });
   }
 
   // A GET with a valid key is a health check — handy when pasting the URL
@@ -215,10 +244,7 @@ module.exports = async function handler(req, res) {
 
   try {
     // ---- 1. Everyone we know about, in one query ----
-    const pRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/profiles?select=id,email,full_name,company,employee_code,shift_id&limit=2000`,
-      { headers: H }
-    );
+    const pRes = await fetchProfiles(SUPABASE_URL, H);
     if (!pRes.ok) {
       return res.status(502).json({ error: 'profiles fetch failed', detail: (await pRes.text()).slice(0, 200) });
     }
@@ -235,7 +261,23 @@ module.exports = async function handler(req, res) {
         defaultShift = list.find(x => x.is_default) || null;
       }
     } catch { /* no shifts table yet */ }
-    const shiftFor = p => (p && p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+    const shift1Of = p => (p && p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+    const shift2Of = p => (p && p.shift2_id && shiftById.get(p.shift2_id)) || null;
+    // The shift that applies to a person at an instant: a dual-shift person's
+    // merged window on the days both shifts cover, else whichever covers it.
+    const shiftFor = (p, when) => {
+      const s2 = shift2Of(p);
+      if (!s2) return shift1Of(p);
+      const d = when ? new Date(when) : new Date();
+      return effectiveShift(shift1Of(p), s2, istIsoWeekday(d));
+    };
+    // Which company's chat a punch belongs to: the second one once its window
+    // has begun (the 7pm logout is a Jobways logout), the first before that.
+    const companyFor = (p, when) => {
+      const s2 = shift2Of(p);
+      if (!s2 || !p.company2) return p.company;
+      return shiftPartAt(shift1Of(p), s2, when) === 2 ? p.company2 : p.company;
+    };
 
     const byCode = new Map(
       profiles.filter(p => p.employee_code).map(p => [String(p.employee_code).trim(), p])
@@ -392,11 +434,11 @@ module.exports = async function handler(req, res) {
           r.isReplay = storedAt.has(new Date(r.insert.log_datetime).getTime());
           return !r.isReplay;
         });
-        const shift = shiftFor(list[0].profile);
+        const who = list[0].profile;
         const merged = assignDays(
           stored.map(s => ({ ...s, _stored: true }))
             .concat(fresh.map(r => ({ ...r.insert, _item: r }))),
-          { shiftFor: () => shift }
+          { shiftFor: punch => shiftFor(who, punch && punch.log_datetime) }
         );
 
         for (const m of merged) {
@@ -539,7 +581,7 @@ module.exports = async function handler(req, res) {
       toEmail, EMAIL_CONCURRENCY, deadlineAt,
       async ({ row, meta }) => {
         const p = meta.profile;
-        const shift = shiftFor(p);
+        const shift = shiftFor(p, meta.when);
 
         // Only annotate a boundary we can actually stand behind:
         //  - lateness, only on the day's FIRST punch (a 2pm return from lunch
@@ -581,7 +623,7 @@ module.exports = async function handler(req, res) {
         // to post through is a failure worth logging.
         if (Date.now() > deadlineAt) { bitrixSkipped++; return; }
         const out = await postPunchToGroup({
-          SUPABASE_URL, H, bx, company: p.company, enroll: row.employee_code,
+          SUPABASE_URL, H, bx, company: companyFor(p, meta.when), enroll: row.employee_code,
           message: buildPunchChatLine({
             fullName: p.full_name, eventType: row.event_type, direction: row.direction,
             when: meta.when, shift: shiftEval, source: row.source,
@@ -785,7 +827,7 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
     // ---------------- team_status ----------------
     if (body.mode === 'team_status') {
       const [profiles, shifts, policies, holidays, leaves, types, logs] = await Promise.all([
-        sb('profiles?select=id,full_name,email,company,shift_id,is_wfh&limit=2000').then(r => r.ok ? r.json() : []),
+        fetchProfiles(SUPABASE_URL, H).then(r => r.ok ? r.json() : []),
         sb('shifts?select=*').then(r => r.ok ? r.json() : []),
         sb('company_policies?select=company,week_offs').then(r => r.ok ? r.json() : []),
         sb(`holidays?select=holiday_date,name,company&holiday_date=eq.${today}`).then(r => r.ok ? r.json() : []),
@@ -804,8 +846,9 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
 
       const people = profiles.map(p => {
         const shift = (p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+        const shift2 = (p.shift2_id && shiftById.get(p.shift2_id)) || null;
         const day = classifyDay({
-          date: today, shift,
+          date: today, shift, shift2,
           weekOffs: weekOffsFor(p.company, policies),
           holiday: holidayOn(today, holidays, p.company),
           leave: leaveBy.get(p.id) || null,
@@ -836,7 +879,7 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
     const from = dates[0], to = dates[dates.length - 1];
 
     const [profileRows, shifts, policies, holidays, leaves, types, logs] = await Promise.all([
-      sb(`profiles?select=id,full_name,company,shift_id,is_wfh&id=eq.${encodeURIComponent(userId)}&limit=1`).then(r => r.ok ? r.json() : []),
+      fetchProfiles(SUPABASE_URL, H, `&id=eq.${encodeURIComponent(userId)}`).then(r => r.ok ? r.json() : []),
       sb('shifts?select=*').then(r => r.ok ? r.json() : []),
       sb('company_policies?select=company,week_offs').then(r => r.ok ? r.json() : []),
       sb(`holidays?select=holiday_date,name,company&holiday_date=gte.${from}&holiday_date=lte.${to}`).then(r => r.ok ? r.json() : []),
@@ -850,11 +893,12 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
     const profile = profileRows[0] || {};
     const shift = (profile.shift_id && shifts.find(s => s.id === profile.shift_id))
                || shifts.find(s => s.is_default) || null;
+    const shift2 = (profile.shift2_id && shifts.find(s => s.id === profile.shift2_id)) || null;
     const typeName = new Map(types.map(t => [t.id, t.name]));
     const weekOffs = weekOffsFor(profile.company, policies);
 
     const mon = buildMonth({
-      ym: month, company: profile.company, shift, weekOffs, holidays,
+      ym: month, company: profile.company, shift, shift2, weekOffs, holidays,
       leaves: leaves.map(l => ({ ...l, type_name: typeName.get(l.leave_type_id) || 'Leave' })),
       punches: logs, today,
     });
@@ -873,6 +917,7 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
       legend: DAY_STATUS,
       week_offs: weekOffs,
       shift_name: shift ? shift.name : null,
+      shift2: shift2 ? { id: shift2.id, name: shift2.name, start_time: shift2.start_time, end_time: shift2.end_time, working_days: shiftDays(shift2), company: profile.company2 || null } : null,
       totals: mon.totals,
       days: mon.days.map(d => ({
         date: d.date, status: d.status,
@@ -950,6 +995,86 @@ async function ownPay({ sb, userId, mon, shifts, today }) {
     second_role: secondRole,
     note: sal && sal.note ? String(sal.note).slice(0, 200) : null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Dual-shift switch. For everyone with a second shift for another company,
+// at the moment that shift starts on a day it covers (5:00 PM Mon-Fri for
+// the SportsMart-then-Jobways case) and only if the person is on site, post
+// "Logout · shift over" to the first company's chat and "Login" to the
+// second's, as the person. Idempotent: shift_switch_posts claims one row per
+// person per day before anything is sent, so a scheduler firing every few
+// minutes posts exactly once. Runs for ~60 minutes after the start so a
+// missed tick is caught, and never before.
+// ---------------------------------------------------------------------------
+const SWITCH_WINDOW_MIN = 60;
+
+async function runShiftSwitchJob({ res, SUPABASE_URL, SERVICE_KEY }) {
+  const H = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
+  const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...H, ...(opts.headers || {}) } });
+  const now = new Date(Date.now());
+  const today = istParts(now).isoDate;
+  const weekday = istIsoWeekday(now);
+  const nowMin = timeToMinutes(istParts(now).isoTime);
+
+  const pRes = await fetchProfiles(SUPABASE_URL, H, '&shift2_id=not.is.null');
+  if (!pRes.ok) return res.status(502).json({ error: 'profiles fetch failed', detail: (await pRes.text()).slice(0, 200) });
+  const people = (await pRes.json()).filter(p => p.shift2_id && p.company2 && p.company2 !== p.company);
+  if (!people.length) return res.status(200).json({ ok: true, checked: 0, posted: 0, reason: 'nobody has a second company shift' });
+
+  const shifts = await sb('shifts?select=*').then(r => r.ok ? r.json() : []);
+  const byId = new Map(shifts.map(x => [x.id, x]));
+  const defaultShift = shifts.find(x => x.is_default) || null;
+
+  // Due = the second shift covers today and its start was within the window.
+  const due = people.filter(p => {
+    const s2 = byId.get(p.shift2_id);
+    if (!s2 || !shiftDays(s2).includes(weekday)) return false;
+    const since = (((nowMin - timeToMinutes(s2.start_time)) % 1440) + 1440) % 1440;
+    return since >= 0 && since < SWITCH_WINDOW_MIN;
+  });
+  if (!due.length) return res.status(200).json({ ok: true, checked: people.length, due: 0, posted: 0 });
+
+  // On site = has punched today and the last punch is an IN.
+  const ids = due.map(p => encodeURIComponent(p.id)).join(',');
+  const logs = await sb(`attendance_logs?select=user_id,direction,log_datetime&user_id=in.(${ids})&log_date=eq.${today}&order=log_datetime.asc&limit=2000`).then(r => r.ok ? r.json() : []);
+  const lastBy = new Map();
+  logs.forEach(l => lastBy.set(l.user_id, l));
+
+  const bx = await loadBitrixContext({ SUPABASE_URL, H, profiles: people });
+  const results = [];
+  for (const p of due) {
+    const last = lastBy.get(p.id);
+    if (!last || last.direction !== 'IN') { results.push({ user: p.full_name, skipped: 'not on site' }); continue; }
+    // Claim today's switch for this person; a duplicate means another tick did it.
+    const claim = await sb('shift_switch_posts?on_conflict=user_id,post_date', {
+      method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+      body: JSON.stringify({ user_id: p.id, post_date: today }),
+    });
+    if (!claim.ok) { results.push({ user: p.full_name, error: (await claim.text()).slice(0, 160) }); continue; }
+    const claimed = await claim.json();
+    if (!claimed.length) { results.push({ user: p.full_name, skipped: 'already posted' }); continue; }
+
+    const s1 = (p.shift_id && byId.get(p.shift_id)) || defaultShift || null;
+    const s2 = byId.get(p.shift2_id);
+    const at = new Date(`${today}T${String(s2.start_time).slice(0, 8)}+05:30`);
+    const first = p.company ? await postPunchToGroup({
+      SUPABASE_URL, H, bx, company: p.company, enroll: p.employee_code, kind: 'shift_switch',
+      message: buildPunchChatLine({ fullName: p.full_name, eventType: 'LOGOUT', direction: 'OUT', when: at, source: 'auto',
+                                    note: `${s1 ? s1.name : 'first'} shift over · moving to ${p.company2}` }),
+    }) : { ok: false, reason: 'no_group' };
+    const second = await postPunchToGroup({
+      SUPABASE_URL, H, bx, company: p.company2, enroll: p.employee_code, kind: 'shift_switch',
+      message: buildPunchChatLine({ fullName: p.full_name, eventType: 'LOGIN', direction: 'IN', when: at, source: 'auto',
+                                    note: `${s2.name} shift · auto` }),
+    });
+    await sb(`shift_switch_posts?user_id=eq.${encodeURIComponent(p.id)}&post_date=eq.${today}`, {
+      method: 'PATCH', headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ posted_at: new Date().toISOString(), first_ok: !!first.ok, second_ok: !!second.ok, detail: `${first.reason || 'ok'} / ${second.reason || 'ok'}`.slice(0, 200) }),
+    }).catch(() => {});
+    results.push({ user: p.full_name, first: first.ok ? 'sent' : first.reason, second: second.ok ? 'sent' : second.reason });
+  }
+  return res.status(200).json({ ok: true, checked: people.length, due: due.length, posted: results.filter(r => r.second === 'sent').length, results });
 }
 
 // ---------------------------------------------------------------------------
@@ -1160,7 +1285,9 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
       const shRes = await fetch(`${SUPABASE_URL}/rest/v1/shifts?select=*`, { headers: H });
       if (shRes.ok) {
         const list = await shRes.json();
-        const shift = list.find(x => x.id === profile.shift_id) || list.find(x => x.is_default) || null;
+        const shift1 = list.find(x => x.id === profile.shift_id) || list.find(x => x.is_default) || null;
+        const shift2 = (profile.shift2_id && list.find(x => x.id === profile.shift2_id)) || null;
+        const shift = shift2 ? effectiveShift(shift1, shift2, istIsoWeekday(new Date(when))) : shift1;
         if (shift) {
           const st = timeToMinutes(shift.start_time), en = timeToMinutes(shift.end_time);
           const span = (((en - st) % 1440) + 1440) % 1440 || 1440;

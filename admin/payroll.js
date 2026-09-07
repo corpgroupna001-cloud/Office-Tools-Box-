@@ -177,7 +177,7 @@
             <tr data-uid="${e.id}">
                 <td><b>${escapeHtml(e.name)}</b><div class="text-[11px] text-slate-400 font-bold">${escapeHtml(e.email || '')}</div></td>
                 <td class="text-slate-300 font-bold">${escapeHtml(e.company || '—')}</td>
-                <td class="text-slate-300 font-bold">${escapeHtml(e.shift_name || '—')}${e.shift_assigned ? '' : ' <span class="text-slate-500">(default)</span>'}</td>
+                <td class="text-slate-300 font-bold">${escapeHtml(e.shift_name || '—')}${e.shift_assigned ? '' : ' <span class="text-slate-500">(default)</span>'}${e.shift2_name ? `<br><span class="text-slate-500 text-xs">+ ${escapeHtml(e.shift2_name)}${e.company2 ? ' · ' + escapeHtml(e.company2) : ''}</span>` : ''}</td>
                 <td class="text-right font-black text-slate-300" title="${escapeHtml(wdNote)}">${e.working_days}
                     <div class="text-[10px] text-slate-500 font-bold whitespace-nowrap">${monthDays} − ${offDays} off</div></td>
                 <td class="text-right font-black text-white" title="${escapeHtml(presentNote || 'no late, absent or leave days')}">${t.daysPresent}

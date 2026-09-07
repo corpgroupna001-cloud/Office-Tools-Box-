@@ -945,6 +945,12 @@
                 const { data: shifts } = await rootSb.from('shifts').select('id,name,start_time,end_time,is_default');
                 const sh = (shifts || []).find(s => p && s.id === p.shift_id) || (shifts || []).find(s => s.is_default);
                 if (sh) chips.push(`<span><span class="ic ic-clock"></span>${esc(sh.name)} · ${hhmmAmPm(String(sh.start_time).slice(0,5))} – ${hhmmAmPm(String(sh.end_time).slice(0,5))}</span>`);
+                // Dual shift, when the columns exist and one is set
+                try {
+                    const { data: d2 } = await rootSb.from('profiles').select('shift2_id, company2').eq('id', currentUser.id).maybeSingle();
+                    const sh2 = d2 && d2.shift2_id ? (shifts || []).find(s => s.id === d2.shift2_id) : null;
+                    if (sh2) chips.push(`<span><span class="ic ic-clock"></span>+ ${esc(sh2.name)} · ${hhmmAmPm(String(sh2.start_time).slice(0,5))} – ${hhmmAmPm(String(sh2.end_time).slice(0,5))}${d2.company2 ? ' · ' + esc(d2.company2) : ''}</span>`);
+                } catch {}
             } catch {}
             if (p && p.is_wfh) chips.push(`<span><span class="ic ic-home"></span>Work from home</span>`);
             if (p && p.employee_code) chips.push(`<span><span class="ic ic-fingerprint"></span>ID ${esc(p.employee_code)}</span>`);

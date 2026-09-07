@@ -11,7 +11,17 @@ const { sendMail, senderFor: mailSenderFor, COMPANY_TO_USER, COMING_SOON_COMPANI
 const bitrix = require('../lib/bitrix');
 const { istParts, istToday, buildPunchEmail, evaluateShift, describeWorkingDays,
         weekOffsFor, buildMonth, computePay, computeMonthlyPay, monthDates, DAY_STATUS,
-        buildLeaveChatLine, assignDays } = require('../lib/attendance');
+        buildLeaveChatLine, assignDays, effectiveShift, istIsoWeekday, shiftDays } = require('../lib/attendance');
+
+/**
+ * ',shift2_id,company2' once the dual-shift migration has run, '' before it —
+ * so every profile select below works either way instead of failing on a
+ * column that is not there yet.
+ */
+async function dualCols(sb) {
+  try { const r = await sb('profiles?select=shift2_id&limit=1'); return r.ok ? ',shift2_id,company2' : ''; }
+  catch { return ''; }
+}
 
 /* ---------------------------------------------------------------------------
  * Built-in public-holiday lists, for the "Pre-fill" button in Admin -> Holidays.
@@ -76,8 +86,9 @@ const HOLIDAY_COMPANIES = [
  * patches only the rows that come out different. Dry run unless `apply`.
  * ------------------------------------------------------------------------- */
 async function recomputePunches({ sb, from, to, apply, employeeCode, deadlineAt }) {
+  const dual = await dualCols(sb);
   const [pRes, shiftsRes, logsRes] = await Promise.all([
-    sb('profiles?select=id,full_name,company,employee_code,shift_id&limit=2000'),
+    sb(`profiles?select=id,full_name,company,employee_code,shift_id${dual}&limit=2000`),
     sb('shifts?select=*'),
     sb(`attendance_logs?select=id,user_id,employee_code,log_datetime,log_date,direction,direction_derived,event_type,source` +
        (employeeCode ? `&employee_code=eq.${encodeURIComponent(employeeCode)}` : '') +
@@ -92,9 +103,11 @@ async function recomputePunches({ sb, from, to, apply, employeeCode, deadlineAt 
   const shiftById = new Map(shifts.map(s => [s.id, s]));
   const defaultShift = shifts.find(s => s.is_default) || null;
   const profById = new Map(profiles.map(p => [p.id, p]));
-  const shiftOf = row => {
+  const shiftOf = (row, when) => {
     const p = row.user_id ? profById.get(row.user_id) : null;
-    return (p && p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+    const s1 = (p && p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+    const s2 = (p && p.shift2_id && shiftById.get(p.shift2_id)) || null;
+    return s2 ? effectiveShift(s1, s2, istIsoWeekday(new Date(when || row.log_datetime))) : s1;
   };
 
   // One person = one employee code (or, for selfie-only people, one user).
@@ -110,8 +123,7 @@ async function recomputePunches({ sb, from, to, apply, employeeCode, deadlineAt 
     // The shift of whoever the punches belong to now - a row bound after the
     // fact carries the user_id, so this picks up their real shift.
     const owner = list.find(x => x.user_id) || list[0];
-    const shift = shiftOf(owner);
-    for (const m of assignDays(list, { shiftFor: () => shift })) {
+    for (const m of assignDays(list, { shiftFor: punch => shiftOf(owner, punch && punch.log_datetime) })) {
       const s = list.find(x => x.id === m.id);
       if (s.log_date !== m.log_date || s.direction !== m.direction || s.event_type !== m.event_type) {
         changes.push({ id: s.id, employee_code: s.employee_code, log_datetime: s.log_datetime,
@@ -1243,8 +1255,9 @@ module.exports = async function handler(req, res) {
       const from = dates[0], to = dates[dates.length - 1];
       const today = istToday();
 
+      const dual = await dualCols(sb);
       const [profiles, shifts, policies, holidays, leaveRows, leaveTypes, logs, salaries, secondaries] = await Promise.all([
-        fetchAll('profiles?select=id,full_name,email,company,employee_code,shift_id,is_wfh&order=full_name.asc'),
+        fetchAll(`profiles?select=id,full_name,email,company,employee_code,shift_id,is_wfh${dual}&order=full_name.asc`),
         sb('shifts?select=*').then(r => r.ok ? r.json() : []),
         sb('company_policies?select=company,week_offs').then(r => r.ok ? r.json() : []),
         sb(`holidays?select=holiday_date,name,company&holiday_date=gte.${from}&holiday_date=lte.${to}`).then(r => r.ok ? r.json() : []),
@@ -1285,13 +1298,14 @@ module.exports = async function handler(req, res) {
 
       const rows = people.map(p => {
         const shift = (p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+        const shift2 = (p.shift2_id && shiftById.get(p.shift2_id)) || null;
         const weekOffs = weekOffsFor(p.company, policies);
         // Named `mon` on purpose: `month` is the validated YYYY-MM string from
         // above, and shadowing it here would let a junk ?month= build a grid
         // whose days did not line up with the `dates` header the UI renders.
         const mon = buildMonth({
           ym: month,
-          company: p.company, shift, weekOffs,
+          company: p.company, shift, shift2, weekOffs,
           holidays, leaves: leavesByUser.get(p.id) || [],
           punches: logsByUser.get(p.id) || [], today,
         });
@@ -1346,6 +1360,8 @@ module.exports = async function handler(req, res) {
           employee_code: p.employee_code || null,
           is_wfh: p.is_wfh === true,
           shift_name: shift ? shift.name : null,
+          shift2_name: shift2 ? shift2.name : null,
+          company2: p.company2 || null,
           shift_assigned: !!(p.shift_id && shiftById.get(p.shift_id)),
           week_offs: weekOffs,
           week_offs_label: describeWorkingDays(weekOffs),
@@ -1584,9 +1600,10 @@ module.exports = async function handler(req, res) {
       const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...SH, ...(opts.headers || {}) } });
 
       if (action === 'shift_list') {
+        const dual = await dualCols(sb);
         const [sRes, pRes] = await Promise.all([
           sb('shifts?select=*&order=start_time.asc'),
-          sb('profiles?select=id,full_name,email,company,shift_id&order=full_name.asc&limit=2000'),
+          sb(`profiles?select=id,full_name,email,company,shift_id${dual}&order=full_name.asc&limit=2000`),
         ]);
         if (!sRes.ok) return res.status(502).json({ error: 'shifts fetch failed', detail: (await sRes.text()).slice(0, 200) });
         const shifts = await sRes.json();
@@ -1603,6 +1620,8 @@ module.exports = async function handler(req, res) {
           })),
           employees: profiles,
           unassigned: profiles.filter(p => !p.shift_id).length,
+          dual_ready: !!dual,
+          companies: HOLIDAY_COMPANIES,
         });
       }
 
@@ -1658,14 +1677,27 @@ module.exports = async function handler(req, res) {
       if (action === 'shift_assign') {
         const ids = Array.isArray(body.user_ids) ? body.user_ids.filter(Boolean) : [];
         if (!ids.length) return res.status(400).json({ error: 'user_ids required' });
-        const shiftId = body.shift_id === null || body.shift_id === '' ? null : body.shift_id;
+        const nul = v => v === null || v === undefined || v === '' ? null : v;
+        // Only the keys sent are changed: the first-shift picker sends
+        // shift_id, the second-shift picker sends shift2_id (+ company2).
+        const patch = {};
+        if ('shift_id' in body) patch.shift_id = nul(body.shift_id);
+        if ('shift2_id' in body) patch.shift2_id = nul(body.shift2_id);
+        if ('company2' in body) patch.company2 = nul(body.company2);
+        if (patch.shift2_id === null && !('company2' in body)) patch.company2 = null;
+        if (patch.company2 && !HOLIDAY_COMPANIES.includes(patch.company2)) return res.status(400).json({ error: 'unknown company' });
+        if (!Object.keys(patch).length) return res.status(400).json({ error: 'nothing to change' });
         const inList = ids.map(encodeURIComponent).join(',');
         const r = await sb(`profiles?id=in.(${inList})`, {
           method: 'PATCH', headers: { Prefer: 'return=representation' },
-          body: JSON.stringify({ shift_id: shiftId }),
+          body: JSON.stringify(patch),
         });
-        if (!r.ok) return res.status(502).json({ error: 'assign failed', detail: (await r.text()).slice(0, 200) });
-        return res.status(200).json({ success: true, updated: (await r.json()).length, shift_id: shiftId });
+        if (!r.ok) {
+          const detail = (await r.text()).slice(0, 200);
+          if (/shift2_id|company2/.test(detail)) return res.status(409).json({ error: 'migration_needed', detail: 'Run supabase-dual-shift-migration.sql first — profiles has no shift2_id / company2 columns yet.' });
+          return res.status(502).json({ error: 'assign failed', detail });
+        }
+        return res.status(200).json({ success: true, updated: (await r.json()).length, ...patch });
       }
 
       return res.status(400).json({ error: 'Unknown shift action' });
@@ -1683,7 +1715,8 @@ module.exports = async function handler(req, res) {
       const AH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
       const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...AH, ...(opts.headers || {}) } });
       const loadProfiles = async () => {
-        const r = await sb('profiles?select=id,email,full_name,company,employee_code,shift_id&limit=2000');
+        const dual = await dualCols(sb);
+        const r = await sb(`profiles?select=id,email,full_name,company,employee_code,shift_id${dual}&limit=2000`);
         if (!r.ok) throw new Error('profiles fetch failed: ' + (await r.text()).slice(0, 160));
         return r.json();
       };
@@ -1802,7 +1835,9 @@ module.exports = async function handler(req, res) {
         .map(p => {
           const punches = byUser.get(p.id) || [];
           const s = summarize(punches);
-          const shift = (p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+          const shift1 = (p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+          const shift2 = (p.shift2_id && shiftById.get(p.shift2_id)) || null;
+          const shift = shift2 ? effectiveShift(shift1, shift2, istIsoWeekday(dayAnchor)) : shift1;
           const sh = evaluateShift({ shift, firstIn: s.first_in, lastOut: s.last_out, date: dayAnchor });
 
           const holiday = holidayFor(p.company);
