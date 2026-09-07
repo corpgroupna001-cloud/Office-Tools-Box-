@@ -265,6 +265,44 @@
             </div>
         </div>
 
+        <!-- Pay this month: the person's own salary worked out from these
+             punches, the way the admin pay sheet works it out. -->
+        <div class="card clock" id="pay-card" style="display:none;"><a id="pay" class="anchor"></a>
+            <h2><span class="ic ic-salary"></span> Pay this month <span id="pay-month" class="muted" style="font-size:13px;font-weight:700;"></span></h2>
+            <p class="hint" id="pay-hint">Monthly salary ÷ scheduled working days = your per-day rate; every day you work adds one per-day rate. Updates live from your punches.</p>
+            <div class="pay-grid" id="pay-grid">
+                <div class="pay-tile main">
+                    <div class="lbl">Earned so far</div>
+                    <div class="val ok" id="pay-earned">—</div>
+                    <div class="sub" id="pay-earned-sub"></div>
+                    <div class="ws-bar" style="margin-top:10px"><i id="pay-bar" style="width:0%"></i></div>
+                </div>
+                <div class="pay-tile">
+                    <div class="lbl">Per day</div>
+                    <div class="val" id="pay-perday">—</div>
+                    <div class="sub" id="pay-perday-sub"></div>
+                </div>
+                <div class="pay-tile">
+                    <div class="lbl">Projected month</div>
+                    <div class="val" id="pay-proj">—</div>
+                    <div class="sub" id="pay-proj-sub"></div>
+                </div>
+                <div class="pay-tile">
+                    <div class="lbl">Not earned</div>
+                    <div class="val bad" id="pay-lost">—</div>
+                    <div class="sub" id="pay-lost-sub"></div>
+                </div>
+            </div>
+            <p id="pay-role2" class="pay-role2" style="display:none;"></p>
+            <div class="scroll" id="pay-table-wrap">
+                <table>
+                    <thead><tr><th>Date</th><th>Status</th><th>In → Out</th><th>Hours</th><th class="num">Earned</th><th class="num">Running total</th></tr></thead>
+                    <tbody id="pay-body"></tbody>
+                </table>
+            </div>
+            <p id="pay-empty" class="muted" style="display:none;font-size:12.5px;margin:0;"></p>
+        </div>
+
         <!-- History -->
         <div class="card toolbar">
             <div class="seg">
@@ -680,7 +718,7 @@
 
         async function loadCalendar() {
             const ym = el('month').value || fmtISO.format(new Date()).slice(0, 7);
-            if (calMonthLoaded === ym && calData) return renderCalendar();
+            if (calMonthLoaded === ym && calData) { renderCalendar(); renderPay(calData); return; }
             el('mcal').innerHTML = '<div class="h" style="grid-column:1/-1;padding:26px 0;">Loading…</div>';
             el('cal-tot').innerHTML = ''; el('cal-legend').innerHTML = '';
             try {
@@ -694,9 +732,74 @@
                 if (!r.ok) throw new Error(data.detail || data.error || 'Could not load the calendar.');
                 calData = data; calMonthLoaded = ym;
                 renderCalendar();
+                renderPay(data);
             } catch (e) {
                 el('mcal').innerHTML = `<div class="h" style="grid-column:1/-1;padding:26px 0;color:#fda4af;">${esc(e.message)}</div>`;
             }
+        }
+
+        // ---- Pay this month ----
+        function renderPay(d) {
+            const P = d && d.pay;
+            const card = el('pay-card');
+            if (!P) { card.style.display = 'none'; return; }
+            card.style.display = '';
+            const cur = P.currency || 'INR';
+            const money = (n, frac = 0) => n == null || !isFinite(Number(n)) ? '—'
+                : new Intl.NumberFormat('en-IN', { style: 'currency', currency: cur, maximumFractionDigits: frac, minimumFractionDigits: frac }).format(Number(n));
+            const monthLabel = new Intl.DateTimeFormat('en-GB', { timeZone: IST, month: 'long', year: 'numeric' }).format(new Date(d.month + '-01T12:00:00+05:30'));
+            el('pay-month').textContent = '· ' + monthLabel;
+
+            if (!P.has_rate) {
+                el('pay-grid').style.display = 'none'; el('pay-table-wrap').style.display = 'none'; el('pay-role2').style.display = 'none';
+                el('pay-empty').style.display = '';
+                el('pay-empty').textContent = 'Your monthly salary has not been entered yet, so there is nothing to work out. Once your admin adds it (Admin → Salary), this card shows what you have earned day by day.';
+                return;
+            }
+            el('pay-grid').style.display = ''; el('pay-table-wrap').style.display = ''; el('pay-empty').style.display = 'none';
+
+            const pct = P.monthly_salary ? Math.min(100, Math.round((P.earned || 0) / P.monthly_salary * 100)) : 0;
+            el('pay-earned').textContent = money(P.earned);
+            el('pay-earned-sub').textContent = `${P.days_present} of ${P.working_days} working days · ${pct}% of ${money(P.monthly_salary)}`;
+            el('pay-bar').style.width = pct + '%';
+            el('pay-perday').textContent = money(P.per_day, 2);
+            el('pay-perday-sub').textContent = `${money(P.monthly_salary)} ÷ ${P.working_days} working days`;
+            el('pay-proj').textContent = money(P.projected);
+            el('pay-proj-sub').textContent = P.remaining_days > 0
+                ? `if you work the ${P.remaining_days} scheduled day${P.remaining_days > 1 ? 's' : ''} still to come`
+                : 'No scheduled days left this month';
+            const lost = (P.absent_cost || 0) + (P.leave_cost || 0);
+            el('pay-lost').textContent = money(lost);
+            el('pay-lost-sub').textContent = lost > 0
+                ? [P.absent_days ? `${P.absent_days} absent` : '', P.leave_days ? `${P.leave_days} on leave` : ''].filter(Boolean).join(' · ') + ' · not paid under this rule'
+                : 'No absent or leave days so far';
+
+            const r2 = P.second_role;
+            if (r2 && r2.has_rate) {
+                el('pay-role2').style.display = '';
+                el('pay-role2').innerHTML = `<b>${esc(r2.label)}</b>${r2.shift_name ? ' · ' + esc(r2.shift_name) : ''}: ${r2.days_present} day${r2.days_present === 1 ? '' : 's'} × ${esc(money(r2.rate, 2))} = <b>${esc(money(r2.gross, 2))}</b> on top`;
+            } else el('pay-role2').style.display = 'none';
+
+            // Day by day, newest first, with the running total as it stood that day
+            const BADGE = { present: 'present', late: 'late', absent: 'absent', leave: 'leave', holiday: 'holiday', weekoff: 'weekoff', pending: 'pending' };
+            const L = d.legend || {};
+            const days = (d.days || []).filter(x => x.date <= d.today);
+            let run = 0;
+            const rows = days.map(x => { run += Number(x.earned || 0); return { ...x, run }; }).reverse();
+            const hm = m => m ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : '—';
+            const t12 = t => { if (!t) return null; const [h, m] = t.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+            el('pay-body').innerHTML = rows.map(x => {
+                const label = x.status === 'pending' ? 'Not in yet' : (x.note || (L[x.status] && L[x.status].label) || x.status);
+                const io = x.in ? `${esc(t12(x.in))}${x.out ? ' → ' + esc(t12(x.out)) : ' → …'}` : '<span class="muted">—</span>';
+                return `<tr${x.date === d.today ? ' class="today"' : ''}>
+                    <td style="white-space:nowrap;font-weight:800">${esc(fmtDay.format(new Date(x.date + 'T12:00:00+05:30')))}</td>
+                    <td><span class="ws-badge ${BADGE[x.status] || 'mute'}">${esc(label)}</span>${x.late ? ` <span class="muted" style="font-size:11px">+${x.late}m late</span>` : ''}</td>
+                    <td style="white-space:nowrap">${io}</td>
+                    <td class="muted">${hm(x.minutes)}</td>
+                    <td class="num">${x.earned ? esc(money(x.earned, 2)) : '<span class="muted">—</span>'}</td>
+                    <td class="num" style="font-weight:800">${esc(money(x.run, 2))}</td>
+                </tr>`;
+            }).join('') || `<tr><td colspan="6" class="muted" style="text-align:center;padding:14px 0;">The month has not started yet.</td></tr>`;
         }
 
         function renderCalendar() {
@@ -1262,19 +1365,20 @@
         });
         el('month').addEventListener('change', () => {
             calMonthLoaded = null;                 // the cached month is stale now
-            if (view === 'calendar') loadCalendar();
+            loadCalendar();                        // the pay card follows the month too
             load();
         });
 
         await loadMyShift();
         await loadLeave();
         await load();
+        loadCalendar();                            // pay card + calendar, from the same call
 
         // Live: a punch lands in the DB and the page updates without a refresh.
         sb.channel('attendance-self')
           .on('postgres_changes',
               { event: 'INSERT', schema: 'public', table: 'attendance_logs', filter: `user_id=eq.${session.user.id}` },
-              () => load())
+              () => { calMonthLoaded = null; load(); loadCalendar(); })
           .subscribe();
     })();
     </script>

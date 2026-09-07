@@ -53,6 +53,7 @@ const {
   istToday, monthDates, buildMonth, classifyDay,
   weekOffsFor, holidayOn, DAY_STATUS,
   assignDays, attendanceDateFor, NEW_DAY_GAP_MS,
+  computeMonthlyPay, computePay,
   buildPunchChatLine, buildLeaveChatLine,
 } = require('../lib/attendance');
 
@@ -859,6 +860,14 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
     });
 
     const hhmm = iso => iso ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(iso)) : null;
+
+    // ---- Pay: the person's OWN salary, worked out exactly the way the admin
+    // pay sheet does it (monthly ÷ scheduled working days × days worked), so
+    // the number an employee sees here is the number that gets paid. Only
+    // ever for the caller — the salaries table is service-key only, and this
+    // route already knows who is asking.
+    const pay = await ownPay({ sb, userId, mon, shifts, today });
+
     return res.status(200).json({
       month, today,
       legend: DAY_STATUS,
@@ -869,12 +878,78 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
         date: d.date, status: d.status,
         in: hhmm(d.firstIn), out: hhmm(d.lastOut),
         late: d.lateMinutes || 0,
+        minutes: d.workedMinutes || 0,
+        worked: !!d.worked,
         note: d.holidayName || d.leaveType || null,
+        earned: pay.has_rate && d.worked ? pay.per_day_exact : 0,
       })),
+      pay: {
+        has_rate: pay.has_rate, currency: pay.currency,
+        monthly_salary: pay.monthly_salary, per_day: pay.per_day,
+        working_days: pay.working_days, days_present: pay.days_present,
+        earned: pay.earned, remaining_days: pay.remaining_days, projected: pay.projected,
+        absent_days: pay.absent_days, absent_cost: pay.absent_cost,
+        leave_days: pay.leave_days, leave_cost: pay.leave_cost,
+        second_role: pay.second_role, note: pay.note,
+      },
     });
   } catch (e) {
     return res.status(500).json({ error: 'view_failed', detail: String(e && e.message || e).slice(0, 200) });
   }
+}
+
+/**
+ * The caller's own pay for one month. Mirrors pay_list in api/admin.js:
+ *   per-day  = monthly salary ÷ scheduled working days (shift days minus
+ *              company week-offs minus holidays)
+ *   earned   = per-day × days actually worked so far (rounded once)
+ *   projected = per-day × (worked + scheduled days still to come, today
+ *               included while it is still open)
+ * Absent and leave days simply do not earn under this rule; their cost is
+ * shown so the running total explains itself.
+ */
+async function ownPay({ sb, userId, mon, shifts, today }) {
+  const [salRows, roleRows] = await Promise.all([
+    sb(`salaries?user_id=eq.${encodeURIComponent(userId)}&select=*&limit=1`).then(r => r.ok ? r.json() : []).catch(() => []),
+    sb(`secondary_roles?user_id=eq.${encodeURIComponent(userId)}&select=user_id,label,shift_id,per_day_rate,currency,note&limit=1`).then(r => r.ok ? r.json() : []).catch(() => []),
+  ]);
+  const sal = salRows[0] || null;
+  const T = mon.totals;
+  const p = computeMonthlyPay({
+    monthlySalary: sal ? sal.monthly_salary : null,
+    workingDays: T.workingDays, daysPresent: T.daysPresent,
+    currency: sal ? sal.currency : 'INR',
+  });
+  const perDayExact = p.hasRate ? p.monthlySalary / T.workingDays : 0;
+  const r2 = roleRows[0] || null;
+  const upTo = mon.days.filter(d => d.date <= today);
+  const remaining = mon.days.filter(d => (d.date > today && d.status === 'future') || (d.date === today && d.status === 'pending')).length;
+  const absentDays = upTo.filter(d => d.status === 'absent').length;
+  const leaveDays  = upTo.filter(d => d.status === 'leave').length;
+  const money = n => Math.round(n * 100) / 100;
+
+  let secondRole = null;
+  if (r2) {
+    const r2Shift = (r2.shift_id && shifts.find(s => s.id === r2.shift_id)) || null;
+    const r2Days = (r2Shift && Array.isArray(r2Shift.working_days)) ? r2Shift.working_days.map(Number) : [1,2,3,4,5,6,7];
+    const dp2 = mon.days.filter(d => d.worked && r2Days.includes(d.weekday)).length;
+    const p2 = computePay({ perDayRate: r2.per_day_rate, daysPresent: dp2, currency: r2.currency });
+    secondRole = { label: r2.label || 'Second role', shift_name: r2Shift ? r2Shift.name : null,
+                   rate: p2.hasRate ? Number(r2.per_day_rate) : null, days_present: dp2, gross: p2.gross, has_rate: p2.hasRate, currency: p2.currency };
+  }
+
+  return {
+    has_rate: p.hasRate, currency: p.currency,
+    monthly_salary: p.monthlySalary, per_day: p.perDay, per_day_exact: money(perDayExact),
+    working_days: T.workingDays, days_present: T.daysPresent,
+    earned: p.gross,
+    remaining_days: remaining,
+    projected: p.hasRate ? money(perDayExact * (T.daysPresent + remaining)) : null,
+    absent_days: absentDays, absent_cost: p.hasRate ? money(perDayExact * absentDays) : null,
+    leave_days: leaveDays,  leave_cost:  p.hasRate ? money(perDayExact * leaveDays)  : null,
+    second_role: secondRole,
+    note: sal && sal.note ? String(sal.note).slice(0, 200) : null,
+  };
 }
 
 // ---------------------------------------------------------------------------

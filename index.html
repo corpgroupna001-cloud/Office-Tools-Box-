@@ -405,12 +405,12 @@
                         <div class="dash-strip-skel" style="width:100%"><span class="ws-skel"></span><span class="ws-skel"></span><span class="ws-skel"></span><span class="ws-skel"></span><span class="ws-skel"></span><span class="ws-skel"></span><span class="ws-skel"></span></div>
                     </div>
                     <div class="ws-legend">
-                        <span><i style="background:#10b981"></i>Present</span>
-                        <span><i style="background:#f59e0b"></i>Late</span>
-                        <span><i style="background:#ef4444"></i>Absent</span>
-                        <span><i style="background:#8b5cf6"></i>Leave</span>
-                        <span><i style="background:#ec4899"></i>Holiday</span>
-                        <span><i style="background:var(--ws-bg-2);border:1px solid var(--ws-border)"></i>Week off</span>
+                        <span><i class="present"></i>Present</span>
+                        <span><i class="late"></i>Late</span>
+                        <span><i class="absent"></i>Absent</span>
+                        <span><i class="leave"></i>Leave</span>
+                        <span><i class="holiday"></i>Holiday</span>
+                        <span><i class="weekoff"></i>Week off</span>
                     </div>
                 </div>
 
@@ -442,7 +442,6 @@
                         <a class="ws-tool" href="./chat/"><span class="ico teal"><span class="ic ic-chat"></span></span><div class="t"><b>Chat &amp; Calls</b><span>Messages, voice, video</span></div><span class="stat" id="tool-chat">—</span></a>
                         <a class="ws-tool" href="./recordings/"><span class="ico rose"><span class="ic ic-video"></span></span><div class="t"><b>Friday Check-in</b><span>WFH weekly clips</span></div></a>
                         <a class="ws-tool" href="./signature/"><span class="ico violet"><span class="ic ic-pen"></span></span><div class="t"><b>Email Signature</b><span>Branded signature</span></div></a>
-                        <a class="ws-tool" href="./admin/"><span class="ico"><span class="ic ic-shield"></span></span><div class="t"><b>Admin console</b><span>Password protected</span></div><span class="stat"><span class="ic ic-lock sm"></span></span></a>
                     </div>
                 </div>
             </div>
@@ -1015,12 +1014,16 @@
             document.getElementById('strip-sub').textContent = `${worked14} worked · ${fmtDM.format(atNoon(from))} – ${fmtDM.format(atNoon(today))}`;
         }
 
-        let teamAll = [], teamShowAll = false;
+        let teamAll = [], teamShowAll = false, teamAvatars = null;
         async function loadTeamToday() {
             const body = document.getElementById('team-body');
             const counts = document.getElementById('team-counts');
             const toggle = document.getElementById('team-toggle');
-            const t = await apiView({ mode: 'team_status' });
+            const [t] = await Promise.all([
+                apiView({ mode: 'team_status' }),
+                teamAvatars ? null : rootSb.from('profiles').select('id, avatar_url').not('avatar_url', 'is', null).limit(300)
+                    .then(r => { teamAvatars = new Map((r.data || []).map(p => [p.id, p.avatar_url])); }).catch(() => { teamAvatars = new Map(); }),
+            ]);
             const ORDER = { present: 0, late: 1, pending: 2, leave: 3, holiday: 4, weekoff: 5, absent: 6 };
             teamAll = (t.people || []).slice().sort((a, b) => {
                 const ac = a.company === myCompany ? 0 : 1, bc = b.company === myCompany ? 0 : 1;
@@ -1041,7 +1044,7 @@
                 const list = teamShowAll ? teamAll : teamAll.slice(0, 8);
                 body.innerHTML = list.map(p => `
                     <tr${p.id === currentUser.id ? ' class="me"' : ''}>
-                        <td><div class="who">${avatarHtml(p, 'sm')}<div><b>${esc(p.name)}${p.id === currentUser.id ? ' <span class="muted">(you)</span>' : ''}</b>${p.is_wfh ? '<small>Work from home</small>' : ''}<small class="co">${esc(p.company || '—')}</small></div></div></td>
+                        <td><div class="who">${avatarHtml({ ...p, avatar_url: teamAvatars && teamAvatars.get(p.id) || '' }, 'sm')}<div><b>${esc(p.name)}${p.id === currentUser.id ? ' <span class="muted">(you)</span>' : ''}</b>${p.is_wfh ? '<small>Work from home</small>' : ''}<small class="co">${esc(p.company || '—')}</small></div></div></td>
                         <td class="muted col-co">${esc(p.company || '—')}</td>
                         <td><span class="ws-badge ${STATUS_BADGE[p.status] || 'mute'}">${esc(p.status === 'pending' ? 'Not in yet' : p.label)}</span></td>
                     </tr>`).join('') || `<tr><td colspan="3"><div class="ws-empty">Nobody on the roster yet.</div></td></tr>`;

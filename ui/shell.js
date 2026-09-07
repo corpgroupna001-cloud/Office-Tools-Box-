@@ -47,9 +47,8 @@
             { key: 'typing',     title: 'ZenType',          href: '/typingtest/', icon: 'keyboard' },
             { key: 'quiz',       title: 'MCQ Quiz',         href: '/mcqquiz/',    icon: 'quiz' },
         ]},
-        { label: 'Admin', items: [
-            { key: 'admin',      title: 'Admin console',    href: '/admin/',      icon: 'shield', tag: 'Locked' },
-        ]},
+        // The admin console is deliberately not listed: it is reached by its
+        // URL and its own password, and employees have no reason to see it.
     ];
 
     var state = { mounted: false, opts: {}, user: null, explicitUser: false, sb: null, uid: null, unreadTimer: null };
