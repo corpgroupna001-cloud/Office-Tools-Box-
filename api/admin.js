@@ -14,6 +14,57 @@ const { istParts, istToday, buildPunchEmail, evaluateShift, describeWorkingDays,
         buildLeaveChatLine, assignDays } = require('../lib/attendance');
 
 /* ---------------------------------------------------------------------------
+ * Built-in public-holiday lists, for the "Pre-fill" button in Admin -> Holidays.
+ *
+ * All five companies sit in Hyderabad, so this is the Telangana General
+ * Holidays list (G.O. for 2026), which is what an HR team here would start
+ * from before trimming it to what the company actually closes for. A few
+ * widely-given days the state marks Optional are included as optional.
+ * Dates of the Islamic festivals depend on the moon and can move by a day;
+ * Bonalu's date is fixed by the government nearer the time, so it is left
+ * out rather than guessed. Every entry can be deleted or edited afterwards.
+ * ------------------------------------------------------------------------- */
+const HOLIDAY_LISTS = {
+  '2026': [
+    { date: '2026-01-01', name: "New Year's Day", optional: true },
+    { date: '2026-01-14', name: 'Bhogi' },
+    { date: '2026-01-15', name: 'Sankranti / Pongal' },
+    { date: '2026-01-26', name: 'Republic Day' },
+    { date: '2026-02-15', name: 'Maha Shivaratri' },
+    { date: '2026-03-03', name: 'Holi' },
+    { date: '2026-03-19', name: 'Ugadi' },
+    { date: '2026-03-21', name: 'Eid ul-Fitr (Ramzan)' },
+    { date: '2026-03-27', name: 'Sri Rama Navami' },
+    { date: '2026-04-03', name: 'Good Friday' },
+    { date: '2026-04-14', name: "Dr. B.R. Ambedkar's Birthday" },
+    { date: '2026-05-01', name: 'May Day', optional: true },
+    { date: '2026-05-27', name: 'Eid ul-Azha (Bakrid)' },
+    { date: '2026-06-26', name: 'Muharram' },
+    { date: '2026-08-15', name: 'Independence Day' },
+    { date: '2026-08-26', name: 'Eid Milad-un-Nabi' },
+    { date: '2026-09-04', name: 'Sri Krishna Ashtami' },
+    { date: '2026-09-14', name: 'Vinayaka Chavithi' },
+    { date: '2026-10-02', name: 'Gandhi Jayanti' },
+    { date: '2026-10-20', name: 'Vijaya Dasami (Dussehra)' },
+    { date: '2026-10-21', name: 'Day after Vijaya Dasami' },
+    { date: '2026-11-08', name: 'Deepavali' },
+    { date: '2026-11-24', name: 'Kartika Purnima / Guru Nanak Jayanti' },
+    { date: '2026-12-25', name: 'Christmas' },
+  ],
+};
+
+// The companies that always get a holiday card, even before anyone in them
+// has punched or been given a holiday. Mirrors the list in admin/holidays.js.
+const HOLIDAY_COMPANIES = [
+  'Nova Sportsmart Private Limited',
+  'CORPGROUP',
+  'Protathlitis Sportsmart LLP',
+  'Jobways Point LLP',
+  'Genie Lamp Private Limited',
+  'Navyug Raise A Player Foundation',
+];
+
+/* ---------------------------------------------------------------------------
  * Re-derive attendance days, directions and events for stored punches.
  *
  * The rules live in lib/attendance assignDays and are applied as punches
@@ -1480,6 +1531,45 @@ module.exports = async function handler(req, res) {
         const r = await sb(`holidays?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: { Prefer: 'return=representation' } });
         if (!r.ok) return res.status(502).json({ error: 'delete failed', detail: (await r.text()).slice(0, 200) });
         return res.status(200).json({ success: true, deleted: (await r.json()).length });
+      }
+
+      // Pre-fill a year's public holidays for one company, several, or all.
+      // Only dates the company does not already have are added, so running it
+      // twice - or after an admin has trimmed the list - changes nothing that
+      // was set by hand. Every company gets its OWN rows (not the shared "all
+      // companies" list), so each list can then be edited on its own.
+      if (action === 'holiday_prefill') {
+        const year = String(body.year || new Date().getFullYear()).slice(0, 4);
+        const list = HOLIDAY_LISTS[year];
+        if (!list) {
+          return res.status(400).json({ error: 'no_list',
+            detail: `No built-in holiday list for ${year}. Add the dates by hand, or ask for the ${year} list to be added.` });
+        }
+        // Which companies: the ones asked for, else everyone with people plus
+        // the fixed set the rest of the panel knows.
+        let companies = Array.isArray(body.companies) ? body.companies.map(String).filter(Boolean) : [];
+        if (!companies.length) {
+          const pr = await sb('profiles?select=company&limit=2000').then(r => r.ok ? r.json() : []);
+          companies = [...new Set([...HOLIDAY_COMPANIES, ...pr.map(p => p.company).filter(Boolean)])];
+        }
+        const existing = await sb(`holidays?select=holiday_date,company&holiday_date=gte.${year}-01-01&holiday_date=lte.${year}-12-31&limit=5000`)
+          .then(r => r.ok ? r.json() : []);
+        const have = new Set(existing.map(h => `${h.holiday_date}|${h.company || '*'}`));
+        const rows = [];
+        for (const company of companies) {
+          for (const h of list) {
+            if (have.has(`${h.date}|${company}`)) continue;
+            rows.push({ holiday_date: h.date, name: h.name, company, is_optional: !!h.optional });
+          }
+        }
+        let inserted = 0;
+        if (rows.length) {
+          const r = await sb('holidays', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify(rows) });
+          if (!r.ok) return res.status(502).json({ error: 'insert failed', detail: (await r.text()).slice(0, 250) });
+          inserted = (await r.json()).length;
+        }
+        return res.status(200).json({ success: true, year, companies, inserted,
+                                      skipped: companies.length * list.length - rows.length });
       }
 
       return res.status(400).json({ error: 'Unknown leave action' });

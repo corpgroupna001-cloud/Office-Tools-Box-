@@ -152,22 +152,43 @@
             `<div class="text-[11px] uppercase tracking-widest text-slate-400 font-black mt-1">` +
             `${rated.length} of ${rows.length} rated · ${d.month}</div>`;
 
+        const monthDays = (d.dates || []).length;
         document.getElementById('pay-tbody').innerHTML = rows.length ? rows.map(e => {
             const r2 = e.second_role;
+            const t = e.totals || {};
             const perDay = e.has_rate ? payMoney(e.per_day, e.currency) + '<span class="text-slate-500">/day</span>' : '—';
+            // Show the working, not just the answer. Working days is what the
+            // salary is divided by, so say where it came from: the month's
+            // days minus the company's week-offs and holidays. Present is the
+            // days actually worked (late days included), which is what the
+            // per-day rate is multiplied by.
+            const offDays = Math.max(0, monthDays - (e.working_days || 0));
+            const wdNote = `${monthDays} days − ${offDays} off` +
+                (t.weekoff != null ? ` (${t.weekoff} week-off${t.weekoff === 1 ? '' : 's'}${t.holiday ? `, ${t.holiday} holiday${t.holiday === 1 ? '' : 's'}` : ''})` : '');
+            const presentNote = [
+                t.late ? `${t.late} late` : null,
+                t.absent ? `${t.absent} absent` : null,
+                t.leave ? `${t.leave} leave` : null,
+            ].filter(Boolean).join(' · ');
+            const working = e.has_rate
+                ? `${payMoney(e.monthly_salary, e.currency)} ÷ ${e.working_days} = ${payMoney(e.per_day, e.currency)} × ${t.daysPresent} present`
+                : '';
             const main = `
             <tr data-uid="${e.id}">
                 <td><b>${escapeHtml(e.name)}</b><div class="text-[11px] text-slate-400 font-bold">${escapeHtml(e.email || '')}</div></td>
                 <td class="text-slate-300 font-bold">${escapeHtml(e.company || '—')}</td>
                 <td class="text-slate-300 font-bold">${escapeHtml(e.shift_name || '—')}${e.shift_assigned ? '' : ' <span class="text-slate-500">(default)</span>'}</td>
-                <td class="text-right font-black text-slate-300">${e.working_days}</td>
-                <td class="text-right font-black text-white">${e.totals.daysPresent}</td>
+                <td class="text-right font-black text-slate-300" title="${escapeHtml(wdNote)}">${e.working_days}
+                    <div class="text-[10px] text-slate-500 font-bold whitespace-nowrap">${monthDays} − ${offDays} off</div></td>
+                <td class="text-right font-black text-white" title="${escapeHtml(presentNote || 'no late, absent or leave days')}">${t.daysPresent}
+                    ${presentNote ? `<div class="text-[10px] text-slate-500 font-bold whitespace-nowrap">${escapeHtml(presentNote)}</div>` : ''}</td>
                 <td class="text-right">
                     <input type="number" min="0" step="0.01" class="pay-rate glass px-3 py-1.5 rounded-lg text-right text-white font-bold w-32 focus:outline-none"
                            value="${e.monthly_salary == null ? '' : e.monthly_salary}" placeholder="monthly">
                 </td>
                 <td class="text-right font-bold text-slate-300 whitespace-nowrap">${perDay}</td>
-                <td class="text-right font-black ${e.has_rate ? 'text-emerald-300' : 'text-slate-500'}">${payMoney(e.gross, e.currency)}</td>
+                <td class="text-right font-black ${e.has_rate ? 'text-emerald-300' : 'text-slate-500'}">${payMoney(e.gross, e.currency)}
+                    ${working ? `<div class="text-[10px] text-slate-500 font-bold whitespace-nowrap">${escapeHtml(working)}</div>` : ''}</td>
                 <td class="text-right whitespace-nowrap">
                     ${r2 ? '' : `<button type="button" class="role2-add glass px-2.5 py-1.5 rounded-lg text-xs font-black text-slate-300" title="This person has a second job paid separately">+ 2nd role</button>`}
                     <button type="button" class="pay-clear glass px-3 py-1.5 rounded-lg text-xs font-black text-slate-300" ${e.has_rate ? '' : 'disabled style="opacity:.3"'}>Clear</button>

@@ -263,7 +263,15 @@
             </div>
             <p id="lv-msg" style="font-size:12px;font-weight:800;margin:0 0 12px;"></p>
             <div class="scroll"><table><thead id="lv-head"></thead><tbody id="lv-body"></tbody></table></div>
-            <p id="lv-holidays" class="muted" style="font-size:12px;margin:14px 0 0;"></p>
+        </div>
+
+        <!-- Holidays: this company's list for the year. A holiday counts as a
+             day off in the calendar and the pay sheet, never as Absent. -->
+        <div class="card clock" id="hol-card" style="display:none;">
+            <h2>🎉 Holidays <span id="hol-title" class="muted" style="font-size:13px;font-weight:700;"></span></h2>
+            <p class="hint" id="hol-hint">Your company's holidays. They show as Holiday in your calendar, not Absent.</p>
+            <div class="scroll"><table><thead><tr><th>Date</th><th>Holiday</th><th></th></tr></thead><tbody id="hol-body"></tbody></table></div>
+            <p id="hol-more" class="muted" style="font-size:12px;margin:12px 0 0;cursor:pointer;display:none;"></p>
         </div>
 
         <!-- Today -->
@@ -358,6 +366,7 @@
         let rows = [];       // this month's punches (newest first)
         let allRows = [];    // plus the day before the month, for the today card
         let myShift = null;
+        let myCompany = '';
         let isWfh = false;
         let myName = '';
 
@@ -383,12 +392,58 @@
         // 01:00 against a 22:00 start is 3h late, not 21h early.
         const offset = (t, b) => { const r = (((t - b) % 1440) + 1440) % 1440; return r <= 720 ? r : r - 1440; };
 
+        // The holidays that apply to ME: my company's own rows, plus the shared
+        // rows (company null) for dates my company has not set itself. Other
+        // companies' holidays are not mine and are not shown.
+        let holShowAll = false;
+        async function loadHolidays() {
+            try {
+                const yr = fmtISO.format(new Date()).slice(0, 4);
+                let q = sb.from('holidays').select('holiday_date,name,company,is_optional')
+                    .gte('holiday_date', `${yr}-01-01`).lte('holiday_date', `${yr}-12-31`).order('holiday_date');
+                q = myCompany ? q.or(`company.is.null,company.eq.${JSON.stringify(myCompany)}`) : q.is('company', null);
+                const { data: rows, error } = await q;
+                if (error) return;
+                const byDate = new Map();
+                (rows || []).forEach(h => {
+                    const cur = byDate.get(h.holiday_date);
+                    if (!cur || (h.company && !cur.company)) byDate.set(h.holiday_date, h);   // own row beats shared
+                });
+                const list = [...byDate.values()].sort((a, b) => a.holiday_date.localeCompare(b.holiday_date));
+                el('hol-title').textContent = myCompany ? `· ${myCompany} · ${yr}` : `· ${yr}`;
+                if (!list.length) {
+                    el('hol-body').innerHTML = `<tr><td colspan="3" class="muted" style="text-align:center;padding:14px 0;">No holidays set for ${esc(yr)} yet.</td></tr>`;
+                    el('hol-card').style.display = '';
+                    return;
+                }
+                const today = fmtISO.format(new Date());
+                const dayName = iso => new Intl.DateTimeFormat('en-GB', { timeZone: IST, weekday: 'short', day: '2-digit', month: 'short' }).format(new Date(iso + 'T12:00:00+05:30'));
+                const past = list.filter(h => h.holiday_date < today), next = list.filter(h => h.holiday_date >= today);
+                const render = () => {
+                    const shown = holShowAll ? list : next;
+                    el('hol-body').innerHTML = shown.map(h => `
+                        <tr${h.holiday_date < today ? ' style="opacity:.5"' : ''}>
+                            <td style="white-space:nowrap;font-weight:900">${esc(dayName(h.holiday_date))}</td>
+                            <td>${esc(h.name)}</td>
+                            <td class="muted" style="font-size:11px;white-space:nowrap">${h.is_optional ? 'Optional' : ''}${!h.company ? (h.is_optional ? ' · ' : '') + 'All companies' : ''}</td>
+                        </tr>`).join('') || `<tr><td colspan="3" class="muted" style="text-align:center;padding:14px 0;">No more holidays this year.</td></tr>`;
+                    el('hol-more').style.display = past.length ? '' : 'none';
+                    el('hol-more').textContent = holShowAll ? `Hide the ${past.length} that have passed` : `Show the ${past.length} that have passed`;
+                };
+                el('hol-more').onclick = () => { holShowAll = !holShowAll; render(); };
+                render();
+                el('hol-card').style.display = '';
+            } catch { /* holidays table may not exist yet - the card just stays hidden */ }
+        }
+
         async function loadMyShift() {
             try {
-                const { data: prof } = await sb.from('profiles').select('shift_id, is_wfh, full_name').eq('id', session.user.id).maybeSingle();
+                const { data: prof } = await sb.from('profiles').select('shift_id, is_wfh, full_name, company').eq('id', session.user.id).maybeSingle();
                 isWfh = !!(prof && prof.is_wfh === true);
                 myName = (prof && prof.full_name) || '';
+                myCompany = (prof && prof.company) || '';
                 if (isWfh) el('clock').style.display = '';
+                loadHolidays();
                 const { data: shifts } = await sb.from('shifts').select('*');
                 if (!shifts || !shifts.length) return;
                 myShift = shifts.find(s => prof && s.id === prof.shift_id) || shifts.find(s => s.is_default) || null;
@@ -1096,20 +1151,15 @@
         async function loadLeave() {
             try {
                 const today = fmtISO.format(new Date());
-                const [{ data: types }, { data: mine }, { data: hols }] = await Promise.all([
+                const [{ data: types }, { data: mine }] = await Promise.all([
                     sb.from('leave_types').select('*').eq('active', true).order('sort_order'),
                     sb.from('leave_requests').select('*').order('start_date', { ascending: false }).limit(50),
-                    sb.from('holidays').select('*').gte('holiday_date', today).order('holiday_date').limit(5),
                 ]);
                 leaveTypes = types || [];
                 el('lv-type').innerHTML = leaveTypes.map(t =>
                     `<option value="${t.id}">${esc(t.name)}${t.is_paid === false ? ' (unpaid)' : ''}</option>`).join('');
                 renderMyLeave(mine || []);
-
-                el('lv-holidays').innerHTML = (hols && hols.length)
-                    ? '🎉 Next holidays: ' + hols.map(h =>
-                        `<strong>${esc(h.name)}</strong> ${esc(h.holiday_date)}${h.is_optional ? ' (optional)' : ''}`).join(' · ')
-                    : '';
+                void today;
             } catch {
                 // Leave tables may not exist yet — hide rather than show a broken card.
                 el('leave-card').style.display = 'none';

@@ -312,6 +312,7 @@
                     <button data-tab="employees"  class="admin-tab" type="button"><span class="ic ic-users"></span>Employees</button>
                     <button data-tab="shifts"     class="admin-tab" type="button"><span class="ic ic-clock"></span>Shifts</button>
                     <button data-tab="leave"      class="admin-tab" type="button"><span class="ic ic-leave"></span>Leave</button>
+                    <button data-tab="holidays"   class="admin-tab" type="button"><span class="ic ic-calendar"></span>Holidays</button>
                     <button data-tab="salary"     class="admin-tab" type="button"><span class="ic ic-salary"></span>Salary</button>
                 </div>
                 <div class="side-group">
@@ -839,26 +840,31 @@
                     </div>
                 </div>
 
-                <div class="section-head mb-3"><h3><span class="ic ic-calendar"></span>Holiday calendar</h3><span class="sub">Holidays show as Holiday, not Absent</span></div>
+            </div>
+
+            <!-- ================= HOLIDAYS ================= -->
+            <!-- One card per company, each with its own list and its own add
+                 form, plus the shared list that applies to everyone. Owned end
+                 to end by admin/holidays.js, like the Bitrix24 panel. -->
+            <div id="holidays-panel" class="hidden">
+                <div class="section-head mb-3"><h3><span class="ic ic-calendar"></span>Holidays</h3><span class="sub">Each company keeps its own list. A holiday shows as Holiday, not Absent, and is taken out of that month's working days</span></div>
                 <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
-                    <input id="hol-year" type="number" min="2020" max="2099" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none w-28">
-                    <input id="hol-date" type="date" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
-                    <input id="hol-name" type="text" placeholder="Holiday name" class="glass flex-1 min-w-[180px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none">
-                    <select id="hol-company" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
-                        <option value="">All companies</option>
-                        <option>Nova Sportsmart Private Limited</option>
-                        <option>CORPGROUP</option>
-                        <option>Protathlitis Sportsmart LLP</option>
-                        <option>Jobways Point LLP</option>
-                        <option>Genie Lamp Private Limited</option>
-                        <option>Navyug Raise A Player Foundation</option>
-                    </select>
-                    <label class="flex items-center gap-2 text-xs font-bold text-slate-300 cursor-pointer">
-                        <input id="hol-optional" type="checkbox" class="w-4 h-4"> Optional
-                    </label>
-                    <button id="hol-add" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Add</button>
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] uppercase tracking-widest text-slate-400 font-black">Year</span>
+                        <input id="hol-year" type="number" min="2020" max="2099" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none w-28">
+                    </div>
+                    <button id="hol-reload" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh</button>
+                    <button id="hol-prefill-all" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold text-violet-200 hover:bg-violet-500/10">Pre-fill every company from the Telangana list</button>
+                    <span id="hol-summary" class="text-xs font-bold text-slate-400 ml-auto"></span>
                 </div>
-                <div id="hol-sections" class="space-y-5"></div>
+                <div id="hol-notice"></div>
+                <div id="hol-cards" class="grid gap-5" style="grid-template-columns:repeat(auto-fit,minmax(420px,1fr));"></div>
+                <p class="text-slate-400 text-xs font-bold mt-4 max-w-3xl leading-relaxed">
+                    <b>Pre-fill</b> adds the Telangana general holidays for the year to a company's list and skips any date it already has,
+                    so you can prefill first and then delete the days that company stays open. The Islamic festival dates follow the moon and
+                    can move by a day; Bonalu is not included because its date is fixed nearer the time. The <b>Shared</b> list at the end applies
+                    to every company that has no entry of its own for that date.
+                </p>
             </div>
 
             <!-- ================= MONTH CALENDAR ================= -->
@@ -914,8 +920,9 @@
                     </div>
                 </div>
                 <p class="text-slate-400 text-xs font-bold mt-3">
-                    Enter each person's <b>monthly salary</b>. Per-day = salary ÷ that month's working days
-                    (shift days minus company holidays and week-offs); gross = per-day × days present.
+                    Enter each person's <b>monthly salary</b>. The working is shown on every row:
+                    <b>working days</b> = the month's days minus that company's week-offs and holidays;
+                    <b>per-day</b> = salary ÷ working days; <b>gross</b> = per-day × days present (late days count as present).
                     Leave is unpaid and holidays are days off, so neither is paid — a full salary is reached
                     only by being present every working day. No salary set shows “—”, never ₹0, and is left out of the total.
                 </p>
@@ -1179,7 +1186,6 @@
         let selfieData = null;
         let empWho = 'all';
         let leaveData = null;
-        let holidayData = null;
         let currentTab = 'results';
         let editingEmployee = null;
         let deletingEmployee = null;
@@ -2984,15 +2990,9 @@
             if (!adminPassword) return;
             document.getElementById('lv-tbody').innerHTML =
                 '<tr><td colspan="7" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading…</td></tr>';
-            if (!document.getElementById('hol-year').value)
-                document.getElementById('hol-year').value = new Date().getFullYear();
             try {
-                const [lv, hol] = await Promise.all([
-                    leaveApi({ action: 'leave_list', status: document.getElementById('lv-status').value || null }),
-                    leaveApi({ action: 'holiday_list', year: document.getElementById('hol-year').value })
-                ]);
-                leaveData = lv; holidayData = hol;
-                renderLeave(); renderHolidays();
+                leaveData = await leaveApi({ action: 'leave_list', status: document.getElementById('lv-status').value || null });
+                renderLeave();
             } catch (e) {
                 document.getElementById('lv-tbody').innerHTML =
                     `<tr><td colspan="7" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
@@ -3032,75 +3032,6 @@
                 : '<tr><td colspan="7" class="p-8 text-center text-slate-400 font-bold">No leave requests for this filter.</td></tr>';
         }
 
-        // The companies, in a fixed order, so every company gets its own
-        // holiday list even before anyone has added a holiday for it. Mirrors
-        // the options in the #hol-company picker above.
-        const HOL_COMPANIES = [
-            'Nova Sportsmart Private Limited',
-            'CORPGROUP',
-            'Protathlitis Sportsmart LLP',
-            'Jobways Point LLP',
-            'Genie Lamp Private Limited',
-            'Navyug Raise A Player Foundation',
-        ];
-
-        function renderHolidays() {
-            if (!holidayData) return;
-            const rows = holidayData.holidays || [];
-            const year = document.getElementById('hol-year').value;
-
-            // Group by company. A null/blank company is the shared "All
-            // companies" list that applies to everyone unless a company has its
-            // own row for that date.
-            const byCompany = new Map();
-            rows.forEach(h => {
-                const key = h.company || '';   // '' == All companies
-                if (!byCompany.has(key)) byCompany.set(key, []);
-                byCompany.get(key).push(h);
-            });
-
-            // Section order: All companies first, then the fixed company list,
-            // then any other company that somehow has rows (kept, never hidden).
-            const order = ['', ...HOL_COMPANIES];
-            [...byCompany.keys()].forEach(k => { if (!order.includes(k)) order.push(k); });
-
-            const section = (key) => {
-                const list = (byCompany.get(key) || [])
-                    .slice().sort((a, b) => a.holiday_date.localeCompare(b.holiday_date));
-                const title = key === '' ? 'All companies' : key;
-                const badge = key === ''
-                    ? '<span class="text-[10px] uppercase tracking-widest text-violet-300 font-black ml-2">applies to everyone</span>'
-                    : `<span class="text-[10px] uppercase tracking-widest text-slate-500 font-black ml-2">${list.length} holiday${list.length === 1 ? '' : 's'}</span>`;
-                const body = list.length ? `
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm">
-                            <thead><tr><th>Date</th><th>Holiday</th><th>Type</th><th></th></tr></thead>
-                            <tbody>${list.map(h => `
-                                <tr>
-                                    <td class="text-white font-black whitespace-nowrap">${escapeHtml(h.holiday_date)}</td>
-                                    <td class="text-slate-200 font-bold">${escapeHtml(h.name)}</td>
-                                    <td>${h.is_optional
-                                        ? '<span class="text-amber-300 text-xs font-black">Optional</span>'
-                                        : '<span class="text-violet-300 text-xs font-black">Public</span>'}</td>
-                                    <td class="text-right"><button type="button" data-hol-del="${h.id}" class="glass px-3 py-1.5 rounded-xl text-xs font-bold text-rose-300 hover:bg-rose-500/10">Delete</button></td>
-                                </tr>`).join('')}</tbody>
-                        </table>
-                    </div>`
-                    : `<p class="px-4 py-6 text-center text-slate-500 text-xs font-bold">No holidays set for ${escapeHtml(title)} in ${escapeHtml(String(year))}.</p>`;
-                return `
-                    <div class="glass rounded-2xl overflow-hidden">
-                        <div class="px-4 py-3 flex items-center border-b border-white/5">
-                            <span class="ic ic-calendar"></span>
-                            <h4 class="text-white font-black ml-2">${escapeHtml(title)}</h4>${badge}
-                        </div>
-                        ${body}
-                    </div>`;
-            };
-
-            document.getElementById('hol-sections').innerHTML =
-                order.map(section).join('');
-        }
-
         document.getElementById('lv-tbody').addEventListener('click', async ev => {
             const ok = ev.target.closest('[data-lv-ok]');
             const no = ev.target.closest('[data-lv-no]');
@@ -3125,47 +3056,8 @@
             }
         });
 
-        document.getElementById('hol-add').addEventListener('click', async () => {
-            const date = document.getElementById('hol-date').value;
-            const name = document.getElementById('hol-name').value.trim();
-            if (!date || !name) {
-                wsDialog.alert({ icon: 'ℹ️', title: 'Date and name needed', message: 'Pick a date and give the holiday a name.' });
-                return;
-            }
-            try {
-                await leaveApi({ action: 'holiday_save', holiday: {
-                    holiday_date: date, name,
-                    company: document.getElementById('hol-company').value || null,
-                    is_optional: document.getElementById('hol-optional').checked
-                }});
-                document.getElementById('hol-name').value = '';
-                document.getElementById('hol-optional').checked = false;
-                holidayData = null;
-                holidayData = await leaveApi({ action: 'holiday_list', year: document.getElementById('hol-year').value });
-                renderHolidays();
-            } catch (e) {
-                wsDialog.alert({ icon: '⚠️', danger: true, title: 'Could not add holiday', message: escapeHtml(e.message) });
-            }
-        });
-
-        document.getElementById('hol-sections').addEventListener('click', async ev => {
-            const d = ev.target.closest('[data-hol-del]');
-            if (!d) return;
-            const ok = await wsDialog.confirm({ icon: '🎉', danger: true, title: 'Delete this holiday?',
-                message: 'That date will go back to being a normal working day in the report.', okText: 'Delete' });
-            if (!ok) return;
-            try {
-                await leaveApi({ action: 'holiday_delete', id: d.dataset.holDel });
-                holidayData = await leaveApi({ action: 'holiday_list', year: document.getElementById('hol-year').value });
-                renderHolidays();
-            } catch (e) {
-                wsDialog.alert({ icon: '⚠️', danger: true, title: 'Delete failed', message: escapeHtml(e.message) });
-            }
-        });
-
         document.getElementById('lv-refresh').addEventListener('click', () => { leaveData = null; loadLeave(); });
         document.getElementById('lv-status').addEventListener('change', () => { leaveData = null; loadLeave(); });
-        document.getElementById('hol-year').addEventListener('change', () => { leaveData = null; loadLeave(); });
 
         gatePassword.focus();
     </script>
@@ -3173,5 +3065,6 @@
     <script src="/admin/bitrix.js"></script>
     <script src="/admin/roster.js"></script>
     <script src="/admin/attendance-tools.js"></script>
+    <script src="/admin/holidays.js"></script>
 </body>
 </html>
