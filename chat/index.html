@@ -956,7 +956,8 @@
 
     <script src="/ui/shell.js"></script>
     <script>WSShell.mount({ active: 'chat', crumb: 'Chat & Calls', pageClass: 'fill',
-        tools: '<button id="show-history-btn" type="button" class="ws-btn sm hidden" title="Call history"><span class="ic ic-clock"></span><span>Calls</span></button>' });</script>
+        tools: '<button id="show-history-btn" type="button" class="ws-btn sm hidden" title="Call history"><span class="ic ic-clock"></span><span>Calls</span></button>' +
+               '<button type="button" class="ws-btn sm" title="Chat and call rules" onclick="var f=document.getElementById(\'ws-rules-fab\'); if (f) f.click();"><span class="ic ic-shield"></span><span>Rules</span></button>' });</script>
     <script>
         // ============================================================
         // Chat + Call app — Supabase Realtime + WebRTC

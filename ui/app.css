@@ -653,6 +653,16 @@ body.ws-app.page-tool .hero { display: flex; }
 body.ws-app.page-tool .container { padding-top: 0; }
 
 body.ws-app .ws-back-btn { display: none !important; }
+/* Pages with a bare `button { width: 100% }` rule (signature) must not stretch the shell's controls. */
+body.ws-app .ws-top .ws-cmdk-trigger { width: auto; padding: 6px 8px 6px 12px; }
+body.ws-app .ws-userbtn { width: auto; }
+body.ws-app .ws-top .ws-iconbtn, body.ws-app .ws-top .ws-theme-toggle { width: 34px; padding: 0; }
+body.ws-app .ws-side-foot .out { width: 30px; padding: 0; }
+body.ws-app .ws-userbtn { padding: 3px 10px 3px 3px; }
+body.ws-app .ws-menu button { width: 100%; padding: 8px 10px; }
+/* ZenType's focus overlay was a dark scrim; in the shell it dims the page's own ground instead. */
+body.ws-app #focus-overlay { background: color-mix(in srgb, var(--ws-bg) 78%, transparent) !important; backdrop-filter: blur(3px) !important; }
+body.ws-app #focus-overlay .glass-strong { background: var(--ws-surface); border: 1px solid var(--ws-border); box-shadow: var(--ws-shadow-lg); }
 body.ws-app .ws-rules-fab { left: auto; right: 18px; bottom: 18px; background: var(--ws-surface); color: var(--ws-text-2); border-color: var(--ws-border-2); box-shadow: var(--ws-shadow-lg); backdrop-filter: none; font-weight: 700; }
 body.ws-app .ws-rules-fab:hover { background: var(--ws-surface-2); }
 body.ws-app.page-tool .page-title { position: static; margin-bottom: 4px; grid-column: 1 / -1; font-size: 21px; font-weight: 800; }
@@ -684,6 +694,14 @@ body.ws-app.page-chat .msg-sender-name { color: var(--ws-primary); }
 body.ws-app.page-chat .btn-primary { background: var(--ws-primary); box-shadow: none; }
 body.ws-app.page-chat .border-white\/10, body.ws-app.page-chat .border-white\/5 { border-color: var(--ws-border); }
 body.ws-app.page-chat select, body.ws-app.page-chat input, body.ws-app.page-chat textarea { color-scheme: inherit; }
+/* Composer: the inline glass styles were written for the dark page */
+body.ws-app.page-chat div:has(> #msg-form) { background: var(--ws-surface) !important; border-top: 1px solid var(--ws-border) !important; }
+body.ws-app.page-chat #msg-input { background: var(--ws-surface-2) !important; border: 1px solid var(--ws-border-2) !important; color: var(--ws-text); }
+body.ws-app.page-chat #msg-input::placeholder { color: var(--ws-text-dim); }
+body.ws-app.page-chat #attach-btn { background: var(--ws-surface-2) !important; border: 1px solid var(--ws-border-2) !important; color: var(--ws-text-muted) !important; }
+body.ws-app.page-chat #msg-form button[type="submit"] { background: var(--ws-primary) !important; box-shadow: none !important; }
+body.ws-app.page-chat #msg-form button[type="submit"]:hover { background: var(--ws-primary-2) !important; }
+body.ws-app.page-chat .ws-rules-fab { display: none; }   /* it lives in the top bar on this page */
 body.ws-app.page-chat .link-preview .lp-title { color: var(--ws-text); }
 body.ws-app.page-chat .link-preview .lp-desc, body.ws-app.page-chat .link-preview .lp-host { color: var(--ws-text-muted); }
 body.ws-app.page-chat .call-event-pill { background: var(--ws-surface-2); border-color: var(--ws-border); color: var(--ws-text-2); }
