@@ -10,6 +10,7 @@
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/design-system.css">
     <link rel="stylesheet" href="/responsive.css">
+    <link rel="stylesheet" href="/ui/app.css">
     <script defer src="/commandpalette.js"></script>
     <style>
         body {
@@ -206,16 +207,17 @@
         }
     </style>
 </head>
-<body>
+<body class="ws-app">
     <div class="container">
-        <a href="/" class="back">← Back to WorkSuite</a>
-
-        <div class="hero">
-            <span class="ic">🕐</span>
+        <div class="ws-page-head">
             <div>
                 <h1>My Attendance</h1>
                 <p id="sub">Your biometric check-ins and check-outs</p>
                 <p id="shift-line" class="shift-line" style="display:none;"></p>
+            </div>
+            <div class="actions">
+                <a class="ws-btn" href="#leave"><span class="ic ic-leave"></span>Apply for leave</a>
+                <a class="ws-btn" href="#holidays"><span class="ic ic-party"></span>Holidays</a>
             </div>
         </div>
 
@@ -234,44 +236,14 @@
 
         <!-- WFH selfie clock (shown only to work-from-home employees) -->
         <div class="card clock" id="clock" style="display:none;">
-            <h2>📸 Selfie attendance</h2>
+            <h2><span class="ic ic-camera"></span> Selfie attendance</h2>
             <p class="hint">A photo and your location are both required for every punch.</p>
             <div class="clock-grid">
-                <button class="clock-btn login"  data-event="LOGIN"><span class="ico">🟢</span>Login</button>
-                <button class="clock-btn"        data-event="BREAK_OUT"><span class="ico">☕</span>Start break</button>
-                <button class="clock-btn"        data-event="BREAK_IN"><span class="ico">⏱️</span>End break</button>
-                <button class="clock-btn logout" data-event="LOGOUT"><span class="ico">🔴</span>Logout</button>
+                <button class="clock-btn login"  data-event="LOGIN"><span class="ico"><span class="ic ic-login"></span></span>Login</button>
+                <button class="clock-btn"        data-event="BREAK_OUT"><span class="ico"><span class="ic ic-coffee"></span></span>Start break</button>
+                <button class="clock-btn"        data-event="BREAK_IN"><span class="ico"><span class="ic ic-clock"></span></span>End break</button>
+                <button class="clock-btn logout" data-event="LOGOUT"><span class="ico"><span class="ic ic-logout"></span></span>Logout</button>
             </div>
-        </div>
-
-        <!-- Leave -->
-        <div class="card clock" id="leave-card">
-            <h2>🌴 Leave</h2>
-            <p class="hint" id="leave-hint">Approved leave shows as On leave in the attendance report, not Absent.</p>
-            <div style="display:flex;flex-wrap:wrap;gap:9px;align-items:flex-end;margin-bottom:14px;">
-                <div><label class="lv-lab">Type</label><select id="lv-type" class="lv-in"></select></div>
-                <div><label class="lv-lab">From</label><input id="lv-from" type="date" class="lv-in"></div>
-                <div><label class="lv-lab">To</label><input id="lv-to" type="date" class="lv-in"></div>
-                <div><label class="lv-lab">Part</label>
-                    <select id="lv-part" class="lv-in">
-                        <option value="full">Full day</option>
-                        <option value="first_half">First half</option>
-                        <option value="second_half">Second half</option>
-                    </select></div>
-                <div style="flex:1;min-width:150px;"><label class="lv-lab">Reason</label><input id="lv-reason" type="text" placeholder="Optional" class="lv-in" style="width:100%;"></div>
-                <button id="lv-apply" class="lv-btn">Request</button>
-            </div>
-            <p id="lv-msg" style="font-size:12px;font-weight:800;margin:0 0 12px;"></p>
-            <div class="scroll"><table><thead id="lv-head"></thead><tbody id="lv-body"></tbody></table></div>
-        </div>
-
-        <!-- Holidays: this company's list for the year. A holiday counts as a
-             day off in the calendar and the pay sheet, never as Absent. -->
-        <div class="card clock" id="hol-card" style="display:none;">
-            <h2>🎉 Holidays <span id="hol-title" class="muted" style="font-size:13px;font-weight:700;"></span></h2>
-            <p class="hint" id="hol-hint">Your company's holidays. They show as Holiday in your calendar, not Absent.</p>
-            <div class="scroll"><table><thead><tr><th>Date</th><th>Holiday</th><th></th></tr></thead><tbody id="hol-body"></tbody></table></div>
-            <p id="hol-more" class="muted" style="font-size:12px;margin:12px 0 0;cursor:pointer;display:none;"></p>
         </div>
 
         <!-- Today -->
@@ -325,6 +297,37 @@
             </div>
         </div>
 
+        <!-- Leave -->
+        <div class="card clock" id="leave-card"><a id="leave" class="anchor"></a>
+            <h2><span class="ic ic-leave"></span> Leave</h2>
+            <p class="hint" id="leave-hint">Approved leave shows as On leave in the attendance report, not Absent.</p>
+            <div style="display:flex;flex-wrap:wrap;gap:9px;align-items:flex-end;margin-bottom:14px;">
+                <div><label class="lv-lab">Type</label><select id="lv-type" class="lv-in"></select></div>
+                <div><label class="lv-lab">From</label><input id="lv-from" type="date" class="lv-in"></div>
+                <div><label class="lv-lab">To</label><input id="lv-to" type="date" class="lv-in"></div>
+                <div><label class="lv-lab">Part</label>
+                    <select id="lv-part" class="lv-in">
+                        <option value="full">Full day</option>
+                        <option value="first_half">First half</option>
+                        <option value="second_half">Second half</option>
+                    </select></div>
+                <div style="flex:1;min-width:150px;"><label class="lv-lab">Reason</label><input id="lv-reason" type="text" placeholder="Optional" class="lv-in" style="width:100%;"></div>
+                <button id="lv-apply" class="lv-btn">Request</button>
+            </div>
+            <p id="lv-msg" style="font-size:12px;font-weight:800;margin:0 0 12px;"></p>
+            <div class="scroll"><table><thead id="lv-head"></thead><tbody id="lv-body"></tbody></table></div>
+        </div>
+
+        <!-- Holidays: this company's list for the year. A holiday counts as a
+             day off in the calendar and the pay sheet, never as Absent. -->
+        <div class="card clock" id="hol-card" style="display:none;"><a id="holidays" class="anchor"></a>
+            <h2><span class="ic ic-party"></span> Holidays <span id="hol-title" class="muted" style="font-size:13px;font-weight:700;"></span></h2>
+            <p class="hint" id="hol-hint">Your company's holidays. They show as Holiday in your calendar, not Absent.</p>
+            <div class="scroll"><table><thead><tr><th>Date</th><th>Holiday</th><th></th></tr></thead><tbody id="hol-body"></tbody></table></div>
+            <p id="hol-more" class="muted" style="font-size:12px;margin:12px 0 0;cursor:pointer;display:none;"></p>
+        </div>
+
+
         <p class="muted" style="text-align:center;font-size:12px;margin-top:18px;">
             Times are IST, straight from the biometric device. Something look wrong? Tell your admin.
         </p>
@@ -350,6 +353,8 @@
         </div>
     </div>
 
+    <script src="/ui/shell.js"></script>
+    <script>WSShell.mount({ active: location.hash === '#leave' || location.hash === '#holidays' ? 'leave' : 'attendance', crumb: 'My Attendance' });</script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="/presence.js"></script>
     <script>

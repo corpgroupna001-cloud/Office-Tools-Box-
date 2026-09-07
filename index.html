@@ -11,191 +11,31 @@
     <link rel="stylesheet" href="/responsive.css">
     <script defer src="/wfh-reminder.js"></script>
     <script defer src="/commandpalette.js"></script>
+    <link rel="stylesheet" href="/ui/app.css">
     <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            min-height: 100vh;
-            background: var(--ws-bg);
-            background-image:
-                radial-gradient(at 15% 12%, hsla(258, 90%, 55%, 0.55) 0, transparent 45%),
-                radial-gradient(at 85% 15%, hsla(200, 95%, 55%, 0.45) 0, transparent 45%),
-                radial-gradient(at 50% 90%, hsla(320, 80%, 55%, 0.45) 0, transparent 50%),
-                radial-gradient(at 90% 85%, hsla(160, 85%, 45%, 0.35) 0, transparent 45%);
-            background-attachment: fixed;
-            color: var(--ws-text);
-            overflow-x: hidden;
-        }
-        body::before {
-            content: '';
-            position: fixed;
-            inset: 0;
-            background-image:
-                radial-gradient(var(--ws-surface) 1px, transparent 1px);
-            background-size: 22px 22px;
-            pointer-events: none;
-            z-index: 0;
-        }
-        .glass {
-            background: var(--ws-surface);
-            backdrop-filter: blur(24px) saturate(180%);
-            -webkit-backdrop-filter: blur(24px) saturate(180%);
-            border: 1px solid var(--ws-border-2);
-            box-shadow:
-                0 8px 32px rgba(0, 0, 0, 0.35),
-                inset 0 1px 0 rgba(255, 255, 255, 0.25);
-        }
-        .glass-strong {
-            background: var(--ws-border);
-            backdrop-filter: blur(30px) saturate(200%);
-            -webkit-backdrop-filter: blur(30px) saturate(200%);
-            border: 1px solid rgba(255, 255, 255, 0.22);
-            box-shadow:
-                0 12px 40px rgba(0, 0, 0, 0.4),
-                inset 0 1px 0 rgba(255, 255, 255, 0.3);
-        }
-        .glass-nav {
-            background: rgba(15, 23, 42, 0.35);
-            backdrop-filter: blur(28px) saturate(180%);
-            -webkit-backdrop-filter: blur(28px) saturate(180%);
-            border-bottom: 1px solid var(--ws-border);
-        }
-        .glass-tool {
-            background: var(--ws-surface);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid var(--ws-border);
-            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-            position: relative;
-            overflow: hidden;
-        }
-        .glass-tool::before {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(135deg, var(--ws-border) 0%, transparent 50%);
-            pointer-events: none;
-            opacity: 0.6;
-        }
-        .glass-tool:hover {
-            background: var(--ws-border);
-            border-color: rgba(255, 255, 255, 0.3);
-            transform: translateY(-6px);
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--ws-surface-2);
-        }
-        .icon-glow-blue { box-shadow: 0 8px 30px rgba(59, 130, 246, 0.5), inset 0 1px 0 rgba(255,255,255,0.3); }
-        .icon-glow-emerald { box-shadow: 0 8px 30px rgba(16, 185, 129, 0.5), inset 0 1px 0 rgba(255,255,255,0.3); }
-        .content { position: relative; z-index: 1; }
-
-        /* Hero pill with personalized greeting */
-        .hero-eyebrow {
-            display: inline-flex; align-items: center; gap: 8px;
-            padding: 6px 14px; border-radius: 999px;
-            background: var(--ws-surface);
-            border: 1px solid var(--ws-border);
-            color: var(--ws-text-2); font-weight: 700; font-size: 12px;
-            text-transform: uppercase; letter-spacing: 1.5px;
-            backdrop-filter: blur(10px);
-            margin-bottom: 14px;
-        }
-        .hero-eyebrow .live-dot {
-            width: 8px; height: 8px; border-radius: 50%;
-            background: #10b981; box-shadow: 0 0 8px rgba(16,185,129,.8);
-            animation: live-pulse 1.8s ease-in-out infinite;
-        }
-        @keyframes live-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
-
-        /* "Team online" horizontal strip */
-        .online-strip {
-            display: flex; align-items: center; gap: 14px;
-            padding: 16px 20px;
-            border-radius: 20px;
-            background: var(--ws-surface);
-            border: 1px solid var(--ws-border);
-            backdrop-filter: blur(16px);
-            margin-bottom: 24px;
-        }
-        .online-strip .label {
-            font-size: 11px; font-weight: 900; letter-spacing: 1px;
-            text-transform: uppercase; color: var(--ws-text-muted);
-            display: flex; align-items: center; gap: 8px; flex-shrink: 0;
-        }
-        .online-strip .label .live-dot {
-            width: 7px; height: 7px; border-radius: 50%;
-            background: #10b981; box-shadow: 0 0 8px rgba(16,185,129,.8);
-            animation: live-pulse 1.8s ease-in-out infinite;
-        }
-        .online-avatars { display: flex; align-items: center; gap: 0; flex: 1; overflow: hidden; }
-        .online-avatar {
-            width: 40px; height: 40px; border-radius: 50%;
-            display: inline-flex; align-items: center; justify-content: center;
-            font-weight: 900; color: #fff; font-size: 14px;
-            border: 2.5px solid var(--ws-bg);
-            box-shadow: 0 4px 12px rgba(0,0,0,.4);
-            margin-left: -10px;
-            transition: transform .15s ease, z-index .15s;
-            overflow: hidden;
-            cursor: pointer;
-            position: relative;
-        }
-        .online-avatar:first-child { margin-left: 0; }
-        .online-avatar:hover { transform: translateY(-3px) scale(1.08); z-index: 5; }
-        .online-avatar img { width: 100%; height: 100%; object-fit: cover; }
-        .online-avatar.more {
-            background: var(--ws-surface-2); color: var(--ws-text-2); font-size: 11px;
-        }
-        .online-strip .empty {
-            font-size: 13px; color: var(--ws-text-muted); font-weight: 600;
-        }
-
-        /* Personal stats mini row inside tool cards */
-        .tool-stat {
-            margin-top: 10px; margin-bottom: 10px;
-            padding: 10px 14px;
-            border-radius: 14px;
-            background: var(--ws-surface-2);
-            border: 1px solid var(--ws-border);
-            display: flex; align-items: center; justify-content: space-between;
-            font-size: 12px; font-weight: 700;
-        }
-        .tool-stat .stat-label { color: var(--ws-text-muted); text-transform: uppercase; letter-spacing: 1px; font-size: 10px; font-weight: 900; }
-        .tool-stat .stat-value { color: var(--ws-text); font-weight: 900; font-size: 14px; }
-        .tool-stat .stat-value.pending { color: var(--ws-text-muted); font-weight: 700; font-size: 12px; }
-        .tool-stat .stat-badge {
-            display: inline-flex; align-items: center; gap: 4px;
-            padding: 2px 8px; border-radius: 999px;
-            background: rgba(59,130,246,0.2); color: var(--ws-info-text);
-            font-size: 11px; font-weight: 900;
-        }
-        .tool-stat .stat-badge.new { background: rgba(244,63,94,0.2); color: var(--ws-danger-text); }
+        /* Dashboard-only bits; the shell and widgets come from /ui/app.css */
+        .dash-greet { display: flex; align-items: center; gap: 14px; }
+        .dash-greet .ws-avatar.lg { width: 48px; height: 48px; font-size: 18px; }
+        .dash-date { color: var(--ws-text-muted); font-size: 13px; font-weight: 500; margin: 3px 0 0; }
+        .dash-head-facts { margin-top: 12px; }
+        .ws-kpi .val.today { font-size: 20px; }
+        #team-body .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        #team-body .who b { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #team-body .who small { display: block; font-size: 11px; color: var(--ws-text-muted); font-weight: 500; }
+        #team-body tr.me td { background: color-mix(in srgb, var(--ws-primary) 6%, transparent); }
+        .team-counts { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; font-weight: 600; color: var(--ws-text-muted); }
+        .team-counts b { color: var(--ws-text); font-weight: 800; }
+        .online-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .online-names { font-size: 12.5px; color: var(--ws-text-2); font-weight: 600; }
+        .online-names a { color: inherit; text-decoration: none; }
+        .online-names a:hover { color: var(--ws-primary); }
+        .dash-strip-skel { display: flex; gap: 5px; }
+        .dash-strip-skel .ws-skel { flex: 1; height: 28px; }
+        .lv-days { font-size: 11px; color: var(--ws-text-muted); font-weight: 600; }
+        @media (max-width: 640px) { .ws-page-head .actions { width: 100%; } .ws-page-head .actions .ws-btn { flex: 1; } }
     </style>
 </head>
-<body class="min-h-screen flex flex-col">
-
-    <!-- Top Navigation Bar -->
-    <nav class="glass-nav w-full z-40 sticky top-0 content">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between items-center h-16">
-                <div class="flex items-center gap-3">
-                    <div class="w-9 h-9 rounded-lg flex items-center justify-center" style="background: var(--ws-primary); color: var(--ws-on-accent);">
-                        <span class="ic ic-shield lg"></span>
-                    </div>
-                    <span class="font-black text-[17px] text-white tracking-tight">WorkSuite</span>
-                </div>
-                <div class="flex items-center gap-3">
-                    <button type="button" class="ws-theme-toggle" data-ws-theme><span class="sun ic ic-sun"></span><span class="moon ic ic-moon"></span></button>
-                    <button type="button" class="ws-cmdk-trigger hidden md:inline-flex" onclick="window.wsCmdK && window.wsCmdK.open()" title="Search & quick actions (Ctrl/Cmd + K)">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                        <span>Quick search</span>
-                        <span class="kbd">⌘K</span>
-                    </button>
-                    <button id="profile-btn" class="hidden items-center gap-2 glass px-2 py-1.5 rounded-full hover:bg-white/10 transition-all">
-                        <span id="nav-avatar" class="w-8 h-8 rounded-full flex items-center justify-center text-white font-black text-sm overflow-hidden" style="background: var(--ws-primary); color: var(--ws-on-accent);">S</span>
-                        <span id="user-chip" class="text-xs font-bold text-slate-200 pr-2">—</span>
-                    </button>
-                </div>
-            </div>
-        </div>
-    </nav>
+<body class="ws-app">
 
     <!-- Auth modal (root gate) -->
     <div id="auth-modal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" data-ws="scrim">
@@ -362,7 +202,7 @@
     </style>
 
     <!-- Photo picker modal (shown to existing users without an avatar) -->
-    <div id="photo-modal" class="fixed inset-0 z-[66] hidden items-center justify-center p-4" style="background: rgba(11, 17, 32, 0.92); backdrop-filter: blur(24px);">
+    <div id="photo-modal" class="fixed inset-0 z-[66] hidden items-center justify-center p-4" data-ws="scrim">
         <div class="w-full max-w-md rounded-[2.5rem] p-8" data-ws="panel">
             <div class="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-5 text-3xl" style="background: linear-gradient(135deg,#8b5cf6,#6366f1); box-shadow: 0 15px 40px rgba(139,92,246,0.5);">📸</div>
             <h2 class="text-2xl font-black text-white mb-1 text-center">Add your profile photo</h2>
@@ -382,7 +222,7 @@
     </div>
 
     <!-- Company picker modal (shown to existing users without a company set) -->
-    <div id="company-modal" class="fixed inset-0 z-[65] hidden items-center justify-center p-4" style="background: rgba(11, 17, 32, 0.9); backdrop-filter: blur(24px);">
+    <div id="company-modal" class="fixed inset-0 z-[65] hidden items-center justify-center p-4" data-ws="scrim">
         <div class="w-full max-w-md rounded-[2.5rem] p-8" data-ws="panel">
             <div class="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-5 text-3xl" style="background: linear-gradient(135deg,#f97316,#ef4444); box-shadow: 0 15px 40px rgba(249,115,22,0.5);">🏢</div>
             <h2 class="text-2xl font-black text-white mb-1 text-center">Select your company</h2>
@@ -403,7 +243,7 @@
 
     <!-- Profile Settings Modal (home-screen version) -->
     <div id="profile-modal" class="fixed inset-0 z-[62] hidden items-center justify-center p-4" data-ws="scrim">
-        <div class="w-full max-w-md rounded-[2.5rem] p-8 max-h-[92vh] overflow-y-auto" style="background: rgba(255,255,255,0.10); backdrop-filter: blur(30px); border: 1px solid rgba(255,255,255,0.22); box-shadow: 0 20px 60px rgba(0,0,0,0.55);">
+        <div class="w-full max-w-md rounded-[2.5rem] p-8 max-h-[92vh] overflow-y-auto" data-ws="panel">
 
             <!-- Avatar + name -->
             <div class="text-center mb-6">
@@ -491,126 +331,168 @@
         </div>
     </div>
 
-    <!-- Main Content -->
-    <main class="flex-grow w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 content">
-
-        <div class="mb-10 text-center md:text-left">
-            <span class="hero-eyebrow"><span class="live-dot"></span><span id="hero-time-of-day">Welcome</span></span>
-            <h1 id="hero-title" class="text-3xl md:text-5xl font-black text-white mb-3 tracking-tight">Welcome to your Hub</h1>
-            <p class="text-lg text-slate-200/90 font-medium max-w-2xl">Access all your internal tools, utilities, and assessments from one centralized dashboard.</p>
+    <!-- Employee dashboard -->
+    <main id="dash">
+        <div class="ws-page-head ws-anim" style="--i:0">
+            <div>
+                <div class="dash-greet">
+                    <span class="ws-avatar lg" id="dash-avatar">?</span>
+                    <div>
+                        <h1 id="dash-greet">Welcome back</h1>
+                        <p class="dash-date" id="dash-date">&nbsp;</p>
+                    </div>
+                </div>
+                <div class="ws-facts dash-head-facts" id="dash-facts" hidden></div>
+            </div>
+            <div class="actions">
+                <a class="ws-btn" href="/attendance/#leave"><span class="ic ic-leave"></span>Apply for leave</a>
+                <a class="ws-btn primary" href="/attendance/"><span class="ic ic-attend"></span>My attendance</a>
+            </div>
         </div>
 
-        <!-- Live "Team online" strip -->
-        <div id="online-strip" class="online-strip" style="display:none;">
-            <div class="label"><span class="live-dot"></span><span>Team online <span id="online-count">0</span></span></div>
-            <div id="online-avatars" class="online-avatars"></div>
+        <!-- KPI row -->
+        <div class="ws-grid c4">
+            <div class="ws-card ws-anim" style="--i:1">
+                <div class="ws-kpi">
+                    <div class="ico mute" id="kpi-today-ico"><span class="ic ic-clock"></span></div>
+                    <div style="min-width:0">
+                        <div class="lbl">Today</div>
+                        <div class="val today" id="kpi-today">—</div>
+                        <div class="sub" id="kpi-today-sub">Loading…</div>
+                    </div>
+                </div>
+            </div>
+            <div class="ws-card ws-anim" style="--i:2">
+                <div class="ws-kpi">
+                    <div class="ico ok"><span class="ic ic-check"></span></div>
+                    <div style="min-width:0">
+                        <div class="lbl">Present this month</div>
+                        <div class="val" id="kpi-present">—</div>
+                        <div class="sub" id="kpi-present-sub">&nbsp;</div>
+                        <div class="ws-bar" style="margin-top:8px"><i id="kpi-present-bar" style="width:0%"></i></div>
+                    </div>
+                </div>
+            </div>
+            <div class="ws-card ws-anim" style="--i:3">
+                <div class="ws-kpi">
+                    <div class="ico warn"><span class="ic ic-clock"></span></div>
+                    <div style="min-width:0">
+                        <div class="lbl">Late arrivals</div>
+                        <div class="val" id="kpi-late">—</div>
+                        <div class="sub" id="kpi-late-sub">&nbsp;</div>
+                    </div>
+                </div>
+            </div>
+            <div class="ws-card ws-anim" style="--i:4">
+                <div class="ws-kpi">
+                    <div class="ico bad" id="kpi-absent-ico"><span class="ic ic-leave"></span></div>
+                    <div style="min-width:0">
+                        <div class="lbl">Absent</div>
+                        <div class="val" id="kpi-absent">—</div>
+                        <div class="sub" id="kpi-absent-sub">&nbsp;</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        <!-- Tool Grid -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-
-            <!-- Tool 1: Typing Test -->
-            <a href="./typingtest/" class="glass-tool group block rounded-2xl p-6 relative">
-                <div class="relative z-10">
-                    <div class="tool-ic blue"><span class="ic ic-keyboard lg"></span></div>
-
-                    <h2 class="text-lg font-black text-white mb-1.5">ZenType</h2>
-                    <p class="text-slate-200/80 font-medium mb-4">AI-powered typing assessment with dynamic motivational passages and live accuracy tracking.</p>
-
-                    <div id="stat-typing" class="tool-stat">
-                        <span class="stat-label">Your Best</span>
-                        <span class="stat-value pending">— Take a test to see your score</span>
+        <div class="ws-grid main" style="margin-top:16px">
+            <div class="ws-stack">
+                <!-- 14-day strip -->
+                <div class="ws-card ws-anim" style="--i:5">
+                    <div class="ws-card-head">
+                        <h3>Last 14 days</h3>
+                        <span class="sub" id="strip-sub"></span>
+                        <div class="right"><a class="more" href="/attendance/">Full calendar →</a></div>
                     </div>
-
-                    <div class="flex items-center text-blue-300 font-bold group-hover:gap-2 group-hover:text-blue-200 transition-all">
-                        Launch Tool
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="ml-1"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                    <div class="ws-strip" id="dash-strip">
+                        <div class="dash-strip-skel" style="width:100%"><span class="ws-skel"></span><span class="ws-skel"></span><span class="ws-skel"></span><span class="ws-skel"></span><span class="ws-skel"></span><span class="ws-skel"></span><span class="ws-skel"></span></div>
                     </div>
-                </div>
-            </a>
-
-            <!-- Tool 2: Email Signature Generator -->
-            <!-- Tool: Chat & Calls -->
-            <a href="./chat/" class="glass-tool group block rounded-2xl p-6 relative">
-                <div class="relative z-10">
-                    <div class="tool-ic blue"><span class="ic ic-chat lg"></span></div>
-                    <h2 class="text-lg font-black text-white mb-1.5">Chat & Calls</h2>
-                    <p class="text-slate-200/80 font-medium mb-4">In-app messaging, audio and video calls with your teammates. Live presence and notifications built in.</p>
-                    <div id="stat-chat" class="tool-stat">
-                        <span class="stat-label">Activity</span>
-                        <span class="stat-value pending">— No unread messages</span>
-                    </div>
-                    <div class="flex items-center text-cyan-300 font-bold group-hover:gap-2 group-hover:text-cyan-200 transition-all">
-                        Launch Tool
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="ml-1"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                    <div class="ws-legend">
+                        <span><i style="background:#10b981"></i>Present</span>
+                        <span><i style="background:#f59e0b"></i>Late</span>
+                        <span><i style="background:#ef4444"></i>Absent</span>
+                        <span><i style="background:#8b5cf6"></i>Leave</span>
+                        <span><i style="background:#ec4899"></i>Holiday</span>
+                        <span><i style="background:var(--ws-bg-2);border:1px solid var(--ws-border)"></i>Week off</span>
                     </div>
                 </div>
-            </a>
 
-            <!-- Tool 3: MCQ Quiz -->
-            <a href="./mcqquiz/" class="glass-tool group block rounded-2xl p-6 relative">
-                <div class="relative z-10">
-                    <div class="tool-ic amber"><span class="ic ic-quiz lg"></span></div>
-                    <h2 class="text-lg font-black text-white mb-1.5">MCQ Quiz</h2>
-                    <p class="text-slate-200/80 font-medium mb-4">Brain-train with 10 categories: shortcuts (Mac/Win/VS Code/Chrome/Excel) + Logic, Math, GK, Aptitude, Riddles.</p>
-                    <div id="stat-quiz" class="tool-stat">
-                        <span class="stat-label">Your Best</span>
-                        <span class="stat-value pending">— Play a quiz to see your score</span>
+                <!-- Team today -->
+                <div class="ws-card flush ws-anim" style="--i:6">
+                    <div class="ws-card-head" style="padding-bottom:10px">
+                        <h3>Team today</h3>
+                        <div class="right"><button type="button" class="ws-btn sm" id="team-toggle" hidden>Show all</button></div>
                     </div>
-                    <div class="flex items-center text-orange-300 font-bold group-hover:gap-2 group-hover:text-orange-200 transition-all">
-                        Launch Tool
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="ml-1"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-                    </div>
-                </div>
-            </a>
-
-            <a href="./signature/" class="glass-tool group block rounded-2xl p-6 relative">
-                <div class="relative z-10">
-                    <div class="tool-ic violet"><span class="ic ic-pen lg"></span></div>
-
-                    <h2 class="text-lg font-black text-white mb-1.5">Signature Gen</h2>
-                    <p class="text-slate-200/80 font-medium mb-6">Standardized corporate email signature generator. Ensure brand consistency across employee comms.</p>
-
-                    <div class="flex items-center text-emerald-300 font-bold group-hover:gap-2 group-hover:text-emerald-200 transition-all">
-                        Launch Tool
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="ml-1"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                    <div class="team-counts" id="team-counts" style="padding:0 18px 12px"></div>
+                    <div class="ws-table-wrap">
+                        <table class="ws-table">
+                            <thead><tr><th>Name</th><th class="col-co">Company</th><th>Status</th></tr></thead>
+                            <tbody id="team-body">
+                                <tr><td colspan="3"><span class="ws-skel" style="height:14px;width:60%"></span></td></tr>
+                                <tr><td colspan="3"><span class="ws-skel" style="height:14px;width:45%"></span></td></tr>
+                                <tr><td colspan="3"><span class="ws-skel" style="height:14px;width:55%"></span></td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-            </a>
 
-            <!-- Tool: My Attendance -->
-            <a href="./attendance/" class="glass-tool group block rounded-2xl p-6 relative">
-                <div class="relative z-10">
-                    <div class="tool-ic green"><span class="ic ic-attend lg"></span></div>
-                    <h2 class="text-lg font-black text-white mb-1.5">My Attendance</h2>
-                    <p class="text-slate-200/80 font-medium mb-4">Your biometric check-ins and check-outs, live. You also get an email the moment you punch in or out.</p>
-                    <div id="stat-attendance" class="tool-stat">
-                        <span class="stat-label">Today</span>
-                        <span class="stat-value pending">— No punch recorded yet</span>
-                    </div>
-                    <div class="flex items-center text-cyan-300 font-bold group-hover:gap-2 group-hover:text-cyan-200 transition-all">
-                        Launch Tool
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="ml-1"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                <!-- Tools -->
+                <div class="ws-card ws-anim" style="--i:7">
+                    <div class="ws-card-head"><h3>Tools</h3><span class="sub">Everything else in WorkSuite</span></div>
+                    <div class="ws-grid c3" style="gap:10px">
+                        <a class="ws-tool" href="./typingtest/"><span class="ico"><span class="ic ic-keyboard"></span></span><div class="t"><b>ZenType</b><span>Typing test</span></div><span class="stat" id="tool-typing">—</span></a>
+                        <a class="ws-tool" href="./mcqquiz/"><span class="ico amber"><span class="ic ic-quiz"></span></span><div class="t"><b>MCQ Quiz</b><span>10 categories</span></div><span class="stat" id="tool-quiz">—</span></a>
+                        <a class="ws-tool" href="./chat/"><span class="ico teal"><span class="ic ic-chat"></span></span><div class="t"><b>Chat &amp; Calls</b><span>Messages, voice, video</span></div><span class="stat" id="tool-chat">—</span></a>
+                        <a class="ws-tool" href="./recordings/"><span class="ico rose"><span class="ic ic-video"></span></span><div class="t"><b>Friday Check-in</b><span>WFH weekly clips</span></div></a>
+                        <a class="ws-tool" href="./signature/"><span class="ico violet"><span class="ic ic-pen"></span></span><div class="t"><b>Email Signature</b><span>Branded signature</span></div></a>
+                        <a class="ws-tool" href="./admin/"><span class="ico"><span class="ic ic-shield"></span></span><div class="t"><b>Admin console</b><span>Password protected</span></div><span class="stat"><span class="ic ic-lock sm"></span></span></a>
                     </div>
                 </div>
-            </a>
+            </div>
 
-            <!-- Tool: WFH Weekly Recordings -->
-            <a href="./recordings/" class="glass-tool group block rounded-2xl p-6 relative">
-                <div class="relative z-10">
-                    <div class="tool-ic rose"><span class="ic ic-video lg"></span></div>
-                    <h2 class="text-lg font-black text-white mb-1.5">Friday Check-in</h2>
-                    <p class="text-slate-200/80 font-medium mb-6">WFH employees record three short back-camera clips — mobile, laptop and tab — every Friday. Assigned by admin.</p>
-                    <div class="flex items-center text-pink-300 font-bold group-hover:gap-2 group-hover:text-pink-200 transition-all">
-                        Launch Tool
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="ml-1"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            <div class="ws-stack">
+                <!-- Upcoming holidays -->
+                <div class="ws-card ws-anim" style="--i:5">
+                    <div class="ws-card-head">
+                        <h3>Upcoming holidays</h3>
+                        <div class="right"><a class="more" href="/attendance/#holidays">All →</a></div>
                     </div>
+                    <ul class="ws-list" id="dash-holidays"><li><span class="ws-skel" style="height:14px;width:70%"></span></li></ul>
                 </div>
-            </a>
 
+                <!-- My leave -->
+                <div class="ws-card ws-anim" style="--i:6">
+                    <div class="ws-card-head">
+                        <h3>My leave requests</h3>
+                        <div class="right"><a class="more" href="/attendance/#leave">Apply →</a></div>
+                    </div>
+                    <ul class="ws-list" id="dash-leaves"><li><span class="ws-skel" style="height:14px;width:70%"></span></li></ul>
+                </div>
+
+                <!-- Online now -->
+                <div class="ws-card ws-anim" style="--i:7">
+                    <div class="ws-card-head">
+                        <h3>Online now</h3>
+                        <span class="sub" id="online-sub"></span>
+                        <div class="right"><a class="more" href="/chat/">Open chat →</a></div>
+                    </div>
+                    <div class="online-row" id="dash-online"><span class="ws-skel" style="height:26px;width:50%"></span></div>
+                </div>
+            </div>
         </div>
     </main>
 
+    <script src="/ui/shell.js"></script>
+    <script>
+        WSShell.mount({
+            active: 'home', crumb: 'Home',
+            onProfile: function () { if (typeof openProfileModal === 'function') openProfileModal(); },
+            onSignOut: async function () {
+                if (window.rootSb) { try { await rootSb.auth.signOut(); } catch (e) {} }
+                if (typeof onLoggedOut === 'function') onLoggedOut();
+            }
+        });
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="/presence.js"></script>
     <script src="/notifications.js"></script>
@@ -945,49 +827,67 @@
             m.classList.add('hidden'); m.classList.remove('flex');
         }
         let currentUser = null;
+        let shellUser = null;          // what the sidebar / top bar show
+        function syncShellUser(patch) {
+            shellUser = Object.assign({}, shellUser || {}, patch || {});
+            if (window.WSShell) WSShell.setUser(shellUser);
+            const av = document.getElementById('dash-avatar');
+            if (av) {
+                if (shellUser.avatar) av.innerHTML = `<img src="${_homeEscapeHtml(shellUser.avatar)}" alt="">`;
+                else av.textContent = (shellUser.name || '?').trim().charAt(0).toUpperCase();
+            }
+        }
+
+        let dashTimers = [];
         async function onLoggedIn(session) {
             currentUser = session.user;
             const name = session.user.user_metadata?.full_name || session.user.email.split('@')[0];
-            document.getElementById('user-chip').innerText = name;
-
-            // Show the profile button (avatar + name) — hide the plain chip inside it if empty
-            const profileBtn = document.getElementById('profile-btn');
-            profileBtn.classList.remove('hidden');
-            profileBtn.classList.add('flex');
-
-            // Preload avatar for the nav (from metadata first for speed, then profiles table)
-            let avatar = session.user.user_metadata?.avatar_url || '';
-            setNavAvatar(avatar, name);
+            syncShellUser({ name, email: session.user.email, avatar: session.user.user_metadata?.avatar_url || '', company: session.user.user_metadata?.company || '' });
             hideAuthModal();
 
-            // Fetch canonical avatar + company from profiles
+            // Canonical name / avatar / company from profiles
             try {
                 if (rootSb) {
-                    const { data: p } = await rootSb.from('profiles').select('avatar_url,full_name').eq('id', currentUser.id).maybeSingle();
-                    if (p?.avatar_url) setNavAvatar(p.avatar_url, p.full_name || name);
-                    if (p?.full_name) document.getElementById('user-chip').innerText = p.full_name;
+                    const { data: p } = await rootSb.from('profiles').select('avatar_url,full_name,company').eq('id', currentUser.id).maybeSingle();
+                    if (p) syncShellUser({ name: p.full_name || name, avatar: p.avatar_url || shellUser.avatar, company: p.company || shellUser.company });
                 }
             } catch {}
 
-            // Prompt for company if missing
+            // Prompt for company / photo if missing
             checkCompany().catch(() => {});
 
-            // Personalize hero + kick off live team-online + personal stats
-            personalizeHero(name);
-            loadOnlineTeam().catch(() => {});
-            setInterval(() => loadOnlineTeam().catch(() => {}), 20000);
-            loadPersonalStats().catch(() => {});
+            // The dashboard
+            personalizeHero(shellUser.name);
+            loadDashboard();
+            dashTimers.forEach(clearInterval);
+            dashTimers = [
+                setInterval(() => loadOnlineTeam().catch(() => {}), 20000),
+                setInterval(() => loadTeamToday().catch(() => {}), 90000),
+            ];
+            if (location.hash === '#profile') { history.replaceState(null, '', '/'); openProfileModal(); }
         }
 
+        // ---------- Dashboard ----------
+        const IST = 'Asia/Kolkata';
+        const fmtISO = new Intl.DateTimeFormat('en-CA', { timeZone: IST, year: 'numeric', month: '2-digit', day: '2-digit' });
+        const fmtLong = new Intl.DateTimeFormat('en-GB', { timeZone: IST, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        const fmtDM = new Intl.DateTimeFormat('en-GB', { timeZone: IST, day: '2-digit', month: 'short' });
+        const fmtMonth = new Intl.DateTimeFormat('en-GB', { timeZone: IST, month: 'long' });
+        const istToday = () => fmtISO.format(new Date());
+        const atNoon = iso => new Date(iso + 'T12:00:00+05:30');
+        const addDays = (iso, n) => { const d = atNoon(iso); d.setUTCDate(d.getUTCDate() + n); return fmtISO.format(d); };
+        const hhmmAmPm = t => { if (!t) return ''; const [h, m] = t.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+        const STATUS_BADGE = { present: 'present', late: 'late', absent: 'absent', leave: 'leave', holiday: 'holiday', weekoff: 'weekoff', pending: 'pending', future: 'mute' };
+
         function personalizeHero(name) {
-            const h = new Date().getHours();
+            const h = Number(new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: 'numeric', hour12: false }).format(new Date()));
             const greeting = h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : h < 21 ? 'Good evening' : 'Good night';
-            const first = (name || '').split(/[\s@]/)[0] || 'friend';
+            const first = (name || '').split(/[\s@]/)[0] || 'there';
             const cap = first.charAt(0).toUpperCase() + first.slice(1);
-            const eyebrow = document.getElementById('hero-time-of-day');
-            if (eyebrow) eyebrow.textContent = greeting;
-            const title = document.getElementById('hero-title');
-            if (title) title.textContent = `Welcome back, ${cap}`;
+            const title = document.getElementById('dash-greet');
+            if (title) title.textContent = `${greeting}, ${cap}`;
+            const date = document.getElementById('dash-date');
+            if (date) date.textContent = `${fmtLong.format(new Date())} · IST`;
         }
 
         // Reuse the same pickColor helper from other pages
@@ -999,120 +899,247 @@
         function _homeEscapeHtml(s) {
             return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
+        const esc = _homeEscapeHtml;
+        const avatarHtml = (p, cls = '') => {
+            const name = p.full_name || p.name || p.email || '?';
+            return p.avatar_url
+                ? `<span class="ws-avatar ${cls}"><img src="${esc(p.avatar_url)}" alt=""></span>`
+                : `<span class="ws-avatar ${cls}" style="background:${_homePickColor(name)}">${esc(name.charAt(0).toUpperCase())}</span>`;
+        };
+
+        // Signed-in employee views on /api/attendance-webhook (calendar, team_status)
+        async function apiView(body) {
+            const { data: { session } } = await rootSb.auth.getSession();
+            if (!session) throw new Error('Not signed in');
+            const r = await fetch('/api/attendance-webhook', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+                body: JSON.stringify(body),
+            });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(j.detail || j.error || `HTTP ${r.status}`);
+            return j;
+        }
+
+        let myCompany = '';
+        function loadDashboard() {
+            if (!rootSb || !currentUser) return;
+            loadProfileFacts().catch(() => {}).then(() => {
+                loadHolidaysWidget().catch(() => {});
+                loadTeamToday().catch(() => {});
+            });
+            loadAttendanceWidgets().catch(e => {
+                const t = document.getElementById('kpi-today');
+                if (t) { t.textContent = '—'; document.getElementById('kpi-today-sub').textContent = e.message || 'Could not load'; }
+                const strip = document.getElementById('dash-strip');
+                if (strip) strip.innerHTML = `<div class="ws-empty" style="width:100%">${esc(e.message || 'Could not load attendance')}</div>`;
+            });
+            loadLeavesWidget().catch(() => {});
+            loadOnlineTeam().catch(() => {});
+            loadToolStats().catch(() => {});
+        }
+
+        async function loadProfileFacts() {
+            const facts = document.getElementById('dash-facts');
+            const { data: p } = await rootSb.from('profiles').select('company,shift_id,is_wfh,employee_code').eq('id', currentUser.id).maybeSingle();
+            myCompany = (p && p.company) || shellUser?.company || '';
+            const chips = [];
+            if (myCompany) chips.push(`<span><span class="ic ic-users"></span>${esc(myCompany)}</span>`);
+            try {
+                const { data: shifts } = await rootSb.from('shifts').select('id,name,start_time,end_time,is_default');
+                const sh = (shifts || []).find(s => p && s.id === p.shift_id) || (shifts || []).find(s => s.is_default);
+                if (sh) chips.push(`<span><span class="ic ic-clock"></span>${esc(sh.name)} · ${hhmmAmPm(String(sh.start_time).slice(0,5))} – ${hhmmAmPm(String(sh.end_time).slice(0,5))}</span>`);
+            } catch {}
+            if (p && p.is_wfh) chips.push(`<span><span class="ic ic-home"></span>Work from home</span>`);
+            if (p && p.employee_code) chips.push(`<span><span class="ic ic-fingerprint"></span>ID ${esc(p.employee_code)}</span>`);
+            if (facts) { facts.innerHTML = chips.join(''); facts.hidden = !chips.length; }
+        }
+
+        async function loadAttendanceWidgets() {
+            const today = istToday();
+            const ym = today.slice(0, 7);
+            const cal = await apiView({ mode: 'calendar', month: ym });
+            const days = new Map((cal.days || []).map(d => [d.date, d]));
+            // The strip reaches into last month early in a month
+            const from = addDays(today, -13);
+            if (from.slice(0, 7) !== ym) {
+                try { const prev = await apiView({ mode: 'calendar', month: from.slice(0, 7) }); (prev.days || []).forEach(d => days.set(d.date, d)); } catch {}
+            }
+            const T = cal.totals || {};
+
+            // KPI: today
+            const td = days.get(today) || { status: 'pending' };
+            const kv = document.getElementById('kpi-today'), ks = document.getElementById('kpi-today-sub'), ki = document.getElementById('kpi-today-ico');
+            ki.className = 'ico';
+            if (td.in) {
+                kv.textContent = `In ${hhmmAmPm(td.in)}`;
+                if (td.out) { ks.textContent = `Out ${hhmmAmPm(td.out)}`; ks.className = 'sub'; }
+                else { ks.textContent = 'On the clock'; ks.className = 'sub ok'; }
+                if (td.late > 0) { ks.textContent += ` · late by ${td.late} min`; ks.className = 'sub warn'; ki.classList.add('warn'); }
+                else ki.classList.add('ok');
+            } else if (td.status === 'weekoff') { kv.textContent = 'Week off'; ks.textContent = 'Enjoy the day'; ki.classList.add('mute'); }
+            else if (td.status === 'holiday') { kv.textContent = 'Holiday'; ks.textContent = td.note || ''; ki.classList.add('mute'); }
+            else if (td.status === 'leave') { kv.textContent = 'On leave'; ks.textContent = td.note || 'Approved leave'; ki.classList.add('mute'); }
+            else { kv.textContent = 'Not in yet'; ks.textContent = 'No punch recorded today'; ks.className = 'sub'; ki.classList.add('mute'); }
+
+            // KPI: present / late / absent
+            const monthName = fmtMonth.format(atNoon(today));
+            const wd = T.workingDays || 0, dp = T.daysPresent || 0;
+            document.getElementById('kpi-present').innerHTML = `${dp}<small>/ ${wd} days</small>`;
+            document.getElementById('kpi-present-sub').textContent = `${monthName} · ${cal.shift_name ? esc(cal.shift_name) : 'default shift'}`;
+            document.getElementById('kpi-present-bar').style.width = wd ? `${Math.min(100, Math.round(dp / wd * 100))}%` : '0%';
+            document.getElementById('kpi-late').textContent = T.late || 0;
+            const lm = T.lateMinutes || 0;
+            const ls = document.getElementById('kpi-late-sub');
+            ls.textContent = T.late ? `${lm} min late in total` : 'On time every day so far';
+            ls.className = 'sub ' + (T.late ? 'warn' : 'ok');
+            document.getElementById('kpi-absent').textContent = T.absent || 0;
+            document.getElementById('kpi-absent-ico').className = 'ico ' + (T.absent ? 'bad' : 'ok');
+            const parts = [];
+            if (T.leave) parts.push(`${T.leave} on leave`);
+            if (T.holiday) parts.push(`${T.holiday} holiday${T.holiday > 1 ? 's' : ''}`);
+            if (T.weekoff) parts.push(`${T.weekoff} week off`);
+            document.getElementById('kpi-absent-sub').textContent = parts.join(' · ') || `No days missed in ${monthName}`;
+
+            // 14-day strip
+            const strip = document.getElementById('dash-strip');
+            const cells = [];
+            for (let i = 13; i >= 0; i--) {
+                const iso = addDays(today, -i);
+                const d = days.get(iso) || { status: 'future' };
+                const st = d.status === 'pending' && d.in ? 'present' : d.status;
+                const cls = STATUS_BADGE[st] === 'mute' ? '' : (STATUS_BADGE[st] || '');
+                const label = (cal.legend && cal.legend[d.status] && cal.legend[d.status].label) || d.status;
+                const tip = `${fmtDM.format(atNoon(iso))} · ${d.note || label}${d.in ? ` · ${hhmmAmPm(d.in)}${d.out ? '–' + hhmmAmPm(d.out) : ''}` : ''}`;
+                cells.push(`<div class="d ${cls}${iso === today ? ' today' : ''}" title="${esc(tip)}"><i></i><span>${Number(iso.slice(8, 10))}</span></div>`);
+            }
+            strip.innerHTML = cells.join('');
+            const worked14 = [...Array(14)].map((_, i) => days.get(addDays(today, -i))).filter(d => d && (d.status === 'present' || d.status === 'late')).length;
+            document.getElementById('strip-sub').textContent = `${worked14} worked · ${fmtDM.format(atNoon(from))} – ${fmtDM.format(atNoon(today))}`;
+        }
+
+        let teamAll = [], teamShowAll = false;
+        async function loadTeamToday() {
+            const body = document.getElementById('team-body');
+            const counts = document.getElementById('team-counts');
+            const toggle = document.getElementById('team-toggle');
+            const t = await apiView({ mode: 'team_status' });
+            const ORDER = { present: 0, late: 1, pending: 2, leave: 3, holiday: 4, weekoff: 5, absent: 6 };
+            teamAll = (t.people || []).slice().sort((a, b) => {
+                const ac = a.company === myCompany ? 0 : 1, bc = b.company === myCompany ? 0 : 1;
+                if (ac !== bc) return ac - bc;
+                const ao = ORDER[a.status] ?? 9, bo = ORDER[b.status] ?? 9;
+                if (ao !== bo) return ao - bo;
+                return String(a.name).localeCompare(String(b.name));
+            });
+            const n = s => teamAll.filter(p => p.status === s).length;
+            counts.innerHTML = [
+                `<span><b>${n('present') + n('late')}</b> in</span>`,
+                `<span><b>${n('pending')}</b> not in yet</span>`,
+                `<span><b>${n('leave')}</b> on leave</span>`,
+                `<span><b>${n('weekoff') + n('holiday')}</b> off</span>`,
+                `<span><b>${teamAll.length}</b> people</span>`,
+            ].join('');
+            const render = () => {
+                const list = teamShowAll ? teamAll : teamAll.slice(0, 8);
+                body.innerHTML = list.map(p => `
+                    <tr${p.id === currentUser.id ? ' class="me"' : ''}>
+                        <td><div class="who">${avatarHtml(p, 'sm')}<div><b>${esc(p.name)}${p.id === currentUser.id ? ' <span class="muted">(you)</span>' : ''}</b>${p.is_wfh ? '<small>Work from home</small>' : ''}<small class="co">${esc(p.company || '—')}</small></div></div></td>
+                        <td class="muted col-co">${esc(p.company || '—')}</td>
+                        <td><span class="ws-badge ${STATUS_BADGE[p.status] || 'mute'}">${esc(p.status === 'pending' ? 'Not in yet' : p.label)}</span></td>
+                    </tr>`).join('') || `<tr><td colspan="3"><div class="ws-empty">Nobody on the roster yet.</div></td></tr>`;
+                toggle.hidden = teamAll.length <= 8;
+                toggle.textContent = teamShowAll ? 'Show fewer' : `Show all ${teamAll.length}`;
+            };
+            toggle.onclick = () => { teamShowAll = !teamShowAll; render(); };
+            render();
+        }
+
+        // Holidays that apply to me: my company's rows beat the shared ones
+        async function loadHolidaysWidget() {
+            const ul = document.getElementById('dash-holidays');
+            const today = istToday(), yr = today.slice(0, 4);
+            let q = rootSb.from('holidays').select('holiday_date,name,company,is_optional')
+                .gte('holiday_date', today).lte('holiday_date', `${Number(yr) + 1}-12-31`).order('holiday_date');
+            q = myCompany ? q.or(`company.is.null,company.eq.${JSON.stringify(myCompany)}`) : q.is('company', null);
+            const { data: rows, error } = await q;
+            if (error) throw error;
+            const byDate = new Map();
+            (rows || []).forEach(h => { const cur = byDate.get(h.holiday_date); if (!cur || (h.company && !cur.company)) byDate.set(h.holiday_date, h); });
+            const list = [...byDate.values()].sort((a, b) => a.holiday_date.localeCompare(b.holiday_date)).slice(0, 5);
+            if (!list.length) { ul.innerHTML = '<li><div class="ws-empty" style="width:100%"><b>No holidays ahead</b>Your admin has not added any yet.</div></li>'; return; }
+            ul.innerHTML = list.map(h => {
+                const d = atNoon(h.holiday_date);
+                const days = Math.round((d - atNoon(today)) / 86400000);
+                const when = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `in ${days} days`;
+                return `<li>
+                    <div class="date"><b>${Number(h.holiday_date.slice(8, 10))}</b><span>${esc(fmtDM.format(d).slice(3))}</span></div>
+                    <div class="main"><b>${esc(h.name)}</b><span>${esc(new Intl.DateTimeFormat('en-GB', { timeZone: IST, weekday: 'long' }).format(d))} · ${when}</span></div>
+                    <div class="right">${h.is_optional ? '<span class="ws-badge mute">Optional</span>' : ''}</div>
+                </li>`;
+            }).join('');
+        }
+
+        async function loadLeavesWidget() {
+            const ul = document.getElementById('dash-leaves');
+            const [{ data: rows, error }, { data: types }] = await Promise.all([
+                rootSb.from('leave_requests').select('id,start_date,end_date,day_part,status,reason,leave_type_id').eq('user_id', currentUser.id).order('start_date', { ascending: false }).limit(4),
+                rootSb.from('leave_types').select('id,name'),
+            ]);
+            if (error) throw error;
+            const tn = new Map((types || []).map(t => [t.id, t.name]));
+            if (!rows || !rows.length) { ul.innerHTML = '<li><div class="ws-empty" style="width:100%"><b>No leave requests</b>Apply from My Attendance when you need a day off.</div></li>'; return; }
+            const BADGE = { approved: 'ok', rejected: 'bad', pending: 'pending', cancelled: 'mute' };
+            ul.innerHTML = rows.map(l => {
+                const s = atNoon(l.start_date), e = atNoon(l.end_date);
+                const nd = Math.round((e - s) / 86400000) + 1;
+                const span = l.start_date === l.end_date ? fmtDM.format(s) : `${fmtDM.format(s)} – ${fmtDM.format(e)}`;
+                const part = l.day_part === 'first_half' ? 'First half' : l.day_part === 'second_half' ? 'Second half' : `${nd} day${nd > 1 ? 's' : ''}`;
+                return `<li>
+                    <div class="date"><b>${Number(l.start_date.slice(8, 10))}</b><span>${esc(fmtDM.format(s).slice(3))}</span></div>
+                    <div class="main"><b>${esc(tn.get(l.leave_type_id) || 'Leave')}</b><span>${esc(span)} · ${esc(part)}</span></div>
+                    <div class="right"><span class="ws-badge ${BADGE[l.status] || 'mute'}">${esc(l.status ? l.status.charAt(0).toUpperCase() + l.status.slice(1) : '—')}</span></div>
+                </li>`;
+            }).join('');
+        }
 
         async function loadOnlineTeam() {
             if (!rootSb || !currentUser) return;
-            try {
-                // "Online" = last_seen_at within 60s (matches presence.js threshold)
-                const cutoff = new Date(Date.now() - 60_000).toISOString();
-                const { data } = await rootSb.from('profiles')
-                    .select('id, full_name, email, avatar_url, last_seen_at')
-                    .gte('last_seen_at', cutoff)
-                    .not('id', 'eq', currentUser.id)
-                    .limit(50);
-                const strip = document.getElementById('online-strip');
-                const countEl = document.getElementById('online-count');
-                const avatars = document.getElementById('online-avatars');
-                if (!data || data.length === 0) {
-                    strip.style.display = 'flex';
-                    countEl.textContent = '0';
-                    avatars.innerHTML = '<span class="empty">No teammates online right now — you\'re holding down the fort 🎯</span>';
-                    return;
-                }
-                strip.style.display = 'flex';
-                countEl.textContent = data.length;
-                const shown = data.slice(0, 10);
-                const extra = data.length - shown.length;
-                avatars.innerHTML = shown.map(p => {
-                    const name = p.full_name || p.email || '?';
-                    const initial = name.charAt(0).toUpperCase();
-                    const bg = _homePickColor(name);
-                    const inner = p.avatar_url
-                        ? `<img src="${_homeEscapeHtml(p.avatar_url)}" alt="">`
-                        : initial;
-                    return `<a href="./chat/#thread=${encodeURIComponent(p.id)}" class="online-avatar" title="${_homeEscapeHtml(name)} — online now" style="background:${bg}">${inner}</a>`;
-                }).join('') + (extra > 0
-                    ? `<span class="online-avatar more" title="${extra} more online">+${extra}</span>`
-                    : '');
-            } catch (e) { console.warn('online team load failed', e); }
+            const host = document.getElementById('dash-online');
+            const sub = document.getElementById('online-sub');
+            // "Online" = last_seen_at within 60s (matches presence.js threshold)
+            const cutoff = new Date(Date.now() - 60_000).toISOString();
+            const { data } = await rootSb.from('profiles')
+                .select('id, full_name, email, avatar_url, last_seen_at')
+                .gte('last_seen_at', cutoff)
+                .not('id', 'eq', currentUser.id)
+                .limit(50);
+            if (!data || !data.length) {
+                sub.textContent = '';
+                host.innerHTML = '<div class="ws-empty" style="width:100%;padding:10px 0"><b>Nobody else online</b>You are holding the fort.</div>';
+                return;
+            }
+            sub.textContent = `${data.length} teammate${data.length > 1 ? 's' : ''}`;
+            const shown = data.slice(0, 8);
+            host.innerHTML = `<div class="ws-avatar-stack">${shown.map(p => avatarHtml(p, 'sm')).join('')}</div>` +
+                `<div class="online-names">${shown.map(p => `<a href="./chat/#thread=${encodeURIComponent(p.id)}" title="Message ${esc(p.full_name || p.email)}">${esc((p.full_name || p.email || '?').split(' ')[0])}</a>`).join(', ')}${data.length > shown.length ? ` +${data.length - shown.length} more` : ''}</div>`;
         }
 
-        async function loadPersonalStats() {
+        async function loadToolStats() {
             if (!rootSb || !currentUser) return;
-
-            // 1) Typing best (highest WPM)
+            const set = (id, html, cls) => { const el = document.getElementById(id); if (el) { el.innerHTML = html; el.className = 'stat' + (cls ? ' ' + cls : ''); } };
             try {
-                const { data } = await rootSb.from('test_results')
-                    .select('wpm, accuracy, created_at')
-                    .eq('user_id', currentUser.id)
-                    .order('wpm', { ascending: false })
-                    .limit(1);
-                const el = document.querySelector('#stat-typing .stat-value');
-                if (el) {
-                    if (data && data.length) {
-                        const t = data[0];
-                        el.classList.remove('pending');
-                        el.innerHTML = `${t.wpm} <span style="color:#94a3b8;font-size:11px;font-weight:700;">WPM</span> · ${t.accuracy}% <span style="color:#94a3b8;font-size:11px;font-weight:700;">accuracy</span>`;
-                    }
-                }
-            } catch (e) { /* silent */ }
-
-            // 2) Quiz best (highest accuracy)
+                const { data } = await rootSb.from('test_results').select('wpm, accuracy').eq('user_id', currentUser.id).order('wpm', { ascending: false }).limit(1);
+                set('tool-typing', data && data.length ? `${data[0].wpm} WPM` : 'No test yet');
+            } catch {}
             try {
-                const { data } = await rootSb.from('quiz_results')
-                    .select('score, total, accuracy, category_label, created_at')
-                    .eq('user_id', currentUser.id)
-                    .order('accuracy', { ascending: false })
-                    .limit(1);
-                const el = document.querySelector('#stat-quiz .stat-value');
-                if (el) {
-                    if (data && data.length) {
-                        const q = data[0];
-                        el.classList.remove('pending');
-                        el.innerHTML = `${q.score}/${q.total} <span style="color:#94a3b8;font-size:11px;font-weight:700;">in ${_homeEscapeHtml(q.category_label || 'Quiz')}</span>`;
-                    }
-                }
-            } catch (e) { /* silent */ }
-
-            // 3) Chat unread count (messages received, unread)
+                const { data } = await rootSb.from('quiz_results').select('score, total').eq('user_id', currentUser.id).order('accuracy', { ascending: false }).limit(1);
+                set('tool-quiz', data && data.length ? `Best ${data[0].score}/${data[0].total}` : 'No quiz yet');
+            } catch {}
             try {
-                const { count } = await rootSb.from('messages')
-                    .select('id', { count: 'exact', head: true })
-                    .eq('recipient_id', currentUser.id)
-                    .is('read_at', null);
-                const el = document.querySelector('#stat-chat .stat-value');
-                if (el) {
-                    if (count && count > 0) {
-                        el.classList.remove('pending');
-                        el.innerHTML = `<span class="stat-badge new">${count} unread</span>`;
-                    } else {
-                        el.classList.add('pending');
-                        el.textContent = '— No unread messages';
-                    }
-                }
-            } catch (e) { /* silent */ }
-
-            // 4) Attendance — today's first punch (IST calendar day)
-            try {
-                const istToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-                const { data } = await rootSb.from('attendance_logs')
-                    .select('direction, log_datetime')
-                    .eq('user_id', currentUser.id)
-                    .eq('log_date', istToday)
-                    .order('log_datetime', { ascending: true })
-                    .limit(50);
-                const el = document.querySelector('#stat-attendance .stat-value');
-                if (el && data && data.length) {
-                    const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true });
-                    const ins  = data.filter(d => d.direction === 'IN');
-                    const outs = data.filter(d => d.direction === 'OUT');
-                    const firstIn = ins[0] || data[0];
-                    const lastOut = outs.length ? outs[outs.length - 1] : null;
-                    el.classList.remove('pending');
-                    el.innerHTML = `${fmt.format(new Date(firstIn.log_datetime))} <span style="color:#94a3b8;font-size:11px;font-weight:700;">in</span>`
-                        + (lastOut ? ` · ${fmt.format(new Date(lastOut.log_datetime))} <span style="color:#94a3b8;font-size:11px;font-weight:700;">out</span>` : '');
-                }
-            } catch (e) { /* table may not exist yet — silent */ }
+                const { count } = await rootSb.from('messages').select('id', { count: 'exact', head: true }).eq('recipient_id', currentUser.id).is('read_at', null);
+                set('tool-chat', count > 0 ? `${count} unread` : 'All read', count > 0 ? 'new' : '');
+            } catch {}
         }
 
         function showCompanyModal() {
@@ -1258,9 +1285,9 @@
         });
         function onLoggedOut() {
             currentUser = null;
-            const profileBtn = document.getElementById('profile-btn');
-            profileBtn.classList.add('hidden');
-            profileBtn.classList.remove('flex');
+            shellUser = null;
+            if (window.WSShell) WSShell.setUser(null);
+            dashTimers.forEach(clearInterval); dashTimers = [];
             hideCompanyModal();
             hidePhotoModal();
             closeProfileModal();
@@ -1504,13 +1531,7 @@
         let profileData = null;
 
         function setNavAvatar(avatarUrl, name) {
-            const el = document.getElementById('nav-avatar');
-            if (avatarUrl) {
-                el.innerHTML = `<img src="${avatarUrl}" class="w-full h-full object-cover" alt="">`;
-            } else {
-                const initial = (name || '?').trim().charAt(0).toUpperCase();
-                el.innerHTML = initial;
-            }
+            syncShellUser({ avatar: avatarUrl || '', name: name || shellUser?.name || '' });
         }
 
         async function openProfileModal() {
@@ -1558,7 +1579,6 @@
             m.classList.add('hidden'); m.classList.remove('flex');
         }
 
-        document.getElementById('profile-btn').addEventListener('click', openProfileModal);
         document.getElementById('profile-close').addEventListener('click', closeProfileModal);
 
         // Change photo from profile modal
@@ -1592,8 +1612,8 @@
                 if (error) throw error;
                 try { await rootSb.auth.updateUser({ data: { full_name: newName } }); } catch {}
                 document.getElementById('profile-name').innerText = newName;
-                document.getElementById('user-chip').innerText = newName;
                 setNavAvatar(profileData?.avatar_url, newName);
+                personalizeHero(newName);
                 showToast('Name updated!', 'success');
             } catch (ex) {
                 showDialog({ type: 'error', title: "Couldn't save name", message: ex.message });

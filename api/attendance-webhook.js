@@ -816,6 +816,7 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
           id: p.id,
           email: p.email,
           name: p.full_name || p.email,
+          company: p.company || null,
           is_wfh: p.is_wfh === true,
           status: day.status,
           label: day.status === 'holiday' ? (day.holidayName || 'Holiday')
