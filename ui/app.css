@@ -70,6 +70,7 @@ body.ws-app {
     overflow-x: hidden;
 }
 body.ws-app::before { display: none; }   /* pages used to draw a dot grid; the shell does not */
+body.ws-app { display: block; }           /* some tool pages centred their content with body flex */
 
 .ws-shell {
     display: grid;
@@ -117,6 +118,7 @@ body.ws-app::before { display: none; }   /* pages used to draw a dot grid; the s
     position: relative;
     transition: background var(--ws-motion), color var(--ws-motion);
 }
+button.ws-side-item { width: 100%; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
 .ws-side-item .ic { width: 17px; height: 17px; color: var(--ws-text-muted); transition: color var(--ws-motion); }
 .ws-side-item:hover { background: var(--ws-surface-2); color: var(--ws-text); }
 .ws-side-item:hover .ic { color: var(--ws-text); }
@@ -209,11 +211,14 @@ body.ws-app::before { display: none; }   /* pages used to draw a dot grid; the s
 .ws-menu a:hover, .ws-menu button:hover { background: var(--ws-surface-2); color: var(--ws-text); }
 .ws-menu .danger { color: var(--ws-danger); }
 
+.ws-top-tools { display: flex; align-items: center; gap: 8px; }
 .ws-hamb { display: none; }
 .ws-scrim { display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.45); z-index: 39; }
 
 /* Page */
 .ws-page { width: 100%; max-width: 1360px; margin: 0 auto; padding: 22px 24px 56px; }
+.ws-page.center { display: flex; flex-direction: column; align-items: center; }
+.ws-page.fill { max-width: none; padding: 0; position: relative; height: calc(100vh - var(--app-top-h)); overflow: hidden; }
 .ws-page-head {
     display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap;
     margin-bottom: 18px;
@@ -236,6 +241,8 @@ body.ws-app::before { display: none; }   /* pages used to draw a dot grid; the s
     .ws-hamb { display: inline-flex; }
     .ws-top { padding: 0 14px; }
     .ws-top .ws-cmdk-trigger { display: none; }
+    .ws-top-tools .ws-btn span:not(.ic) { display: none; }
+    .ws-top-tools .ws-btn { padding: 0 9px; }
     .ws-page { padding: 16px 14px 48px; }
     .ws-userbtn .nm { display: none; }
     .ws-top .crumb > span, .ws-top .crumb > b ~ * { display: none; }
@@ -392,6 +399,11 @@ body.ws-app [hidden] { display: none !important; }
 .ws-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .ws-table .muted { color: var(--ws-text-muted); }
 .ws-table-wrap { overflow-x: auto; }
+.ws-table .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ws-table .who b { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-table .who small { display: block; font-size: 11px; color: var(--ws-text-muted); font-weight: 500; }
+.ws-table .who small.co { display: none; }
+@media (max-width: 640px) { .ws-table .who small.co { display: block; } }
 
 /* Attendance strip: one square per day */
 .ws-strip { display: flex; gap: 5px; align-items: flex-end; }
@@ -570,3 +582,109 @@ body.ws-app .mcal .d { border-radius: 8px; }
 body.ws-app .today-grid { margin: 16px 0; }
 body.ws-app .clock, body.ws-app .prompt { margin-bottom: 16px; }
 body.ws-app .card.toolbar { margin-bottom: 16px; }
+
+/* ---------- 5. Admin console: the old glass components, flattened -------- */
+body.ws-app .admin-shell { display: block; }
+body.ws-app .glass, body.ws-app .glass-strong {
+    background: var(--ws-surface); border: 1px solid var(--ws-border);
+    box-shadow: var(--ws-shadow-sm); backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+body.ws-app .glass.rounded-2xl, body.ws-app .glass-strong.rounded-2xl, body.ws-app .glass.rounded-xl { border-radius: var(--ws-r-lg); }
+body.ws-app input.glass, body.ws-app select.glass, body.ws-app textarea.glass {
+    background: var(--ws-surface-2); border-color: var(--ws-border-2); box-shadow: none; border-radius: 7px; font-weight: 600;
+}
+body.ws-app input.glass:focus, body.ws-app select.glass:focus { border-color: var(--ws-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ws-primary) 18%, transparent); outline: none; }
+body.ws-app .btn-primary { background: var(--ws-primary); box-shadow: none; border-radius: 7px; }
+body.ws-app .btn-primary:hover:not(:disabled) { background: var(--ws-primary-2); transform: none; }
+body.ws-app select, body.ws-app input { color-scheme: inherit; }
+body.ws-app .stat-card { border-radius: var(--ws-r-lg); padding: 14px 16px; backdrop-filter: none; box-shadow: var(--ws-shadow-sm); }
+body.ws-app .stat-card::before { display: none; }
+body.ws-app .stat-card:hover { transform: none; }
+body.ws-app .stat-card .stat-icon { width: 38px; height: 38px; border-radius: 9px; box-shadow: none; font-size: 18px; }
+body.ws-app .stat-card .stat-icon svg { width: 18px; height: 18px; }
+body.ws-app .stat-card.blue .stat-icon,
+body.ws-app .stat-card.slate .stat-icon  { background: var(--ws-info-bg);    color: var(--ws-info-text); }
+body.ws-app .stat-card.emerald .stat-icon{ background: var(--ws-success-bg); color: var(--ws-success-text); }
+body.ws-app .stat-card.orange .stat-icon { background: var(--ws-warning-bg); color: var(--ws-warning-text); }
+body.ws-app .stat-card.rose .stat-icon   { background: var(--ws-danger-bg);  color: var(--ws-danger-text); }
+body.ws-app .stat-card.purple .stat-icon { background: rgba(139,92,246,0.14); color: #6d28d9; }
+:root[data-theme="dark"] body.ws-app .stat-card.purple .stat-icon { color: #c4b5fd; }
+body.ws-app .stat-card .stat-key { font-size: 11px; letter-spacing: 0.06em; font-weight: 700; }
+body.ws-app .stat-card .stat-num { font-size: 22px; font-weight: 800; }
+body.ws-app .section-head h3 { font-size: 14px; font-weight: 700; }
+body.ws-app .section-head .sub { font-size: 11px; letter-spacing: 0.06em; font-weight: 700; }
+body.ws-app .admin-main th, body.ws-app .admin-main td { padding: 9px 12px; }
+body.ws-app .admin-main th { font-size: 11px; letter-spacing: 0.06em; font-weight: 700; background: var(--ws-surface-2); }
+body.ws-app .admin-main table:not(.cal-grid) tbody tr:hover { background: var(--ws-surface-2); }
+body.ws-app .admin-main tbody td { font-size: 13px; }
+body.ws-app .admin-main .rounded-2xl { border-radius: var(--ws-r-lg); }
+body.ws-app .admin-main .rounded-xl { border-radius: 7px; }
+body.ws-app .admin-main .rounded-\[2\.5rem\] { border-radius: var(--ws-r-xl); }
+body.ws-app .wfh-switch input:checked + .wfh-slider { background: var(--ws-success); }
+body.ws-app .dev-chip.on { background: var(--ws-info-bg); border-color: color-mix(in srgb, var(--ws-info-text) 40%, transparent); box-shadow: none; }
+body.ws-app #gate input { text-align: center; }
+body.ws-app .ws-tool { text-align: left; font: inherit; width: 100%; cursor: pointer; }
+
+/* ---------- 6. Tool pages (typing, quiz, chat, recordings, signature) ---- */
+/* Their old top bars become an in-page toolbar; the brand + view links stay, the account bits go. */
+body.ws-app.page-tool .glass-nav {
+    position: static; width: 100%; max-width: 56rem; margin: 0 0 16px;
+    background: var(--ws-surface); border: 1px solid var(--ws-border); border-radius: var(--ws-r-lg);
+    box-shadow: var(--ws-shadow-sm); backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+body.ws-app.page-tool .glass-nav > div { padding-left: 16px; padding-right: 16px; }
+body.ws-app.page-tool .glass-nav .h-16 { height: 52px; }
+body.ws-app.page-tool .glass-nav #user-chip, body.ws-app.page-tool .glass-nav #logout-btn { display: none !important; }
+body.ws-app.page-tool .glass-nav .nav-link { font-size: 13px; font-weight: 600; }
+body.ws-app.page-tool .glass, body.ws-app.page-tool .glass-strong, body.ws-app.page-tool .glass-subtle {
+    background: var(--ws-surface); border: 1px solid var(--ws-border); box-shadow: var(--ws-shadow-sm);
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+body.ws-app.page-tool input.glass, body.ws-app.page-tool select.glass, body.ws-app.page-tool textarea.glass,
+body.ws-app.page-tool input.glass-subtle, body.ws-app.page-tool select.glass-subtle, body.ws-app.page-tool textarea.glass-subtle {
+    background: var(--ws-surface-2); border-color: var(--ws-border-2); box-shadow: none;
+}
+body.ws-app.page-tool .btn-primary { background: var(--ws-primary); box-shadow: none; }
+body.ws-app.page-tool .btn-primary:hover:not(:disabled) { background: var(--ws-primary-2); transform: none; }
+body.ws-app.page-tool select, body.ws-app.page-tool input, body.ws-app.page-tool textarea { color-scheme: inherit; }
+body.ws-app.page-tool .hero .ic, body.ws-app.page-tool .page-title-icon { box-shadow: none; background: var(--ws-primary); }
+body.ws-app.page-tool .hero h1 { font-size: 21px; }
+body.ws-app.page-tool .hero { display: flex; }
+body.ws-app.page-tool .container { padding-top: 0; }
+
+body.ws-app .ws-back-btn { display: none !important; }
+body.ws-app .ws-rules-fab { left: auto; right: 18px; bottom: 18px; background: var(--ws-surface); color: var(--ws-text-2); border-color: var(--ws-border-2); box-shadow: var(--ws-shadow-lg); backdrop-filter: none; font-weight: 700; }
+body.ws-app .ws-rules-fab:hover { background: var(--ws-surface-2); }
+body.ws-app.page-tool .page-title { position: static; margin-bottom: 4px; grid-column: 1 / -1; font-size: 21px; font-weight: 800; }
+body.ws-app.page-tool .page-title-icon { width: 34px; height: 34px; border-radius: 9px; }
+
+/* Chat: the two panels fill the page column under the top bar. */
+body.ws-app.page-chat { overflow: hidden; }
+body.ws-app.page-chat .glass-nav { display: none; }
+body.ws-app.page-chat .app-container { position: absolute; top: 0; left: 0; right: 0; bottom: 0; padding: 12px; gap: 12px; }
+body.ws-app.page-chat .contacts-panel, body.ws-app.page-chat .chat-panel {
+    border-radius: var(--ws-r-lg); background: var(--ws-surface); border: 1px solid var(--ws-border);
+    box-shadow: var(--ws-shadow-sm); backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+body.ws-app.page-chat .glass, body.ws-app.page-chat .glass-strong, body.ws-app.page-chat .glass-subtle {
+    background: var(--ws-surface-2); border: 1px solid var(--ws-border); backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+body.ws-app.page-chat .chat-header-fixed { background: var(--ws-surface); border-bottom: 1px solid var(--ws-border); backdrop-filter: none; }
+body.ws-app.page-chat .contact:hover { background: var(--ws-surface-2); }
+body.ws-app.page-chat .contact.active { background: color-mix(in srgb, var(--ws-primary) 10%, transparent); border-color: color-mix(in srgb, var(--ws-primary) 35%, transparent); }
+body.ws-app.page-chat .contact-name { color: var(--ws-text); }
+body.ws-app.page-chat .contact-preview, body.ws-app.page-chat .contact-time { color: var(--ws-text-muted); }
+body.ws-app.page-chat .contact.has-unread .contact-preview { color: var(--ws-text); }
+body.ws-app.page-chat .contact.has-unread .contact-time { color: var(--ws-primary); }
+body.ws-app.page-chat .contacts-section-head .lbl { color: var(--ws-text-muted); }
+body.ws-app.page-chat .msg-sent { background: var(--ws-primary); color: #fff; }
+body.ws-app.page-chat .msg-recv { background: var(--ws-surface-2); color: var(--ws-text); border: 1px solid var(--ws-border); }
+body.ws-app.page-chat .day-sep span { background: var(--ws-surface-2); color: var(--ws-text-muted); border: 1px solid var(--ws-border); }
+body.ws-app.page-chat .msg-sender-name { color: var(--ws-primary); }
+body.ws-app.page-chat .btn-primary { background: var(--ws-primary); box-shadow: none; }
+body.ws-app.page-chat .border-white\/10, body.ws-app.page-chat .border-white\/5 { border-color: var(--ws-border); }
+body.ws-app.page-chat select, body.ws-app.page-chat input, body.ws-app.page-chat textarea { color-scheme: inherit; }
+body.ws-app.page-chat .link-preview .lp-title { color: var(--ws-text); }
+body.ws-app.page-chat .link-preview .lp-desc, body.ws-app.page-chat .link-preview .lp-host { color: var(--ws-text-muted); }
+body.ws-app.page-chat .call-event-pill { background: var(--ws-surface-2); border-color: var(--ws-border); color: var(--ws-text-2); }
+:root[data-theme="dark"] body.ws-app.page-chat .msg-sent { color: #fff; }

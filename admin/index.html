@@ -11,6 +11,7 @@
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/design-system.css">
     <link rel="stylesheet" href="/responsive.css">
+    <link rel="stylesheet" href="/ui/app.css">
     <script src="/dialogs.js"></script>
     <script defer src="/commandpalette.js"></script>
     <style>
@@ -260,11 +261,11 @@
         .dev-chip:disabled { cursor: wait; }
     </style>
 </head>
-<body>
+<body class="ws-app">
 
     <!-- Password gate -->
     <div id="gate" class="fixed inset-0 z-50 flex items-center justify-center p-4" data-ws="scrim">
-        <form id="gate-form" class="glass-strong w-full max-w-md rounded-[2.5rem] p-12 text-center">
+        <form id="gate-form" class="w-full max-w-md rounded-[2.5rem] p-12 text-center" data-ws="panel">
             <div class="w-14 h-14 rounded-2xl mx-auto mb-6 flex items-center justify-center" data-ws="tile"><span class="ic ic-lock lg"></span></div>
             <h1 class="text-2xl font-black mb-2">WorkSuite Admin</h1>
             <p class="text-slate-400 mb-8 text-sm">Restricted area. Enter password to continue.</p>
@@ -277,64 +278,81 @@
 
     <!-- Dashboard (hidden until unlocked) -->
     <div id="dashboard" class="hidden">
-        <nav class="glass-nav border-b sticky top-0 z-30">
-            <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
-                <div class="flex items-center gap-3">
-                    <a href="/" class="glass px-3 py-2 rounded-xl text-sm font-bold inline-flex items-center gap-2 mr-1" title="Back to WorkSuite home"><span class="ic ic-home sm"></span>Home</a>
-                    <div class="w-9 h-9 rounded-lg flex items-center justify-center" style="background: var(--ws-primary); color: var(--ws-on-accent);">
-                        <span class="ic ic-shield lg"></span>
-                    </div>
-                    <div>
-                        <div class="font-black text-[15px] leading-tight">WorkSuite Admin</div>
-                        <div class="text-[12px] text-slate-400 leading-tight">People, attendance and tools</div>
-                    </div>
-                </div>
-                <div class="flex items-center gap-2">
-                    <button type="button" class="ws-theme-toggle" data-ws-theme>
-                        <span class="sun ic ic-sun"></span><span class="moon ic ic-moon"></span>
-                    </button>
-                    <button id="refresh-btn" class="glass px-3 py-2 rounded-xl text-sm font-bold inline-flex items-center gap-2"><span class="ic ic-refresh sm"></span>Refresh</button>
-                    <button id="logout-btn" class="glass px-3 py-2 rounded-xl text-sm font-bold text-rose-300 inline-flex items-center gap-2"><span class="ic ic-lock sm"></span>Lock</button>
-                </div>
-            </div>
-        </nav>
 
-        <main class="max-w-7xl mx-auto px-6 py-7">
+        <main>
             <!-- Section navigation.
                  Eleven items had outgrown a single row. Grouped into a sidebar,
                  but every button keeps its data-tab and .admin-tab class, so the
                  switcher below and admin/payroll.js - which binds its own two
                  panels to the same selector - carry on working untouched. -->
             <div class="admin-shell">
-              <aside class="admin-side">
-                <div class="side-group">
-                    <div class="side-head">People</div>
-                    <button data-tab="employees"  class="admin-tab" type="button"><span class="ic ic-users"></span>Employees</button>
-                    <button data-tab="shifts"     class="admin-tab" type="button"><span class="ic ic-clock"></span>Shifts</button>
-                    <button data-tab="leave"      class="admin-tab" type="button"><span class="ic ic-leave"></span>Leave</button>
-                    <button data-tab="holidays"   class="admin-tab" type="button"><span class="ic ic-calendar"></span>Holidays</button>
-                    <button data-tab="salary"     class="admin-tab" type="button"><span class="ic ic-salary"></span>Salary</button>
-                </div>
-                <div class="side-group">
-                    <div class="side-head">Attendance</div>
-                    <button data-tab="attendance" class="admin-tab" type="button"><span class="ic ic-attend"></span>Attendance</button>
-                    <button data-tab="calendar"   class="admin-tab" type="button"><span class="ic ic-calendar"></span>Calendar</button>
-                    <button data-tab="selfies"    class="admin-tab" type="button"><span class="ic ic-camera"></span>Selfies</button>
-                    <button data-tab="wfh"        class="admin-tab" type="button"><span class="ic ic-video"></span>WFH Check-ins</button>
-                    <button data-tab="friday"     class="admin-tab" type="button"><span class="ic ic-report"></span>Friday Report</button>
-                    <button data-tab="roster"     class="admin-tab" type="button"><span class="ic ic-fingerprint"></span>Biometric</button>
-                </div>
-                <div class="side-group">
-                    <div class="side-head">Tools</div>
-                    <button data-tab="results"    class="admin-tab active" type="button"><span class="ic ic-keyboard"></span>Typing</button>
-                    <button data-tab="quizzes"    class="admin-tab" type="button"><span class="ic ic-quiz"></span>Quizzes</button>
-                    <button data-tab="bitrix"     class="admin-tab" type="button"><span class="ic ic-chat"></span>Bitrix24</button>
-                </div>
-              </aside>
               <div class="admin-main">
 
+            <!-- OVERVIEW (default tab): today at a glance -->
+            <div id="overview-panel">
+                <div class="ws-page-head">
+                    <div>
+                        <h1>Overview</h1>
+                        <p id="ov-date">Today at a glance</p>
+                    </div>
+                    <div class="actions">
+                        <button type="button" class="ws-btn primary" data-jump="attendance"><span class="ic ic-attend"></span>Attendance report</button>
+                    </div>
+                </div>
+                <div class="ws-grid c4" id="ov-kpis">
+                    <div class="ws-card"><div class="ws-kpi"><div class="ico"><span class="ic ic-users"></span></div><div><div class="lbl">Employees</div><div class="val" id="ov-emp">—</div><div class="sub" id="ov-emp-sub">&nbsp;</div></div></div></div>
+                    <div class="ws-card"><div class="ws-kpi"><div class="ico ok"><span class="ic ic-check"></span></div><div><div class="lbl">Present today</div><div class="val" id="ov-present">—</div><div class="sub" id="ov-present-sub">&nbsp;</div></div></div></div>
+                    <div class="ws-card"><div class="ws-kpi"><div class="ico warn"><span class="ic ic-clock"></span></div><div><div class="lbl">Late today</div><div class="val" id="ov-late">—</div><div class="sub" id="ov-late-sub">&nbsp;</div></div></div></div>
+                    <div class="ws-card"><div class="ws-kpi"><div class="ico bad" id="ov-absent-ico"><span class="ic ic-leave"></span></div><div><div class="lbl">Absent today</div><div class="val" id="ov-absent">—</div><div class="sub" id="ov-absent-sub">&nbsp;</div></div></div></div>
+                </div>
+                <div class="ws-grid main" style="margin-top:16px">
+                    <div class="ws-stack">
+                        <div class="ws-card flush">
+                            <div class="ws-card-head" style="padding-bottom:10px">
+                                <h3>Attendance today</h3>
+                                <span class="sub" id="ov-att-sub"></span>
+                                <div class="right"><button type="button" class="ws-btn sm" data-jump="attendance">Full report →</button></div>
+                            </div>
+                            <div class="ws-table-wrap">
+                                <table class="ws-table">
+                                    <thead><tr><th>Employee</th><th class="col-co">Company</th><th>Shift</th><th>In</th><th>Out</th><th>Status</th></tr></thead>
+                                    <tbody id="ov-att-body"><tr><td colspan="6"><div class="ws-empty">Loading…</div></td></tr></tbody>
+                                </table>
+                            </div>
+                            <div style="padding:10px 18px 14px"><button type="button" class="ws-btn sm" id="ov-att-more" hidden>Show all</button></div>
+                        </div>
+                        <div class="ws-card">
+                            <div class="ws-card-head"><h3>Workspace</h3><span class="sub">Jump to a section</span></div>
+                            <div class="ws-grid c3" style="gap:10px" id="ov-links">
+                                <button type="button" class="ws-tool" data-jump="employees"><span class="ico"><span class="ic ic-users"></span></span><div class="t"><b>Employees</b><span>Profiles, WFH, devices</span></div></button>
+                                <button type="button" class="ws-tool" data-jump="leave"><span class="ico violet"><span class="ic ic-leave"></span></span><div class="t"><b>Leave</b><span>Approve or reject</span></div><span class="stat" id="ov-link-leave"></span></button>
+                                <button type="button" class="ws-tool" data-jump="salary"><span class="ico green"><span class="ic ic-salary"></span></span><div class="t"><b>Salary</b><span>Monthly pay sheet</span></div></button>
+                                <button type="button" class="ws-tool" data-jump="calendar"><span class="ico teal"><span class="ic ic-calendar"></span></span><div class="t"><b>Calendar</b><span>Month grid, everyone</span></div></button>
+                                <button type="button" class="ws-tool" data-jump="roster"><span class="ico amber"><span class="ic ic-fingerprint"></span></span><div class="t"><b>Biometric</b><span>Device roster</span></div><span class="stat" id="ov-link-roster"></span></button>
+                                <button type="button" class="ws-tool" data-jump="bitrix"><span class="ico rose"><span class="ic ic-chat"></span></span><div class="t"><b>Bitrix24</b><span>Group posts &amp; hooks</span></div></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="ws-stack">
+                        <div class="ws-card">
+                            <div class="ws-card-head"><h3>Pending leave</h3><div class="right"><button type="button" class="ws-btn sm" data-jump="leave">Review →</button></div></div>
+                            <ul class="ws-list" id="ov-leave"><li><div class="ws-empty">Loading…</div></li></ul>
+                        </div>
+                        <div class="ws-card">
+                            <div class="ws-card-head"><h3>Needs attention</h3></div>
+                            <ul class="ws-list" id="ov-issues"><li><div class="ws-empty">Loading…</div></li></ul>
+                        </div>
+                        <div class="ws-card">
+                            <div class="ws-card-head"><h3>Companies</h3><span class="sub">People per entity</span></div>
+                            <ul class="ws-list" id="ov-companies"><li><div class="ws-empty">Loading…</div></li></ul>
+                        </div>
+                    </div>
+                </div>
+            </div><!-- /#overview-panel -->
+
+
             <!-- Filters (RESULTS TAB) -->
-            <div id="results-panel">
+            <div id="results-panel" class="hidden">
             <!-- Stats -->
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                 <div class="stat-card slate">
@@ -1172,6 +1190,45 @@
         </div>
     </div>
 
+    <script src="/ui/shell.js"></script>
+    <script>
+        WSShell.mount({
+            active: 'overview', crumb: 'Overview', crumbPrefix: 'Admin', brandSub: 'Admin console',
+            nav: [
+                { label: '', items: [
+                    { key: 'overview',   title: 'Overview',      icon: 'home',        tab: 'overview' },
+                ]},
+                { label: 'People', items: [
+                    { key: 'employees',  title: 'Employees',     icon: 'users',       tab: 'employees' },
+                    { key: 'shifts',     title: 'Shifts',        icon: 'clock',       tab: 'shifts' },
+                    { key: 'leave',      title: 'Leave',         icon: 'leave',       tab: 'leave' },
+                    { key: 'holidays',   title: 'Holidays',      icon: 'party',       tab: 'holidays' },
+                    { key: 'salary',     title: 'Salary',        icon: 'salary',      tab: 'salary' },
+                ]},
+                { label: 'Attendance', items: [
+                    { key: 'attendance', title: 'Attendance',    icon: 'attend',      tab: 'attendance' },
+                    { key: 'calendar',   title: 'Calendar',      icon: 'calendar',    tab: 'calendar' },
+                    { key: 'selfies',    title: 'Selfies',       icon: 'camera',      tab: 'selfies' },
+                    { key: 'wfh',        title: 'WFH Check-ins', icon: 'video',       tab: 'wfh' },
+                    { key: 'friday',     title: 'Friday Report', icon: 'report',      tab: 'friday' },
+                    { key: 'roster',     title: 'Biometric',     icon: 'fingerprint', tab: 'roster' },
+                ]},
+                { label: 'Tools', items: [
+                    { key: 'results',    title: 'Typing',        icon: 'keyboard',    tab: 'results' },
+                    { key: 'quizzes',    title: 'Quizzes',       icon: 'quiz',        tab: 'quizzes' },
+                    { key: 'bitrix',     title: 'Bitrix24',      icon: 'chat',        tab: 'bitrix' },
+                ]},
+                { label: 'Employee view', items: [
+                    { key: 'home',       title: 'Back to home',  icon: 'arrow',       href: '/' },
+                ]},
+            ],
+            onSignOut: function () { var b = document.getElementById('logout-btn'); if (b) b.click(); },
+            tools: '<button type="button" id="refresh-btn" class="ws-btn sm" title="Reload the current data"><span class="ic ic-refresh"></span><span>Refresh</span></button>' +
+                   '<button type="button" id="logout-btn" class="ws-btn sm danger" title="Lock the admin console"><span class="ic ic-lock"></span><span>Lock</span></button>',
+        });
+        // Every sidebar tab button carries .admin-tab so the existing switchers keep working.
+        document.querySelectorAll('.ws-side-item[data-tab]').forEach(b => b.classList.add('admin-tab'));
+    </script>
     <script>
         let adminPassword = '';
         let allResults = [];
@@ -1186,7 +1243,7 @@
         let selfieData = null;
         let empWho = 'all';
         let leaveData = null;
-        let currentTab = 'results';
+        let currentTab = 'overview';
         let editingEmployee = null;
         let deletingEmployee = null;
         let quizTrendChart = null;
@@ -1232,6 +1289,8 @@
                 gate.classList.add('hidden');
                 dashboard.classList.remove('hidden');
                 renderAll();
+                if (window.WSShell) WSShell.setUser({ name: 'Administrator', company: 'Admin console · unlocked' });
+                document.dispatchEvent(new CustomEvent('admin-unlocked'));
             } catch (err) {
                 gateError.innerText = 'Network error. Please try again.';
                 gateError.classList.remove('hidden');
@@ -1246,6 +1305,7 @@
             gatePassword.value = '';
             dashboard.classList.add('hidden');
             gate.classList.remove('hidden');
+            if (window.WSShell) WSShell.setUser(null);
         });
 
         document.getElementById('refresh-btn').addEventListener('click', async () => {
@@ -1260,6 +1320,7 @@
                 allResults = data.results || [];
                 renderAll();
             }
+            document.dispatchEvent(new CustomEvent('admin-refresh', { detail: { tab: currentTab } }));
         });
 
         document.getElementById('search-input').addEventListener('input', renderTable);
@@ -1616,6 +1677,7 @@
                 document.querySelectorAll('.admin-tab').forEach(b => {
                     b.classList.toggle('active', b.dataset.tab === currentTab);
                 });
+                document.getElementById('overview-panel').classList.toggle('hidden',  currentTab !== 'overview');
                 document.getElementById('results-panel').classList.toggle('hidden',   currentTab !== 'results');
                 document.getElementById('quizzes-panel').classList.toggle('hidden',   currentTab !== 'quizzes');
                 document.getElementById('employees-panel').classList.toggle('hidden', currentTab !== 'employees');
@@ -3066,5 +3128,6 @@
     <script src="/admin/roster.js"></script>
     <script src="/admin/attendance-tools.js"></script>
     <script src="/admin/holidays.js"></script>
+    <script src="/admin/overview.js"></script>
 </body>
 </html>

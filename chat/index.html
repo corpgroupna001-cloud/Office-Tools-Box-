@@ -16,6 +16,7 @@
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/design-system.css">
     <link rel="stylesheet" href="/responsive.css">
+    <link rel="stylesheet" href="/ui/app.css">
     <script defer src="/commandpalette.js"></script>
     <style>
         body {
@@ -641,11 +642,7 @@
         #return-banner.show { display: inline-flex; }
     </style>
 </head>
-<body>
-    <a href="/" class="ws-back-btn" title="Back to WorkSuite home">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
-        <span>Home</span>
-    </a>
+<body class="ws-app page-chat">
     <!-- Top nav -->
     <nav class="glass-nav fixed top-0 left-0 w-full z-40">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -655,10 +652,6 @@
                     <span class="font-black text-xl text-white tracking-tight">Chat</span>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button id="show-history-btn" class="hidden glass items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black text-slate-200 hover:bg-white/15 hover:text-white transition" title="Call history">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                        <span>Calls</span>
-                    </button>
                     <span id="user-chip" class="hidden glass px-3 py-2 rounded-xl text-xs font-black text-white items-center gap-2">
                         <span id="user-chip-avatar" class="inline-flex items-center justify-center w-6 h-6 rounded-lg text-[10px]" style="background: linear-gradient(135deg,#3b82f6,#6366f1);">—</span>
                         <span id="user-chip-name">—</span>
@@ -961,6 +954,9 @@
         @keyframes attach-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.4 } }
     </style>
 
+    <script src="/ui/shell.js"></script>
+    <script>WSShell.mount({ active: 'chat', crumb: 'Chat & Calls', pageClass: 'fill',
+        tools: '<button id="show-history-btn" type="button" class="ws-btn sm hidden" title="Call history"><span class="ic ic-clock"></span><span>Calls</span></button>' });</script>
     <script>
         // ============================================================
         // Chat + Call app — Supabase Realtime + WebRTC

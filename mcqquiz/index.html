@@ -13,6 +13,7 @@
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/design-system.css">
     <link rel="stylesheet" href="/responsive.css">
+    <link rel="stylesheet" href="/ui/app.css">
     <script src="/dialogs.js"></script>
     <script defer src="/wfh-reminder.js"></script>
     <script defer src="/commandpalette.js"></script>
@@ -228,7 +229,7 @@
         }
     </style>
 </head>
-<body class="flex flex-col items-center p-4 pt-20">
+<body class="ws-app page-tool">
 
     <nav class="glass-nav fixed top-0 left-0 w-full z-40 content">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -574,6 +575,8 @@
         </div>
     </div>
 
+    <script src="/ui/shell.js"></script>
+    <script>WSShell.mount({ active: 'quiz', crumb: 'MCQ Quiz', pageClass: 'center' });</script>
     <script>
         // ============================================================
         // Question banks — 5 categories, ~170 questions total

@@ -461,6 +461,8 @@
     // ---------- Universal back-to-home button ----------
     function injectBackButton() {
         if (isHomePage) return;
+        // Pages in the app shell have Home in the sidebar already.
+        if (document.body && document.body.classList.contains('ws-app')) return;
         if (document.querySelector('.ws-back-btn')) return;
         const a = document.createElement('a');
         a.className = 'ws-back-btn';

@@ -10,6 +10,7 @@
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/design-system.css">
     <link rel="stylesheet" href="/responsive.css">
+    <link rel="stylesheet" href="/ui/app.css">
     <script defer src="/commandpalette.js"></script>
     <style>
         body {
@@ -314,7 +315,7 @@
     <script src="/presence.js"></script>
     <script src="/notifications.js"></script>
 </head>
-<body>
+<body class="ws-app page-tool">
 
 <div class="container">
     <div class="hero">
@@ -332,6 +333,8 @@
 
 <div id="toast" class="toast"></div>
 
+<script src="/ui/shell.js"></script>
+<script>WSShell.mount({ active: 'recordings', crumb: 'Friday Check-in' });</script>
 <script>
     // ---------- Devices we need a clip of ----------
     const DEVICES = [

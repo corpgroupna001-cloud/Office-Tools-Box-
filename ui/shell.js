@@ -18,7 +18,11 @@
    in the top bar and does not add its floating fallback button.
 
    API
-     WSShell.mount({ active, crumb, title, subtitle, onProfile, onSignOut })
+     WSShell.mount({ active, crumb, crumbPrefix, title, subtitle, brandSub,
+                     nav,            // optional: [{label, items:[{key,title,icon, href | tab, tag, badge}]}]
+                     tools,          // optional HTML for the top bar (buttons the page wires itself)
+                     pageClass,      // 'center' (old centred tool pages) | 'fill' (chat: no padding, full height)
+                     onProfile, onSignOut })
      WSShell.setUser({ name, email, avatar, company } | null)
      WSShell.setCrumb(text)
      WSShell.toast(message, 'ok' | 'bad' | '')
@@ -68,24 +72,28 @@
         if (p.indexOf('/admin') === 0) return 'admin';
         return '';
     }
-    function findItem(key) {
-        for (var g = 0; g < NAV.length; g++) for (var i = 0; i < NAV[g].items.length; i++) if (NAV[g].items[i].key === key) return NAV[g].items[i];
-        return null;
-    }
     function initialOf(name) {
         var s = String(name || '').trim();
         return s ? s.charAt(0).toUpperCase() : '?';
     }
-    function navHtml(active) {
-        return NAV.map(function (g) {
-            return '<div class="ws-side-group"><div class="label">' + esc(g.label) + '</div>' +
+    function navHtml(nav, active) {
+        return nav.map(function (g) {
+            return '<div class="ws-side-group">' + (g.label ? '<div class="label">' + esc(g.label) + '</div>' : '') +
                 g.items.map(function (it) {
                     var extra = it.badge ? '<span class="badge" data-ws-badge="' + it.badge + '" hidden></span>'
                               : it.tag ? '<span class="tag">' + esc(it.tag) + '</span>' : '';
-                    return '<a class="ws-side-item' + (it.key === active ? ' active' : '') + '" href="' + esc(it.href) + '" data-key="' + esc(it.key) + '">' +
-                        '<span class="ic ic-' + esc(it.icon) + '"></span><span>' + esc(it.title) + '</span>' + extra + '</a>';
+                    var inner = '<span class="ic ic-' + esc(it.icon) + '"></span><span>' + esc(it.title) + '</span>' + extra;
+                    var cls = 'ws-side-item' + (it.key === active ? ' active' : '') + (it.cls ? ' ' + esc(it.cls) : '');
+                    // A "tab" item is a button the page's own switcher handles (data-tab);
+                    // everything else is a plain link.
+                    if (it.tab) return '<button type="button" class="' + cls + '" data-tab="' + esc(it.tab) + '" data-key="' + esc(it.key) + '">' + inner + '</button>';
+                    return '<a class="' + cls + '" href="' + esc(it.href) + '" data-key="' + esc(it.key) + '">' + inner + '</a>';
                 }).join('') + '</div>';
         }).join('');
+    }
+    function findIn(nav, key) {
+        for (var g = 0; g < nav.length; g++) for (var i = 0; i < nav[g].items.length; i++) if (nav[g].items[i].key === key) return nav[g].items[i];
+        return null;
     }
 
     function mount(opts) {
@@ -97,9 +105,11 @@
         state.opts = opts;
         body.classList.add('ws-app');
 
+        var nav = opts.nav || NAV;
         var active = opts.active || guessActive();
-        var item = findItem(active);
+        var item = findIn(nav, active);
         var crumb = opts.crumb || (item ? item.title : document.title.split('·')[0].trim());
+        var prefix = opts.crumbPrefix || 'WorkSuite';
 
         // ----- sidebar -----
         var side = document.createElement('aside');
@@ -108,8 +118,8 @@
         side.setAttribute('aria-label', 'Main navigation');
         side.innerHTML =
             '<a class="ws-side-brand" href="/"><span class="mark"><span class="ic ic-shield"></span></span>' +
-                '<span class="name">WorkSuite<small>People &amp; attendance</small></span></a>' +
-            '<nav class="ws-side-nav">' + navHtml(active) + '</nav>' +
+                '<span class="name">WorkSuite<small>' + esc(opts.brandSub || 'People & attendance') + '</small></span></a>' +
+            '<nav class="ws-side-nav">' + navHtml(nav, active) + '</nav>' +
             '<div class="ws-side-foot" id="ws-side-foot">' +
                 '<span class="ws-avatar" id="ws-foot-avatar">?</span>' +
                 '<div class="who"><b id="ws-foot-name">Not signed in</b><span id="ws-foot-sub">WorkSuite</span></div>' +
@@ -121,8 +131,9 @@
         top.className = 'ws-top';
         top.innerHTML =
             '<button type="button" class="ws-iconbtn ws-hamb" id="ws-hamb" aria-label="Open menu"><span class="ic ic-menu"></span></button>' +
-            '<div class="crumb">WorkSuite <span aria-hidden="true">›</span> <b id="ws-crumb">' + esc(crumb) + '</b></div>' +
+            '<div class="crumb">' + esc(prefix) + ' <span aria-hidden="true">›</span> <b id="ws-crumb">' + esc(crumb) + '</b></div>' +
             '<div class="spacer"></div>' +
+            (opts.tools ? '<div class="ws-top-tools">' + opts.tools + '</div>' : '') +
             '<button type="button" class="ws-cmdk-trigger" id="ws-search" title="Search & quick actions (Ctrl/Cmd + K)">' +
                 '<span class="ic ic-search sm"></span><span>Search</span><span class="kbd">⌘K</span></button>' +
             '<button type="button" class="ws-theme-toggle" data-ws-theme data-ws-theme-ready="1" aria-label="Switch between light and dark" title="Switch between light and dark">' +
@@ -140,7 +151,7 @@
 
         // ----- page column: everything that was in <body> moves here -----
         var page = document.createElement('div');
-        page.className = 'ws-page';
+        page.className = 'ws-page' + (opts.pageClass ? ' ' + opts.pageClass : '');
         page.id = 'ws-page';
         if (opts.title) {
             var head = document.createElement('div');
@@ -209,7 +220,13 @@
         var signOut = function () { toggleMenu(false); doSignOut(); };
         top.querySelector('#ws-menu-out').addEventListener('click', signOut);
         side.querySelector('#ws-foot-out').addEventListener('click', signOut);
-        side.querySelectorAll('.ws-side-item').forEach(function (a) { a.addEventListener('click', function () { closeDrawer(); }); });
+        side.querySelectorAll('.ws-side-item').forEach(function (a) {
+            a.addEventListener('click', function () {
+                closeDrawer();
+                // Tab items: the page's switcher marks the active one; keep the breadcrumb in step.
+                if (a.dataset.tab) { var it = findIn(nav, a.dataset.key); if (it) setCrumb(it.title); }
+            });
+        });
 
         renderUser();
         whenSupabase(bootUser);

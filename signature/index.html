@@ -9,6 +9,7 @@
 <script src="/theme.js"></script>
 <link rel="stylesheet" href="/design-system.css">
     <link rel="stylesheet" href="/responsive.css">
+    <link rel="stylesheet" href="/ui/app.css">
     <script src="/dialogs.js"></script>
     <script defer src="/wfh-reminder.js"></script>
 <script defer src="/commandpalette.js"></script>
@@ -204,7 +205,7 @@ button:active { transform: translateY(0); }
 <script src="/notifications.js"></script>
 </head>
 
-<body>
+<body class="ws-app page-tool">
 
 <div class="container">
 
@@ -309,6 +310,8 @@ button:active { transform: translateY(0); }
 
 </div>
 
+<script src="/ui/shell.js"></script>
+<script>WSShell.mount({ active: 'signature', crumb: 'Email Signature' });</script>
 <script>
 let currentMode = "light";
 let logoDataUrl = "";
