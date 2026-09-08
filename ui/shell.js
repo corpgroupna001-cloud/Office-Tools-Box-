@@ -33,19 +33,19 @@
     if (window.WSShell) return;
 
     var NAV = [
-        { label: 'Me', items: [
-            { key: 'home',       title: 'Home',             href: '/',                 icon: 'home' },
+        { label: 'Workspace', items: [
+            { key: 'home',       title: 'Dashboard',             href: '/',                 icon: 'home' },
             { key: 'attendance', title: 'My Attendance',    href: '/attendance/',      icon: 'attend' },
             { key: 'leave',      title: 'Leave & Holidays', href: '/attendance/#leave', icon: 'leave' },
         ]},
-        { label: 'Work', items: [
+        { label: 'Collaboration', items: [
             { key: 'chat',       title: 'Chat & Calls',     href: '/chat/',       icon: 'chat', badge: 'unread' },
             { key: 'recordings', title: 'Friday Check-in',  href: '/recordings/', icon: 'video' },
             { key: 'signature',  title: 'Email Signature',  href: '/signature/',  icon: 'pen' },
         ]},
-        { label: 'Learn', items: [
-            { key: 'typing',     title: 'ZenType',          href: '/typingtest/', icon: 'keyboard' },
-            { key: 'quiz',       title: 'MCQ Quiz',         href: '/mcqquiz/',    icon: 'quiz' },
+        { label: 'Development', items: [
+            { key: 'typing',     title: 'Typing assessment',          href: '/typingtest/', icon: 'keyboard' },
+            { key: 'quiz',       title: 'Knowledge assessments',         href: '/mcqquiz/',    icon: 'quiz' },
         ]},
         // The admin console is deliberately not listed: it is reached by its
         // URL and its own password, and employees have no reason to see it.
@@ -117,7 +117,7 @@
         side.setAttribute('aria-label', 'Main navigation');
         side.innerHTML =
             '<a class="ws-side-brand" href="/"><span class="mark"><span class="ic ic-shield"></span></span>' +
-                '<span class="name">WorkSuite<small>' + esc(opts.brandSub || 'People & attendance') + '</small></span></a>' +
+                '<span class="name">WorkSuite<small>' + esc(opts.brandSub || 'Employee workspace') + '</small></span></a>' +
             '<nav class="ws-side-nav">' + navHtml(nav, active) + '</nav>' +
             '<div class="ws-side-foot" id="ws-side-foot">' +
                 '<span class="ws-avatar" id="ws-foot-avatar">?</span>' +
@@ -129,12 +129,12 @@
         var top = document.createElement('header');
         top.className = 'ws-top';
         top.innerHTML =
-            '<button type="button" class="ws-iconbtn ws-hamb" id="ws-hamb" aria-label="Open menu"><span class="ic ic-menu"></span></button>' +
+            '<button type="button" class="ws-iconbtn ws-hamb" id="ws-hamb" aria-label="Open navigation" aria-controls="ws-side" aria-expanded="false"><span class="ic ic-menu"></span></button>' +
             '<div class="crumb">' + esc(prefix) + ' <span aria-hidden="true">›</span> <b id="ws-crumb">' + esc(crumb) + '</b></div>' +
             '<div class="spacer"></div>' +
             (opts.tools ? '<div class="ws-top-tools">' + opts.tools + '</div>' : '') +
             '<button type="button" class="ws-cmdk-trigger" id="ws-search" title="Search & quick actions (Ctrl/Cmd + K)">' +
-                '<span class="ic ic-search sm"></span><span>Search</span><span class="kbd">⌘K</span></button>' +
+                '<span class="ic ic-search sm"></span><span>Search workspace</span><span class="kbd">⌘K</span></button>' +
             '<button type="button" class="ws-theme-toggle" data-ws-theme data-ws-theme-ready="1" aria-label="Switch between light and dark" title="Switch between light and dark">' +
                 '<span class="moon ic ic-moon" aria-hidden="true"></span><span class="sun ic ic-sun" aria-hidden="true"></span></button>' +
             '<a class="ws-iconbtn" id="ws-bell" href="/chat/" title="Messages" aria-label="Messages"><span class="ic ic-bell"></span><span class="dot"></span></a>' +
@@ -152,6 +152,7 @@
         var page = document.createElement('div');
         page.className = 'ws-page' + (opts.pageClass ? ' ' + opts.pageClass : '');
         page.id = 'ws-page';
+        page.setAttribute('tabindex', '-1');
         if (opts.title) {
             var head = document.createElement('div');
             head.className = 'ws-page-head';
@@ -182,7 +183,12 @@
         host.className = 'ws-toast-host';
         host.id = 'ws-toast-host';
 
+        var skip = document.createElement('a');
+        skip.className = 'ws-skip-link';
+        skip.href = '#ws-page';
+        skip.textContent = 'Skip to content';
         body.insertBefore(shell, body.firstChild);
+        body.insertBefore(skip, shell);
         body.appendChild(scrim);
         body.appendChild(host);
 
@@ -227,6 +233,13 @@
             });
         });
 
+        // Keep the closed mobile drawer out of the keyboard focus order.
+        var mobileNav = window.matchMedia('(max-width: 960px)');
+        function syncDrawerVisibility() {
+            side.inert = mobileNav.matches && !side.classList.contains('open');
+        }
+        mobileNav.addEventListener('change', syncDrawerVisibility);
+        syncDrawerVisibility();
         renderUser();
         whenSupabase(bootUser);
     }
@@ -236,6 +249,13 @@
         var open = typeof force === 'boolean' ? force : !refs.side.classList.contains('open');
         refs.side.classList.toggle('open', open);
         refs.scrim.classList.toggle('open', open);
+        document.getElementById('ws-hamb').setAttribute('aria-expanded', String(open));
+        refs.side.inert = window.matchMedia('(max-width: 960px)').matches && !open;
+        if (!open && refs.side.contains(document.activeElement)) document.getElementById('ws-hamb').focus();
+        if (open) {
+            var first = refs.side.querySelector('.ws-side-item');
+            if (first) first.focus();
+        }
     }
     function closeDrawer() { if (refs.side) toggleDrawer(false); }
     function toggleMenu(force) {

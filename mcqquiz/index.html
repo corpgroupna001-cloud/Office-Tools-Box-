@@ -228,8 +228,9 @@
             box-shadow: 0 0 12px rgba(244, 63, 94, 0.6);
         }
     </style>
+    <link rel="stylesheet" href="/ui/corporate.css">
 </head>
-<body class="ws-app page-tool">
+<body data-ws-page="quiz" class="ws-app ws-corporate page-tool">
 
     <nav class="glass-nav fixed top-0 left-0 w-full z-40 content">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -276,9 +277,9 @@
         <div class="text-center mb-6">
             <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full mb-4" style="background: linear-gradient(135deg, rgba(249,115,22,0.2), rgba(239,68,68,0.2)); border: 1px solid rgba(249,115,22,0.35);">
                 <span>🥷</span>
-                <span class="text-xs font-black uppercase tracking-[0.2em] text-orange-300">Brain Training</span>
+                <span class="text-xs font-black uppercase tracking-[0.2em] text-orange-300">Learning &amp; development</span>
             </div>
-            <h1 class="text-4xl md:text-5xl font-black text-white mb-2 tracking-tighter drop-shadow-lg">MCQ Quiz</h1>
+            <h1 class="text-4xl md:text-5xl font-black text-white mb-2 tracking-tighter drop-shadow-lg">Knowledge assessments</h1>
             <p class="text-slate-300 font-semibold max-w-lg mx-auto">10 categories · shortcuts, logic, math, GK, aptitude, riddles.</p>
         </div>
 
@@ -308,14 +309,14 @@
                 <div class="flex-1 w-full">
                     <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mb-2">Difficulty</p>
                     <select id="difficulty-select" class="glass w-full text-white rounded-2xl focus:outline-none block px-5 py-3 font-extrabold cursor-pointer">
-                        <option value="mixed" selected>🎯 Mixed</option>
-                        <option value="easy">🟢 Easy Only</option>
-                        <option value="medium">🟡 Medium Only</option>
-                        <option value="hard">🔴 Hard Only</option>
+                        <option value="mixed" selected>Mixed difficulty</option>
+                        <option value="easy">Easy</option>
+                        <option value="medium">Medium</option>
+                        <option value="hard">Hard</option>
                     </select>
                 </div>
                 <button id="start-btn" disabled class="btn-primary text-white font-black px-8 py-4 rounded-2xl text-lg whitespace-nowrap w-full sm:w-auto">
-                    🚀 Start Quiz
+                    Start assessment
                 </button>
             </div>
             <p class="text-slate-400 text-xs mt-3 text-center">10 questions · 30 seconds each · press 1-4 to answer</p>
@@ -984,12 +985,12 @@
         function renderCategoryCards() {
             const grid = document.getElementById('cat-grid');
             grid.innerHTML = Object.values(QUESTION_BANKS).map(bank => `
-                <div class="cat-card glass-strong rounded-3xl p-4 text-center" data-cat="${bank.key}">
-                    <div class="cat-check">✓</div>
-                    <div class="w-14 h-14 mx-auto rounded-2xl flex items-center justify-center text-2xl mb-3" style="background: ${bank.iconBg}; box-shadow: 0 6px 20px rgba(0,0,0,0.35);">${bank.icon}</div>
-                    <h3 class="font-black text-white">${bank.name}</h3>
-                    <p class="text-[10px] uppercase tracking-widest text-slate-400 font-black mt-1">${bank.questions.length} qs</p>
-                </div>
+                <button type="button" class="cat-card glass-strong rounded-3xl p-4 text-center" data-cat="${bank.key}" aria-pressed="false">
+                    <span class="cat-check" aria-hidden="true">✓</span>
+                    <span class="cat-symbol" aria-hidden="true"><span class="ic ic-quiz"></span></span>
+                    <span class="cat-name">${bank.name}</span>
+                    <span class="cat-count">${bank.questions.length} questions</span>
+                </button>
             `).join('');
             grid.querySelectorAll('.cat-card').forEach(el => {
                 el.addEventListener('click', () => selectCategory(el.dataset.cat));
@@ -998,7 +999,10 @@
 
         function selectCategory(key) {
             selectedCategory = key;
-            document.querySelectorAll('.cat-card').forEach(c => c.classList.toggle('selected', c.dataset.cat === key));
+            document.querySelectorAll('.cat-card').forEach(c => {
+                c.classList.toggle('selected', c.dataset.cat === key);
+                c.setAttribute('aria-pressed', String(c.dataset.cat === key));
+            });
             document.getElementById('start-btn').disabled = false;
             // For AI category, prompt for topic on Start click (not here).
         }
@@ -1739,7 +1743,7 @@
             document.getElementById('result-screen').classList.add('hidden');
             document.getElementById('welcome-screen').classList.remove('hidden');
             selectedCategory = null;
-            document.querySelectorAll('.cat-card').forEach(c => c.classList.remove('selected'));
+            document.querySelectorAll('.cat-card').forEach(c => { c.classList.remove('selected'); c.setAttribute('aria-pressed', 'false'); });
             document.getElementById('start-btn').disabled = true;
             updateWelcomeStats();
         });

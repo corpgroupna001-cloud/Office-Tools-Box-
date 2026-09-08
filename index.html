@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WorkSuite Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/design-system.css">
     <link rel="stylesheet" href="/responsive.css">
@@ -31,15 +31,22 @@
         .lv-days { font-size: 11px; color: var(--ws-text-muted); font-weight: 600; }
         @media (max-width: 640px) { .ws-page-head .actions { width: 100%; } .ws-page-head .actions .ws-btn { flex: 1; } }
     </style>
+    <link rel="stylesheet" href="/ui/corporate.css">
 </head>
-<body class="ws-app">
+<body data-ws-page="home" class="ws-app ws-corporate">
 
     <!-- Auth modal (root gate) -->
     <div id="auth-modal" class="fixed inset-0 z-[60] hidden items-center justify-center p-4" data-ws="scrim">
-        <div class="glass-strong w-full max-w-md rounded-[2.5rem] p-8" data-ws="panel">
+        <div class="ws-auth-layout" data-ws="panel">
+            <aside class="ws-auth-brand">
+                <a href="/" class="ws-auth-wordmark"><span class="ic ic-shield"></span>WorkSuite</a>
+                <div><p class="ws-eyebrow">Employee services</p><h2>Employee<br>workspace</h2><p>Attendance, team communication and everyday work tools.</p></div>
+                <span class="ws-auth-caption">Company employee portal</span>
+            </aside>
+            <section class="ws-auth-form" aria-label="Sign in or create an account">
             <div class="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-5" data-ws="tile"><span class="ic ic-lock lg"></span></div>
-            <h2 class="text-2xl font-black text-white mb-1 text-center">WorkSuite</h2>
-            <p class="text-slate-300 mb-6 text-sm font-semibold text-center">Sign in to access your tools</p>
+            <h2 class="text-2xl font-black text-white mb-1 text-center">Welcome to WorkSuite</h2>
+            <p class="text-slate-300 mb-6 text-sm font-semibold text-center">Sign in with your registered email address.</p>
 
             <div class="rounded-2xl p-1 flex mb-5" data-ws="inset">
                 <button type="button" data-tab="login" onclick="switchAuthTab('login'); return false;" class="auth-tab flex-1 py-2 rounded-xl font-black text-sm text-white bg-white/10" style="cursor: pointer;">Log In</button>
@@ -47,9 +54,11 @@
             </div>
 
             <form id="login-form" class="space-y-3">
-                <input type="email" name="email" placeholder="Email" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
+                <label class="ws-field-label" for="login-email">Email address</label>
+                <input id="login-email" autocomplete="username" type="email" name="email" placeholder="name@company.com" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
+                <label class="ws-field-label" for="login-password">Password</label>
                 <div class="password-field">
-                    <input type="password" name="password" placeholder="Password" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
+                    <input id="login-password" autocomplete="current-password" type="password" name="password" placeholder="Enter your password" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
                     <button type="button" class="password-toggle" aria-label="Show password" data-target="prev">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                     </button>
@@ -70,9 +79,12 @@
                         <p id="signup-photo-hint" class="text-slate-400 text-xs mt-0.5">Tap the icon — required</p>
                     </div>
                 </div>
-                <input type="text" name="full_name" placeholder="Full Name" required minlength="2" class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
-                <input type="email" name="email" placeholder="Email" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
-                <select name="company" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white cursor-pointer" data-ws="inset">
+                <label class="ws-field-label" for="signup-name">Full name</label>
+                <input id="signup-name" autocomplete="name" type="text" name="full_name" placeholder="Full name" required minlength="2" class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
+                <label class="ws-field-label" for="signup-email">Email address</label>
+                <input id="signup-email" autocomplete="email" type="email" name="email" placeholder="name@company.com" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
+                <label class="ws-field-label" for="signup-company">Company</label>
+                <select id="signup-company" name="company" required class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white cursor-pointer" data-ws="inset">
                     <option value="" disabled selected>Select your company</option>
                     <option value="Nova Sportsmart Private Limited">Nova Sportsmart Private Limited</option>
                     <option value="Protathlitis Sportsmart LLP">Protathlitis Sportsmart LLP</option>
@@ -81,8 +93,9 @@
                     <option value="Genie Lamp Private Limited">Genie Lamp Private Limited</option>
                     <option value="CORPGROUP">CORPGROUP</option>
                 </select>
+                <label class="ws-field-label" for="signup-password">Create a password</label>
                 <div class="password-field">
-                    <input id="signup-password" type="password" name="password" placeholder="Password (min 6 chars)" required minlength="6" class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
+                    <input autocomplete="new-password" id="signup-password" type="password" name="password" placeholder="Password (min 6 chars)" required minlength="6" class="w-full px-5 py-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
                     <button type="button" class="password-toggle" aria-label="Show password" data-target="prev">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                     </button>
@@ -100,8 +113,9 @@
 
             <div class="auth-trust">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                <span>Encrypted &amp; secure sign-in · No ads · Passwords never leave your device unhashed</span>
+                <span>Your account connects you to your company workspace.</span>
             </div>
+            </section>
         </div>
     </div>
 
@@ -332,6 +346,7 @@
     <main id="dash">
         <div class="ws-page-head ws-anim" style="--i:0">
             <div>
+                <p class="ws-eyebrow">My workspace</p>
                 <div class="dash-greet">
                     <span class="ws-avatar lg" id="dash-avatar">?</span>
                     <div>
@@ -397,7 +412,7 @@
                 <!-- 14-day strip -->
                 <div class="ws-card ws-anim" style="--i:5">
                     <div class="ws-card-head">
-                        <h3>Last 14 days</h3>
+                        <h3>Attendance overview</h3>
                         <span class="sub" id="strip-sub"></span>
                         <div class="right"><a class="more" href="/attendance/">Full calendar →</a></div>
                     </div>
@@ -435,10 +450,10 @@
 
                 <!-- Tools -->
                 <div class="ws-card ws-anim" style="--i:7">
-                    <div class="ws-card-head"><h3>Tools</h3><span class="sub">Everything else in WorkSuite</span></div>
-                    <div class="ws-grid c3" style="gap:10px">
-                        <a class="ws-tool" href="./typingtest/"><span class="ico"><span class="ic ic-keyboard"></span></span><div class="t"><b>ZenType</b><span>Typing test</span></div><span class="stat" id="tool-typing">—</span></a>
-                        <a class="ws-tool" href="./mcqquiz/"><span class="ico amber"><span class="ic ic-quiz"></span></span><div class="t"><b>MCQ Quiz</b><span>10 categories</span></div><span class="stat" id="tool-quiz">—</span></a>
+                    <div class="ws-card-head"><h3>Workplace tools</h3><span class="sub">Your everyday applications</span></div>
+                    <div class="ws-grid c2 ws-launcher">
+                        <a class="ws-tool" href="./typingtest/"><span class="ico"><span class="ic ic-keyboard"></span></span><div class="t"><b>Typing assessment</b><span>Practice and progress</span></div><span class="stat" id="tool-typing">—</span></a>
+                        <a class="ws-tool" href="./mcqquiz/"><span class="ico amber"><span class="ic ic-quiz"></span></span><div class="t"><b>Knowledge assessments</b><span>10 topic categories</span></div><span class="stat" id="tool-quiz">—</span></a>
                         <a class="ws-tool" href="./chat/"><span class="ico teal"><span class="ic ic-chat"></span></span><div class="t"><b>Chat &amp; Calls</b><span>Messages, voice, video</span></div><span class="stat" id="tool-chat">—</span></a>
                         <a class="ws-tool" href="./recordings/"><span class="ico rose"><span class="ic ic-video"></span></span><div class="t"><b>Friday Check-in</b><span>WFH weekly clips</span></div></a>
                         <a class="ws-tool" href="./signature/"><span class="ico violet"><span class="ic ic-pen"></span></span><div class="t"><b>Email Signature</b><span>Branded signature</span></div></a>
@@ -481,7 +496,7 @@
     <script src="/ui/shell.js"></script>
     <script>
         WSShell.mount({
-            active: 'home', crumb: 'Home',
+            active: 'home', crumb: 'Dashboard',
             onProfile: function () { if (typeof openProfileModal === 'function') openProfileModal(); },
             onSignOut: async function () {
                 if (window.rootSb) { try { await rootSb.auth.signOut(); } catch (e) {} }

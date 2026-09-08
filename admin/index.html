@@ -260,19 +260,20 @@
         }
         .dev-chip:disabled { cursor: wait; }
     </style>
+    <link rel="stylesheet" href="/ui/corporate.css">
 </head>
-<body class="ws-app">
+<body data-ws-page="admin" class="ws-app ws-corporate">
 
     <!-- Password gate -->
     <div id="gate" class="fixed inset-0 z-50 flex items-center justify-center p-4" data-ws="scrim">
         <form id="gate-form" class="w-full max-w-md rounded-[2.5rem] p-12 text-center" data-ws="panel">
             <div class="w-14 h-14 rounded-2xl mx-auto mb-6 flex items-center justify-center" data-ws="tile"><span class="ic ic-lock lg"></span></div>
-            <h1 class="text-2xl font-black mb-2">WorkSuite Admin</h1>
-            <p class="text-slate-400 mb-8 text-sm">Restricted area. Enter password to continue.</p>
+            <h1 class="text-2xl font-black mb-2">Administration</h1>
+            <p class="text-slate-400 mb-8 text-sm">Sign in to manage your organization.</p>
             <input id="gate-password" type="password" placeholder="Admin password" autocomplete="off"
                 class="glass w-full px-6 py-4 rounded-2xl mb-4 font-bold text-lg text-center focus:outline-none focus:ring-4 focus:ring-blue-400/20 focus:border-blue-400">
             <p id="gate-error" class="text-rose-300 text-sm font-bold mb-4 hidden">Incorrect password.</p>
-            <button type="submit" id="gate-submit" class="btn-primary w-full text-white font-black py-4 rounded-2xl">Unlock</button>
+            <button type="submit" id="gate-submit" class="btn-primary w-full text-white font-black py-4 rounded-2xl">Sign in to administration</button>
         </form>
     </div>
 
@@ -292,7 +293,7 @@
             <div id="overview-panel">
                 <div class="ws-page-head">
                     <div>
-                        <h1>Overview</h1>
+                        <p class="ws-eyebrow">People operations</p><h1>Organization overview</h1>
                         <p id="ov-date">Today at a glance</p>
                     </div>
                     <div class="actions">

@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Attendance · WorkSuite</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/design-system.css">
     <link rel="stylesheet" href="/responsive.css">
@@ -206,13 +206,14 @@
             .hero h1 { font-size: 21px; }
         }
     </style>
+    <link rel="stylesheet" href="/ui/corporate.css">
 </head>
-<body class="ws-app">
+<body data-ws-page="attendance" class="ws-app ws-corporate">
     <div class="container">
         <div class="ws-page-head">
             <div>
-                <h1>My Attendance</h1>
-                <p id="sub">Your biometric check-ins and check-outs</p>
+                <p class="ws-eyebrow">Time &amp; attendance</p><h1>My attendance</h1>
+                <p id="sub">Your workday, attendance history and leave requests.</p>
                 <p id="shift-line" class="shift-line" style="display:none;"></p>
             </div>
             <div class="actions">

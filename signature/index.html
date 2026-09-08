@@ -13,7 +13,7 @@
     <script src="/dialogs.js"></script>
     <script defer src="/wfh-reminder.js"></script>
 <script defer src="/commandpalette.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 * { box-sizing: border-box; }
 
@@ -203,9 +203,10 @@ button:active { transform: translateY(0); }
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="/presence.js"></script>
 <script src="/notifications.js"></script>
+    <link rel="stylesheet" href="/ui/corporate.css">
 </head>
 
-<body class="ws-app page-tool">
+<body data-ws-page="signature" class="ws-app ws-corporate page-tool">
 
 <div class="container">
 
@@ -213,18 +214,21 @@ button:active { transform: translateY(0); }
     <span class="page-title-icon">
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.2 8.4c.5.5.8 1.1.8 1.6 0 1.1-.9 2-2 2h-4l-3 3-3-3H6a2 2 0 0 1-2-2 2 2 0 0 1 2-2h4l3-3 3 3h4c.5 0 1.1.3 1.6.8z"/><path d="M2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6"/></svg>
     </span>
-    <span>Signature Generator</span>
+    <div><p class="ws-eyebrow">Company identity</p><h1>Email signature</h1></div>
   </div>
 
   <!-- FORM -->
   <div class="glass">
 
     <h2>Employee Details</h2>
-    <p class="section-sub">Fill out your info — the preview updates live</p>
+    <p class="section-sub">Enter your details to preview your company signature.</p>
 
+    <label class="ws-field-label" for="name">Full name</label>
     <input id="name" placeholder="Full Name">
+    <label class="ws-field-label" for="title">Job title</label>
     <input id="title" placeholder="Job Title">
 
+    <label class="ws-field-label" for="companySelect">Company</label>
     <select id="companySelect" onchange="renderPreview()">
       <option value="">-- Select Company --</option>
       <option value="Jobways Point LLP">Jobways Point LLP</option>

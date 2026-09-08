@@ -417,8 +417,9 @@
             box-shadow: inset 0 -1px 0 rgba(0,0,0,0.3);
         }
     </style>
+    <link rel="stylesheet" href="/ui/corporate.css">
 </head>
-<body class="ws-app page-tool">
+<body data-ws-page="typing" class="ws-app ws-corporate page-tool">
 
     <nav class="glass-nav fixed top-0 left-0 w-full z-40 content">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -496,7 +497,7 @@
         <header class="w-full flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-4 px-2">
             <div class="min-w-0">
                 <div class="flex items-center gap-3 flex-wrap">
-                    <h1 class="text-2xl md:text-3xl font-black text-white tracking-tighter drop-shadow-lg">AI Assessment</h1>
+                    <h1 class="text-2xl md:text-3xl font-black text-white tracking-tighter drop-shadow-lg">Typing assessment</h1>
                     <span id="rank-pill" class="rank-pill hidden">🏆 Rank #-</span>
                     <span id="daily-badge" style="display: none;">✨ Daily</span>
                 </div>
@@ -504,7 +505,7 @@
             </div>
             <div class="flex items-center gap-3 flex-wrap">
                 <select id="category-selector" class="glass text-white rounded-2xl focus:ring-4 focus:ring-purple-400/20 focus:border-purple-400 block px-4 py-3 font-extrabold outline-none cursor-pointer transition-all" title="Passage category">
-                    <option value="">🎲 Random</option>
+                    <option value="">All categories</option>
                     <option value="Motivation">Motivation</option>
                     <option value="Commitment">Commitment</option>
                     <option value="Mindset">Mindset</option>
