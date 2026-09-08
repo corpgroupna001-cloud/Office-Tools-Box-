@@ -200,6 +200,21 @@ click. Binding a code also re-points that code's past punches.
   `att_` prefix — see the note below.)
 - Employees see their own punches at `/attendance/`.
 
+Email and Bitrix delivery run in independent queues. A slow email send or
+email-status update must not prevent the same punch from reaching Bitrix.
+Check **Admin → Bitrix → delivery log** for Bitrix failures separately from
+the attendance email status. A `deadline` entry means the punch was stored,
+but Bitrix delivery did not start before the request's time budget expired.
+The webhook reports these as `bitrix_deferred`.
+
+An email marked `sent` does not confirm Bitrix delivery. The attendance
+**Resend failed** action retries email only; replaying a biometric export
+does not resend notifications for already-stored punches. This fix does
+not automatically recover older missing Bitrix messages.
+
+Run `npm test` for the mocked biometric-delivery regression tests; they do
+not contact Supabase, SMTP, or Bitrix.
+
 ### Notes
 
 - The endpoint always answers `200` once a punch is stored — the vendor logs

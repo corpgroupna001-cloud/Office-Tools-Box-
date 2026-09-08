@@ -59,9 +59,11 @@ const {
 } = require('../lib/attendance');
 
 // Vercel Hobby kills the function at 10s. Stop starting new sends at 7.5s and
-// leave the rest as 'pending' — the admin Attendance tab can resend those.
+// leave unsent emails as 'pending'. Bitrix has its own independent queue;
+// a slow SMTP send must never use up the time available to post a punch.
 const EMAIL_DEADLINE_MS = 7500;
 const EMAIL_CONCURRENCY = 4;
+const BITRIX_CONCURRENCY = 4;
 const MAX_RECORDS = 500;
 
 // BACKFILL GUARD: the vendor's "Manual Data Export" can replay any date range.
@@ -151,7 +153,7 @@ async function runBounded(items, limit, deadlineAt, worker, onSkipped) {
   const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (i < items.length) {
       const idx = i++;
-      if (Date.now() > deadlineAt) { onSkipped(items[idx]); continue; }
+      if (Date.now() > deadlineAt) { await onSkipped(items[idx]); continue; }
       await worker(items[idx]);
     }
   });
@@ -558,7 +560,7 @@ module.exports = async function handler(req, res) {
     const keyOf = r => `${r.employee_code}|${new Date(r.log_datetime).getTime()}|${r.device_sn || ''}`;
     const metaByKey = new Map(rows.map(r => [keyOf(r.insert), r]));
 
-    const toEmail = inserted
+    const toNotify = inserted
       .map(row => ({ row, meta: metaByKey.get(keyOf(row)) }))
       .filter(x => x.meta && x.meta.profile && x.row.email_status === 'pending');
 
@@ -566,75 +568,86 @@ module.exports = async function handler(req, res) {
 
     // ---- 4. Notify: an email to the person, and a line in their company's
     //         Bitrix group posted AS them, through their own webhook ----
-    // Both happen in the same worker so they share one deadline: the Hobby
-    // function dies at 10s, and a slow SMTP host must not leave Bitrix with
-    // no time, or the other way round.
+    // Run independent queues. Previously each worker awaited SMTP and its
+    // status PATCH before checking the deadline for Bitrix. A successful but
+    // slow email silently dropped the group message, and vendor replays
+    // could not recover it because the punch was already stored.
     let emailed = 0, failed = 0, deferred = 0;
-    let bitrixSent = 0, bitrixFailed = 0, bitrixSkipped = 0;
+    let bitrixSent = 0, bitrixFailed = 0, bitrixSkipped = 0, bitrixDeferred = 0;
     const deadlineAt = startedAt + EMAIL_DEADLINE_MS;
 
     // Group mapping and, for people with no hook of their own yet, the
     // enroll numbers of colleagues whose hook can carry their line instead.
     const bx = await loadBitrixContext({ SUPABASE_URL, H, profiles, byCode });
 
-    await runBounded(
-      toEmail, EMAIL_CONCURRENCY, deadlineAt,
-      async ({ row, meta }) => {
-        const p = meta.profile;
-        const shift = shiftFor(p, meta.when);
+    const notifications = toNotify.map(({ row, meta }) => {
+      const p = meta.profile;
+      const shift = shiftFor(p, meta.when);
 
-        // Only annotate a boundary we can actually stand behind:
-        //  - lateness, only on the day's FIRST punch (a 2pm return from lunch
-        //    is not "4 hours late for a 9:30 shift");
-        //  - leaving early, only on a Logout, so a lunch-break exit isn't
-        //    reported as going home early.
-        const shiftEval = shift ? evaluateShift({
-          shift,
-          firstIn:  (row.direction === 'IN'  && meta.isFirstOfDay)       ? meta.when : null,
-          lastOut:  (row.direction === 'OUT' && row.event_type === 'LOGOUT') ? meta.when : null,
-          date: meta.when,
-        }) : null;
+      // Only annotate a boundary we can actually stand behind:
+      //  - lateness, only on the day's FIRST punch (a 2pm return from lunch
+      //    is not "4 hours late for a 9:30 shift");
+      //  - leaving early, only on a Logout, so a lunch-break exit isn't
+      //    reported as going home early.
+      const shiftEval = shift ? evaluateShift({
+        shift,
+        firstIn:  (row.direction === 'IN'  && meta.isFirstOfDay)       ? meta.when : null,
+        lastOut:  (row.direction === 'OUT' && row.event_type === 'LOGOUT') ? meta.when : null,
+        date: meta.when,
+      }) : null;
 
-        const { subject, html, text } = buildPunchEmail({
-          fullName: p.full_name,
-          direction: row.direction,
-          eventType: row.event_type,
-          when: meta.when,
-          deviceName: row.device_name,
-          employeeCode: row.employee_code,
-          shift: shiftEval,
-        });
+      return { row, meta, shiftEval };
+    });
 
-        const result = await sendMail({ company: p.company, to: p.email, subject, html, text });
-        if (result.ok) emailed++; else failed++;
+    const postBitrix = async ({ row, meta, shiftEval }, skipReason) => {
+      const p = meta.profile;
+      const out = await postPunchToGroup({
+        SUPABASE_URL, H, bx, company: companyFor(p, meta.when), enroll: row.employee_code,
+        message: buildPunchChatLine({
+          fullName: p.full_name, eventType: row.event_type, direction: row.direction,
+          when: meta.when, shift: shiftEval, source: row.source,
+        }),
+        skipReason,
+      });
+      if (out.reason === 'no_group') bitrixSkipped++;
+      else if (out.reason === 'deadline') bitrixDeferred++;
+      else if (out.ok) bitrixSent++;
+      else bitrixFailed++;
+    };
 
-        await fetch(`${SUPABASE_URL}/rest/v1/attendance_logs?id=eq.${row.id}`, {
-          method: 'PATCH',
-          headers: { ...H, Prefer: 'return=minimal' },
-          body: JSON.stringify({
-            email_status: result.ok ? 'sent' : 'failed',
-            emailed_at:   result.ok ? new Date().toISOString() : null,
-            email_error:  result.ok ? null : `${result.reason}: ${result.detail}`.slice(0, 400),
-          }),
-        }).catch(() => {});
+    await Promise.all([
+      runBounded(notifications, BITRIX_CONCURRENCY, deadlineAt,
+        item => postBitrix(item),
+        item => postBitrix(item, 'deadline')),
+      runBounded(notifications, EMAIL_CONCURRENCY, deadlineAt,
+        async ({ row, meta, shiftEval }) => {
+          const p = meta.profile;
+          const { subject, html, text } = buildPunchEmail({
+            fullName: p.full_name,
+            direction: row.direction,
+            eventType: row.event_type,
+            when: meta.when,
+            deviceName: row.device_name,
+            employeeCode: row.employee_code,
+            shift: shiftEval,
+          });
 
-        // Bitrix, as the person. Silent when the company has no group mapped
-        // - that is a choice, not a fault - but a mapped group with nothing
-        // to post through is a failure worth logging.
-        if (Date.now() > deadlineAt) { bitrixSkipped++; return; }
-        const out = await postPunchToGroup({
-          SUPABASE_URL, H, bx, company: companyFor(p, meta.when), enroll: row.employee_code,
-          message: buildPunchChatLine({
-            fullName: p.full_name, eventType: row.event_type, direction: row.direction,
-            when: meta.when, shift: shiftEval, source: row.source,
-          }),
-        });
-        if (out.reason === 'no_group') bitrixSkipped++;
-        else if (out.ok) bitrixSent++;
-        else bitrixFailed++;
-      },
-      () => { deferred++; } // left 'pending' — resend from the admin tab
-    );
+          const result = await sendMail({ company: p.company, to: p.email, subject, html, text });
+          if (result.ok) emailed++; else failed++;
+
+          await fetch(`${SUPABASE_URL}/rest/v1/attendance_logs?id=eq.${row.id}`, {
+            method: 'PATCH',
+            headers: { ...H, Prefer: 'return=minimal' },
+            body: JSON.stringify({
+              email_status: result.ok ? 'sent' : 'failed',
+              emailed_at:   result.ok ? new Date().toISOString() : null,
+              email_error:  result.ok ? null : `${result.reason}: ${result.detail}`.slice(0, 400),
+            }),
+          }).catch(() => {});
+        },
+        () => { deferred++; } // left 'pending' — resend from the admin tab
+      ),
+    ]);
 
     // Always 200 once the punches are safely stored: the vendor logs a failure
     // for any non-2xx, and a mail problem is ours to retry, not theirs.
@@ -651,6 +664,7 @@ module.exports = async function handler(req, res) {
       bitrix_sent: bitrixSent,
       bitrix_failed: bitrixFailed,
       bitrix_skipped: bitrixSkipped,
+      bitrix_deferred: bitrixDeferred,
       relabelled,
       auto_linked: autoLinked,
       rejected,
@@ -717,10 +731,16 @@ async function loadBitrixContext({ SUPABASE_URL, H, profiles, byCode }) {
   return ctx;
 }
 
-async function postPunchToGroup({ SUPABASE_URL, H, bx, company, enroll, message, kind = 'punch' }) {
+async function postPunchToGroup({ SUPABASE_URL, H, bx, company, enroll, message, kind = 'punch', skipReason }) {
   if (!bx || !bx.configured || !company || !message) return { ok: false, reason: 'no_group' };
   const t = bx.targets.get(company);
   if (!t || !t.enabled || !t.dialog_id) return { ok: false, reason: 'no_group' };
+  if (skipReason) {
+    const out = { ok: false, reason: skipReason,
+      detail: 'Punch stored, but the request deadline was reached before Bitrix delivery could start.' };
+    await bitrix.logAttempt({ SUPABASE_URL, H, kind, company, dialogId: t.dialog_id, message, out });
+    return out;
+  }
   const sender = bitrix.senderFor({ enroll, companyEnrolls: bx.enrollsByCompany.get(company) || [] });
   if (!sender.base) {
     const out = { ok: false, reason: 'not_configured', detail: 'No BITRIX_HOOK_<enroll> set for anyone.' };

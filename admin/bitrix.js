@@ -64,6 +64,8 @@
         empty:          ['Nothing to send', ''],
         timeout:        ['Bitrix did not answer in time',
             'Usually a slow portal. Try the test again.'],
+        deadline:       ['Punch stored; Bitrix delivery did not start',
+            'The attendance request ran out of time. This message was not posted; email delivery is tracked separately.'],
         network:        ['Could not reach Bitrix',
             'Check the portal address in the webhook URL.'],
         // Bitrix's own codes. CANCELED is the one this setup hits first, and
