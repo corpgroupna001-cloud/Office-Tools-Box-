@@ -1,4 +1,4 @@
-// Password-gated admin API. Uses the Supabase service_role key to bypass RLS
+// Password login and signed-cookie admin API. Uses the Supabase service_role key to bypass RLS
 // and return every employee's test results for the dashboard.
 //
 // Env vars required in Vercel:
@@ -9,6 +9,7 @@
 
 const { sendMail, senderFor: mailSenderFor, COMPANY_TO_USER, COMING_SOON_COMPANIES } = require('../lib/mailer');
 const bitrix = require('../lib/bitrix');
+const { createSession, validSession, sessionCookie, sameOrigin } = require('../lib/admin-session');
 const { istParts, istToday, buildPunchEmail, evaluateShift, describeWorkingDays,
         weekOffsFor, buildMonth, computePay, computeMonthlyPay, monthDates, DAY_STATUS,
         buildLeaveChatLine, assignDays, effectiveShift, istIsoWeekday, shiftDays } = require('../lib/attendance');
@@ -157,13 +158,17 @@ async function recomputePunches({ sb, from, to, apply, employeeCode, deadlineAt 
 }
 
 module.exports = async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'no-store');
+  if (!sameOrigin(req)) return res.status(403).json({ error: 'Cross-origin admin requests are not allowed.' });
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+  let body;
+  try { body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {}); }
+  catch { return res.status(400).json({ error: 'Invalid JSON' }); }
+  if (!body || typeof body !== 'object') return res.status(400).json({ error: 'Invalid request body' });
   const password = String(body.password || '');
   const action   = String(body.action || 'results');
 
@@ -171,17 +176,30 @@ module.exports = async function handler(req, res) {
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+  if (action === 'logout') {
+    res.setHeader('Set-Cookie', sessionCookie(''));
+    return res.status(200).json({ success: true });
+  }
+
   if (!ADMIN_PASSWORD) {
     return res.status(500).json({ error: 'ADMIN_PASSWORD not configured on server.' });
   }
-  if (!password || password !== ADMIN_PASSWORD) {
+  const passwordOK = !!password && password === ADMIN_PASSWORD;
+  const sessionOK = validSession(req.headers.cookie, process.env);
+  if (action === 'login' ? !passwordOK : !passwordOK && !sessionOK) {
     // Small delay to slow brute-force. Not a defense on its own — pick a strong password.
     await new Promise(r => setTimeout(r, 500));
-    return res.status(401).json({ error: 'Invalid password' });
+    return res.status(401).json({ error: action === 'login' ? 'Invalid password' : 'Admin session expired. Please sign in again.' });
   }
   if (!SUPABASE_URL || !SERVICE_KEY) {
     return res.status(500).json({ error: 'Supabase server config missing (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY).' });
   }
+
+  if (action === 'login') {
+    res.setHeader('Set-Cookie', sessionCookie(createSession(process.env)));
+    return res.status(200).json({ success: true });
+  }
+  if (action === 'session') return res.status(200).json({ authenticated: true });
 
   try {
     if (action === 'results') {

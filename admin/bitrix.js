@@ -117,9 +117,9 @@
     const esc = s => (window.escapeHtml ? window.escapeHtml(s) : String(s == null ? '' : s));
 
     async function api(action, extra = {}) {
-        const r = await fetch('/api/admin', {
+        const r = await adminFetch({
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: adminPassword, action, ...extra }),
+            body: JSON.stringify({ action, ...extra }),
         });
         const data = await r.json();
         if (!r.ok) {
@@ -133,7 +133,7 @@
     }
 
     async function loadBitrix() {
-        if (!adminPassword) return;
+        if (!adminAuthenticated) return;
         const body = document.getElementById('bx-body');
         body.innerHTML = '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold animate-pulse">Checking the connection…</td></tr>';
         try {
@@ -222,7 +222,7 @@
     }
 
     async function loadLogs() {
-        if (!adminPassword) return;
+        if (!adminAuthenticated) return;
         const body = document.getElementById('bx-log-body');
         body.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-400 font-bold animate-pulse">Reading the log\u2026</td></tr>';
         try {
@@ -400,7 +400,7 @@
      * only whether each is set (and looks like a URL) - never the URL itself.
      * ------------------------------------------------------------------- */
     async function loadHooks() {
-        if (!adminPassword) return;
+        if (!adminAuthenticated) return;
         const body = document.getElementById('bx-hooks-body');
         body.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-400 font-bold animate-pulse">Reading the environment…</td></tr>';
         try {

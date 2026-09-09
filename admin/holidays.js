@@ -32,9 +32,9 @@
     let data = null;     // { year, holidays: [...] }
 
     async function api(action, extra = {}) {
-        const r = await fetch('/api/admin', {
+        const r = await adminFetch({
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: adminPassword, action, ...extra }),
+            body: JSON.stringify({ action, ...extra }),
         });
         const out = await r.json();
         if (!r.ok) {
@@ -53,7 +53,7 @@
     const prettyOf = iso => PRETTY.format(new Date(iso + 'T12:00:00+05:30'));
 
     async function load() {
-        if (!adminPassword) return;
+        if (!adminAuthenticated) return;
         if (!$('hol-year').value) $('hol-year').value = new Date().getFullYear();
         $('hol-cards').innerHTML = '<div class="glass rounded-2xl p-8 text-center text-slate-400 font-bold animate-pulse">Loading…</div>';
         try {

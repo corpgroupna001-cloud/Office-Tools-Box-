@@ -68,7 +68,7 @@
         if (p.indexOf('/signature') === 0) return 'signature';
         if (p.indexOf('/typingtest') === 0) return 'typing';
         if (p.indexOf('/mcqquiz') === 0) return 'quiz';
-        if (p.indexOf('/admin') === 0) return 'admin';
+        if (p.indexOf('/admin') === 0 || p.indexOf('/wsm-admin') === 0) return 'admin';
         return '';
     }
     function initialOf(name) {

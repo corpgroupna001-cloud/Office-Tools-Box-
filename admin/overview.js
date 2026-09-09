@@ -24,9 +24,9 @@
     let showAll = false, loaded = false, loading = false;
 
     async function api(action, extra = {}) {
-        const r = await fetch('/api/admin', {
+        const r = await adminFetch({
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: adminPassword, action, ...extra }),
+            body: JSON.stringify({ action, ...extra }),
         });
         const out = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(out.error || out.detail || `HTTP ${r.status}`);
@@ -40,7 +40,7 @@
     const t = iso => iso ? fmtTime.format(new Date(iso)) : '—';
 
     async function load() {
-        if (!adminPassword || loading) return;
+        if (!adminAuthenticated || loading) return;
         loading = true;
         $('ov-date').textContent = `${fmtLong.format(new Date())} · IST`;
         const results = await Promise.allSettled([
@@ -150,7 +150,7 @@
     document.addEventListener('admin-refresh', e => { if (e.detail && e.detail.tab === 'overview') load().catch(() => {}); });
     document.querySelectorAll('.admin-tab').forEach(btn => {
         btn.addEventListener('click', () => {
-            if (btn.dataset.tab === 'overview' && adminPassword && !loaded) load().catch(() => {});
+            if (btn.dataset.tab === 'overview' && adminAuthenticated && !loaded) load().catch(() => {});
         });
     });
 })();

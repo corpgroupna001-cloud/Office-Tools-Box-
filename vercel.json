@@ -23,13 +23,33 @@
   ],
   "redirects": [
     {
+      "source": "/admin",
+      "destination": "/wsm-admin",
+      "permanent": false
+    },
+    {
+      "source": "/admin/",
+      "destination": "/wsm-admin",
+      "permanent": false
+    },
+    {
+      "source": "/admin/index",
+      "destination": "/wsm-admin",
+      "permanent": false
+    },
+    {
+      "source": "/admin/index.html",
+      "destination": "/wsm-admin",
+      "permanent": false
+    },
+    {
       "source": "/Network.ADMIN",
-      "destination": "/admin",
+      "destination": "/wsm-admin",
       "permanent": false
     },
     {
       "source": "/Network.ADMIN/",
-      "destination": "/admin",
+      "destination": "/wsm-admin",
       "permanent": false
     },
     {

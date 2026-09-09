@@ -8,7 +8,7 @@
  * HTML.
  *
  * It relies on two globals declared by the inline script above it:
- *   adminPassword  (let, script-level -> shared global lexical scope)
+ *   adminAuthenticated  (let, script-level -> shared global lexical scope)
  *   escapeHtml     (function declaration -> global)
  * Loaded WITHOUT defer immediately after that script, so both exist and the
  * DOM is already parsed by the time this runs.
@@ -38,7 +38,7 @@
     }
 
     async function loadPayroll(month) {
-        if (!adminPassword) return;
+        if (!adminAuthenticated) return;
         const m = month
             || document.getElementById('cal-month').value
             || document.getElementById('pay-month').value
@@ -48,9 +48,9 @@
         document.getElementById('pay-tbody').innerHTML =
             '<tr><td colspan="9" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading…</td></tr>';
         try {
-            const r = await fetch('/api/admin', {
+            const r = await adminFetch({
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: adminPassword, action: 'pay_list', month: m })
+                body: JSON.stringify({ action: 'pay_list', month: m })
             });
             const data = await r.json();
             if (!r.ok) throw new Error(data.detail || data.error || 'Load failed');
@@ -236,10 +236,10 @@
     async function savePayRate(uid, value, tr) {
         const blank = value === '' || value == null;
         try {
-            const r = await fetch('/api/admin', {
+            const r = await adminFetch({
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    password: adminPassword,
+
                     action: blank ? 'pay_clear_rate' : 'pay_set_rate',
                     user_id: uid, monthly_salary: blank ? undefined : value
                 })
@@ -326,9 +326,9 @@
         const shiftId = patch.shift_id != null ? patch.shift_id : cur.shift_id;
         const rate = patch.rate != null ? patch.rate : (cur.rate == null ? '' : cur.rate);
         try {
-            const r = await fetch('/api/admin', {
+            const r = await adminFetch({
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: adminPassword, action: 'pay_role2_set',
+                body: JSON.stringify({ action: 'pay_role2_set',
                     user_id: emp.id, label, shift_id: shiftId, per_day_rate: rate }),
             });
             const data = await r.json();
@@ -375,9 +375,9 @@
 
     async function clearRole2(emp, tr) {
         try {
-            const r = await fetch('/api/admin', {
+            const r = await adminFetch({
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: adminPassword, action: 'pay_role2_clear', user_id: emp.id }),
+                body: JSON.stringify({ action: 'pay_role2_clear', user_id: emp.id }),
             });
             if (!r.ok) { const d = await r.json(); throw new Error(d.detail || d.error || 'Remove failed'); }
             emp.second_role = null;

@@ -1232,7 +1232,7 @@
         document.querySelectorAll('.ws-side-item[data-tab]').forEach(b => b.classList.add('admin-tab'));
     </script>
     <script>
-        let adminPassword = '';
+        let adminAuthenticated = false;
         let allResults = [];
         let allEmployees = [];
         let allQuizzes = [];
@@ -1265,57 +1265,97 @@
         const gateSubmit = document.getElementById('gate-submit');
         const gatePassword = document.getElementById('gate-password');
 
-        document.getElementById('gate-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const pw = gatePassword.value;
-            if (!pw) return;
-            gateSubmit.disabled = true;
-            gateSubmit.innerText = 'Checking…';
-            gateError.classList.add('hidden');
-            try {
-                const r = await fetch('/api/admin', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password: pw, action: 'results' })
-                });
-                const data = await r.json();
-                if (!r.ok) {
-                    gateError.innerText = data.error || 'Incorrect password.';
-                    gateError.classList.remove('hidden');
-                    gateSubmit.disabled = false;
-                    gateSubmit.innerText = 'Unlock';
-                    return;
-                }
-                adminPassword = pw;
-                allResults = data.results || [];
-                gate.classList.add('hidden');
-                dashboard.classList.remove('hidden');
-                renderAll();
-                if (window.WSShell) WSShell.setUser({ name: 'Administrator', company: 'Admin console · unlocked' });
-                document.dispatchEvent(new CustomEvent('admin-unlocked'));
-            } catch (err) {
-                gateError.innerText = 'Network error. Please try again.';
-                gateError.classList.remove('hidden');
-                gateSubmit.disabled = false;
-                gateSubmit.innerText = 'Unlock';
+        // Cookies are sent automatically to the same-origin admin API. The
+        // password is used only for login, then immediately cleared.
+        async function adminFetch(options) {
+            const response = await fetch('/api/admin', { ...options, credentials: 'same-origin' });
+            const action = JSON.parse(options.body || '{}').action;
+            if (response.status === 401 && action !== 'login' && action !== 'session') {
+                showAdminGate('Your session expired. Please sign in again.');
             }
-        });
+            return response;
+        }
 
-        document.getElementById('logout-btn').addEventListener('click', () => {
-            adminPassword = '';
+        function showAdminGate(message = '') {
+            adminAuthenticated = false;
             allResults = [];
             gatePassword.value = '';
             dashboard.classList.add('hidden');
             gate.classList.remove('hidden');
+            gateSubmit.disabled = false;
+            gateSubmit.textContent = 'Sign in to administration';
+            gateError.textContent = message;
+            gateError.classList.toggle('hidden', !message);
             if (window.WSShell) WSShell.setUser(null);
+        }
+
+        async function unlockAdmin() {
+            const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'results' }) });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.error || 'Could not load the dashboard.');
+            adminAuthenticated = true;
+            gatePassword.value = '';
+            allResults = data.results || [];
+            gate.classList.add('hidden');
+            dashboard.classList.remove('hidden');
+            renderAll();
+            if (window.WSShell) WSShell.setUser({ name: 'Administrator', company: 'Admin console' });
+            document.dispatchEvent(new CustomEvent('admin-unlocked'));
+        }
+
+        document.getElementById('gate-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!gatePassword.value) return;
+            gateSubmit.disabled = true;
+            gateSubmit.textContent = 'Signing in…';
+            gateError.classList.add('hidden');
+            try {
+                const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: gatePassword.value, action: 'login' }) });
+                const data = await r.json();
+                gatePassword.value = '';
+                if (!r.ok) throw new Error(data.error || 'Incorrect password.');
+                await unlockAdmin();
+            } catch (err) {
+                showAdminGate(err.message || 'Network error. Please try again.');
+            }
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', async () => {
+            try {
+                const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'logout' }) });
+                if (!r.ok) throw new Error('Could not end your session. Please try Lock again.');
+                // Reload clears all in-memory reports and the server-cleared
+                // cookie ensures the dashboard stays locked on the next load.
+                location.reload();
+            } catch (err) {
+                if (window.WSShell) WSShell.toast(err.message || 'Could not lock. Please try again.', 'bad');
+            }
+        });
+
+        // Wait until every admin module has installed its unlock listener.
+        document.addEventListener('DOMContentLoaded', async () => {
+            gateSubmit.disabled = true;
+            gateSubmit.textContent = 'Checking session…';
+            try {
+                const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'session' }) });
+                if (r.status === 401) { showAdminGate(); return; }
+                if (!r.ok) throw new Error('Could not check your session. Please sign in again.');
+                await unlockAdmin();
+            } catch (err) {
+                showAdminGate(err.message || 'Network error. Please try again.');
+            }
         });
 
         document.getElementById('refresh-btn').addEventListener('click', async () => {
-            if (!adminPassword) return;
-            const r = await fetch('/api/admin', {
+            if (!adminAuthenticated) return;
+            const r = await adminFetch({
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: adminPassword, action: 'results' })
+                body: JSON.stringify({ action: 'results' })
             });
             const data = await r.json();
             if (r.ok) {
@@ -1390,13 +1430,13 @@
         // QUIZ TAB
         // ============================================================
         async function loadQuizzes() {
-            if (!adminPassword) return;
+            if (!adminAuthenticated) return;
             document.getElementById('quiz-tbody').innerHTML = '<tr><td colspan="9" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading quizzes…</td></tr>';
             try {
-                const r = await fetch('/api/admin', {
+                const r = await adminFetch({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password: adminPassword, action: 'quiz_results' })
+                    body: JSON.stringify({ action: 'quiz_results' })
                 });
                 const data = await r.json();
                 if (!r.ok) throw new Error(data.error || 'Failed');
@@ -1702,13 +1742,13 @@
 
         // ---------- Employees ----------
         async function loadEmployees() {
-            if (!adminPassword) return;
+            if (!adminAuthenticated) return;
             document.getElementById('emp-tbody').innerHTML = '<tr><td colspan="11" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading employees…</td></tr>';
             try {
-                const r = await fetch('/api/admin', {
+                const r = await adminFetch({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password: adminPassword, action: 'employees' })
+                    body: JSON.stringify({ action: 'employees' })
                 });
                 const data = await r.json();
                 if (!r.ok) throw new Error(data.error || 'Failed');
@@ -1804,10 +1844,10 @@
                     const is_wfh = input.checked;
                     input.disabled = true;
                     try {
-                        const r = await fetch('/api/admin', {
+                        const r = await adminFetch({
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ password: adminPassword, action: 'set_wfh', id, is_wfh })
+                            body: JSON.stringify({ action: 'set_wfh', id, is_wfh })
                         });
                         if (!r.ok) throw new Error((await r.json()).error || 'Update failed');
                         const emp = allEmployees.find(x => x.id === id);
@@ -1833,10 +1873,10 @@
                     const on = emp[field] === false; // flipping
                     btn.disabled = true;
                     try {
-                        const r = await fetch('/api/admin', {
+                        const r = await adminFetch({
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ password: adminPassword, action: 'set_device', id, device, on })
+                            body: JSON.stringify({ action: 'set_device', id, device, on })
                         });
                         if (!r.ok) throw new Error((await r.json()).error || 'Update failed');
                         emp[field] = on;
@@ -1874,10 +1914,10 @@
             const orig = btn.innerText;
             btn.disabled = true; btn.innerText = 'Saving…';
             try {
-                const r = await fetch('/api/admin', {
+                const r = await adminFetch({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password: adminPassword, action: 'update_employee', id: editingEmployee.id, full_name })
+                    body: JSON.stringify({ action: 'update_employee', id: editingEmployee.id, full_name })
                 });
                 const data = await r.json();
                 if (!r.ok) throw new Error(data.error || 'Failed');
@@ -1912,10 +1952,10 @@
             btn.disabled = true; btn.innerText = 'Deleting…';
             err.classList.add('hidden');
             try {
-                const r = await fetch('/api/admin', {
+                const r = await adminFetch({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password: adminPassword, action: 'delete_employee', id: deletingEmployee.id })
+                    body: JSON.stringify({ action: 'delete_employee', id: deletingEmployee.id })
                 });
                 const data = await r.json();
                 if (!r.ok) throw new Error(data.error || 'Failed');
@@ -1937,10 +1977,10 @@
             const okReset = await wsDialog.confirm({ icon: '🔑', title: 'Send password reset?', message: `A reset email will be sent to <b>${escapeHtml(emp.email)}</b>.`, okText: 'Send Email' });
             if (!okReset) return;
             try {
-                const r = await fetch('/api/admin', {
+                const r = await adminFetch({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password: adminPassword, action: 'reset_password', id: emp.id, email: emp.email })
+                    body: JSON.stringify({ action: 'reset_password', id: emp.id, email: emp.email })
                 });
                 const data = await r.json();
                 if (!r.ok) throw new Error(data.error || 'Failed');
@@ -1956,15 +1996,15 @@
 
         // ---------- WFH check-ins ----------
         async function loadWfh() {
-            if (!adminPassword) return;
+            if (!adminAuthenticated) return;
             const grid = document.getElementById('wfh-grid');
             grid.innerHTML = '<div class="glass rounded-2xl p-8 text-center text-slate-400 font-bold animate-pulse col-span-full">Loading Friday check-ins…</div>';
             try {
                 const week = document.getElementById('wfh-week').value || '';
-                const r = await fetch('/api/admin', {
+                const r = await adminFetch({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password: adminPassword, action: 'wfh_recordings', week })
+                    body: JSON.stringify({ action: 'wfh_recordings', week })
                 });
                 const data = await r.json();
                 if (!r.ok) throw new Error(data.error || 'Failed');
@@ -2208,10 +2248,10 @@
             const err = document.getElementById('wfh-del-err');
             btn.disabled = true; btn.innerText = 'Deleting…'; err.classList.add('hidden');
             try {
-                const r = await fetch('/api/admin', {
+                const r = await adminFetch({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password: adminPassword, action: 'wfh_delete', id, device })
+                    body: JSON.stringify({ action: 'wfh_delete', id, device })
                 });
                 const j = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(j.error || 'Delete failed');
@@ -2280,10 +2320,10 @@
             const note = document.getElementById('wfh-review-note').value.trim();
             btn.disabled = true; btn.innerText = 'Saving…'; err.classList.add('hidden');
             try {
-                const r = await fetch('/api/admin', {
+                const r = await adminFetch({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password: adminPassword, action: 'wfh_review', id, status: verdict, note })
+                    body: JSON.stringify({ action: 'wfh_review', id, status: verdict, note })
                 });
                 const j = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(j.error || 'Review failed');
@@ -2310,16 +2350,16 @@
         }
 
         async function loadFriday() {
-            if (!adminPassword) return;
+            if (!adminAuthenticated) return;
             const tbody = document.getElementById('friday-tbody');
             tbody.innerHTML = '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold animate-pulse">Building Friday report…</td></tr>';
             try {
                 const weekInput = document.getElementById('friday-week');
                 if (!weekInput.value) weekInput.value = latestFridayIST();
-                const r = await fetch('/api/admin', {
+                const r = await adminFetch({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password: adminPassword, action: 'friday_report', week: weekInput.value })
+                    body: JSON.stringify({ action: 'friday_report', week: weekInput.value })
                 });
                 const data = await r.json();
                 if (!r.ok) throw new Error(data.error || 'Failed');
@@ -2430,10 +2470,10 @@
         async function attApi(payload) {
             // Attendance admin actions live inside /api/admin (prefixed att_) —
             // Vercel Hobby caps a deployment at 12 serverless functions.
-            const r = await fetch('/api/admin', {
+            const r = await adminFetch({
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: adminPassword, ...payload, action: 'att_' + payload.action })
+                body: JSON.stringify({ ...payload, action: 'att_' + payload.action })
             });
             const data = await r.json();
             if (!r.ok) throw new Error(data.error || data.detail || 'Request failed');
@@ -2441,7 +2481,7 @@
         }
 
         async function loadAttendance() {
-            if (!adminPassword) return;
+            if (!adminAuthenticated) return;
             const dateInput = document.getElementById('att-date');
             if (!dateInput.value) dateInput.value = attIstToday();
             const date = dateInput.value;
@@ -2682,10 +2722,10 @@
         let shiftEditingId = null;
 
         async function shiftApi(payload) {
-            const r = await fetch('/api/admin', {
+            const r = await adminFetch({
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: adminPassword, ...payload })
+                body: JSON.stringify({ ...payload })
             });
             const data = await r.json();
             if (!r.ok) throw new Error(data.error || data.detail || 'Request failed');
@@ -2695,7 +2735,7 @@
         function hhmm(t) { return String(t || '').slice(0, 5); }
 
         async function loadShifts() {
-            if (!adminPassword) return;
+            if (!adminAuthenticated) return;
             document.getElementById('shift-cards').innerHTML =
                 '<p class="text-slate-400 font-bold animate-pulse col-span-full">Loading shifts…</p>';
             try {
@@ -2961,7 +3001,7 @@
         }
 
         async function loadSelfies(allDates) {
-            if (!adminPassword) return;
+            if (!adminAuthenticated) return;
             const d = document.getElementById('sf-date');
             if (!d.value && !allDates) d.value = sfIstToday();
             document.getElementById('sf-grid').innerHTML =
@@ -3069,9 +3109,9 @@
 
         // ================= LEAVE & HOLIDAYS =================
         async function leaveApi(payload) {
-            const r = await fetch('/api/admin', {
+            const r = await adminFetch({
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: adminPassword, ...payload })
+                body: JSON.stringify({ ...payload })
             });
             const data = await r.json();
             if (!r.ok) throw new Error(data.error || data.detail || 'Request failed');
@@ -3079,7 +3119,7 @@
         }
 
         async function loadLeave() {
-            if (!adminPassword) return;
+            if (!adminAuthenticated) return;
             document.getElementById('lv-tbody').innerHTML =
                 '<tr><td colspan="7" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading…</td></tr>';
             try {

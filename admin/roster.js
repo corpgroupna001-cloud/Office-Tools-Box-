@@ -27,9 +27,9 @@
     }
 
     async function api(action, extra = {}) {
-        const r = await fetch('/api/admin', {
+        const r = await adminFetch({
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: adminPassword, action, ...extra }),
+            body: JSON.stringify({ action, ...extra }),
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.detail || d.error || 'Request failed');
@@ -37,7 +37,7 @@
     }
 
     async function load() {
-        if (!adminPassword) return;
+        if (!adminAuthenticated) return;
         const body = document.getElementById('rost-body');
         body.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-400 font-bold animate-pulse">Reading the roster…</td></tr>';
         try {

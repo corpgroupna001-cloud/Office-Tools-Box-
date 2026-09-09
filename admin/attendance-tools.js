@@ -15,9 +15,9 @@
     const $ = id => document.getElementById(id);
 
     async function api(action, extra = {}) {
-        const r = await fetch('/api/admin', {
+        const r = await adminFetch({
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ password: adminPassword, action, ...extra }),
+            body: JSON.stringify({ action, ...extra }),
         });
         const data = await r.json();
         if (!r.ok) {
@@ -42,7 +42,7 @@
     };
 
     async function loadMail() {
-        if (!adminPassword) return;
+        if (!adminAuthenticated) return;
         const box = $('mail-status');
         try {
             mailData = await api('mail_status');
@@ -170,7 +170,7 @@
     let loaded = false;
     document.querySelectorAll('.admin-tab').forEach(btn => {
         btn.addEventListener('click', () => {
-            if (btn.dataset.tab !== 'attendance' || loaded || !adminPassword) return;
+            if (btn.dataset.tab !== 'attendance' || loaded || !adminAuthenticated) return;
             loaded = true;
             if (!$('recompute-from').value) $('recompute-from').value = daysAgo(14);
             if (!$('recompute-to').value) $('recompute-to').value = istToday();

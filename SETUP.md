@@ -79,7 +79,7 @@ By default Supabase requires email confirmation. If you want employees to sign u
 | `https://work-suite-mauve.vercel.app/signature/` | Signature Gen |
 | `https://work-suite-mauve.vercel.app/attendance/` | My Attendance — login required |
 | `https://work-suite-mauve.vercel.app/api/attendance-webhook` | Biometric device push endpoint (Bearer key) |
-| `https://work-suite-mauve.vercel.app/Network.ADMIN` | Admin dashboard — password required |
+| `https://work-suite-mauve.vercel.app/wsm-admin` | Admin dashboard — password required |
 
 ---
 
@@ -87,7 +87,7 @@ By default Supabase requires email confirmation. If you want employees to sign u
 
 1. Visit `/typingtest/` → sign up with your email + password
 2. Complete a test → you should see the "Download Result" button and a saved record in Supabase (`test_results` table)
-3. Visit `/Network.ADMIN` → enter your `ADMIN_PASSWORD` → you should see your test result
+3. Visit `/wsm-admin` → enter your `ADMIN_PASSWORD` → you should see your test result
 
 ---
 
@@ -486,3 +486,9 @@ functions fails the build with
 
 Cron slots are similarly full: Hobby allows 2, and both are used by
 `/api/wfh-remind`.
+
+## Admin session and URL
+
+The admin page is `/wsm-admin`. The old `/admin` and `/Network.ADMIN` links redirect there. Support scripts and `/api/admin` keep their existing URLs.
+
+After signing in, a signed HTTP-only, Secure, SameSite=Strict cookie keeps the admin session for 12 hours, including page refreshes. Lock clears the cookie and reloads the login screen. Changing `ADMIN_PASSWORD` or the Supabase service key invalidates existing sessions. No database migration or new environment variable is needed.

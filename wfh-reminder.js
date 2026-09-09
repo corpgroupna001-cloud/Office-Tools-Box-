@@ -77,7 +77,7 @@
 
     async function init() {
         if (!isFriday()) return;
-        if (location.pathname.startsWith('/recordings') || location.pathname.startsWith('/admin')) return;
+        if (location.pathname.startsWith('/recordings') || location.pathname.startsWith('/admin') || location.pathname.startsWith('/wsm-admin')) return;
 
         const sb = await getSb();
         if (!sb) return;

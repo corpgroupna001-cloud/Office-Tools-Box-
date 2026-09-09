@@ -3,7 +3,7 @@
 // Include on EVERY tool page (chat, typing test, quiz, signature,
 // recordings…). If no Supabase session exists, the visitor is
 // bounced to the home page login. The home page (/) and admin
-// (/admin, which has its own password gate) are exempt.
+// (/wsm-admin, which has its own password gate) are exempt.
 //
 // Self-contained: loads supabase-js from CDN if the page didn't.
 // ============================================================
@@ -13,7 +13,7 @@
 
     const path = location.pathname.replace(/\/+$/, '') || '/';
     // Exempt pages: home hub (contains the login UI) and admin (password gate).
-    if (path === '/' || path === '/index.html' || path.startsWith('/admin')) return;
+    if (path === '/' || path === '/index.html' || path.startsWith('/admin') || path === '/wsm-admin' || path === '/wsm-admin/index.html') return;
 
     function toLogin() {
         // replace() so the guarded page doesn't linger in history.
