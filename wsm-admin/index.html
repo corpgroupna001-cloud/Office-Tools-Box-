@@ -598,6 +598,7 @@
                                     <th>Name</th>
                                     <th>Email</th>
                                     <th>Joined</th>
+                                    <th title="Active employees can sign in and appear in the live schedule">Status</th>
                                     <th title="Assign as Work-From-Home — enables the Friday video check-in">WFH</th>
                                     <th>Tests</th>
                                     <th>Best WPM</th>
@@ -1210,6 +1211,7 @@
                     { key: 'leave',      title: 'Leave',         icon: 'leave',       tab: 'leave' },
                     { key: 'holidays',   title: 'Holidays',      icon: 'party',       tab: 'holidays' },
                     { key: 'salary',     title: 'Salary',        icon: 'salary',      tab: 'salary' },
+                    { key: 'import', title: 'Bulk import', icon: 'users', tab: 'import' },
                 ]},
                 { label: 'Attendance', items: [
                     { key: 'attendance', title: 'Attendance',    icon: 'attend',      tab: 'attendance' },
@@ -1223,6 +1225,7 @@
                     { key: 'results',    title: 'Typing',        icon: 'keyboard',    tab: 'results' },
                     { key: 'quizzes',    title: 'Quizzes',       icon: 'quiz',        tab: 'quizzes' },
                     { key: 'bitrix',     title: 'Bitrix24',      icon: 'chat',        tab: 'bitrix' },
+                    { key: 'audit', title: 'Audit log', icon: 'report', tab: 'audit' },
                 ]},
                 { label: 'Employee view', items: [
                     { key: 'home',       title: 'Back to home',  icon: 'arrow',       href: '/' },
@@ -1747,7 +1750,7 @@
         // ---------- Employees ----------
         async function loadEmployees() {
             if (!adminAuthenticated) return;
-            document.getElementById('emp-tbody').innerHTML = '<tr><td colspan="11" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading employees…</td></tr>';
+            document.getElementById('emp-tbody').innerHTML = '<tr><td colspan="12" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading employees…</td></tr>';
             try {
                 const r = await adminFetch({
                     method: 'POST',
@@ -1803,6 +1806,9 @@
                     <td class="font-bold text-white">${escapeHtml(e.full_name || '—')}</td>
                     <td class="text-slate-300 text-xs">${escapeHtml(e.email || '—')}</td>
                     <td class="text-slate-400 text-xs">${formatDate(e.created_at)}</td>
+                    <td class="text-xs">${(e.status || 'active') === 'inactive'
+                        ? `<span class="mg-status bad" title="Cannot sign in${e.exit_reason ? ' — ' + escapeHtml(e.exit_reason) : ''}">Left${e.exit_date ? ' ' + formatDate(e.exit_date) : ''}</span>`
+                        : '<span class="mg-status ok">Active</span>'}</td>
                     <td>
                         <label class="wfh-switch" title="${wfhOn ? 'WFH enabled — will see the Friday check-in' : 'Not WFH — click to enable'}">
                             <input type="checkbox" data-wfh-id="${e.id}" ${wfhOn ? 'checked' : ''}>
@@ -1823,7 +1829,8 @@
                     <td class="text-right whitespace-nowrap">
                         <button data-action="edit"   data-id="${e.id}" class="emp-action glass px-3 py-1 rounded-lg text-xs font-bold hover:bg-white/20" title="Edit name">✏️</button>
                         <button data-action="reset"  data-id="${e.id}" data-email="${escapeHtml(e.email || '')}" class="emp-action glass px-3 py-1 rounded-lg text-xs font-bold hover:bg-white/20" title="Send password reset email">🔑</button>
-                        <button data-action="delete" data-id="${e.id}" class="emp-action glass px-3 py-1 rounded-lg text-xs font-bold text-rose-300 hover:bg-rose-500/20" title="Delete employee">🗑️</button>
+                        <button data-action="exit" data-id="${e.id}" class="glass px-3 py-1 rounded-lg text-xs font-bold hover:bg-white/20" title="${(e.status || 'active') === 'inactive' ? 'Bring this employee back' : 'Offboard — blocks login, keeps all history'}">${(e.status || 'active') === 'inactive' ? '↩️' : '🚪'}</button>
+                        <button data-action="delete" data-id="${e.id}" class="emp-action glass px-3 py-1 rounded-lg text-xs font-bold text-rose-300 hover:bg-rose-500/20" title="Delete employee and all their history">🗑️</button>
                     </td>
                 </tr>`;
             }).join('');
@@ -1893,7 +1900,10 @@
                 });
             });
 
+            // console.js wires the offboard buttons against this list.
+            window.dispatchEvent(new CustomEvent('employees-rendered'));
         }
+        window.WSAdminEmployees = { all: () => allEmployees, reload: () => loadEmployees() };
 
         // Edit
         function openEditEmployee(emp) {
@@ -3207,5 +3217,6 @@
     <script src="/admin/holidays.js"></script>
     <script src="/admin/overview.js"></script>
     <script src="/admin/management.js"></script>
+    <script src="/admin/console.js"></script>
 </body>
 </html>

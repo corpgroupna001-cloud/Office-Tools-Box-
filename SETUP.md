@@ -534,3 +534,58 @@ a count per table — all four should be `0`.
 
 Attendance, payroll, leave and assessment records are keyed on the person, not
 on the company name, so nothing is lost.
+
+---
+
+## Step 9 — Admin console: onboarding, offboarding, import and audit
+
+Run these two migrations, in order:
+
+1. `supabase-admin-management-migration.sql` — employment details on profiles
+   (department, job title, phone, joining date, manager) and the `mail_events`
+   table behind **Email monitoring**.
+2. `supabase-admin-console-migration.sql` — `profiles.status` / `exit_date` /
+   `exit_reason` for offboarding, and the `admin_audit` table.
+
+Both are safe to re-run and preserve existing records. Until they are applied
+the console still loads: the affected fields are disabled and each panel says
+which file to run.
+
+### What the console gains
+
+| Tab | What it does |
+|---|---|
+| **People → Company structure** | Company → department → employee, with each person's scheduled shift drawn on a 36-hour timeline so overnight shifts are visible. A schedule, not a punch record. |
+| **People → Employees → + Add employee** | Creates the login account and the employee record together and emails an invite. No password is chosen by the admin or sent in plain text. |
+| **People → Employees → 🚪** | Offboards someone: blocks the login, records a last working day, and drops them out of the live schedule. Their history is kept — this is not the 🗑️ delete button, which cascades their records away. ↩️ brings them back. |
+| **People → Bulk import** | Paste or upload a CSV to create and update employees in bulk. Rows are matched on **email**. Always previews first and writes nothing until confirmed. |
+| **Tools → Email monitoring** | Every outgoing message, its SMTP result, and whether each company's mailbox is configured. |
+| **Tools → Audit log** | Every change made from the console — what changed, on whom, and whether it worked. Reads are not logged, and no passwords, codes or webhook URLs are recorded. |
+| **Export CSV** (all tabs) | Downloads the rows currently on screen, with whatever filters are applied. |
+
+### Bulk import CSV
+
+Header row required. Recognised columns — anything else is ignored and named
+back to you:
+
+```
+email,full_name,company,employee_code,department,job_title,phone,joining_date,is_wfh
+```
+
+`email` is required on every row and is what a row is matched on: an address
+already in WorkSuite is **updated**, a new one **creates** an account and sends
+an invite. An update never changes the login address. `joining_date` is
+`YYYY-MM-DD`; `is_wfh` accepts `true`/`yes`/`1`. Use **Download template** for a
+correctly-shaped starting file.
+
+Rows are sent to the server in small batches so a large file does not hit the
+10-second function limit — leave the tab open until it reports "Import
+finished". Each row reports its own outcome, so one bad row never blocks the
+rest.
+
+### Notes
+
+- Offboarding uses a long GoTrue ban to hold the login closed. If that call
+  fails the console says so rather than assuming the person is locked out.
+- The audit log records the caller's IP from `x-forwarded-for`. There is one
+  shared `ADMIN_PASSWORD`, so it identifies the machine, not the person.

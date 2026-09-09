@@ -16,6 +16,9 @@ function backend(config = env) {
       if (name === '../lib/admin-session') return sessions;
       if (name === '../lib/attendance') return require('../lib/attendance');
       if (name === '../lib/mailer' || name === '../lib/bitrix') return {};
+      // The audit trail has its own tests; here it must not reach the network.
+      if (name === '../lib/admin-audit') return { auditWrap: res => res };
+      if (name === '../lib/employee-admin') return require('../lib/employee-admin');
       throw new Error(name);
     },
     fetch: async () => new Response(JSON.stringify([]), { status: 200 }),

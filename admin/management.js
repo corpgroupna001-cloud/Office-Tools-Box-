@@ -30,7 +30,8 @@
     if (!$('mg-date').value) return;
     const day = new Date($('mg-date').value+'T12:00:00+05:30').getUTCDay() || 7;
     const filter=$('mg-company').value, search=$('mg-search').value.trim().toLowerCase();
-    const visible=people.filter(p=>(!filter || p.company===filter) && (!search || [p.full_name,p.email,p.department,p.employee_code].join(' ').toLowerCase().includes(search)));
+    const left=people.filter(p=>p.status==='inactive').length;
+    const visible=people.filter(p=>p.status!=='inactive' && (!filter || p.company===filter) && (!search || [p.full_name,p.email,p.department,p.employee_code].join(' ').toLowerCase().includes(search)));
     const names = [...new Set([...WSCompanies.companies,...visible.map(p=>p.company || 'Company assignment needed')])].filter(c=>!filter || c===filter);
     let rows='', count=0;
     for(const company of names) {
@@ -50,7 +51,7 @@
         count++;
       }
     }
-    $('mg-summary').textContent=`${count} employees shown · ${$('mg-date').value} · Next-day hours are marked +1. Holidays and leave are available in their respective tabs.`;
+    $('mg-summary').textContent=`${count} employees shown · ${$('mg-date').value} · Next-day hours are marked +1.${left?` ${left} offboarded employee${left>1?'s are':' is'} not shown.`:''} Holidays and leave are available in their respective tabs.`;
     $('mg-gantt').innerHTML=`<div class="mg-scroll"><table class="mg-table mg-gantt"><thead><tr><th>Organization / employee</th><th><div class="mg-scale">${['00','03','06','09','12','15','18','21','00 +1','03 +1','06 +1','09 +1','12 +1'].map(t=>`<span>${t}</span>`).join('')}</div></th></tr></thead><tbody>${rows || '<tr><td colspan="2">No matching employees.</td></tr>'}</tbody></table></div>`;
   }
   async function loadCompany() {
@@ -117,7 +118,7 @@
           else input=`<input id="mg-edit-${key}" type="${type}" value="${esc(value)}" ${disabled?'disabled':''}>`;
           return `<label>${label}${input}</label>`;
         }).join('')+['is_wfh','req_mobile','req_laptop','req_tab'].map((key,i)=>`<label class="mg-check"><input id="mg-edit-${key}" type="checkbox" ${emp[key]?'checked':''}>${['Work from home','Require mobile check-in','Require laptop check-in','Require tablet check-in'][i]}</label>`).join('');
-        $('mg-edit-note').textContent=(orgReady?'':'Apply supabase-admin-management-migration.sql to enable employment details. ')+ 'Changing email immediately changes the login address. Leave primary shift on Company default to use the company schedule. Changes apply to future punches; historical punches are not rewritten.';
+        $('mg-edit-note').textContent=(orgReady?'':'Apply supabase-admin-management-migration.sql to enable employment details. ')+ (emp.status==='inactive'?`This employee is offboarded${emp.exit_date?' as of '+emp.exit_date:''} and cannot sign in; use the ↩️ button in the employee list to bring them back. `:'')+ 'Changing email immediately changes the login address. Leave primary shift on Company default to use the company schedule. Changes apply to future punches; historical punches are not rewritten.';
         $('edit-emp-save').disabled=false;
       } catch(e) { $('mg-edit-fields').textContent=e.message; }
     },

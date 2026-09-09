@@ -11,6 +11,7 @@ const { resolveShift } = require('../company-config');
 const { sendMail, senderFor: mailSenderFor, COMPANY_TO_USER, COMING_SOON_COMPANIES } = require('../lib/mailer');
 const bitrix = require('../lib/bitrix');
 const { createSession, validSession, sessionCookie, sameOrigin } = require('../lib/admin-session');
+const { auditWrap } = require('../lib/admin-audit');
 const { istParts, istToday, buildPunchEmail, evaluateShift, describeWorkingDays,
         weekOffsFor, buildMonth, computePay, computeMonthlyPay, monthDates, DAY_STATUS,
         buildLeaveChatLine, assignDays, effectiveShift, istIsoWeekday, shiftDays } = require('../lib/attendance');
@@ -201,6 +202,9 @@ module.exports = async function handler(req, res) {
   }
   if (action === 'session') return res.status(200).json({ authenticated: true });
 
+  // From here on every action that is not a read records what it did.
+  res = auditWrap(res, req, action, body);
+
   try {
     if (action === 'results') {
       // Fetch every result, most recent first. Cap at 1000 for now.
@@ -327,6 +331,15 @@ module.exports = async function handler(req, res) {
         const result = await require('../lib/employee-admin').updateEmployee(body, { url: SUPABASE_URL, key: SERVICE_KEY });
         return res.status(200).json(result);
       } catch (e) { return res.status(e.status || 502).json({ error: e.message || 'Employee update failed' }); }
+    }
+
+    if (action === 'create_employee' || action === 'set_employee_status' || action === 'bulk_employees') {
+      const people = require('../lib/employee-admin');
+      const run = { create_employee: people.createEmployee, set_employee_status: people.setEmployeeStatus,
+                    bulk_employees: people.bulkEmployees }[action];
+      try {
+        return res.status(200).json(await run(body, { url: SUPABASE_URL, key: SERVICE_KEY }));
+      } catch (e) { return res.status(e.status || 502).json({ error: e.message || 'Request failed' }); }
     }
 
     if (action === 'set_wfh') {
@@ -750,9 +763,30 @@ module.exports = async function handler(req, res) {
     // so "emails are not going out" can be split into "SMTP is down",
     // "this company has no mailbox" and "the address on the profile is wrong"
     // without reading Vercel logs.
-    if (String(action).startsWith('mail_')) {
+    // audit_log rides along: it wants the same service-key fetch helper.
+    if (String(action).startsWith('mail_') || action === 'audit_log') {
       const MH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
       const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...MH, ...(opts.headers || {}) } });
+
+      if (action === 'audit_log') {
+        const date = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? value : null;
+        const from = date(body.from), to = date(body.to);
+        if (!from || !to || from > to) return res.status(400).json({ error: 'Choose a valid date range' });
+        const page = Math.max(0, Math.min(10000, Math.floor(Number(body.page) || 0)));
+        // IST day boundaries, so "today" in the picker means today in the office.
+        const after = new Date(Date.parse(to) + 86400000).toISOString().slice(0, 10);
+        let query = `admin_audit?select=*&created_at=gte.${from}T00:00:00%2B05:30&created_at=lt.${after}T00:00:00%2B05:30&order=created_at.desc,id.desc`;
+        if (body.status === 'ok' || body.status === 'failed') query += '&status=eq.' + body.status;
+        if (body.action_filter) query += '&action=eq.' + encodeURIComponent(String(body.action_filter).slice(0, 100));
+        if (body.search) {
+          const term = String(body.search).trim().slice(0, 100).replace(/[,()*]/g, ' ');
+          if (term) query += `&or=(target_label.ilike.*${encodeURIComponent(term)}*,summary.ilike.*${encodeURIComponent(term)}*)`;
+        }
+        const r = await sb(query + `&limit=51&offset=${page * 50}`);
+        if (!r.ok) return res.status(502).json({ error: 'Audit log unavailable. Apply supabase-admin-console-migration.sql first.' });
+        const rows = await r.json();
+        return res.status(200).json({ rows: rows.slice(0, 50), more: rows.length > 50, page });
+      }
 
       if (action === 'mail_status') {
         const profiles = await sb('profiles?select=company,email&limit=2000').then(r => r.ok ? r.json() : []);

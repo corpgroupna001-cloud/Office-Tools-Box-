@@ -27,3 +27,10 @@
 .mg-fields .mg-check { flex-direction:row; align-items:center; }
 #edit-emp-modal > div { max-width:760px; max-height:90vh; overflow:auto; }
 @media(max-width:600px) { .mg-fields { grid-template-columns:1fr; } }
+
+/* Admin console additions: export buttons and the add/offboard modals. */
+.ws-export { margin-left: auto; }
+.ws-management textarea { border:1px solid #cbd5e1; border-radius:8px; padding:10px 12px; background:var(--ws-surface, #fff); color:var(--ws-text, #172b4d); }
+#add-emp-modal.flex, #exit-emp-modal.flex { display:flex; }
+#add-emp-modal .mg-toolbar, #exit-emp-modal .mg-toolbar { margin-bottom:0; justify-content:flex-end; }
+#import-panel textarea { margin-bottom:4px; }
