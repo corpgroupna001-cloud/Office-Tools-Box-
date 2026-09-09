@@ -1207,6 +1207,7 @@
                 ]},
                 { label: 'People', items: [
                     { key: 'employees',  title: 'Employees',     icon: 'users',       tab: 'employees' },
+                    { key: 'company', title: 'Company structure', icon: 'users', tab: 'company' },
                     { key: 'shifts',     title: 'Shifts',        icon: 'clock',       tab: 'shifts' },
                     { key: 'leave',      title: 'Leave',         icon: 'leave',       tab: 'leave' },
                     { key: 'holidays',   title: 'Holidays',      icon: 'party',       tab: 'holidays' },
@@ -1224,6 +1225,7 @@
                 { label: 'Tools', items: [
                     { key: 'results',    title: 'Typing',        icon: 'keyboard',    tab: 'results' },
                     { key: 'quizzes',    title: 'Quizzes',       icon: 'quiz',        tab: 'quizzes' },
+                    { key: 'email', title: 'Email monitoring', icon: 'chat', tab: 'email' },
                     { key: 'bitrix',     title: 'Bitrix24',      icon: 'chat',        tab: 'bitrix' },
                     { key: 'audit', title: 'Audit log', icon: 'report', tab: 'audit' },
                 ]},
@@ -1908,6 +1910,7 @@
         // Edit
         function openEditEmployee(emp) {
             editingEmployee = emp;
+            WSAdminPeople.open(emp);
             document.getElementById('edit-emp-email').innerText = emp.email || '—';
             document.getElementById('edit-emp-name').value = emp.full_name || '';
             document.getElementById('edit-emp-err').classList.add('hidden');

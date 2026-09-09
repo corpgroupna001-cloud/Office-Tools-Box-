@@ -788,6 +788,26 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ rows: rows.slice(0, 50), more: rows.length > 50, page });
       }
 
+      if (action === 'mail_logs') {
+        const source = body.source === 'system' ? 'system' : 'attendance';
+        const date = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? value : null;
+        const from = date(body.from), to = date(body.to);
+        if (!from || !to || from > to) return res.status(400).json({ error: 'Choose a valid date range' });
+        const page = Math.max(0, Math.min(10000, Number(body.page) || 0));
+        let query;
+        if (source === 'system') {
+          query = `mail_events?select=*&created_at=gte.${from}T00:00:00%2B05:30&created_at=lt.${new Date(Date.parse(to) + 86400000).toISOString().slice(0,10)}T00:00:00%2B05:30&order=created_at.desc,id.desc`;
+          if (['accepted','failed'].includes(body.status)) query += '&status=eq.' + body.status;
+        } else {
+          query = `attendance_logs?select=id,employee_name,employee_code,log_date,log_datetime,event_type,direction,email_to,email_status,email_error,emailed_at&log_date=gte.${from}&log_date=lte.${to}&order=log_datetime.desc,id.desc`;
+          if (['sent','failed','pending','skipped'].includes(body.status)) query += '&email_status=eq.' + body.status;
+        }
+        const r = await sb(query + `&limit=51&offset=${Math.floor(page)*50}`);
+        if (!r.ok) return res.status(502).json({ error: source === 'system' ? 'System email audit unavailable. Apply supabase-admin-management-migration.sql first.' : 'Unable to load attendance email history' });
+        const rows = await r.json();
+        return res.status(200).json({ rows: rows.slice(0,50), more: rows.length > 50, page: Math.floor(page), source });
+      }
+
       if (action === 'mail_status') {
         const profiles = await sb('profiles?select=company,email&limit=2000').then(r => r.ok ? r.json() : []);
         const companies = [...new Set([...Object.keys(COMPANY_TO_USER), ...COMING_SOON_COMPANIES,
