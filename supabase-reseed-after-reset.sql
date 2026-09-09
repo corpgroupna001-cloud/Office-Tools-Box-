@@ -32,7 +32,6 @@ insert into public.company_policies (company, week_offs) values
   ('Genie Lamp Private Limited',      '{6,7}'),
   ('Nova Sportsmart Private Limited', '{7}'),
   ('Protathlitis Sportsmart LLP',     '{7}'),
-  ('CORPGROUP',                       '{7}'),
   ('Navyug Raise A Player Foundation','{7}'),
   ('Raise a Player',                  '{7}')
 on conflict (company) do nothing;
@@ -42,7 +41,6 @@ on conflict (company) do nothing;
 insert into public.bitrix_targets (company, label) values
   ('Nova Sportsmart Private Limited',  'SportsMart Working Hours'),
   ('Protathlitis Sportsmart LLP',      'SportsMart Working Hours'),
-  ('CORPGROUP',                        'SportsMart Working Hours'),
   ('Jobways Point LLP',                'Jobways Working Hours'),
   ('Genie Lamp Private Limited',       'Genie Lamp Working Hours'),
   ('Navyug Raise A Player Foundation', null),

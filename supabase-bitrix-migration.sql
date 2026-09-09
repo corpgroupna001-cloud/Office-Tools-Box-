@@ -31,7 +31,6 @@ create table if not exists public.bitrix_targets (
 insert into public.bitrix_targets (company, label) values
   ('Nova Sportsmart Private Limited',  'SportsMart Working Hours'),
   ('Protathlitis Sportsmart LLP',      'SportsMart Working Hours'),
-  ('CORPGROUP',                        'SportsMart Working Hours'),
   ('Jobways Point LLP',                'Jobways Working Hours'),
   ('Genie Lamp Private Limited',       'Genie Lamp Working Hours'),
   ('Navyug Raise A Player Foundation', null),

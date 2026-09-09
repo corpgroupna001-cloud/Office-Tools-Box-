@@ -92,7 +92,6 @@
                     <option value="Navyug Raise A Player Foundation">Navyug Raise A Player Foundation — Coming soon</option>
                     <option value="Jobways Point LLP">Jobways Point LLP</option>
                     <option value="Genie Lamp Private Limited">Genie Lamp Private Limited</option>
-                    <option value="CORPGROUP">CORPGROUP</option>
                 </select>
                 <label class="ws-field-label" for="signup-password">Create a password</label>
                 <div class="password-field">
@@ -246,7 +245,6 @@
                 <option value="Navyug Raise A Player Foundation">Navyug Raise A Player Foundation</option>
                 <option value="Jobways Point LLP">Jobways Point LLP</option>
                 <option value="Genie Lamp Private Limited">Genie Lamp Private Limited</option>
-                    <option value="CORPGROUP">CORPGROUP</option>
             </select>
             <p id="company-error" class="text-rose-300 text-sm font-bold hidden mb-3 text-center"></p>
             <button id="company-save" type="button" class="w-full text-white font-extrabold py-4 rounded-2xl text-lg" style="background: linear-gradient(135deg,#f97316,#ef4444); box-shadow: 0 10px 30px rgba(249,115,22,0.4);">Save</button>
@@ -318,7 +316,6 @@
                     <option value="Navyug Raise A Player Foundation">Navyug Raise A Player Foundation</option>
                     <option value="Jobways Point LLP">Jobways Point LLP</option>
                     <option value="Genie Lamp Private Limited">Genie Lamp Private Limited</option>
-                    <option value="CORPGROUP">CORPGROUP</option>
                 </select>
                 <button id="profile-company-save" class="px-4 py-3 rounded-xl text-white font-black text-sm" style="background: linear-gradient(135deg,#f97316,#ef4444); box-shadow: 0 4px 12px rgba(249,115,22,0.4);">Save</button>
             </div>
@@ -1365,7 +1362,6 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 user_id: data.session.user.id, email,
-                                company: prof.company || 'CORPGROUP',
                                 full_name: prof.full_name || ''
                             })
                         });

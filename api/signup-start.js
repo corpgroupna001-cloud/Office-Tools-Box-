@@ -15,7 +15,6 @@ function sixDigits() { return String(crypto.randomInt(0, 1_000_000)).padStart(6,
 
 const ALLOWED_COMPANIES = [
   'Nova Sportsmart Private Limited',
-  'CORPGROUP',
   'Protathlitis Sportsmart LLP',
   'Jobways Point LLP',
   'Genie Lamp Private Limited',

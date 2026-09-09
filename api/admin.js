@@ -69,7 +69,6 @@ const HOLIDAY_LISTS = {
 // has punched or been given a holiday. Mirrors the list in admin/holidays.js.
 const HOLIDAY_COMPANIES = [
   'Nova Sportsmart Private Limited',
-  'CORPGROUP',
   'Protathlitis Sportsmart LLP',
   'Jobways Point LLP',
   'Genie Lamp Private Limited',

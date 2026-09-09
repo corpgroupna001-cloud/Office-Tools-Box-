@@ -1,7 +1,7 @@
 -- ============================================================================
 -- secondary_roles — a second job for one person, paid separately
 --
--- Some CORPGROUP staff work two shifts in a day (SportsMart 10-5 AND Jobways
+-- Some SportsMart staff work two shifts in a day (SportsMart 10-5 AND Jobways
 -- 5-7) and are paid by each company, so payroll has to produce TWO lines for
 -- them. The salaries table is one row per person (user_id is its primary key),
 -- so it cannot hold a second rate. This table is that second rate.

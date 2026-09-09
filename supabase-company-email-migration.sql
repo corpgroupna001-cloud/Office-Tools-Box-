@@ -19,7 +19,6 @@ alter table public.profiles
   add constraint profiles_company_allowed_ck
   check (company is null or company in (
     'Nova Sportsmart Private Limited',
-    'CORPGROUP',
     'Protathlitis Sportsmart LLP',
     'Jobways Point LLP',
     'Genie Lamp Private Limited',

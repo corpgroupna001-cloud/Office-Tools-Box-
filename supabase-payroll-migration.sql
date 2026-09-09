@@ -38,7 +38,6 @@ insert into public.company_policies (company, week_offs) values
   ('Genie Lamp Private Limited',      '{6,7}'),
   ('Nova Sportsmart Private Limited', '{7}'),
   ('Protathlitis Sportsmart LLP',     '{7}'),
-  ('CORPGROUP',                       '{7}'),
   ('Navyug Raise A Player Foundation','{7}'),
   ('Raise a Player',                  '{7}')
 on conflict (company) do nothing;

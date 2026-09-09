@@ -8,7 +8,7 @@ const attendance = require('../lib/attendance');
 // Exercise the real handler and event classification with isolated external
 // services. No SMTP, Bitrix, Supabase credentials or third-party packages.
 const source = fs.readFileSync(path.join(__dirname, '../api/attendance-webhook.js'), 'utf8');
-const COMPANY = 'CORPGROUP';
+const COMPANY = 'Nova Sportsmart Private Limited';
 const NOW = Date.parse('2026-09-08T19:00:00+05:30');
 const punches = ['09:30', '11:00', '11:15', '13:00', '13:30', '18:30'].map(time => ({
   employee_code: '00000008', employee_name: 'Test Employee',

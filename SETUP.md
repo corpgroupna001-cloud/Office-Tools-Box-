@@ -518,3 +518,19 @@ Order of precedence for one person:
 
 A company default is shown in the console as *"Company default"*; nothing needs
 to be created in the Shifts table for it to apply.
+
+---
+
+## Step 8 — Retiring CORPGROUP
+
+`CORPGROUP` is no longer a company. Everything on it moves to **Nova Sportsmart
+Private Limited**, which already shared its sender mailbox and Bitrix group.
+
+Run `supabase-corpgroup-retire-migration.sql` in the SQL Editor **before**
+deploying, since the deployed code no longer knows how to route mail for
+CORPGROUP. It remaps profiles, company policies, Bitrix targets, holidays and
+history, and rewrites the allowed-company constraint. The last statement prints
+a count per table — all four should be `0`.
+
+Attendance, payroll, leave and assessment records are keyed on the person, not
+on the company name, so nothing is lost.

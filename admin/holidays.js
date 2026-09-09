@@ -21,7 +21,6 @@
     // Mirrors HOLIDAY_COMPANIES in api/admin.js.
     const COMPANIES = [
         'Nova Sportsmart Private Limited',
-        'CORPGROUP',
         'Protathlitis Sportsmart LLP',
         'Jobways Point LLP',
         'Genie Lamp Private Limited',
