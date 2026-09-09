@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <link rel="stylesheet" href="/admin/management.css">
+    <script src="/company-config.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
@@ -1097,7 +1099,7 @@
             <div id="shift-f-days" class="flex flex-wrap gap-2 mb-4"></div>
             <label class="flex items-center gap-2 mb-6 cursor-pointer">
                 <input id="shift-f-default" type="checkbox" class="w-4 h-4">
-                <span class="text-sm font-bold text-slate-200">Use for anyone without a shift assigned</span>
+                <span class="text-sm font-bold text-slate-200">General fallback for companies without a company default</span>
             </label>
             <div class="flex gap-3">
                 <button id="shift-cancel" type="button" class="glass flex-1 text-white font-bold py-3 rounded-xl">Cancel</button>
@@ -1113,6 +1115,8 @@
             <p id="edit-emp-email" class="text-slate-400 text-sm text-center mb-6">—</p>
             <label class="text-[10px] uppercase tracking-widest text-slate-400 font-black block mb-2">Full Name</label>
             <input id="edit-emp-name" type="text" class="glass w-full px-4 py-3 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-400/40 font-bold mb-6">
+            <div id="mg-edit-fields" class="mg-fields"></div>
+            <p id="mg-edit-note" class="text-slate-400 text-xs mb-4"></p>
             <div class="flex gap-3">
                 <button id="edit-emp-cancel" type="button" class="glass flex-1 text-white font-bold py-3 rounded-xl">Cancel</button>
                 <button id="edit-emp-save" type="button" class="btn-primary flex-1 text-white font-black py-3 rounded-xl">Save</button>
@@ -1888,6 +1892,7 @@
                     }
                 });
             });
+
         }
 
         // Edit
@@ -1917,11 +1922,13 @@
                 const r = await adminFetch({
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'update_employee', id: editingEmployee.id, full_name })
+                    body: JSON.stringify({ action: 'update_employee', id: editingEmployee.id, full_name, ...WSAdminPeople.values() })
                 });
                 const data = await r.json();
                 if (!r.ok) throw new Error(data.error || 'Failed');
-                editingEmployee.full_name = full_name;
+                Object.assign(editingEmployee, data.employee || { full_name });
+                window.dispatchEvent(new CustomEvent('admin-refresh'));
+                if (data.warning) alert(data.warning);
                 renderEmployees();
                 document.getElementById('edit-emp-modal').classList.add('hidden');
                 document.getElementById('edit-emp-modal').classList.remove('flex');
@@ -3199,5 +3206,6 @@
     <script src="/admin/attendance-tools.js"></script>
     <script src="/admin/holidays.js"></script>
     <script src="/admin/overview.js"></script>
+    <script src="/admin/management.js"></script>
 </body>
 </html>

@@ -1,3 +1,4 @@
+const { resolveShift } = require('../company-config');
 // ============================================================
 // Biometric attendance ingest.
 //
@@ -263,7 +264,7 @@ module.exports = async function handler(req, res) {
         defaultShift = list.find(x => x.is_default) || null;
       }
     } catch { /* no shifts table yet */ }
-    const shift1Of = p => (p && p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+    const shift1Of = p => resolveShift(p, shiftById, defaultShift);
     const shift2Of = p => (p && p.shift2_id && shiftById.get(p.shift2_id)) || null;
     // The shift that applies to a person at an instant: a dual-shift person's
     // merged window on the days both shifts cover, else whichever covers it.
@@ -865,7 +866,7 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
       const logsBy = currentDayPunches(logs, today);
 
       const people = profiles.map(p => {
-        const shift = (p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+        const shift = resolveShift(p, shiftById, defaultShift);
         const shift2 = (p.shift2_id && shiftById.get(p.shift2_id)) || null;
         const day = classifyDay({
           date: today, shift, shift2,
@@ -911,8 +912,7 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
     ]);
 
     const profile = profileRows[0] || {};
-    const shift = (profile.shift_id && shifts.find(s => s.id === profile.shift_id))
-               || shifts.find(s => s.is_default) || null;
+    const shift = resolveShift(profile, shifts);
     const shift2 = (profile.shift2_id && shifts.find(s => s.id === profile.shift2_id)) || null;
     const typeName = new Map(types.map(t => [t.id, t.name]));
     const weekOffs = weekOffsFor(profile.company, policies);
@@ -1075,7 +1075,7 @@ async function runShiftSwitchJob({ res, SUPABASE_URL, SERVICE_KEY }) {
     const claimed = await claim.json();
     if (!claimed.length) { results.push({ user: p.full_name, skipped: 'already posted' }); continue; }
 
-    const s1 = (p.shift_id && byId.get(p.shift_id)) || defaultShift || null;
+    const s1 = resolveShift(p, byId, defaultShift);
     const s2 = byId.get(p.shift2_id);
     const at = new Date(`${today}T${String(s2.start_time).slice(0, 8)}+05:30`);
     const first = p.company ? await postPunchToGroup({
@@ -1305,7 +1305,7 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
       const shRes = await fetch(`${SUPABASE_URL}/rest/v1/shifts?select=*`, { headers: H });
       if (shRes.ok) {
         const list = await shRes.json();
-        const shift1 = list.find(x => x.id === profile.shift_id) || list.find(x => x.is_default) || null;
+        const shift1 = resolveShift(profile, list);
         const shift2 = (profile.shift2_id && list.find(x => x.id === profile.shift2_id)) || null;
         const shift = shift2 ? effectiveShift(shift1, shift2, istIsoWeekday(new Date(when))) : shift1;
         if (shift) {

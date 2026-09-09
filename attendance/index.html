@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script src="/company-config.js"></script>
     <script src="/authguard.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -489,14 +490,14 @@
                 if (isWfh) el('clock').style.display = '';
                 loadHolidays();
                 const { data: shifts } = await sb.from('shifts').select('*');
-                if (!shifts || !shifts.length) return;
-                myShift = shifts.find(s => prof && s.id === prof.shift_id) || shifts.find(s => s.is_default) || null;
+                
+                myShift = WSCompanies.resolveShift(prof, shifts);
                 if (!myShift) return;
                 // A second shift (dual), if the columns exist and one is set
                 let shift2 = null, company2 = '';
                 try {
                     const { data: d2 } = await sb.from('profiles').select('shift2_id, company2').eq('id', session.user.id).maybeSingle();
-                    if (d2 && d2.shift2_id) { shift2 = shifts.find(s => s.id === d2.shift2_id) || null; company2 = d2.company2 || ''; }
+                    if (d2 && d2.shift2_id) { shift2 = (shifts || []).find(s => s.id === d2.shift2_id) || null; company2 = d2.company2 || ''; }
                 } catch { /* before the migration */ }
                 const dayLabel = sh => {
                     const days = (sh.working_days || []).map(Number);

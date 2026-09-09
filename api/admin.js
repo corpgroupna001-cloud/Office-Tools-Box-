@@ -1,3 +1,4 @@
+const { resolveShift } = require('../company-config');
 // Password login and signed-cookie admin API. Uses the Supabase service_role key to bypass RLS
 // and return every employee's test results for the dashboard.
 //
@@ -106,7 +107,7 @@ async function recomputePunches({ sb, from, to, apply, employeeCode, deadlineAt 
   const profById = new Map(profiles.map(p => [p.id, p]));
   const shiftOf = (row, when) => {
     const p = row.user_id ? profById.get(row.user_id) : null;
-    const s1 = (p && p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+    const s1 = resolveShift(p, shiftById, defaultShift);
     const s2 = (p && p.shift2_id && shiftById.get(p.shift2_id)) || null;
     return s2 ? effectiveShift(s1, s2, istIsoWeekday(new Date(when || row.log_datetime))) : s1;
   };
@@ -323,49 +324,10 @@ module.exports = async function handler(req, res) {
     }
 
     if (action === 'update_employee') {
-      const id = String(body.id || '');
-      const full_name = String(body.full_name || '').trim();
-      if (!id || !full_name) return res.status(400).json({ error: 'id and full_name required' });
-      // Update profiles + auth.users user_metadata + all test_results so displays stay in sync
-      const p = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${id}`, {
-        method: 'PATCH',
-        headers: {
-          apikey: SERVICE_KEY,
-          Authorization: `Bearer ${SERVICE_KEY}`,
-          'Content-Type': 'application/json',
-          Prefer: 'return=representation'
-        },
-        body: JSON.stringify({ full_name })
-      });
-      if (!p.ok) {
-        const err = (await p.text()).slice(0, 200);
-        return res.status(502).json({ error: 'Profile update failed', detail: err });
-      }
-      // Best-effort auth metadata update
       try {
-        await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${id}`, {
-          method: 'PUT',
-          headers: {
-            apikey: SERVICE_KEY,
-            Authorization: `Bearer ${SERVICE_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ user_metadata: { full_name } })
-        });
-      } catch {}
-      // Best-effort denormalized test_results.full_name update
-      try {
-        await fetch(`${SUPABASE_URL}/rest/v1/test_results?user_id=eq.${id}`, {
-          method: 'PATCH',
-          headers: {
-            apikey: SERVICE_KEY,
-            Authorization: `Bearer ${SERVICE_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ full_name })
-        });
-      } catch {}
-      return res.status(200).json({ success: true });
+        const result = await require('../lib/employee-admin').updateEmployee(body, { url: SUPABASE_URL, key: SERVICE_KEY });
+        return res.status(200).json(result);
+      } catch (e) { return res.status(e.status || 502).json({ error: e.message || 'Employee update failed' }); }
     }
 
     if (action === 'set_wfh') {
@@ -834,6 +796,7 @@ module.exports = async function handler(req, res) {
           text: `This is a test from the WorkSuite admin panel, sent through the ${company} mailbox at ${t.prettyTime} IST on ${t.prettyDate}.\n\nIf you can read this, attendance notifications for ${company} can be delivered.`,
           html: `<p>This is a test from the <b>WorkSuite</b> admin panel, sent through the <b>${company}</b> mailbox at ${t.prettyTime} IST on ${t.prettyDate}.</p><p>If you can read this, attendance notifications for ${company} can be delivered.</p>`,
         });
+        await require('../lib/mail-audit').recordMail({ company, to, category: 'test' }, out);
         if (!out.ok) return res.status(502).json({ error: out.reason, detail: out.detail });
         return res.status(200).json({ success: true, from: out.from, message_id: out.messageId });
       }
@@ -1315,7 +1278,7 @@ module.exports = async function handler(req, res) {
       const people = only ? profiles.filter(p => p.id === only) : profiles;
 
       const rows = people.map(p => {
-        const shift = (p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+        const shift = resolveShift(p, shiftById, defaultShift);
         const shift2 = (p.shift2_id && shiftById.get(p.shift2_id)) || null;
         const weekOffs = weekOffsFor(p.company, policies);
         // Named `mon` on purpose: `month` is the validated YYYY-MM string from
@@ -1853,7 +1816,7 @@ module.exports = async function handler(req, res) {
         .map(p => {
           const punches = byUser.get(p.id) || [];
           const s = summarize(punches);
-          const shift1 = (p.shift_id && shiftById.get(p.shift_id)) || defaultShift || null;
+          const shift1 = resolveShift(p, shiftById, defaultShift);
           const shift2 = (p.shift2_id && shiftById.get(p.shift2_id)) || null;
           const shift = shift2 ? effectiveShift(shift1, shift2, istIsoWeekday(dayAnchor)) : shift1;
           const sh = evaluateShift({ shift, firstIn: s.first_in, lastOut: s.last_out, date: dayAnchor });

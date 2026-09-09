@@ -12,6 +12,7 @@ function backend(config = env) {
     module, process: { env: config }, console, URL, Date,
     setTimeout: cb => { cb(); },
     require(name) {
+      if (name === '../company-config') return require('../company-config');
       if (name === '../lib/admin-session') return sessions;
       if (name === '../lib/attendance') return require('../lib/attendance');
       if (name === '../lib/mailer' || name === '../lib/bitrix') return {};

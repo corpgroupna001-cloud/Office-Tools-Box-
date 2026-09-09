@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script src="/company-config.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WorkSuite Dashboard</title>
@@ -245,7 +246,7 @@
                 <option value="Navyug Raise A Player Foundation">Navyug Raise A Player Foundation</option>
                 <option value="Jobways Point LLP">Jobways Point LLP</option>
                 <option value="Genie Lamp Private Limited">Genie Lamp Private Limited</option>
-                <option value="CORPGROUP">CORPGROUP</option>
+                    <option value="CORPGROUP">CORPGROUP</option>
             </select>
             <p id="company-error" class="text-rose-300 text-sm font-bold hidden mb-3 text-center"></p>
             <button id="company-save" type="button" class="w-full text-white font-extrabold py-4 rounded-2xl text-lg" style="background: linear-gradient(135deg,#f97316,#ef4444); box-shadow: 0 10px 30px rgba(249,115,22,0.4);">Save</button>
@@ -958,7 +959,7 @@
             if (myCompany) chips.push(`<span><span class="ic ic-users"></span>${esc(myCompany)}</span>`);
             try {
                 const { data: shifts } = await rootSb.from('shifts').select('id,name,start_time,end_time,is_default');
-                const sh = (shifts || []).find(s => p && s.id === p.shift_id) || (shifts || []).find(s => s.is_default);
+                const sh = WSCompanies.resolveShift(p, shifts);
                 if (sh) chips.push(`<span><span class="ic ic-clock"></span>${esc(sh.name)} · ${hhmmAmPm(String(sh.start_time).slice(0,5))} – ${hhmmAmPm(String(sh.end_time).slice(0,5))}</span>`);
                 // Dual shift, when the columns exist and one is set
                 try {

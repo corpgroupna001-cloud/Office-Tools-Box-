@@ -492,3 +492,29 @@ Cron slots are similarly full: Hobby allows 2, and both are used by
 The admin page is `/wsm-admin`. The old `/admin` and `/Network.ADMIN` links redirect there. Support scripts and `/api/admin` keep their existing URLs.
 
 After signing in, a signed HTTP-only, Secure, SameSite=Strict cookie keeps the admin session for 12 hours, including page refreshes. Lock clears the cookie and reloads the login screen. Changing `ADMIN_PASSWORD` or the Supabase service key invalidates existing sessions. No database migration or new environment variable is needed.
+
+---
+
+## Step 7 — Company default shifts
+
+Each company has a default working window, used for anyone who has no shift
+assigned to them personally:
+
+| Company | Default shift |
+|---|---|
+| Jobways Point LLP | 6:00 PM – 3:00 AM (next day), Mon–Fri |
+| Genie Lamp Private Limited | 6:00 PM – 3:00 AM (next day), Mon–Fri |
+| Nova Sportsmart Private Limited | 9:00 AM – 6:00 PM, Mon–Sat |
+
+These live in `company-config.js`, which is loaded by both the browser and the
+serverless functions, so the attendance webhook, the admin reports, the employee
+dashboard and the company-structure Gantt all resolve a shift the same way.
+
+Order of precedence for one person:
+
+1. The shift assigned to them in **Admin → Shifts**
+2. Their company's default from the table above
+3. The shift marked "General fallback" in **Admin → Shifts**
+
+A company default is shown in the console as *"Company default"*; nothing needs
+to be created in the Shifts table for it to apply.
