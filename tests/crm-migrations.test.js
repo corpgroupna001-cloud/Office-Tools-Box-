@@ -10,6 +10,7 @@ const FILES = [
   'supabase-work-migration.sql',
   'supabase-invoices-migration.sql',
   'supabase-messenger-migration.sql',
+  'supabase-crm-reminders-migration.sql',
 ];
 const read = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 const stripComments = sql => sql.replace(/--[^\n]*/g, '');
@@ -28,7 +29,8 @@ test('migrations never drop the database, drop a schema, or truncate anything', 
     assert.doesNotMatch(sql, /drop\s+schema/, f);
     assert.doesNotMatch(sql, /\btruncate\b/, f);
     assert.doesNotMatch(sql, /drop\s+table/, f);
-    assert.doesNotMatch(sql, /delete\s+from\s+public\./, f);
+    // The one delete allowed: the reminders job trimming its own bookkeeping table.
+    assert.doesNotMatch(sql.replace(/delete\s+from\s+public\.crm_reminder_log\b/g, ''), /delete\s+from\s+public\./, f);
   }
 });
 
@@ -93,7 +95,8 @@ test('the messenger migration keeps direct messages exactly as they were', () =>
   assert.match(sql, /recipient_id drop not null/, 'groups need a nullable recipient');
   assert.match(sql, /\(recipient_id is not null and conversation_id is null\)/, 'a DM stays a DM');
   assert.doesNotMatch(stripComments(sql), /drop\s+policy\s+if\s+exists\s+"?msg_select_own/, 'existing DM read policy must survive');
-  assert.doesNotMatch(stripComments(sql), /drop\s+policy\s+if\s+exists\s+"?msg_insert_own/, 'existing DM insert policy must survive');
+  assert.match(sql, /create policy "msg_insert_own" on public\.messages\s+for insert\s+with check \(auth\.uid\(\) = sender_id and conversation_id is null\)/,
+    'the DM insert rule is kept, limited to direct messages so nobody posts into a group they are not in');
 });
 
 test('the documents bucket is private and reads are gated on the metadata row', () => {

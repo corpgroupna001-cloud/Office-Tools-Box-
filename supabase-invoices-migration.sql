@@ -200,7 +200,7 @@ begin
   if v_status not in ('draft', 'cancelled') then
     if s_tot > 0 and s_paid >= s_tot then v_status := 'paid';
     elsif s_paid > 0 then v_status := 'partially_paid';
-    elsif inv.due_date is not null and inv.due_date < current_date then v_status := 'overdue';
+    elsif inv.due_date is not null and inv.due_date < (now() at time zone 'Asia/Kolkata')::date then v_status := 'overdue';
     else v_status := 'sent';
     end if;
   end if;

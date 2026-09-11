@@ -9,5 +9,8 @@
   "dependencies": {
     "nodemailer": "^6.9.16",
     "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8"
   }
 }

@@ -8,6 +8,7 @@
 //     skips the Friday check)
 
 const webpush = require('web-push');
+const { runAndPush } = require('../lib/crm-reminders');
 
 module.exports = async function handler(req, res) {
   const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -24,6 +25,18 @@ module.exports = async function handler(req, res) {
 
   if (!SUPABASE_URL || !SERVICE_KEY) return res.status(500).json({ error: 'supabase config missing' });
 
+  // CRM reminders (tasks, meetings, follow-ups, overdue invoices) ride along on
+  // this cron: generate them, then push them to devices. ?job=crm runs only
+  // this part, for the optional every-5-minutes pg_net schedule in
+  // supabase-crm-reminders-migration.sql — it must never re-send the WFH nudges.
+  const crmReminders = () => runAndPush({
+    url: SUPABASE_URL, key: SERVICE_KEY, webpush,
+    vapid: { publicKey: VAPID_PUBLIC_KEY, privateKey: VAPID_PRIVATE_KEY, subject: VAPID_SUBJECT },
+  });
+  if (String(req.query?.job || '') === 'crm') {
+    return res.status(200).json({ success: true, crm: await crmReminders() });
+  }
+
   // Retention sweep runs on every invocation, before the day guard below.
   const purged = await purgeOldSelfies(SUPABASE_URL, SERVICE_KEY);
 
@@ -34,6 +47,7 @@ module.exports = async function handler(req, res) {
     SUPABASE_URL, SERVICE_KEY,
     VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT,
   });
+  const crm = await crmReminders();
   if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) return res.status(500).json({ error: 'vapid config missing' });
 
   // ---- Friday (IST) guard — ?force=1 with admin key overrides ----
@@ -41,7 +55,7 @@ module.exports = async function handler(req, res) {
   const isFriday = istNow.getUTCDay() === 5;
   const force = keyOk && String(req.query?.force || '') === '1';
   if (!isFriday && !force) {
-    return res.status(200).json({ success: true, skipped: 'not_friday_ist' });
+    return res.status(200).json({ success: true, skipped: 'not_friday_ist', crm });
   }
   const weekOf = istNow.toISOString().slice(0, 10);
 
@@ -145,7 +159,7 @@ module.exports = async function handler(req, res) {
       details.push({ name: emp.full_name, missing, pushed: sent });
     }
 
-    return res.status(200).json({ success: true, mode, week_of: weekOf, wfh_total: wfhEmployees.length, notified, alreadyDone, noSubscription, cleaned, details });
+    return res.status(200).json({ success: true, mode, week_of: weekOf, wfh_total: wfhEmployees.length, notified, alreadyDone, noSubscription, cleaned, details, crm });
   } catch (e) {
     return res.status(500).json({ error: 'server error', detail: String(e.message || e).slice(0, 200) });
   }

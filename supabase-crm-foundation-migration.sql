@@ -50,7 +50,7 @@ set search_path = public
 as $$
 begin
   if new.app_role is distinct from old.app_role
-     and coalesce(current_setting('request.jwt.claims', true)::jsonb ->> 'role', '') = 'authenticated' then
+     and coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role', '') = 'authenticated' then
     raise exception 'app_role can only be changed by an administrator'
       using errcode = '42501';
   end if;
@@ -734,12 +734,13 @@ begin
   end if;
   if tg_op = 'INSERT' or new.stage_id is distinct from old.stage_id then
     new.probability := s.probability;
+    -- Close dates are IST calendar dates, like every other date in WorkSuite.
     if s.is_won then
       new.status := 'won';
-      new.actual_close_date := coalesce(new.actual_close_date, current_date);
+      new.actual_close_date := coalesce(new.actual_close_date, (now() at time zone 'Asia/Kolkata')::date);
     elsif s.is_lost then
       new.status := 'lost';
-      new.actual_close_date := coalesce(new.actual_close_date, current_date);
+      new.actual_close_date := coalesce(new.actual_close_date, (now() at time zone 'Asia/Kolkata')::date);
     else
       new.status := 'open';
       new.actual_close_date := null;
@@ -909,7 +910,8 @@ begin
   if not public.ws_same_company(l.company) then
     raise exception 'Not allowed' using errcode = '42501';
   end if;
-  if not (l.owner_id = auth.uid() or l.created_by = auth.uid() or public.ws_is_manager()) then
+  -- is not distinct from: a lead with no owner must not make this check NULL (and pass).
+  if not (l.owner_id is not distinct from auth.uid() or l.created_by is not distinct from auth.uid() or public.ws_is_manager()) then
     raise exception 'Only the lead owner or a manager can convert it' using errcode = '42501';
   end if;
   if l.status = 'converted' then raise exception 'Lead is already converted'; end if;

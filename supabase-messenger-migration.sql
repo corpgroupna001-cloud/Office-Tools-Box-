@@ -144,6 +144,21 @@ create index if not exists messages_pinned_idx on public.messages (conversation_
   where pinned_at is not null;
 create index if not exists messages_reply_idx on public.messages (reply_to_id) where reply_to_id is not null;
 
+-- The original chat policy lets a sender insert any row carrying their own
+-- sender_id. Now that a message can target a conversation, that policy is
+-- limited to direct messages — otherwise anyone could post into a group they
+-- are not in by knowing its id. Direct messages behave exactly as before.
+drop policy if exists "msg_insert_own" on public.messages;
+create policy "msg_insert_own" on public.messages
+  for insert
+  with check (auth.uid() = sender_id and conversation_id is null);
+
+-- A reaction needs a message the reactor can actually see.
+drop policy if exists "reactions_insert_own" on public.message_reactions;
+create policy "reactions_insert_own" on public.message_reactions
+  for insert
+  with check (auth.uid() = user_id and exists (select 1 from public.messages m where m.id = message_id));
+
 -- Group members may read; a member may post as themselves.
 drop policy if exists msg_select_group on public.messages;
 create policy msg_select_group on public.messages
@@ -177,7 +192,7 @@ language plpgsql
 security definer
 set search_path = public
 as $$
-declare v_role text := coalesce(current_setting('request.jwt.claims', true)::jsonb ->> 'role', '');
+declare v_role text := coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role', '');
 begin
   if v_role = 'authenticated' then
     if new.body is distinct from old.body then
@@ -188,6 +203,10 @@ begin
     end if;
     if new.pinned_at is distinct from old.pinned_at then
       new.pinned_by := case when new.pinned_at is null then null else auth.uid() end;
+    end if;
+    -- Someone else may pin a message or (in a DM) mark it read, nothing more.
+    if old.sender_id is distinct from auth.uid() then
+      new.edited_at := old.edited_at; new.deleted_at := old.deleted_at; new.mentions := old.mentions;
     end if;
     -- Nothing else on a message is mutable from the browser.
     new.sender_id := old.sender_id; new.recipient_id := old.recipient_id;
@@ -284,7 +303,7 @@ security definer
 set search_path = public
 as $$
 begin
-  if coalesce(current_setting('request.jwt.claims', true)::jsonb ->> 'role', '') = 'authenticated'
+  if coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role', '') = 'authenticated'
      and new.role is distinct from old.role
      and not public.ws_conversation_admin(new.conversation_id) then
     raise exception 'Only a group admin can change roles' using errcode = '42501';
@@ -320,14 +339,18 @@ as $$
 $$;
 grant execute on function public.ws_unread_counts() to authenticated;
 
--- Realtime already publishes messages and message_reactions. Add conversations
--- so a new group shows up without a reload.
+-- Realtime already publishes messages and message_reactions. Add membership
+-- (a new group shows up without a reload) and conversations (a rename or an
+-- archive reaches every member live). RLS still decides who receives what.
 do $$
+declare t text;
 begin
-  if not exists (select 1 from pg_publication_tables
-                  where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'conversation_members') then
-    alter publication supabase_realtime add table public.conversation_members;
-  end if;
+  foreach t in array array['conversation_members', 'conversations'] loop
+    if not exists (select 1 from pg_publication_tables
+                    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    end if;
+  end loop;
 end$$;
 
 -- Done. All four CRM migrations are now applied.
