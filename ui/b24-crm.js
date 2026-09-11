@@ -155,5 +155,63 @@
         </div>`;
     }
 
-    window.WSB24 = { columns, customFields, cfColumns, cfFilters, cfSection, cfDisplay, levels, allowed, hex, peopleOptions, openRecord, pick, titleBar };
+    /* ---------- CSV import / export ---------- */
+    // Parsing and writing live in ui/crm-logic.js (pure, unit-tested).
+    const csvParse = text => window.WSCrmLogic.csvParse(text);
+    const csvStringify = rows => window.WSCrmLogic.csvStringify(rows);
+    function download(filename, text, type) {
+        const url = URL.createObjectURL(new Blob(['﻿' + text], { type: type || 'text/csv;charset=utf-8' }));
+        const a = document.createElement('a');
+        a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+    /** Export: columns [{ title, value(row) }], rows loaded by the page (it applies the filter). */
+    function exportCsv(filename, columns, rows) {
+        download(filename, csvStringify([columns.map(c => c.title)].concat(rows.map(r => columns.map(c => c.value(r))))));
+    }
+    const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    /**
+     * importCsv({ title, fields: [{ key, label, required, aliases: [] }], run: async (records) => ({ inserted, skipped }) })
+     * Reads a CSV the person picks, maps its columns to fields (by header name, adjustable), and hands the records to run().
+     */
+    function importCsv(o) {
+        const body = document.createElement('div');
+        body.innerHTML = `<p style="margin:0 0 12px">Choose a CSV file (UTF-8, first row = column names). Up to 5,000 rows.</p>
+            <input type="file" accept=".csv,text/csv" data-file aria-label="CSV file">
+            <div data-map style="margin-top:14px"></div>`;
+        let parsed = null;
+        const m = C().modal({
+            title: o.title, body, size: 'wide',
+            actions: [{ label: 'Cancel', close: true }, { label: 'Import', primary: true, onClick: async api => {
+                if (!parsed) throw new Error('Choose a CSV file first.');
+                const map = {};
+                body.querySelectorAll('[data-col]').forEach(sel => { if (sel.value !== '') map[sel.dataset.col] = Number(sel.value); });
+                const missing = o.fields.filter(f => f.required && !(f.key in map));
+                if (missing.length) throw new Error(`Choose a column for: ${missing.map(f => f.label).join(', ')}`);
+                const records = parsed.rows.map(r => { const x = {}; Object.entries(map).forEach(([k, i]) => { const v = (r[i] || '').trim(); if (v) x[k] = v; }); return x; })
+                    .filter(x => o.fields.filter(f => f.required).every(f => x[f.key]));
+                if (!records.length) throw new Error('No rows have the required values.');
+                api.setMessage(`Importing ${records.length} row${records.length === 1 ? '' : 's'}…`, true);
+                const res = await o.run(records);
+                api.close();
+                C().alert({ title: 'Import finished', message: `${res.inserted} added${res.skipped ? `, ${res.skipped} skipped as duplicates` : ''}${res.failed ? `, ${res.failed} could not be saved` : ''}.` });
+            } }],
+        });
+        body.querySelector('[data-file]').addEventListener('change', async e => {
+            const file = e.target.files[0]; if (!file) return;
+            if (file.size > 10 * 1024 * 1024) { m.setMessage('That file is larger than 10 MB.'); return; }
+            const rows = csvParse(await file.text());
+            if (rows.length < 2) { m.setMessage('The file has no data rows.'); return; }
+            const head = rows[0];
+            parsed = { head, rows: rows.slice(1, 5001) };
+            const guess = f => { const names = [f.key, f.label].concat(f.aliases || []).map(norm); return head.findIndex(h => names.includes(norm(h))); };
+            body.querySelector('[data-map]').innerHTML = `<p style="margin:0 0 8px"><b>${parsed.rows.length}</b> row${parsed.rows.length === 1 ? '' : 's'} found. Match the columns:</p>
+                <div class="crm-form">${o.fields.map(f => { const g = guess(f); return `<div class="crm-field"><label>${esc(f.label)}${f.required ? '<span class="req">*</span>' : ''}</label>
+                    <select data-col="${esc(f.key)}"><option value="">— skip —</option>${head.map((h, i) => `<option value="${i}"${i === g ? ' selected' : ''}>${esc(h || `Column ${i + 1}`)}</option>`).join('')}</select></div>`; }).join('')}</div>`;
+        });
+        return m;
+    }
+
+    window.WSB24 = { columns, customFields, cfColumns, cfFilters, cfSection, cfDisplay, levels, allowed, hex, peopleOptions, openRecord, pick, titleBar,
+                     csvParse, csvStringify, exportCsv, importCsv, download };
 })();

@@ -552,8 +552,43 @@
     return { verb, detail };
   }
 
+  /* ---------- CSV (import / export) ---------- */
+  /** RFC 4180 CSV to rows of strings. Quoted fields may hold commas, doubled quotes and
+      newlines. The delimiter is a comma, or a semicolon when the header row has no comma. */
+  function csvParse(text) {
+    const s = String(text == null ? '' : text).replace(/^﻿/, '');
+    const head = s.split(/\r?\n/, 1)[0] || '';
+    const delim = !head.includes(',') && head.includes(';') ? ';' : ',';
+    const rows = [];
+    let row = [], cell = '', quoted = false;
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (quoted) {
+        if (ch === '"') { if (s[i + 1] === '"') { cell += '"'; i++; } else quoted = false; }
+        else cell += ch;
+      } else if (ch === '"' && cell === '') quoted = true;
+      else if (ch === delim) { row.push(cell); cell = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && s[i + 1] === '\n') i++;
+        row.push(cell); cell = '';
+        if (row.some(c => c !== '')) rows.push(row);
+        row = [];
+      } else cell += ch;
+    }
+    row.push(cell);
+    if (row.some(c => c !== '')) rows.push(row);
+    return rows;
+  }
+  /** One CSV cell. Text a spreadsheet would run as a formula is prefixed with ' (numbers are left alone). */
+  function csvCell(v) {
+    let s = v == null ? '' : Array.isArray(v) ? v.join(', ') : String(v);
+    if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = "'" + s;
+    return /[",;\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }
+  function csvStringify(rows) { return rows.map(r => r.map(csvCell).join(',')).join('\r\n'); }
+
   return {
-    IST, IST_OFFSET,
+    IST, IST_OFFSET, csvParse, csvCell, csvStringify,
     istDate, istTime, todayIST, dayNumber, fromDayNumber, addDays, daysBetween, isoWeekday, isoAtIST, isoEndOfIST,
     dateRange, rangeToIso, fmtDate, fmtDateTime, fmtTime, fmtRelative,
     round2, money, moneyShort,

@@ -808,3 +808,8 @@ body.ws-b24 .kb-col .kb-add { width: calc(100% - 16px); margin: 4px 8px 8px; box
 .b24-products-add select { width: auto; min-width: 260px; min-height: 34px !important; padding: 4px 30px 4px 10px !important; font-size: 13px !important; }
 .b24-products-foot { display: flex; align-items: center; gap: 12px; padding: 12px 0 0; border-top: 1px solid var(--b24-line); margin-top: 8px; font-size: 14px; }
 .b24-products-foot .grow { flex: 1; }
+/* A person or company in a grid cell: avatar, name, subtitle. */
+.b24-who { display: inline-flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; }
+.b24-who > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+.b24-who > span:last-child > a, .b24-who > span:last-child > .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.b24-who .ws-avatar { flex: 0 0 auto; }

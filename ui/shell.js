@@ -64,6 +64,7 @@
             { key: 'deals',      title: 'Deals',              href: '/deals/',      icon: 'deal',    menu: false, section: 'crm' },
             { key: 'leads',      title: 'Leads',              href: '/leads/',      icon: 'target',  menu: false, section: 'crm' },
             { key: 'contacts',   title: 'Contacts',           href: '/contacts/',   icon: 'user',    menu: false, section: 'crm' },
+            { key: 'companies',  title: 'Companies',          href: '/companies/',  icon: 'building', menu: false, section: 'crm' },
             { key: 'invoices',   title: 'Invoices',           href: '/invoices/',   icon: 'invoice', menu: false, section: 'crm' },
         ]},
         { label: 'Company', items: [
@@ -90,6 +91,7 @@
             { key: 'deals',    title: 'Deals',     href: '/deals/' },
             { key: 'leads',    title: 'Leads',     href: '/leads/' },
             { key: 'contacts', title: 'Contacts',  href: '/contacts/' },
+            { key: 'companies', title: 'Companies', href: '/companies/' },
             { key: 'invoices', title: 'Invoices',  href: '/invoices/' },
             { key: 'crm',      title: 'Analytics', href: '/crm/' },
         ],
@@ -146,7 +148,7 @@
         if (p.indexOf('/attendance') === 0) return location.hash === '#leave' || location.hash === '#holidays' ? 'leave' : 'attendance';
         var first = p.split('/')[1];
         var map = { chat: 'chat', messenger: 'chat', recordings: 'recordings', signature: 'signature', typingtest: 'typing', mcqquiz: 'quiz',
-                    crm: 'crm', contacts: 'contacts', leads: 'leads', deals: 'deals', boards: 'boards', projects: 'projects', tasks: 'tasks',
+                    crm: 'crm', contacts: 'contacts', companies: 'companies', leads: 'leads', deals: 'deals', boards: 'boards', projects: 'projects', tasks: 'tasks',
                     documents: 'documents', calendar: 'calendar', employees: 'employees', invoices: 'invoices', admin: 'admin', 'wsm-admin': 'admin' };
         return map[first] || '';
     }
