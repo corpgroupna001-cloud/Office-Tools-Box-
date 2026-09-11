@@ -560,6 +560,22 @@
                     })
                 .subscribe();
 
+            // In-app notifications (task assigned, mention, meeting invite…) written
+            // by the CRM triggers. The shell keeps the bell count; this shows the toast.
+            try {
+                sb.channel(`notif:inbox:${currentUserId}`)
+                    .on('postgres_changes',
+                        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${currentUserId}` },
+                        ({ new: n }) => {
+                            if (!n || !n.title) return;
+                            const icon = /task/.test(n.kind) ? '✅' : /mention/.test(n.kind) ? '💬' : /event/.test(n.kind) ? '📅' : /deal|lead|contact/.test(n.kind) ? '🎯' : /project/.test(n.kind) ? '📁' : '🔔';
+                            showToast({ icon, title: n.title, message: n.body || '', onClick: () => { if (n.url) location.href = n.url; } });
+                            playPing();
+                            browserNotify(n.title, n.body || '', `ws-notif-${n.kind}`);
+                        })
+                    .subscribe();
+            } catch (e) { /* the notifications table is optional until the CRM migration runs */ }
+
             // Presence + call channel — same channel chat uses
             callChannel = sb.channel('presence:global', { config: { presence: { key: currentUserId } } })
                 .on('broadcast', { event: 'call-offer' }, ({ payload }) => {

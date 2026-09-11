@@ -19,6 +19,14 @@
     {
       "source": "/api/verify-code",
       "destination": "/api/verify?fn=check"
+    },
+    {
+      "source": "/messenger",
+      "destination": "/chat/index.html"
+    },
+    {
+      "source": "/messenger/",
+      "destination": "/chat/index.html"
     }
   ],
   "redirects": [

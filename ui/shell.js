@@ -19,14 +19,22 @@
 
    API
      WSShell.mount({ active, crumb, crumbPrefix, title, subtitle, brandSub,
-                     nav,            // optional: [{label, items:[{key,title,icon, href | tab, tag, badge}]}]
+                     nav,            // optional: [{label, items:[{key,title,icon, href | tab, tag, badge, role}]}]
                      tools,          // optional HTML for the top bar (buttons the page wires itself)
                      pageClass,      // 'center' (old centred tool pages) | 'fill' (chat: no padding, full height)
                      onProfile, onSignOut })
      WSShell.setUser({ name, email, avatar, company } | null)
      WSShell.setCrumb(text)
      WSShell.toast(message, 'ok' | 'bad' | '')
-     WSShell.refreshUnread()
+     WSShell.refreshUnread()          // messages + notifications + tasks badges
+     WSShell.setBadge('tasks', n)     // a page may push a count it already knows
+     WSShell.role                     // 'employee' | 'manager' | 'admin' once known
+
+   Sidebar groups follow the business modules: Workspace, CRM, Collaboration,
+   People, Finance, Tools, Admin. Items carrying `role: 'manager' | 'admin'`
+   stay hidden until the signed-in profile confirms the workspace role.
+   The sidebar collapses to an icon rail on desktop (remembered per browser)
+   and becomes a drawer under 960px.
    ============================================================================ */
 (function () {
     'use strict';
@@ -34,24 +42,46 @@
 
     var NAV = [
         { label: 'Workspace', items: [
-            { key: 'home',       title: 'Dashboard',             href: '/',                 icon: 'home' },
+            { key: 'home',       title: 'Dashboard',        href: '/',                 icon: 'home' },
             { key: 'attendance', title: 'My Attendance',    href: '/attendance/',      icon: 'attend' },
             { key: 'leave',      title: 'Leave & Holidays', href: '/attendance/#leave', icon: 'leave' },
         ]},
+        { label: 'CRM', items: [
+            { key: 'crm',        title: 'CRM',              href: '/crm/',        icon: 'dashboard' },
+            { key: 'contacts',   title: 'Contacts',         href: '/contacts/',   icon: 'user' },
+            { key: 'leads',      title: 'Leads',            href: '/leads/',      icon: 'target' },
+            { key: 'deals',      title: 'Deals',            href: '/deals/',      icon: 'deal' },
+        ]},
         { label: 'Collaboration', items: [
-            { key: 'chat',       title: 'Chat & Calls',     href: '/chat/',       icon: 'chat', badge: 'unread' },
+            { key: 'chat',       title: 'Messenger',        href: '/chat/',       icon: 'chat', badge: 'unread' },
+            { key: 'boards',     title: 'Boards',           href: '/boards/',     icon: 'board' },
+            { key: 'projects',   title: 'Projects',         href: '/projects/',   icon: 'folder' },
+            { key: 'tasks',      title: 'Tasks',            href: '/tasks/',      icon: 'tasks', badge: 'tasks' },
+            { key: 'documents',  title: 'Documents',        href: '/documents/',  icon: 'doc' },
+            { key: 'calendar',   title: 'Calendar',         href: '/calendar/',   icon: 'calendar' },
+        ]},
+        { label: 'People', items: [
+            { key: 'employees',  title: 'Employees',        href: '/employees/',  icon: 'users' },
+        ]},
+        { label: 'Finance', items: [
+            { key: 'invoices',   title: 'Invoices',         href: '/invoices/',   icon: 'invoice', role: 'manager' },
+        ]},
+        { label: 'Tools', items: [
             { key: 'recordings', title: 'Friday Check-in',  href: '/recordings/', icon: 'video' },
             { key: 'signature',  title: 'Email Signature',  href: '/signature/',  icon: 'pen' },
+            { key: 'typing',     title: 'Typing assessment',      href: '/typingtest/', icon: 'keyboard' },
+            { key: 'quiz',       title: 'Knowledge assessments',  href: '/mcqquiz/',    icon: 'quiz' },
         ]},
-        { label: 'Development', items: [
-            { key: 'typing',     title: 'Typing assessment',          href: '/typingtest/', icon: 'keyboard' },
-            { key: 'quiz',       title: 'Knowledge assessments',         href: '/mcqquiz/',    icon: 'quiz' },
+        // The admin console keeps its own password gate; it is only listed for
+        // people whose workspace role is admin, and never in the command palette.
+        { label: 'Admin', items: [
+            { key: 'admin',      title: 'Admin console',    href: '/wsm-admin',   icon: 'shield', role: 'admin' },
         ]},
-        // The admin console is deliberately not listed: it is reached by its
-        // URL and its own password, and employees have no reason to see it.
     ];
 
-    var state = { mounted: false, opts: {}, user: null, explicitUser: false, sb: null, uid: null, unreadTimer: null };
+    var COLLAPSE_KEY = 'ws-side-collapsed';
+    var state = { mounted: false, opts: {}, user: null, explicitUser: false, sb: null, uid: null, unreadTimer: null, role: null,
+                  counts: { unread: 0, notifications: 0, tasks: 0 }, notifOpen: false, notifChannel: null, notifItems: [] };
     var refs = {};
 
     function esc(s) {
@@ -63,13 +93,11 @@
         var p = location.pathname.replace(/\/+$/, '') || '/';
         if (p === '/' || p === '/index.html') return 'home';
         if (p.indexOf('/attendance') === 0) return location.hash === '#leave' || location.hash === '#holidays' ? 'leave' : 'attendance';
-        if (p.indexOf('/chat') === 0) return 'chat';
-        if (p.indexOf('/recordings') === 0) return 'recordings';
-        if (p.indexOf('/signature') === 0) return 'signature';
-        if (p.indexOf('/typingtest') === 0) return 'typing';
-        if (p.indexOf('/mcqquiz') === 0) return 'quiz';
-        if (p.indexOf('/admin') === 0 || p.indexOf('/wsm-admin') === 0) return 'admin';
-        return '';
+        var first = p.split('/')[1];
+        var map = { chat: 'chat', messenger: 'chat', recordings: 'recordings', signature: 'signature', typingtest: 'typing', mcqquiz: 'quiz',
+                    crm: 'crm', contacts: 'contacts', leads: 'leads', deals: 'deals', boards: 'boards', projects: 'projects', tasks: 'tasks',
+                    documents: 'documents', calendar: 'calendar', employees: 'employees', invoices: 'invoices', admin: 'admin', 'wsm-admin': 'admin' };
+        return map[first] || '';
     }
     function initialOf(name) {
         var s = String(name || '').trim();
@@ -77,16 +105,18 @@
     }
     function navHtml(nav, active) {
         return nav.map(function (g) {
-            return '<div class="ws-side-group">' + (g.label ? '<div class="label">' + esc(g.label) + '</div>' : '') +
+            var gated = g.items.every(function (it) { return it.role; });
+            return '<div class="ws-side-group"' + (gated ? ' data-ws-role-group hidden' : '') + '>' + (g.label ? '<div class="label">' + esc(g.label) + '</div>' : '') +
                 g.items.map(function (it) {
                     var extra = it.badge ? '<span class="badge" data-ws-badge="' + it.badge + '" hidden></span>'
                               : it.tag ? '<span class="tag">' + esc(it.tag) + '</span>' : '';
                     var inner = '<span class="ic ic-' + esc(it.icon) + '"></span><span>' + esc(it.title) + '</span>' + extra;
                     var cls = 'ws-side-item' + (it.key === active ? ' active' : '') + (it.cls ? ' ' + esc(it.cls) : '');
+                    var attrs = ' data-key="' + esc(it.key) + '" data-tip="' + esc(it.title) + '"' + (it.role ? ' data-ws-role="' + esc(it.role) + '" hidden' : '') + (it.key === active ? ' aria-current="page"' : '');
                     // A "tab" item is a button the page's own switcher handles (data-tab);
                     // everything else is a plain link.
-                    if (it.tab) return '<button type="button" class="' + cls + '" data-tab="' + esc(it.tab) + '" data-key="' + esc(it.key) + '">' + inner + '</button>';
-                    return '<a class="' + cls + '" href="' + esc(it.href) + '" data-key="' + esc(it.key) + '">' + inner + '</a>';
+                    if (it.tab) return '<button type="button" class="' + cls + '" data-tab="' + esc(it.tab) + '"' + attrs + '>' + inner + '</button>';
+                    return '<a class="' + cls + '" href="' + esc(it.href) + '"' + attrs + '>' + inner + '</a>';
                 }).join('') + '</div>';
         }).join('');
     }
@@ -94,6 +124,8 @@
         for (var g = 0; g < nav.length; g++) for (var i = 0; i < nav[g].items.length; i++) if (nav[g].items[i].key === key) return nav[g].items[i];
         return null;
     }
+    function readCollapsed() { try { return localStorage.getItem(COLLAPSE_KEY) === '1'; } catch (e) { return false; } }
+    function writeCollapsed(v) { try { v ? localStorage.setItem(COLLAPSE_KEY, '1') : localStorage.removeItem(COLLAPSE_KEY); } catch (e) { /* private mode */ } }
 
     function mount(opts) {
         opts = opts || {};
@@ -123,6 +155,7 @@
                 '<span class="ws-avatar" id="ws-foot-avatar">?</span>' +
                 '<div class="who"><b id="ws-foot-name">Not signed in</b><span id="ws-foot-sub">WorkSuite</span></div>' +
                 '<button type="button" class="out" id="ws-foot-out" title="Sign out" aria-label="Sign out"><span class="ic ic-logout"></span></button>' +
+                '<button type="button" class="ws-side-collapse" id="ws-side-collapse" title="Collapse sidebar" aria-label="Collapse sidebar" aria-pressed="false"><span class="ic ic-collapse"></span></button>' +
             '</div>';
 
         // ----- top bar -----
@@ -137,7 +170,12 @@
                 '<span class="ic ic-search sm"></span><span>Search workspace</span><span class="kbd">⌘K</span></button>' +
             '<button type="button" class="ws-theme-toggle" data-ws-theme data-ws-theme-ready="1" aria-label="Switch between light and dark" title="Switch between light and dark">' +
                 '<span class="moon ic ic-moon" aria-hidden="true"></span><span class="sun ic ic-sun" aria-hidden="true"></span></button>' +
-            '<a class="ws-iconbtn" id="ws-bell" href="/chat/" title="Messages" aria-label="Messages"><span class="ic ic-bell"></span><span class="dot"></span></a>' +
+            '<button type="button" class="ws-iconbtn" id="ws-bell" title="Notifications" aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false"><span class="ic ic-bell"></span><span class="dot count" id="ws-bell-count"></span></button>' +
+            '<div class="ws-notif" id="ws-notif" role="dialog" aria-label="Notifications" hidden>' +
+                '<div class="head"><b>Notifications</b><button type="button" id="ws-notif-readall">Mark all read</button></div>' +
+                '<a class="msgs" href="/chat/"><span class="ic ic-chat"></span>Messages<span class="n" id="ws-notif-msgs" hidden></span></a>' +
+                '<div class="list" id="ws-notif-list"><div class="empty">Loading…</div></div>' +
+            '</div>' +
             '<button type="button" class="ws-userbtn" id="ws-userbtn" aria-haspopup="menu" aria-expanded="false">' +
                 '<span class="ws-avatar sm" id="ws-top-avatar">?</span><span class="nm" id="ws-top-name">…</span></button>' +
             '<div class="ws-menu" id="ws-menu" role="menu" hidden>' +
@@ -145,6 +183,7 @@
                 '<button type="button" role="menuitem" id="ws-menu-profile"><span class="ic ic-user"></span>Profile &amp; settings</button>' +
                 '<a role="menuitem" href="/attendance/"><span class="ic ic-attend"></span>My attendance</a>' +
                 '<a role="menuitem" href="/attendance/#leave"><span class="ic ic-leave"></span>Apply for leave</a>' +
+                '<a role="menuitem" href="/tasks/?view=mine"><span class="ic ic-tasks"></span>My tasks</a>' +
                 '<button type="button" role="menuitem" class="danger" id="ws-menu-out"><span class="ic ic-logout"></span>Sign out</button>' +
             '</div>';
 
@@ -171,7 +210,7 @@
         main.appendChild(page);
 
         var shell = document.createElement('div');
-        shell.className = 'ws-shell';
+        shell.className = 'ws-shell' + (readCollapsed() ? ' collapsed' : '');
         shell.appendChild(side);
         shell.appendChild(main);
 
@@ -193,13 +232,16 @@
         body.appendChild(host);
 
         refs = {
-            side: side, scrim: scrim, menu: top.querySelector('#ws-menu'), userbtn: top.querySelector('#ws-userbtn'),
-            crumb: top.querySelector('#ws-crumb'), bell: top.querySelector('#ws-bell'),
+            side: side, shell: shell, scrim: scrim, menu: top.querySelector('#ws-menu'), userbtn: top.querySelector('#ws-userbtn'),
+            crumb: top.querySelector('#ws-crumb'), bell: top.querySelector('#ws-bell'), bellCount: top.querySelector('#ws-bell-count'),
+            notif: top.querySelector('#ws-notif'), notifList: top.querySelector('#ws-notif-list'), notifMsgs: top.querySelector('#ws-notif-msgs'),
             topAvatar: top.querySelector('#ws-top-avatar'), topName: top.querySelector('#ws-top-name'),
             menuName: top.querySelector('#ws-menu-name'), menuEmail: top.querySelector('#ws-menu-email'),
             footAvatar: side.querySelector('#ws-foot-avatar'), footName: side.querySelector('#ws-foot-name'), footSub: side.querySelector('#ws-foot-sub'),
+            collapse: side.querySelector('#ws-side-collapse'),
             host: host, page: page,
         };
+        refs.collapse.setAttribute('aria-pressed', String(shell.classList.contains('collapsed')));
 
         // ----- behaviour -----
         top.querySelector('#ws-hamb').addEventListener('click', function () { toggleDrawer(); });
@@ -210,12 +252,21 @@
         top.querySelector('.ws-theme-toggle').addEventListener('click', function () {
             if (window.WSTheme) window.WSTheme.toggle();
         });
-        refs.userbtn.addEventListener('click', function (e) { e.stopPropagation(); toggleMenu(); });
+        refs.userbtn.addEventListener('click', function (e) { e.stopPropagation(); toggleNotif(false); toggleMenu(); });
+        refs.bell.addEventListener('click', function (e) { e.stopPropagation(); toggleMenu(false); toggleNotif(); });
+        top.querySelector('#ws-notif-readall').addEventListener('click', function () { markAllRead(); });
+        refs.notifList.addEventListener('click', function (e) {
+            var a = e.target.closest('[data-notif]');
+            if (!a) return;
+            e.preventDefault();
+            openNotification(a.dataset.notif, a.getAttribute('href'));
+        });
         document.addEventListener('click', function (e) {
             if (!refs.menu.hidden && !refs.menu.contains(e.target)) toggleMenu(false);
+            if (!refs.notif.hidden && !refs.notif.contains(e.target) && !refs.bell.contains(e.target)) toggleNotif(false);
         });
         document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') { toggleMenu(false); closeDrawer(); }
+            if (e.key === 'Escape') { toggleMenu(false); toggleNotif(false); closeDrawer(); }
         });
         top.querySelector('#ws-menu-profile').addEventListener('click', function () {
             toggleMenu(false);
@@ -225,6 +276,14 @@
         var signOut = function () { toggleMenu(false); doSignOut(); };
         top.querySelector('#ws-menu-out').addEventListener('click', signOut);
         side.querySelector('#ws-foot-out').addEventListener('click', signOut);
+        refs.collapse.addEventListener('click', function () {
+            var on = !shell.classList.contains('collapsed');
+            shell.classList.toggle('collapsed', on);
+            writeCollapsed(on);
+            refs.collapse.setAttribute('aria-pressed', String(on));
+            refs.collapse.title = on ? 'Expand sidebar' : 'Collapse sidebar';
+            document.dispatchEvent(new CustomEvent('ws-sidebar', { detail: { collapsed: on } }));
+        });
         side.querySelectorAll('.ws-side-item').forEach(function (a) {
             a.addEventListener('click', function () {
                 closeDrawer();
@@ -244,7 +303,7 @@
         whenSupabase(bootUser);
     }
 
-    // ----- drawer / menu -----
+    // ----- drawer / menu / notifications -----
     function toggleDrawer(force) {
         var open = typeof force === 'boolean' ? force : !refs.side.classList.contains('open');
         refs.side.classList.toggle('open', open);
@@ -253,7 +312,7 @@
         refs.side.inert = window.matchMedia('(max-width: 960px)').matches && !open;
         if (!open && refs.side.contains(document.activeElement)) document.getElementById('ws-hamb').focus();
         if (open) {
-            var first = refs.side.querySelector('.ws-side-item');
+            var first = refs.side.querySelector('.ws-side-item:not([hidden])');
             if (first) first.focus();
         }
     }
@@ -263,6 +322,14 @@
         var show = typeof force === 'boolean' ? force : refs.menu.hidden;
         refs.menu.hidden = !show;
         refs.userbtn.setAttribute('aria-expanded', show ? 'true' : 'false');
+    }
+    function toggleNotif(force) {
+        if (!refs.notif) return;
+        var show = typeof force === 'boolean' ? force : refs.notif.hidden;
+        refs.notif.hidden = !show;
+        refs.bell.setAttribute('aria-expanded', show ? 'true' : 'false');
+        state.notifOpen = show;
+        if (show) { loadNotifications(); setTimeout(function () { var f = refs.notif.querySelector('a, button'); if (f) f.focus(); }, 20); }
     }
 
     // ----- user -----
@@ -293,6 +360,19 @@
         refs.footSub.textContent = u ? (u.company || u.email || 'WorkSuite') : 'WorkSuite';
     }
     function setCrumb(text) { if (refs.crumb) refs.crumb.textContent = text; }
+    function setRole(role) {
+        state.role = role || 'employee';
+        var rank = { employee: 0, manager: 1, admin: 2 };
+        var mine = rank[state.role] || 0;
+        if (!refs.side) return;
+        refs.side.querySelectorAll('[data-ws-role]').forEach(function (el) {
+            el.hidden = (rank[el.dataset.wsRole] || 0) > mine;
+        });
+        refs.side.querySelectorAll('[data-ws-role-group]').forEach(function (g) {
+            g.hidden = !g.querySelector('.ws-side-item:not([hidden])');
+        });
+        document.dispatchEvent(new CustomEvent('ws-role', { detail: { role: state.role } }));
+    }
 
     function whenSupabase(cb) {
         var tries = 0;
@@ -310,7 +390,7 @@
             var session = res && res.data && res.data.session;
             if (session) await hydrate(session);
             sb.auth.onAuthStateChange(function (ev, s) {
-                if (ev === 'SIGNED_OUT') { state.uid = null; if (!state.explicitUser) { state.user = null; renderUser(); } setUnread(0); }
+                if (ev === 'SIGNED_OUT') { state.uid = null; if (!state.explicitUser) { state.user = null; renderUser(); } setCounts({ unread: 0, notifications: 0, tasks: 0 }); }
                 else if (s && s.user && s.user.id !== state.uid) hydrate(s).catch(function () {});
             });
         } catch (e) { /* the shell is decoration; never break the page */ }
@@ -323,30 +403,131 @@
             renderUser();
         }
         try {
-            var q = await state.sb.from('profiles').select('full_name,avatar_url,company,email').eq('id', state.uid).maybeSingle();
+            var q = await state.sb.from('profiles').select('full_name,avatar_url,company,email,app_role').eq('id', state.uid).maybeSingle();
             var p = q && q.data;
+            if (q && q.error && String(q.error.code) === '42703') {
+                // app_role does not exist before the CRM migration: read the rest and stay an employee.
+                var q2 = await state.sb.from('profiles').select('full_name,avatar_url,company,email').eq('id', state.uid).maybeSingle();
+                p = q2 && q2.data;
+            }
             if (p && !state.explicitUser) {
                 state.user = { name: p.full_name || state.user.name, email: p.email || state.user.email, avatar: p.avatar_url || state.user.avatar, company: p.company || state.user.company };
                 renderUser();
             }
-        } catch (e) { /* profile row is optional */ }
+            setRole(p && p.app_role ? p.app_role : 'employee');
+        } catch (e) { setRole('employee'); }
         refreshUnread();
         clearInterval(state.unreadTimer);
         state.unreadTimer = setInterval(refreshUnread, 30000);
+        watchNotifications();
     }
+
+    // ----- badges: messages, notifications, tasks -----
     async function refreshUnread() {
         if (!state.sb || !state.uid) return;
+        var counts = { unread: state.counts.unread, notifications: state.counts.notifications, tasks: state.counts.tasks };
         try {
-            var r = await state.sb.from('messages').select('id', { count: 'exact', head: true }).eq('recipient_id', state.uid).is('read_at', null);
-            setUnread(r && r.count ? r.count : 0);
+            // Direct + group unread in one call once the messenger migration exists; the old count otherwise.
+            var rpc = await state.sb.rpc('ws_unread_counts');
+            if (!rpc.error && rpc.data && rpc.data[0]) counts.unread = Number(rpc.data[0].total) || 0;
+            else {
+                var r = await state.sb.from('messages').select('id', { count: 'exact', head: true }).eq('recipient_id', state.uid).is('read_at', null);
+                counts.unread = r && r.count ? r.count : 0;
+            }
         } catch (e) { /* messages table is optional */ }
+        try {
+            var n = await state.sb.from('notifications').select('id', { count: 'exact', head: true }).eq('user_id', state.uid).is('read_at', null);
+            counts.notifications = !n.error && n.count ? n.count : 0;
+        } catch (e) { counts.notifications = 0; }
+        try {
+            // Meaningful outstanding work: my open tasks that are overdue or due today.
+            var today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+            var t = await state.sb.from('tasks').select('id', { count: 'exact', head: true })
+                .eq('assignee_id', state.uid).is('archived_at', null).is('completed_at', null).lte('due_date', today);
+            counts.tasks = !t.error && t.count ? t.count : 0;
+        } catch (e) { counts.tasks = 0; }
+        setCounts(counts);
     }
-    function setUnread(n) {
-        if (refs.bell) refs.bell.classList.toggle('has', n > 0);
-        var b = refs.side && refs.side.querySelector('[data-ws-badge="unread"]');
+    function setCounts(c) {
+        state.counts = c;
+        setBadge('unread', c.unread);
+        setBadge('tasks', c.tasks);
+        var total = (c.unread || 0) + (c.notifications || 0);
+        if (refs.bell) {
+            refs.bell.classList.toggle('has', total > 0);
+            refs.bellCount.textContent = total > 99 ? '99+' : String(total);
+            refs.bell.title = total ? total + ' unread' : 'Notifications';
+        }
+        if (refs.notifMsgs) { refs.notifMsgs.hidden = !(c.unread > 0); refs.notifMsgs.textContent = c.unread > 99 ? '99+' : String(c.unread); }
+        document.dispatchEvent(new CustomEvent('ws-unread', { detail: { count: c.unread, notifications: c.notifications, tasks: c.tasks } }));
+    }
+    function setBadge(name, n) {
+        var b = refs.side && refs.side.querySelector('[data-ws-badge="' + name + '"]');
         if (b) { b.hidden = !(n > 0); b.textContent = n > 99 ? '99+' : String(n); }
-        document.dispatchEvent(new CustomEvent('ws-unread', { detail: { count: n } }));
+        if (state.counts && name in state.counts) state.counts[name] = n;
     }
+    function setUnread(n) { setCounts(Object.assign({}, state.counts, { unread: n })); }
+
+    // ----- notification panel -----
+    async function loadNotifications() {
+        if (!state.sb || !state.uid || !refs.notifList) return;
+        try {
+            var r = await state.sb.from('notifications').select('id,kind,title,body,url,read_at,created_at').eq('user_id', state.uid).order('created_at', { ascending: false }).limit(30);
+            if (r.error) throw r.error;
+            state.notifItems = r.data || [];
+            renderNotifications();
+        } catch (e) {
+            refs.notifList.innerHTML = '<div class="empty">' + (String(e.code) === '42P01' || String(e.code) === 'PGRST205' ? 'Notifications are not set up yet.' : 'Could not load notifications.') + '</div>';
+        }
+    }
+    function relTime(iso) {
+        var d = new Date(iso); if (isNaN(d)) return '';
+        var s = (Date.now() - d) / 1000;
+        if (s < 60) return 'just now';
+        if (s < 3600) return Math.round(s / 60) + 'm ago';
+        if (s < 86400) return Math.round(s / 3600) + 'h ago';
+        if (s < 7 * 86400) return Math.round(s / 86400) + 'd ago';
+        return d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' });
+    }
+    function renderNotifications() {
+        if (!state.notifItems.length) { refs.notifList.innerHTML = '<div class="empty">You are all caught up.</div>'; return; }
+        refs.notifList.innerHTML = state.notifItems.map(function (n) {
+            return '<a class="item' + (n.read_at ? ' read' : '') + '" href="' + esc(n.url || '#') + '" data-notif="' + esc(n.id) + '">' +
+                '<span class="dot"></span><span class="t"><b>' + esc(n.title) + '</b>' + (n.body ? '<span>' + esc(n.body) + '</span>' : '') + '<small>' + esc(relTime(n.created_at)) + '</small></span></a>';
+        }).join('');
+    }
+    async function openNotification(id, url) {
+        var n = state.notifItems.filter(function (x) { return x.id === id; })[0];
+        if (n && !n.read_at) {
+            n.read_at = new Date().toISOString();
+            try { await state.sb.from('notifications').update({ read_at: n.read_at }).eq('id', id); } catch (e) { /* best effort */ }
+            setCounts(Object.assign({}, state.counts, { notifications: Math.max(0, state.counts.notifications - 1) }));
+        }
+        toggleNotif(false);
+        if (url && url !== '#') location.href = url;
+    }
+    async function markAllRead() {
+        try { await state.sb.from('notifications').update({ read_at: new Date().toISOString() }).eq('user_id', state.uid).is('read_at', null); } catch (e) { /* best effort */ }
+        state.notifItems.forEach(function (n) { n.read_at = n.read_at || new Date().toISOString(); });
+        renderNotifications();
+        setCounts(Object.assign({}, state.counts, { notifications: 0 }));
+    }
+    function watchNotifications() {
+        if (state.notifChannel || !state.sb || !state.uid || !state.sb.channel) return;
+        try {
+            state.notifChannel = state.sb.channel('shell:notif:' + state.uid)
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: 'user_id=eq.' + state.uid }, function (payload) {
+                    var n = payload && payload.new;
+                    if (!n) return;
+                    state.notifItems.unshift(n);
+                    if (state.notifOpen) renderNotifications();
+                    setCounts(Object.assign({}, state.counts, { notifications: (state.counts.notifications || 0) + 1 }));
+                    if (n.kind === 'task.assigned' || n.kind === 'task.reopened') refreshUnread();
+                })
+                .subscribe();
+        } catch (e) { /* realtime is optional */ }
+    }
+
     async function doSignOut() {
         if (typeof state.opts.onSignOut === 'function') return state.opts.onSignOut();
         try { if (state.sb) await state.sb.auth.signOut(); } catch (e) { /* fall through */ }
@@ -359,10 +540,16 @@
         var t = document.createElement('div');
         t.className = 'ws-toast' + (kind ? ' ' + kind : '');
         t.textContent = message;
+        t.setAttribute('role', 'status');
         refs.host.appendChild(t);
         setTimeout(function () { t.style.opacity = '0'; t.style.transition = 'opacity 200ms'; }, 2600);
         setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 2900);
     }
 
-    window.WSShell = { mount: mount, setUser: setUser, setCrumb: setCrumb, toast: toast, refreshUnread: refreshUnread, closeDrawer: closeDrawer, NAV: NAV };
+    window.WSShell = {
+        mount: mount, setUser: setUser, setCrumb: setCrumb, toast: toast, refreshUnread: refreshUnread, setUnread: setUnread, setBadge: setBadge,
+        closeDrawer: closeDrawer, NAV: NAV,
+        get role() { return state.role; },
+        get counts() { return state.counts; },
+    };
 })();
