@@ -8,3 +8,6 @@ node_modules/
 # git history is effectively permanent, and this is other people's data.
 exports/
 __cdn
+
+# Browser smoke-test screenshots (npm run smoke:ui)
+tests/ui-smoke/out/
