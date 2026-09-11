@@ -27,6 +27,7 @@
     function route() {
         if (unsubscribe) { unsubscribe(); unsubscribe = null; }
         const id = C.param('id');
+        if (id === 'new') return showCreate();
         if (id) return showRecord(id);
         if (page.mode === 'list') return refreshList(true);
         return showList();
@@ -229,7 +230,7 @@
             <div id="body"></div>`;
         await loadMine();
         page.filter = WSFilter.mount(view.querySelector('[data-filter]'), { id: 'projects', fields: filterFields(), presets: PRESETS, defaultPreset: 'mine', me: me.id, onChange: () => refreshList() });
-        view.querySelector('[data-create]').addEventListener('click', () => openProjectEditor(null, [], p => { refreshList(); openProject(p.id); }));
+        view.querySelector('[data-create]').addEventListener('click', () => B.openRecord('/projects/?id=new', () => refreshList(true)));
         view.querySelector('.b24-toolbar').addEventListener('click', e => {
             const b = e.target.closest('[data-view]');
             if (b) { try { localStorage.setItem('ws-projects-view', b.dataset.view); } catch (err) { /* private mode */ } return mountView(b.dataset.view); }
@@ -239,7 +240,7 @@
         if (['list', 'tiles'].includes(C.param('view'))) v = C.param('view');   // deep link: ?view=tiles
         mountView(v === 'tiles' ? 'tiles' : 'list');
         loadCounters();
-        if (C.param('new') === '1') { C.setParam('new', null, true); openProjectEditor(null, [], p => { refreshList(); openProject(p.id); }); }
+        if (C.param('new') === '1') { C.setParam('new', null, true); B.openRecord('/projects/?id=new', () => refreshList(true)); }
     }
     function mountView(kind) {
         page.view = kind;
@@ -364,6 +365,91 @@
         const id = new URL(a.href, location.href).searchParams.get('id');
         if (id) openProject(id);
     });
+
+    /* ------------------------------------------- new project (Bitrix24-style create page) */
+    async function showCreate() {
+        routeSeq++;
+        page.mode = 'create';
+        if (page.grid) { page.grid.destroy(); page.grid = null; }
+        page.reloadView = null;
+        document.title = 'New project · WorkSuite';
+        WSShell.setCrumb('New project');
+        C.loading(view, 'Opening…');
+        const hasGoal = (await B.columns('projects', 'id, goal', 'id')).full;       // the goal column comes with supabase-b24-migration.sql
+        let color = PCOLORS[Math.floor(Math.random() * PCOLORS.length)];
+        let introHidden = false; try { introHidden = localStorage.getItem('ws-proj-intro') === 'hidden'; } catch (e) { /* private mode */ }
+        view.innerHTML = `
+            <div class="b24-pnew">
+                <div class="b24-pnew-card">
+                    <div class="b24-pnew-name">${cols.full ? `<button type="button" class="b24-pnew-av" data-color style="--c:${color}" title="Change the colour" aria-label="Change the project colour">P</button>` : ''}<div data-name style="flex:1;min-width:0"></div></div>
+                    ${introHidden ? '' : '<div class="b24-pnew-intro" data-intro><b>WorkSuite projects</b>One place for the team\'s tasks, files, discussion and deadlines. Add colleagues now or later; the project board is ready as soon as you create it.<button type="button" data-intro-x aria-label="Hide this note">×</button></div>'}
+                    <div data-main></div>
+                    ${cols.full ? `<div class="b24-pnew-label">Privacy</div><div class="b24-privacy" role="radiogroup" aria-label="Privacy">${Object.entries(PRIVACY).map(([k, x]) => `<label><input type="radio" name="privacy" value="${k}"${k === 'public' ? ' checked' : ''}><span><b>${esc(x.label)}</b>${esc(x.hint)}</span></label>`).join('')}</div>` : ''}
+                    <details class="b24-pnew-more"><summary>Other</summary><div data-more></div></details>
+                </div>
+                <div class="b24-new-foot"><button type="button" class="b24-btn-create" data-save>Create project</button><button type="button" class="b24-new-cancel" data-cancel>Cancel</button><span class="b24-new-err" data-err role="alert" hidden></span></div>
+            </div>`;
+        const nameForm = C.form([{ name: 'name', label: 'Project name', type: 'text', required: true, placeholder: 'Project name' }], { name: C.param('name') || '' });
+        const mainForm = C.form([
+            ...(hasGoal ? [{ name: 'goal', label: 'Project goal', type: 'text', full: true, placeholder: 'What should this project achieve?' }] : []),
+            { name: 'description', label: 'Description', type: 'textarea', full: true, rows: 3, placeholder: 'Project details, visible to everyone who can see the project' },
+            { name: 'owner_id', label: 'Project owner', type: 'people', none: null },
+            { name: 'manager_id', label: 'Project manager', type: 'people', none: 'Not assigned' },
+            ...(cols.full ? [{ name: 'moderators', label: 'Project moderators', type: 'peoples', full: true, hint: 'Moderators look after the project with the owner: they approve requests to join and keep it tidy.' }] : []),
+            { name: 'members', label: 'Project members', type: 'peoples', full: true },
+        ], { owner_id: me.id, manager_id: me.id, members: [], moderators: [] });
+        const moreForm = C.form([
+            { name: 'status', label: 'Status', type: 'select', options: STATUS_OPTS, required: true },
+            { name: 'priority', label: 'Priority', type: 'select', options: PRIORITY_OPTS, required: true },
+            { name: 'start_date', label: 'Start date', type: 'date' },
+            { name: 'due_date', label: 'Deadline', type: 'date', validate: (v, all) => v && all.start_date && L.dayNumber(v) < L.dayNumber(all.start_date) ? 'The deadline is before the start date' : '' },
+            { name: 'contact_id', label: 'Related contact', type: 'entity', entity: 'contact', placeholder: 'Search contacts' },
+            { name: 'deal_id', label: 'Related deal', type: 'entity', entity: 'deal', placeholder: 'Search deals' },
+            { name: 'tags', label: 'Tags', type: 'tags', full: true },
+        ], { status: 'planning', priority: 'normal', contact_id: C.param('contact_id') || null, deal_id: C.param('deal_id') || null });
+        view.querySelector('[data-name]').appendChild(nameForm.el);
+        view.querySelector('[data-main]').appendChild(mainForm.el);
+        view.querySelector('[data-more]').appendChild(moreForm.el);
+        const av = view.querySelector('[data-color]'), nameInput = nameForm.field('name').el;
+        const syncAv = () => { if (av) av.textContent = L.initials(nameInput.value || 'P') || 'P'; };
+        nameInput.addEventListener('input', syncAv);
+        if (av) av.addEventListener('click', () => { color = PCOLORS[(PCOLORS.indexOf(color) + 1) % PCOLORS.length]; av.style.setProperty('--c', color); });
+        const ix = view.querySelector('[data-intro-x]');
+        if (ix) ix.addEventListener('click', () => { view.querySelector('[data-intro]').remove(); try { localStorage.setItem('ws-proj-intro', 'hidden'); } catch (e) { /* private mode */ } });
+        const errEl = view.querySelector('[data-err]'), btn = view.querySelector('[data-save]');
+        async function save() {
+            errEl.hidden = true;
+            const okAll = [nameForm.validate(), mainForm.validate(), moreForm.validate()].every(Boolean);
+            if (!okAll) { if (!moreForm.validate()) view.querySelector('.b24-pnew-more').open = true; errEl.textContent = 'Fill in the fields marked in red.'; errEl.hidden = false; return; }
+            const v = { ...nameForm.get(), ...mainForm.get(), ...moreForm.get() };
+            const privacy = (view.querySelector('input[name="privacy"]:checked') || {}).value || 'public';
+            const row = {
+                name: v.name.trim(), description: v.description || null, owner_id: v.owner_id || me.id, manager_id: v.manager_id || null,
+                status: v.status, priority: v.priority, start_date: v.start_date || null, due_date: v.due_date || null,
+                contact_id: v.contact_id || null, deal_id: v.deal_id || null, tags: v.tags || [], completed_at: v.status === 'completed' ? L.todayIST() : null,
+                ...(cols.full ? { privacy, avatar_color: color } : {}), ...(hasGoal ? { goal: v.goal ? String(v.goal).trim() || null : null } : {}),
+            };
+            btn.disabled = true; btn.textContent = 'Creating…';
+            try {
+                const id = (await C.q(sb.from('projects').insert({ ...row, created_by: me.id }).select('id').single())).data.id;
+                const mods = cols.full ? (v.moderators || []) : [];
+                const people = [...new Set([...(v.members || []), ...mods])].filter(Boolean);
+                try {
+                    // The owner and creator may already be on the project (a database trigger adds them): never add anyone twice.
+                    if (people.length) await C.q(sb.from('project_members').upsert(people.map(u => ({ project_id: id, user_id: u, role: mods.includes(u) ? 'moderator' : 'member', added_by: me.id })), { onConflict: 'project_id,user_id', ignoreDuplicates: true }));
+                    people.filter(u => u !== me.id).forEach(u => C.pushNotify({ to: u, title: 'Added to a project', body: row.name, url: `/projects/?id=${id}`, tag: 'project' }));
+                } catch (e) { C.toast(`Project created, but people could not be added: ${e.message}`, 'bad'); }
+                if (row.manager_id && row.manager_id !== me.id) C.pushNotify({ to: row.manager_id, title: 'You manage a project', body: row.name, url: `/projects/?id=${id}`, tag: 'project' });
+                C.toast('Project created', 'ok');
+                B.afterCreate('/projects/', id);
+            } catch (e) { errEl.textContent = e.message; errEl.hidden = false; btn.disabled = false; btn.textContent = 'Create project'; }
+        }
+        btn.addEventListener('click', save);
+        view.querySelector('[data-cancel]').addEventListener('click', () => B.leaveCreate('/projects/'));
+        view.querySelector('.b24-pnew').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); save(); } });
+        syncAv();
+        nameInput.focus();
+    }
 
     /* ------------------------------------------------------------- record */
     async function showRecord(id) {

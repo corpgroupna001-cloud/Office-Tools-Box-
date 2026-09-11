@@ -37,6 +37,7 @@
         recordSeq++;
         if (unsubscribe) { unsubscribe(); unsubscribe = null; }
         const id = C.param('id');
+        if (id === 'new') return showCreate();
         if (id) return showRecord(id);
         if (page.mode === 'list') return refreshList(true);
         return showList();
@@ -199,7 +200,7 @@
             <div id="body"></div>`;
         page.filter = WSFilter.mount(view.querySelector('[data-filter]'), { id: 'tasks', fields: filterFields(), presets: PRESETS, defaultPreset: 'progress', me: me.id, onChange: () => refreshList() });
         if (urlFilter) { C.setParam('view', null, true); page.filter.set(urlFilter[1], urlFilter[0]); }
-        const create = () => C.openTaskEditor({ defaults: { assignee_id: me.id }, onSaved: t => { refreshList(); if (t && t.id) openTask(t.id); } });
+        const create = () => B.openRecord('/tasks/?id=new', () => refreshList());
         view.querySelector('[data-create]').addEventListener('click', create);
         const more = view.querySelector('[data-create-menu]');
         if (more) more.addEventListener('click', () => C.menu(more, [
@@ -580,6 +581,145 @@
             values: { title: t.title, description: t.description, assignee_id: t.assignee_id, priority: t.priority, estimate_hours: t.estimate_hours, tags: t.tags || [],
                 deadline_days: t.due_date ? Math.max(0, L.daysBetween(L.istDate(t.created_at), t.due_date)) : null, checklist: (subtasks || []).map(s => s.title).join('\n') },
             onSubmit: async v => { await saveTemplate(v, null); C.toast('Template saved', 'ok'); } });
+    }
+
+    /* ---------------------------------------------- new task (Bitrix24-style create page) */
+    async function showCreate() {
+        recordSeq++;
+        if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+        page.mode = 'create';
+        if (page.grid) { page.grid.destroy(); page.grid = null; }
+        if (page.board) { page.board.destroy(); page.board = null; }
+        page.reloadView = null;
+        document.title = 'New task · WorkSuite';
+        WSShell.setCrumb('New task');
+        const p = k => C.param(k) || null;
+        // Optional parts, revealed by the chips under the form (as in Bitrix24).
+        const CHIPS = [['assignees', 'Participants', ['assignees']], ['watchers', 'Observers', ['watchers']], ['project', 'Project', ['project_id']], ['tags', 'Tags', ['tags']],
+            ['reminder', 'Reminder', ['reminder']], ['crm', 'CRM items', ['contact_id', 'deal_id']], ['parent', 'Parent task', ['parent_task_id']],
+            ['planning', 'Time planning', ['start_date', 'estimate_hours']], ['priority', 'Priority', ['priority']], ['status', 'Status', ['status']]];
+        const fields = [
+            { name: 'assignee_id', label: 'Assignee', type: 'people', none: 'Not assigned' },
+            { name: 'due_date', label: 'Deadline', type: 'date' },
+            { name: 'due_time', label: 'Time', type: 'time' },
+            { name: 'assignees', label: 'Participants (also assigned)', type: 'peoples', full: true },
+            { name: 'watchers', label: 'Observers', type: 'peoples', full: true },
+            { name: 'project_id', label: 'Project', type: 'entity', entity: 'project', placeholder: 'Search projects', full: true },
+            { name: 'tags', label: 'Tags', type: 'tags', full: true },
+            { name: 'reminder', label: 'Remind me in the app a day before the deadline', type: 'check', full: true },
+            { name: 'contact_id', label: 'Contact', type: 'entity', entity: 'contact', placeholder: 'Search contacts' },
+            { name: 'deal_id', label: 'Deal', type: 'entity', entity: 'deal', placeholder: 'Search deals' },
+            { name: 'parent_task_id', label: 'Parent task', type: 'entity', entity: 'task', placeholder: 'Search tasks', full: true },
+            { name: 'start_date', label: 'Start date', type: 'date' },
+            { name: 'estimate_hours', label: 'Estimate (hours)', type: 'number', min: 0, step: 0.5 },
+            { name: 'priority', label: 'Priority', type: 'select', required: true, options: Object.entries(L.PRIORITY).map(([value, x]) => ({ value, label: x.label })) },
+            { name: 'status', label: 'Status', type: 'select', required: true, options: lk.taskStatuses.map(s => ({ value: s.key, label: s.label })) },
+        ];
+        const defaults = { assignee_id: p('assignee_id') || me.id, due_date: p('due_date'), project_id: p('project_id'), contact_id: p('contact_id'), deal_id: p('deal_id'), parent_task_id: p('parent_task_id'), priority: 'normal', status: OPEN_KEY, assignees: [], watchers: [], reminder: false };
+        view.innerHTML = `
+            <div class="b24-tnew">
+                <div class="b24-tnew-cols">
+                    <div class="b24-tnew-form">
+                        <div class="b24-tnew-card">
+                            <div class="b24-tnew-title" data-title></div>
+                            <div class="b24-tnew-desc" data-desc></div>
+                            <div class="b24-tnew-tools"><button type="button" data-add-check>+ Checklist</button></div>
+                            <div class="b24-tnew-check" data-check></div>
+                        </div>
+                        <div class="b24-tnew-card b24-tnew-people">
+                            <div class="who"><span class="l">Task owner</span>${C.personHtml(me.id, { link: false })}</div>
+                            <div data-fields></div>
+                        </div>
+                        <div class="b24-tnew-chips" data-chips role="group" aria-label="Add to the task">${CHIPS.map(([k, label]) => `<button type="button" data-chip="${k}" aria-pressed="false">+ ${esc(label)}</button>`).join('')}</div>
+                    </div>
+                    <aside class="b24-tnew-chat" aria-label="Task chat"><div class="info"><b>Task chat</b>Once the task is created, everyone on it works together here:<ul><li>discuss progress and results</li><li>attach documents and files</li><li>follow every change to the task</li></ul></div></aside>
+                </div>
+                <div class="b24-new-foot">
+                    <button type="button" class="b24-btn-create" data-save>Create</button>
+                    <button type="button" class="b24-new-cancel" data-cancel>Cancel</button>
+                    ${hasTemplates ? '<button type="button" class="b24-new-cancel" data-templates>Templates ▾</button>' : ''}
+                    <span class="b24-new-err" data-err role="alert" hidden></span>
+                </div>
+            </div>`;
+        const titleForm = C.form([{ name: 'title', label: 'Task name', type: 'text', required: true, placeholder: 'Task name' }], { title: p('title') || '' });
+        const descForm = C.form([{ name: 'description', label: 'Description', type: 'textarea', rows: 4, placeholder: 'Description' }], {});
+        const mainForm = C.form(fields, defaults);
+        view.querySelector('[data-title]').appendChild(titleForm.el);
+        view.querySelector('[data-desc]').appendChild(descForm.el);
+        view.querySelector('[data-fields]').appendChild(mainForm.el);
+        const chipEl = k => view.querySelector(`[data-chip="${k}"]`);
+        function showChip(k, on) {
+            const chip = CHIPS.find(c => c[0] === k); if (!chip) return;
+            chip[2].forEach(n => { const w = mainForm.field(n); if (w) w.wrap.hidden = !on; });
+            chipEl(k).classList.toggle('on', on); chipEl(k).setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+        CHIPS.forEach(([k, , names]) => showChip(k, names.some(n => { const d = defaults[n]; return d != null && d !== '' && !(Array.isArray(d) && !d.length) && !['priority', 'status', 'reminder'].includes(n); })));
+        view.querySelector('[data-chips]').addEventListener('click', e => {
+            const b = e.target.closest('[data-chip]'); if (!b) return;
+            const on = !b.classList.contains('on'); showChip(b.dataset.chip, on);
+            if (on) { const chip = CHIPS.find(c => c[0] === b.dataset.chip); const w = mainForm.field(chip[2][0]); const f = w && w.wrap.querySelector('input, select, textarea'); if (f) f.focus(); }
+        });
+        const checkEl = view.querySelector('[data-check]');
+        function addItem(text) {
+            const row = document.createElement('div'); row.className = 'item';
+            row.innerHTML = '<input type="checkbox" disabled aria-hidden="true"><input type="text" placeholder="Checklist item" aria-label="Checklist item"><button type="button" aria-label="Remove item">×</button>';
+            row.querySelector('input[type=text]').value = text || '';
+            row.querySelector('button').addEventListener('click', () => row.remove());
+            row.querySelector('input[type=text]').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addItem('').querySelector('input[type=text]').focus(); } });
+            checkEl.appendChild(row);
+            return row;
+        }
+        view.querySelector('[data-add-check]').addEventListener('click', () => addItem('').querySelector('input[type=text]').focus());
+        const tb = view.querySelector('[data-templates]');
+        if (tb) tb.addEventListener('click', async () => {
+            const r = await sb.from('task_templates').select('*').order('title');
+            const list = r.error ? [] : (r.data || []);
+            if (!list.length) return C.toast('No templates yet. Save a task as a template from its card.', 'ok');
+            C.menu(tb, list.map(tpl => ({ label: tpl.title, onClick: () => {
+                titleForm.set({ title: tpl.title }); descForm.set({ description: tpl.description || '' });
+                mainForm.set({ assignee_id: tpl.assignee_id || me.id, priority: tpl.priority || 'normal', estimate_hours: tpl.estimate_hours, tags: tpl.tags || [], due_date: tpl.deadline_days != null ? L.addDays(today, tpl.deadline_days) : null });
+                if (tpl.priority && tpl.priority !== 'normal') showChip('priority', true);
+                if ((tpl.tags || []).length) showChip('tags', true);
+                if (tpl.estimate_hours) showChip('planning', true);
+                checkEl.innerHTML = '';
+                (Array.isArray(tpl.checklist) ? tpl.checklist : []).map(x => (typeof x === 'string' ? x : x.title)).filter(Boolean).forEach(addItem);
+            } })));
+        });
+        const errEl = view.querySelector('[data-err]'), btn = view.querySelector('[data-save]');
+        async function save() {
+            errEl.hidden = true;
+            if (![titleForm.validate(), mainForm.validate()].every(Boolean)) { errEl.textContent = 'Fill in the fields marked in red.'; errEl.hidden = false; return; }
+            const v = { ...titleForm.get(), ...descForm.get(), ...mainForm.get() };
+            if (v.due_date && v.start_date && L.dayNumber(v.due_date) < L.dayNumber(v.start_date)) { errEl.textContent = 'The deadline is before the start date.'; errEl.hidden = false; return; }
+            const row = {
+                title: v.title.trim(), description: v.description || null, status: v.status || OPEN_KEY, priority: v.priority || 'normal',
+                assignee_id: v.assignee_id || null, start_date: v.start_date || null, due_date: v.due_date || null, due_time: v.due_time || null,
+                estimate_hours: v.estimate_hours, tags: v.tags || [], reminder_at: v.reminder && v.due_date ? L.isoAtIST(L.addDays(v.due_date, -1), '09:00') : null,
+                project_id: v.project_id || null, contact_id: v.contact_id || null, deal_id: v.deal_id || null, parent_task_id: v.parent_task_id || null, created_by: me.id,
+            };
+            if (p('lead_id')) row.lead_id = p('lead_id');
+            btn.disabled = true; btn.textContent = 'Creating…';
+            try {
+                const saved = (await C.q(sb.from('tasks').insert(row).select('id, title, assignee_id, project_id').single())).data;
+                // The task exists now: problems with the extras are reported without losing it.
+                try {
+                    const extra = [...new Set(v.assignees || [])].filter(id => id && id !== saved.assignee_id);
+                    if (extra.length) await C.q(sb.from('task_assignees').insert(extra.map(id => ({ task_id: saved.id, user_id: id, added_by: me.id }))));
+                    const obs = [...new Set(v.watchers || [])].filter(Boolean);
+                    if (obs.length) await C.q(sb.from('task_watchers').insert(obs.map(id => ({ task_id: saved.id, user_id: id }))));
+                    const items = [...checkEl.querySelectorAll('input[type=text]')].map(i => i.value.trim()).filter(Boolean);
+                    if (items.length) await C.q(sb.from('tasks').insert(items.map(title => ({ title, parent_task_id: saved.id, assignee_id: saved.assignee_id, project_id: saved.project_id, status: OPEN_KEY, created_by: me.id }))));
+                    [saved.assignee_id, ...extra].filter(id => id && id !== me.id).forEach(id => C.pushNotify({ to: id, title: 'Task assigned to you', body: saved.title, url: `/tasks/?id=${saved.id}`, tag: 'task' }));
+                    obs.filter(id => id !== me.id).forEach(id => C.pushNotify({ to: id, title: 'You are now watching a task', body: saved.title, url: `/tasks/?id=${saved.id}`, tag: 'task' }));
+                } catch (e) { C.toast(`Task created, but some details could not be saved: ${e.message}`, 'bad'); }
+                C.toast('Task created', 'ok');
+                B.afterCreate('/tasks/', saved.id);
+            } catch (e) { errEl.textContent = e.message; errEl.hidden = false; btn.disabled = false; btn.textContent = 'Create'; }
+        }
+        btn.addEventListener('click', save);
+        view.querySelector('[data-cancel]').addEventListener('click', () => B.leaveCreate('/tasks/'));
+        view.querySelector('.b24-tnew').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); save(); } });
+        titleForm.field('title').el.focus();
     }
 
     /* ------------------------------------------------------------- record */

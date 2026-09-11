@@ -1199,6 +1199,7 @@ create trigger crm_leads_automation after insert or update of status on public.c
 -- ---------------------------------------------------------------------------
 alter table public.projects add column if not exists privacy text not null default 'public';
 alter table public.projects add column if not exists avatar_color text;
+alter table public.projects add column if not exists goal text;              -- "Project goal" on the create page
 -- Only a hex colour: the value is drawn into a style attribute. NOT VALID keeps any older rows as they are.
 alter table public.projects drop constraint if exists projects_avatar_color_ck;
 alter table public.projects add constraint projects_avatar_color_ck check (avatar_color is null or avatar_color ~ '^#[0-9A-Fa-f]{6}$') not valid;
