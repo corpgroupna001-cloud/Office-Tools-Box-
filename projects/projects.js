@@ -170,6 +170,8 @@
         });
     }
     async function showList() {
+        // Deep links: ?status=active|planning|on_hold|completed|all|archived selects the segment.
+        { const st = C.param('status'); if (st && ['active', 'planning', 'on_hold', 'completed', 'all', 'archived'].includes(st)) { listState.seg = st; C.setParam('status', null, true); } }
         WSShell.setCrumb('Projects');
         document.title = 'Projects · WorkSuite';
         view.innerHTML = `

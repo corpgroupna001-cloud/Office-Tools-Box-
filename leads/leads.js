@@ -297,6 +297,8 @@
         return rows.filter(r => [r.name, r.organization, r.email, r.phone, r.source_detail, (r.tags || []).join(' ')].some(v => v && String(v).toLowerCase().includes(q)));
     }
     async function showList() {
+        // Deep links from the dashboard / palette: ?status=<key> shows that status across all segments.
+        { const st = C.param('status'); if (st) { listState.status = st; listState.seg = 'all'; C.setParam('status', null, true); } }
         WSShell.setCrumb('Leads');
         document.title = 'Leads · WorkSuite';
         view.innerHTML = `

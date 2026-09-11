@@ -154,6 +154,11 @@
         return ls.rows.filter(d => !q || [d.title, d.organization, contactName(d), (d.tags || []).join(' ')].some(v => v && String(v).toLowerCase().includes(q)));
     }
     async function showList() {
+        // Deep links: ?status=won|lost|open|all opens the table filtered; ?view=board|table picks the view.
+        { const st = C.param('status'), vw = C.param('view');
+          if (vw === 'board' || vw === 'table') ls.view = vw;
+          if (st && ['open', 'won', 'lost', 'all'].includes(st)) { ls.status = st; if (st !== 'open') ls.view = 'table'; }
+          if (st || vw) { C.setParam('status', null, true); C.setParam('view', null, true); } }
         WSShell.setCrumb('Deals');
         document.title = 'Deals · WorkSuite';
         lk = await C.lookups();
