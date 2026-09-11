@@ -613,6 +613,18 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 2 | `supabase-work-migration.sql` | `task_statuses`, `boards`, `board_columns`, `projects`, `project_members`, `tasks`, `task_assignees`, `task_watchers`, `comments`, `document_folders`, `documents`, `document_links`, `calendar_events`, `event_participants`, the private **`documents`** storage bucket and its policies |
 | 3 | `supabase-invoices-migration.sql` | `invoices`, `invoice_items`, `invoice_payments`, `invoice_counters`, database-owned totals, `invoice_duplicate()` |
 | 4 | `supabase-messenger-migration.sql` | `conversations`, `conversation_members`, group / reply / edit / pin / mention columns on `messages`, `ws_unread_counts()` |
+| 5 | `supabase-crm-reminders-migration.sql` | `crm_reminder_log`, `notifications.pushed_at`, `crm_run_reminders()` and a pg_cron schedule every 5 minutes (skipped with a notice where pg_cron is unavailable) |
+
+**Already ran 1–4 before 11 Sep 2026?** Run all five again, in order. They
+are idempotent, and 1–4 now carry fixes found by the real-database tests:
+
+- A group message could be posted by someone outside the group. The original
+  chat insert rule is now limited to direct messages.
+- A lead with no owner could be converted by any colleague.
+- Project members could not edit their own project.
+- Deal close dates and invoice overdue status now use the IST calendar date.
+- Session claims are read safely when they are empty.
+- Calendar changes, conversations and memberships now update live.
 
 Optional, **development projects only**: `supabase-crm-demo-seed.sql` creates a
 few clearly-labelled sample records (all tagged `demo`) with a removal block
@@ -721,6 +733,41 @@ A notification that fails to deliver never rolls back the change that caused
 it, and repeats of the same kind for the same record within an hour are
 collapsed.
 
+### Reminders (server-side)
+
+`crm_run_reminders()` (migration 5) creates these whether or not anyone has
+WorkSuite open, each exactly once:
+
+| Kind | When | Who |
+|---|---|---|
+| Task reminder | the task's reminder time passes | assignee |
+| Meeting reminder | inside the event's reminder window | organiser and invitees who have not declined |
+| Lead follow-up | the follow-up time passes | lead owner |
+| Daily digest | once a day from 09:00 IST, only if something is due | everyone with tasks due today or overdue |
+| Invoice overdue | a sent invoice passes its due date (its status flips to overdue) | whoever raised it |
+
+It runs every 5 minutes inside the database via pg_cron. It also runs twice
+a day from the existing `/api/wfh-remind` cron, which pushes these reminders
+to phones and laptops (Web Push). That adds no function and no cron slot.
+For device pushes within minutes instead of twice a day, run the optional
+`pg_net` block at the end of the migration. It needs the existing
+`MAIL_API_KEY` pasted in.
+
+### Emailing invoices
+
+Managers can email a sent, part-paid, overdue or paid invoice from its page.
+It goes to the invoice's billing email, falling back to the contact's email,
+and "Send me a copy" adds your own address. A paid invoice goes out as a
+receipt.
+
+The request goes to the existing `/api/mail` handler with the manager's own
+session token. The server loads the invoice, checks the role and company,
+and builds the email itself, so the endpoint cannot be used to send anything
+else. It uses the company's existing sender mailbox from `lib/mailer.js`. It
+appears in **Admin → Email monitoring** (category `invoice`) and on the
+invoice's activity timeline, which records only the recipient's domain.
+Companies whose mailbox is still "coming soon" get a clear error.
+
 ## 8. Testing
 
 ```
@@ -731,8 +778,21 @@ runs the existing suites plus `tests/crm-logic.test.js` (IST dates and
 ranges, invoice arithmetic, pipeline metrics, lead conversion planning,
 duplicate detection, task due states, permissions, upload validation),
 `tests/crm-migrations.test.js` (migration invariants) and
-`tests/crm-roles.test.js` (workspace-role validation in the admin API).
-No test contacts Supabase.
+`tests/crm-roles.test.js` (workspace-role validation in the admin API),
+`tests/crm-reminders.test.js` and `tests/invoice-mail.test.js`.
+
+`tests/crm-database.test.js` runs **every migration on a real Postgres
+engine** (PGlite, in-process, dev dependency) on top of a small Supabase
+stand-in (`tests/fixtures/supabase-stub.sql`). It runs the CRM set twice to
+prove it re-runs cleanly. It then checks the rules as signed-in employees, a
+manager and an admin: company isolation, edit and delete rights, no
+self-promotion, lead conversion, deal stages, tasks, projects and boards,
+invoice arithmetic and payments, private meetings, document storage paths,
+manager access to attendance and leave, salary privacy, group messages, and
+reminders firing once.
+
+It skips itself if `@electric-sql/pglite` is not installed. No test contacts
+Supabase, SMTP or a push service.
 
 ## 9. Deployment
 
