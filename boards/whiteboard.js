@@ -129,16 +129,18 @@
         let tool = canEdit ? 'pen' : 'pan', color = COLORS[0], size = 3, noteFill = NOTES[0];
         let selected = new Set(), drag = null, editing = null, spaceDown = false;
         const undo = [], redo = [];
+        let viewMoved = false;                                 // panned or zoomed by hand: stop fitting on resize
         container.classList.add('wb');
         container.innerHTML = `
             <div class="wb-tools" role="toolbar" aria-label="Whiteboard tools">
-                ${TOOLS.filter(t => canEdit || t[0] === 'pan' || t[0] === 'select').map(([k, label, key, d]) => `<button type="button" data-tool="${k}" title="${label} (${key})" aria-label="${label}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg></button>`).join('')}
-                ${canEdit ? `<span class="sep"></span>${COLORS.map(c => `<button type="button" class="sw" data-color="${c}" style="--c:${c}" aria-label="Colour ${c}"></button>`).join('')}
-                <select data-size aria-label="Line width"><option value="2">Thin</option><option value="3" selected>Medium</option><option value="6">Thick</option><option value="10">Marker</option></select>
-                <span class="sep"></span><span class="notes">${NOTES.map(c => `<button type="button" class="sw note" data-note="${c}" style="--c:${c}" aria-label="Note colour"></button>`).join('')}</span>
-                <span class="sep"></span><button type="button" data-act="undo" title="Undo (Ctrl+Z)" aria-label="Undo">↶</button><button type="button" data-act="redo" title="Redo (Shift+Ctrl+Z)" aria-label="Redo">↷</button><button type="button" data-act="delete" title="Delete (Del)" aria-label="Delete selected"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>` : ''}
-                <span class="grow"></span>
-                <button type="button" data-act="zoomout" aria-label="Zoom out">−</button><span class="zoom" data-zoom>100%</span><button type="button" data-act="zoomin" aria-label="Zoom in">+</button><button type="button" data-act="fit" title="Show everything">Fit</button>
+                <div class="wb-rail">
+                    ${TOOLS.filter(t => canEdit || t[0] === 'pan' || t[0] === 'select').map(([k, label, key, d]) => `<button type="button" data-tool="${k}" title="${label} (${key})" aria-label="${label}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg></button>`).join('')}
+                    ${canEdit ? `<span class="sep"></span><button type="button" data-act="undo" title="Undo (Ctrl+Z)" aria-label="Undo">↶</button><button type="button" data-act="redo" title="Redo (Shift+Ctrl+Z)" aria-label="Redo">↷</button><button type="button" data-act="delete" title="Delete (Del)" aria-label="Delete selected"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button>` : ''}
+                </div>
+                ${canEdit ? `<div class="wb-props">${COLORS.map(c => `<button type="button" class="sw" data-color="${c}" style="--c:${c}" aria-label="Colour ${c}"></button>`).join('')}
+                    <select data-size aria-label="Line width"><option value="2">Thin</option><option value="3" selected>Medium</option><option value="6">Thick</option><option value="10">Marker</option></select>
+                    <span class="sep"></span><span class="notes">${NOTES.map(c => `<button type="button" class="sw note" data-note="${c}" style="--c:${c}" aria-label="Note colour"></button>`).join('')}</span></div>` : ''}
+                <div class="wb-zoom"><button type="button" data-act="zoomout" aria-label="Zoom out">−</button><span class="zoom" data-zoom>100%</span><button type="button" data-act="zoomin" aria-label="Zoom in">+</button><button type="button" data-act="fit" title="Show everything">Fit</button></div>
             </div>
             <div class="wb-stage" tabindex="0" aria-label="Whiteboard">
                 <svg class="wb-svg" xmlns="http://www.w3.org/2000/svg"><defs><pattern id="wb-grid" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="rgba(0,0,0,.12)"/></pattern></defs>
@@ -181,6 +183,7 @@
         const toScene = e => { const r = svg.getBoundingClientRect(); return [(e.clientX - r.left - v.x) / v.z, (e.clientY - r.top - v.y) / v.z]; };
         function topHit(x, y) { const tol = 6 / v.z; for (let i = els.length - 1; i >= 0; i--) if (hit(els[i], x, y, tol)) return els[i]; return null; }
         function zoomAt(f, cx, cy) {
+            viewMoved = true;
             const r = svg.getBoundingClientRect(); const px = cx - r.left, py = cy - r.top;
             const nz = Math.max(0.1, Math.min(6, v.z * f));
             v.x = px - (px - v.x) * (nz / v.z); v.y = py - (py - v.y) * (nz / v.z); v.z = nz; applyView(); renderSel();
@@ -189,8 +192,16 @@
             const r = svg.getBoundingClientRect();
             if (!els.length || !r.width) { v = { x: 40, y: 40, z: 1 }; return applyView(); }
             const b = contentBox(els);
-            const z = Math.max(0.1, Math.min(2, Math.min(r.width / b.w, r.height / b.h)));
-            v = { z, x: (r.width - b.w * z) / 2 - b.x * z, y: (r.height - b.h * z) / 2 - b.y * z };
+            // Leave room for the floating tools, so nothing starts hidden under them.
+            const pad = { l: 0, t: 0, r: 0, b: 0 };
+            const edge = (sel, f) => { const el = container.querySelector(sel); if (el && el.offsetParent) f(el.getBoundingClientRect()); };
+            edge('.wb-rail', k => { pad.l = Math.max(0, k.right - r.left); });
+            edge('.wb-props', k => { pad.t = Math.max(0, k.bottom - r.top); });
+            edge('.wb-zoom', k => { pad.b = Math.max(0, r.bottom - k.top); });
+            if (r.width - pad.l - pad.r < 160 || r.height - pad.t - pad.b < 120) { pad.l = pad.t = pad.r = pad.b = 0; }
+            const aw = r.width - pad.l - pad.r, ah = r.height - pad.t - pad.b;
+            const z = Math.max(0.1, Math.min(2, Math.min(aw / b.w, ah / b.h)));
+            v = { z, x: pad.l + (aw - b.w * z) / 2 - b.x * z, y: pad.t + (ah - b.h * z) / 2 - b.y * z };
             applyView(); renderSel();
         }
 
@@ -252,7 +263,7 @@
         stage.addEventListener('pointermove', e => {
             if (!drag) return;
             const [x, y] = toScene(e);
-            if (drag.kind === 'pan') { v.x = drag.vx + e.clientX - drag.sx; v.y = drag.vy + e.clientY - drag.sy; applyView(); return; }
+            if (drag.kind === 'pan') { viewMoved = true; v.x = drag.vx + e.clientX - drag.sx; v.y = drag.vy + e.clientY - drag.sy; applyView(); return; }
             if (drag.kind === 'draw') { const last = drag.el.points[drag.el.points.length - 1]; if (Math.hypot(x - last[0], y - last[1]) > 1.5 / v.z) drag.el.points.push([x, y]); }
             else if (drag.kind === 'box') { let w = x - drag.sx, h = y - drag.sy; if (e.shiftKey) { const m = Math.max(Math.abs(w), Math.abs(h)); w = Math.sign(w || 1) * m; h = Math.sign(h || 1) * m; } Object.assign(drag.el, { x: drag.sx, y: drag.sy, w, h }); }
             else if (drag.kind === 'seg') drag.el.points[1] = [x, y];
@@ -291,6 +302,7 @@
         });
         stage.addEventListener('wheel', e => {
             e.preventDefault();
+            viewMoved = true;
             if (e.ctrlKey || e.metaKey) zoomAt(Math.exp(-e.deltaY * 0.0025), e.clientX, e.clientY);
             else { v.x -= e.deltaX; v.y -= e.deltaY; applyView(); }
         }, { passive: false });
@@ -360,15 +372,101 @@
             },
             /** A small preview for the boards list. */
             thumbnail() { if (!els.length) return null; const s = exportSvgString(els, 320); return s.length < 300000 ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s) : null; },
-            destroy() { container.innerHTML = ''; container.classList.remove('wb'); },
+            destroy() { if (ro) ro.disconnect(); container.innerHTML = ''; container.classList.remove('wb'); },
         };
         setTool(tool);
         const sw = container.querySelector('[data-color]'); if (sw) sw.classList.add('on');
         const nw = container.querySelector('[data-note]'); if (nw) nw.classList.add('on');
         render();
         requestAnimationFrame(fit);
+        // Until the view is moved by hand, keep the drawing fitted while the space settles or
+        // changes (full window, a rotated phone).
+        const ro = window.ResizeObserver ? new ResizeObserver(() => { if (!viewMoved) fit(); }) : null;
+        if (ro) ro.observe(stage);
         return api;
     }
 
-    window.WSWhiteboard = { mount };
+    /* ---- templates: starting points for a new board ----
+       Ordinary elements, run through clean() like anything stored, so a board
+       made from a template is edited exactly like one drawn by hand. */
+    const INK = '#1f2a36', GREY = '#525c69', LINE = '#c9d3dc';
+    const TONE = { green: ['#e3f6e1', '#4caf50'], red: ['#fde6e5', '#ff5752'], blue: ['#e3f0fd', '#2067b0'], amber: ['#fff1d6', '#ffa900'], violet: ['#f3e6fd', '#9b7cf5'], grey: ['#f5f7f8', LINE] };
+    const shape = (x, y, w, h, tone, o = {}) => ({ type: o.round ? 'ellipse' : 'rect', x, y, w, h, fill: TONE[tone][0], color: TONE[tone][1], size: o.size || 2 });
+    const label = (x, y, text, o = {}) => { const fs = o.fs || 20; return { type: 'text', x, y, w: o.w || 240, h: Math.round(fs * 1.35 + 8), text, fontSize: fs, color: o.color || INK }; };
+    const inside = (r, text, fs = 20) => label(r.x + 14, r.y + Math.max(6, (r.h - (fs * 1.35 + 8)) / 2), text, { fs, w: r.w - 28 });
+    const sticky = (x, y, text, fill, o = {}) => ({ type: 'note', x, y, w: o.w || 160, h: o.h || 120, text, fill, fontSize: 15, color: INK });
+    const link = (x1, y1, x2, y2, plain) => ({ type: plain ? 'line' : 'arrow', points: [[x1, y1], [x2, y2]], color: GREY, size: 2 });
+    const heading = (text, x = 100) => label(x, -86, text, { fs: 32, w: 900 });
+    const [YELLOW, ORANGE, GREEN, BLUE, LILAC] = NOTES;
+    function withShape(r, text, fs) { return [r, inside(r, text, fs)]; }
+    function columns(names, tones, y, h, notes) {
+        return names.flatMap((n, i) => {
+            const x = 100 + i * 320, head = shape(x, y, 300, 56, tones[i]);
+            return [shape(x, y, 300, h, 'grey'), head, inside(head, n, 20), ...(notes[i] || []).map((t, k) => sticky(x + 25, y + 80 + k * 135, t, t.fill || [YELLOW, ORANGE, GREEN, BLUE, LILAC][(i + k) % 5], { w: 250, h: 115 }))];
+        });
+    }
+    const TEMPLATES = [
+        { key: 'blank', name: 'Blank board', hint: 'Start from an empty board', build: () => [] },
+        { key: 'brainstorm', name: 'Brainstorm', hint: 'One topic in the middle, ideas around it', build: () => {
+            const topic = shape(430, 260, 260, 110, 'blue', { round: true, size: 3 });
+            const spots = [[100, 40], [480, 0], [860, 40], [100, 470], [480, 510], [860, 470]];
+            const ends = [[450, 290, 260, 160], [560, 260, 560, 120], [670, 290, 860, 160], [450, 340, 260, 470], [560, 370, 560, 510], [670, 340, 860, 470]];
+            return [heading('Brainstorm'), topic, inside(topic, 'Main topic', 24),
+                ...spots.map(([x, y], i) => sticky(x, y, 'Idea', [YELLOW, GREEN, BLUE, ORANGE, LILAC, YELLOW][i])),
+                ...ends.map(([a, b, c, d]) => link(a, b, c, d, true))];
+        } },
+        { key: 'swot', name: 'SWOT analysis', hint: 'Strengths, weaknesses, opportunities and threats', build: () => {
+            const cells = [[100, 0, 'green', 'Strengths', 'What do we do well?'], [520, 0, 'red', 'Weaknesses', 'Where can we improve?'],
+                           [100, 280, 'blue', 'Opportunities', 'What could we take advantage of?'], [520, 280, 'amber', 'Threats', 'What could get in our way?']];
+            return [heading('SWOT analysis'), ...cells.flatMap(([x, y, tone, name, q], i) => [shape(x, y, 400, 260, tone),
+                label(x + 20, y + 16, name, { fs: 22, w: 360 }), label(x + 20, y + 52, q, { fs: 15, w: 360, color: GREY }),
+                sticky(x + 20, y + 100, '', [GREEN, ORANGE, BLUE, YELLOW][i], { w: 150, h: 110 })])];
+        } },
+        { key: 'retro', name: 'Retrospective', hint: 'What went well, what to improve, what to do next', build: () => [heading('Retrospective'),
+            ...columns(['What went well', 'What to improve', 'Action items'], ['green', 'amber', 'blue'], 0, 520, [['Something that worked', 'Thanks to…'], ['Something that slowed us down', ''], ['Who does what, by when', '']])] },
+        { key: 'kanban', name: 'Kanban', hint: 'To do, in progress and done', build: () => [heading('Kanban'),
+            ...columns(['To do', 'In progress', 'Done'], ['grey', 'blue', 'green'], 0, 520, [['Task', 'Task', 'Task'], ['Task', 'Task'], ['Task']])] },
+        { key: 'mindmap', name: 'Mind map', hint: 'A central idea with branches', build: () => {
+            const centre = shape(440, 260, 240, 90, 'blue', { size: 3 });
+            const branches = [[120, 80, 'green'], [820, 80, 'amber'], [120, 460, 'violet'], [820, 460, 'red']];
+            const ends = [[440, 280, 300, 150], [680, 280, 820, 150], [440, 330, 300, 460], [680, 330, 820, 460]];
+            return [heading('Mind map'), ...withShape(centre, 'Central idea', 24),
+                ...branches.flatMap(([x, y, tone], i) => [...withShape(shape(x, y, 180, 70, tone, { round: true }), `Branch ${i + 1}`, 18),
+                    label(x + 10, y + (y < 260 ? -64 : 84), '• Detail', { fs: 15, w: 160, color: GREY }), label(x + 10, y + (y < 260 ? -38 : 110), '• Detail', { fs: 15, w: 160, color: GREY })]),
+                ...ends.map(([a, b, c, d]) => link(a, b, c, d, true))];
+        } },
+        { key: 'flowchart', name: 'Flowchart', hint: 'Steps and decisions from start to end', build: () => {
+            const start = shape(400, 0, 200, 70, 'green', { round: true }), step = shape(380, 120, 240, 80, 'blue'), ask = shape(380, 250, 240, 90, 'amber');
+            const yes = shape(380, 400, 240, 80, 'blue'), no = shape(720, 255, 220, 80, 'violet'), end = shape(400, 530, 200, 70, 'red', { round: true });
+            return [heading('Flowchart', 380), ...withShape(start, 'Start'), link(500, 70, 500, 120), ...withShape(step, 'Step'), link(500, 200, 500, 250),
+                ...withShape(ask, 'Decision?'), link(500, 340, 500, 400), label(512, 348, 'Yes', { fs: 15, w: 60, color: GREY }),
+                link(620, 295, 720, 295), label(640, 262, 'No', { fs: 15, w: 60, color: GREY }), ...withShape(no, 'Another step'),
+                ...withShape(yes, 'Next step'), link(500, 480, 500, 530), link(830, 335, 600, 560), ...withShape(end, 'End')];
+        } },
+        { key: 'journey', name: 'Customer journey', hint: 'Stages across, what the customer does and feels down', build: () => {
+            const stages = ['Awareness', 'Consideration', 'Purchase', 'Use', 'Loyalty'], rows = ['Actions', 'Thoughts', 'Pain points', 'Ideas'];
+            return [heading('Customer journey map'),
+                ...stages.flatMap((s, i) => withShape(shape(260 + i * 210, 0, 200, 60, 'blue'), s, 18)),
+                ...rows.flatMap((r, k) => [...withShape(shape(100, 80 + k * 130, 150, 120, 'grey'), r, 17),
+                    ...stages.map((s, i) => ({ type: 'rect', x: 260 + i * 210, y: 80 + k * 130, w: 200, h: 120, color: LINE, size: 1 }))]),
+                sticky(275, 95, 'Hears about us', YELLOW, { w: 150, h: 90 }), sticky(485, 355, 'Unclear pricing', ORANGE, { w: 150, h: 90 })];
+        } },
+        { key: 'week', name: 'Weekly plan', hint: 'Monday to Friday at a glance', build: () => {
+            const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+            return [heading('Weekly plan'), ...days.flatMap((d, i) => {
+                const x = 100 + i * 220, head = shape(x, 0, 200, 50, 'blue');
+                return [shape(x, 0, 200, 460, 'grey'), head, inside(head, d, 18), sticky(x + 20, 70, 'Plan', [YELLOW, GREEN, BLUE, ORANGE, LILAC][i])];
+            })];
+        } },
+    ];
+    const template = key => { const t = TEMPLATES.find(x => x.key === key); return t ? clean(t.build()) : []; };
+
+    window.WSWhiteboard = {
+        mount,
+        templates: TEMPLATES.map(({ key, name, hint }) => ({ key, name, hint })),
+        /** A fresh copy of a template's elements, with new ids. */
+        template,
+        /** Preview markup for any drawing, checked the same way as stored data. */
+        previewSvg: (elements, maxW) => exportSvgString(clean(elements), maxW),
+    };
 })();

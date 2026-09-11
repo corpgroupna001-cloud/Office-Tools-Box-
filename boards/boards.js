@@ -119,19 +119,50 @@
         if (wbPage.grid) { wbPage.grid.destroy(); wbPage.grid = null; }
         if (wbPage.board) { wbPage.board.destroy(); wbPage.board = null; }
         wbPage.id = null;
+        view.classList.remove('wb-fullwin');
+        document.body.classList.remove('wb-fullwin-on');
     }
     window.addEventListener('beforeunload', e => { if (wbPage.pending) { saveNow(wbPage.id); e.preventDefault(); e.returnValue = ''; } });
-    async function createWhiteboard() {
-        await C.formModal({
-            title: 'New board', submitLabel: 'Create and open',
-            fields: [{ name: 'name', label: 'Name', type: 'text', required: true, full: true, placeholder: 'e.g. Q4 campaign brainstorm' },
-                     { name: 'visibility', label: 'Access', type: 'select', required: true, full: true, options: Object.entries(VIS).map(([value, x]) => ({ value, label: `${x.label}: ${x.hint}` })) }],
-            values: { visibility: 'company' },
-            onSubmit: async v => {
-                const { data } = await C.q(sb.from('whiteboards').insert({ name: v.name.trim(), visibility: v.visibility, data: { v: 1, elements: [] }, created_by: me.id }).select('id').single());
-                history.pushState(null, '', `/boards/?wb=${data.id}`); route();
-            },
+    /* A new board starts from a template (or blank) and opens full window. */
+    function createWhiteboard() {
+        const T = WSWhiteboard.templates;
+        let pick = 'blank', autoName = '';
+        const form = C.form([
+            { name: 'name', label: 'Name', type: 'text', required: true, placeholder: 'e.g. Q4 campaign brainstorm' },
+            { name: 'visibility', label: 'Access', type: 'select', required: true, options: Object.entries(VIS).map(([value, x]) => ({ value, label: `${x.label}: ${x.hint}` })) },
+        ], { visibility: 'company' });
+        const body = document.createElement('div');
+        form.el.classList.add('wb-tpl-form');
+        body.appendChild(form.el);
+        body.insertAdjacentHTML('beforeend', `<div class="wb-tpl-h">Start from a template</div>
+            <div class="wb-tpl-grid" role="radiogroup" aria-label="Template">${T.map(t => {
+                const els = WSWhiteboard.template(t.key);
+                return `<button type="button" class="wb-tpl${t.key === pick ? ' on' : ''}" role="radio" aria-checked="${t.key === pick}" data-tpl="${esc(t.key)}">
+                    <span class="pv">${els.length ? WSWhiteboard.previewSvg(els, 320) : '<span class="plus">+</span>'}</span><b>${esc(t.name)}</b><span class="hint">${esc(t.hint)}</span></button>`;
+            }).join('')}</div>`);
+        async function create(api) {
+            const v = form.get();
+            const name = String(v.name || '').trim();
+            if (!name) { try { form.field('name').el.focus(); } catch (e) { /* no field */ } throw new Error('Name the board.'); }
+            const elements = WSWhiteboard.template(pick);
+            const thumbnail = elements.length ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(WSWhiteboard.previewSvg(elements, 320)) : null;
+            const { data } = await C.q(sb.from('whiteboards').insert({ name, visibility: v.visibility || 'company', data: { v: 1, elements }, thumbnail, created_by: me.id }).select('id').single());
+            api.close();
+            history.pushState(null, '', `/boards/?wb=${data.id}&full=1`); route();
+        }
+        const m = C.modal({
+            title: 'New board', size: 'wide', body,
+            actions: [{ label: 'Cancel', ghost: true, close: true }, { label: 'Create and open', primary: true, onClick: create }],
         });
+        body.querySelector('.wb-tpl-grid').addEventListener('click', e => {
+            const b = e.target.closest('[data-tpl]'); if (!b) return;
+            pick = b.dataset.tpl;
+            body.querySelectorAll('[data-tpl]').forEach(x => { const on = x === b; x.classList.toggle('on', on); x.setAttribute('aria-checked', String(on)); });
+            const nameField = form.field('name'), cur = String(nameField.get() || '').trim();
+            if (!cur || cur === autoName) { autoName = pick === 'blank' ? '' : (T.find(x => x.key === pick) || {}).name || ''; nameField.set(autoName); }
+        });
+        body.querySelector('.wb-tpl-grid').addEventListener('dblclick', e => { if (e.target.closest('[data-tpl]')) create(m).catch(err => m.setMessage(err.message)); });
+        setTimeout(() => { try { form.field('name').el.focus(); } catch (e) { /* closed */ } }, 30);
     }
     async function renameWb(w, after) {
         await C.formModal({ title: 'Rename board', fields: [{ name: 'name', label: 'Name', type: 'text', required: true, full: true }], values: { name: w.name }, submitLabel: 'Save',
@@ -308,12 +339,25 @@
                 <span class="wb-people" data-people></span>
                 ${mine ? `<button type="button" class="b24-btn-glass" data-share>${C.icon('users')}<span>Access</span></button>` : ''}
                 <button type="button" class="b24-btn-glass" data-export>${C.icon('download')}<span>Export</span></button>
+                <button type="button" class="b24-btn-glass round" data-full aria-pressed="false" aria-label="Full screen" title="Full screen"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="in" d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/><path class="out" d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/></svg></button>
             </div>
             <div class="b24-area wb-host" id="wb"></div>`;
         wbPage.id = id; wbPage.stamp = w.updated_at; snapshotBase((w.data || {}).elements);
         wbPage.board = WSWhiteboard.mount(view.querySelector('#wb'), { data: w.data, canEdit: canEditWb, onChange: data => scheduleSave(id, data) });
         const rn = view.querySelector('[data-rename]'); if (rn) rn.addEventListener('click', () => renameWb(w, () => { view.querySelector('[data-name]').textContent = w.name; WSShell.setCrumb(w.name); }));
         const sh = view.querySelector('[data-share]'); if (sh) sh.addEventListener('click', () => shareWb(w));
+        // Full window: the board covers the page (dialogs and menus still open above it).
+        const fullBtn = view.querySelector('[data-full]');
+        const setFull = on => {
+            view.classList.toggle('wb-fullwin', on);
+            document.body.classList.toggle('wb-fullwin-on', on);
+            fullBtn.setAttribute('aria-pressed', String(on));
+            fullBtn.setAttribute('aria-label', on ? 'Exit full screen' : 'Full screen');
+            fullBtn.title = on ? 'Exit full screen' : 'Full screen';
+            C.setParam('full', on ? '1' : null, true);
+        };
+        fullBtn.addEventListener('click', () => setFull(!view.classList.contains('wb-fullwin')));
+        if (C.param('full') === '1') setFull(true);
         const ex = view.querySelector('[data-export]');
         ex.addEventListener('click', () => C.menu(ex, [
             { label: 'Download as PNG', icon: 'download', onClick: () => wbPage.board.exportPng(w.name) },
