@@ -881,6 +881,10 @@ create trigger crm_contacts_log after insert or update on public.crm_contacts
 -- deal, and stamps the lead as converted with both links. The lead row is
 -- kept, so the conversion history survives.
 -- ---------------------------------------------------------------------------
+-- supabase-b24-migration.sql replaces this with a 10-argument version (it also
+-- links a company). Re-running this file afterwards restores this version
+-- alone rather than leaving two overloads; re-run that file again after it.
+drop function if exists public.crm_convert_lead(uuid, uuid, boolean, text, numeric, uuid, uuid, date, uuid, boolean);
 create or replace function public.crm_convert_lead(
   p_lead_id uuid,
   p_contact_id uuid default null,             -- link to this existing contact instead of creating one

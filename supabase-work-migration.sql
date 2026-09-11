@@ -127,7 +127,7 @@ create table if not exists public.project_members (
   primary key (project_id, user_id)
 );
 alter table public.project_members drop constraint if exists project_members_role_ck;
-alter table public.project_members add constraint project_members_role_ck check (role in ('member', 'manager'));
+alter table public.project_members add constraint project_members_role_ck check (role in ('member', 'manager', 'moderator', 'owner'));
 create index if not exists project_members_user_idx on public.project_members (user_id);
 
 /** True when the caller is on the project (owner, project manager or member). */
