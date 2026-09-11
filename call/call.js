@@ -1070,6 +1070,43 @@
         postState();
     }
 
+    /* -------------------------------------------------------- full screen */
+    const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+    const fsSupported = () => !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+    function exitFullscreen() {
+        const exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (!fsElement() || !exit) return;
+        try { const p = exit.call(document); if (p && p.catch) p.catch(() => {}); } catch (e) { /* already left */ }
+    }
+    /** Full screen for one tile (a shared screen) or, without one, the whole call window. */
+    function toggleFullscreen(el) {
+        if (fsElement()) return exitFullscreen();
+        el = el || document.documentElement;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (req) {
+            try { const p = req.call(el); if (p && p.catch) p.catch(() => toast('Full screen is not available here')); } catch (e) { toast('Full screen is not available here'); }
+            return;
+        }
+        // iPhone: only a video element can go full screen.
+        const v = el.querySelector && el.querySelector('video');
+        if (v && v.webkitEnterFullscreen) { try { v.webkitEnterFullscreen(); } catch (e) { toast('Full screen is not available here'); } }
+        else toast('Full screen is not available here');
+    }
+    // A shared screen is shown whole by default; Fill trades the edges for no black bars.
+    let screenFill = (() => { try { return localStorage.getItem('ws-call-screen-fill') === '1'; } catch (e) { return false; } })();
+    function paintTileTools(t) {
+        const shared = t.el.classList.contains('screen');
+        t.el.classList.toggle('fill', shared && screenFill);
+        const fit = t.tools.querySelector('[data-fit]');
+        fit.querySelector('span').textContent = screenFill ? 'Fit' : 'Fill';
+        fit.title = screenFill ? 'Show the whole screen' : 'Fill the space (the edges may be cut off)';
+        fit.setAttribute('aria-pressed', String(screenFill));
+        const isFull = fsElement() === t.el;
+        const full = t.tools.querySelector('[data-full]');
+        full.querySelector('span').textContent = isFull ? 'Exit full screen' : 'Full screen';
+        full.title = isFull ? 'Exit full screen (Esc)' : 'Show the shared screen full screen';
+    }
+
     /* -------------------------------------------------------------- tiles */
     function ensureTile(uid) {
         let t = S.tiles.get(uid);
@@ -1097,8 +1134,23 @@
         const status = document.createElement('div');
         status.className = 'tile-status';
         status.hidden = true;
-        el.append(video, avatar, label, quality, status);
-        t = { el, video, avatar, mic, nm, quality, status };
+        // Shown on a shared screen only (CSS): fit or fill, and its own full screen.
+        const tools = document.createElement('div');
+        tools.className = 'tile-tools';
+        tools.innerHTML = '<button type="button" data-fit aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 9h8v6H8z"/></svg><span>Fill</span></button>'
+            + '<button type="button" data-full><svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg><span>Full screen</span></button>';
+        tools.addEventListener('click', (e) => {
+            const b = e.target.closest('button');
+            if (!b) return;
+            e.stopPropagation();
+            if (b.hasAttribute('data-full')) return toggleFullscreen(el);
+            screenFill = !screenFill;
+            try { localStorage.setItem('ws-call-screen-fill', screenFill ? '1' : '0'); } catch (x) { /* private mode */ }
+            S.tiles.forEach(paintTileTools);
+        });
+        el.addEventListener('dblclick', () => { if (el.classList.contains('screen')) toggleFullscreen(el); });
+        el.append(video, avatar, label, quality, status, tools);
+        t = { el, video, avatar, mic, nm, quality, status, tools };
         S.tiles.set(uid, t);
         fillAvatar(avatar, uid);
         return t;
@@ -1124,6 +1176,7 @@
         const wantsVideo = meta ? !!(meta.video || meta.screen) : true;
         t.el.classList.toggle('has-video', videoFlowing && wantsVideo);
         t.el.classList.toggle('screen', !!(meta && meta.screen));
+        paintTileTools(t);
         t.mic.hidden = !(meta && meta.audio === false);
         const nm = nameOf(uid);
         if (t.nm.textContent !== nm) { t.nm.textContent = nm; fillAvatar(t.avatar, uid); }
@@ -1187,6 +1240,14 @@
         // Tiles for people no longer here.
         [...S.tiles.keys()].forEach(uid => { if (!ids.includes(uid)) { const t = S.tiles.get(uid); t.video.srcObject = null; t.el.remove(); S.tiles.delete(uid); } });
 
+        // While a shared screen is full screen, leave the layout alone: moving
+        // that tile in the page would drop it out of full screen.
+        const fs = fsElement();
+        if (fs && fs.classList && fs.classList.contains('tile')) {
+            if (fs.classList.contains('screen') && [...S.tiles.values()].some(t => t.el === fs)) { renderSelf(); return; }
+            exitFullscreen();
+        }
+
         const presenter = ids.find(uid => { const m = S.presence.get(uid); return m && m.screen; });
         box.className = 'tiles';
         box.textContent = '';
@@ -1201,11 +1262,20 @@
             const main = S.tiles.get(presenter).el;
             main.classList.add('presenter');
             box.appendChild(main);
-            const strip = document.createElement('div');
-            strip.className = 'strip';
-            ids.filter(u => u !== presenter).forEach(u => { const el = S.tiles.get(u).el; el.classList.remove('presenter'); strip.appendChild(el); });
-            strip.appendChild(self);
-            box.appendChild(strip);
+            const rest = ids.filter(u => u !== presenter);
+            if (!rest.length) {
+                // 1:1 — the shared screen takes the whole stage; you float in a corner.
+                box.classList.add('solo');
+                self.classList.add('pip');
+                document.body.appendChild(self);
+                placePip();
+            } else {
+                const strip = document.createElement('div');
+                strip.className = 'strip';
+                rest.forEach(u => { const el = S.tiles.get(u).el; el.classList.remove('presenter'); strip.appendChild(el); });
+                strip.appendChild(self);
+                box.appendChild(strip);
+            }
         } else if (ids.length === 1) {
             box.classList.add('solo');
             box.style.setProperty('--cols', 1);
@@ -1313,6 +1383,13 @@
         share.classList.toggle('active', !!S.local.screen);
         share.setAttribute('aria-pressed', String(!!S.local.screen));
         share.querySelector('span').textContent = S.local.screen ? 'Stop' : 'Share';
+        const full = $('btn-full');
+        const isFull = !!fsElement();
+        full.hidden = !fsSupported();
+        full.classList.toggle('is-full', isFull);
+        full.setAttribute('aria-pressed', String(isFull));
+        full.querySelector('span').textContent = isFull ? 'Exit' : 'Expand';
+        full.title = isFull ? 'Exit full screen (F)' : 'Full screen (F)';
     }
 
     async function toggleMic() {
@@ -1478,6 +1555,10 @@
         $('btn-cam').addEventListener('click', toggleCam);
         $('btn-flip').addEventListener('click', flipCamera);
         $('btn-share').addEventListener('click', toggleShare);
+        $('btn-full').addEventListener('click', () => toggleFullscreen());
+        const onFullscreen = () => { updateButtons(); S.tiles.forEach(paintTileTools); if (!fsElement() && S.phase === 'incall') renderTiles(); };
+        document.addEventListener('fullscreenchange', onFullscreen);
+        document.addEventListener('webkitfullscreenchange', onFullscreen);
         $('btn-hangup').addEventListener('click', () => { if (S.joined) hangup(); else if (S.phase === 'incoming') decline(); else backToChat(); });
         $('btn-devices').addEventListener('click', () => { refreshDevices(); renderConnection(); $('devices').hidden = false; setTimeout(() => $('dev-mic').focus(), 20); });
         $('devices-close').addEventListener('click', () => { $('devices').hidden = true; $('btn-devices').focus(); });
@@ -1504,6 +1585,7 @@
             if (e.metaKey || e.ctrlKey || e.altKey || !S.joined || S.ended) return;
             if (e.key === 'm' || e.key === 'M') { e.preventDefault(); toggleMic(); }
             else if (e.key === 'v' || e.key === 'V') { e.preventDefault(); toggleCam(); }
+            else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
         });
         // Any tap wakes audio the browser held back.
         document.addEventListener('pointerdown', () => Tones.resume(), { once: true, capture: true });

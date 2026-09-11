@@ -383,8 +383,13 @@ async function interact(page, name, result) {
   const expect = async (label, fn) => { try { const ok = await fn(); if (!ok) result.problems.push(`interaction failed: ${label}`); } catch (e) { result.problems.push(`interaction threw: ${label}: ${e.message.split('\n')[0]}`); } };
   const wait = ms => new Promise(r => setTimeout(r, ms));
   if (name === 'contacts') {
-    await expect('Create opens the new-contact dialog', async () => { await page.click('[data-create]'); await wait(300); return !!(await page.$('.crm-modal .crm-form')); });
-    await expect('Escape closes the dialog', async () => { await page.keyboard.press('Escape'); await wait(200); return !(await page.$('.crm-modal')); });
+    await expect('Create opens the new-contact page in a slider', async () => {
+      await page.click('[data-create]');
+      const frame = await (await page.waitForSelector('.ws-slider iframe', { timeout: 3000 })).contentFrame();
+      await frame.waitForSelector('.b24-new input', { timeout: 8000 });
+      return true;
+    });
+    await expect('Escape closes the slider', async () => { await page.keyboard.press('Escape'); await wait(400); return !(await page.$('.ws-slider')); });
     await expect('the list shows the fixture contacts', async () => (await page.$$('.b24-grid-table tbody tr[data-id]')).length >= 2);
   }
   if (name === 'deals') await expect('the pipeline shows one column per stage', async () => (await page.$$('.kb-col')).length >= 5 || (await page.$$('.ws-table tbody tr')).length >= 1);
