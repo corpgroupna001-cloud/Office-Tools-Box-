@@ -152,10 +152,11 @@
         const ok = await C.confirm({ title: 'Delete this file permanently?', message: `${d.name} will be removed from storage${n ? ` and detached from ${n} record${n === 1 ? '' : 's'}` : ''}. This cannot be undone. Archiving keeps it recoverable.`, okText: 'Delete permanently', danger: true });
         if (!ok) return;
         try {
+            // The storage delete policy for managers checks the documents row, so the object goes first.
+            const r = await sb.storage.from(d.bucket || 'documents').remove([d.storage_path]);
+            if (r.error) { console.warn('[documents] storage remove', r.error); throw new Error('The file could not be removed from storage.'); }
             await C.q(sb.from('document_links').delete().eq('document_id', d.id));
             await C.q(sb.from('documents').delete().eq('id', d.id));
-            const r = await sb.storage.from(d.bucket || 'documents').remove([d.storage_path]);
-            if (r.error) console.warn('[documents] storage remove', r.error);
             C.toast('Document deleted', 'ok'); if (after) after();
         } catch (e) { C.toast(e.message, 'bad'); }
     }
@@ -302,7 +303,8 @@
                     row.querySelector('i').style.width = '100%';
                     const existed = doc.created_at && (Date.now() - new Date(doc.created_at)) > 60000;
                     row.querySelector('.st').textContent = existed ? 'Identical file already existed — linked' : 'Done';
-                    if (existed && folderId && !doc.folder_id) { try { await sb.from('documents').update({ folder_id: folderId }).eq('id', doc.id); } catch (e) { /* keep where it was */ } }
+                    if (existed && folderId && !doc.folder_id && (doc.created_by === me.id || ctx.isManager)) { try { await sb.from('documents').update({ folder_id: folderId }).eq('id', doc.id); } catch (e) { /* keep where it was */ } }
+                    else if (existed && folderId && doc.folder_id && doc.folder_id !== folderId) row.querySelector('.st').textContent = 'Identical file already exists in another folder — linked there';
                     setTimeout(() => row.remove(), 3500);
                 } catch (e) { row.querySelector('.st').textContent = e.message; row.querySelector('.st').style.color = 'var(--ws-danger-text)'; setTimeout(() => row.remove(), 8000); }
             }

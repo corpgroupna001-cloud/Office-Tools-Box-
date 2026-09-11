@@ -160,6 +160,7 @@
 
     /* -------------------------------------------------------------- board */
     async function showBoard(id) {
+        if (unsubscribe) { unsubscribe(); unsubscribe = null; }
         C.loading(view, 'Loading board…');
         let board;
         try { board = (await C.q(sb.from('boards').select('*').eq('id', id).maybeSingle())).data; }
@@ -174,7 +175,8 @@
             board.project_id ? sb.from('project_members').select('user_id').eq('project_id', board.project_id).then(r => (r.data || []).map(x => x.user_id)) : [],
         ]);
         bs.columns = cols; bs.project = project; bs.members = members;
-        const manage = canManage(board) || (project && (project.owner_id === me.id || project.manager_id === me.id || members.includes(me.id)));
+        const onProject = !!(project && (project.owner_id === me.id || project.manager_id === me.id || members.includes(me.id)));
+        const manage = canManage(board) || onProject;
 
         view.innerHTML = `
             <a class="crm-back" href="/boards/" data-nav>${C.icon('arrow')}All boards</a>
@@ -224,9 +226,10 @@
             if (!columns.length) { kbEl.classList.remove('kb-board'); return C.empty(kbEl, 'This board has no columns', manage ? 'Add a column to start placing cards.' : 'Ask the board owner to add columns.', manage ? `<button type="button" class="ws-btn primary" onclick="document.getElementById('add-col').click()">${C.icon('plus')}<span>Add column</span></button>` : ''); }
             if (!kb) kb = WSKanban.mount(kbEl, {
                 columns, cards, emptyText: 'No cards', renderCard,
-                canDrag: () => !board.archived_at,
+                canDrag: t => !board.archived_at && (ctx.isManager || L.canEdit({ created_by: t.created_by, assignee_id: t.assignee_id }, me) || onProject),
                 onMove: async ({ card, toColumnId, position }) => {
-                    await C.q(sb.from('tasks').update({ board_column_id: toColumnId, position }).eq('id', card.id));
+                    const { data } = await C.q(sb.from('tasks').update({ board_column_id: toColumnId, position }).eq('id', card.id).select('id'));
+                    if (!data || !data.length) throw new Error('You do not have permission to move this card.');
                     WSShell.refreshUnread();
                     reload(true);
                 },
@@ -240,7 +243,7 @@
             try {
                 const [c, t] = await Promise.all([
                     C.q(sb.from('board_columns').select('*').eq('board_id', id).order('position')),
-                    C.q(sb.from('tasks').select(TASK_SELECT).eq('board_id', id).is('archived_at', null).order('position').limit(1000)),
+                    C.q(sb.from('tasks').select(TASK_SELECT).eq('board_id', id).is('archived_at', null).is('parent_task_id', null).order('position').limit(1000)),
                 ]);
                 bs.columns = c.data || []; bs.cards = t.data || [];
                 const ids = bs.cards.map(x => x.id);
@@ -335,7 +338,7 @@
         /* ---- card modal ---- */
         async function openCard(card) {
             const t = bs.cards.find(x => x.id === card.id) || card;
-            const editable = L.canEdit({ created_by: t.created_by, assignee_id: t.assignee_id }, me) || manage;
+            const editable = L.canEdit({ created_by: t.created_by, assignee_id: t.assignee_id }, me) || ctx.isManager || onProject;
             const f = C.form([
                 { name: 'title', label: 'Title', type: 'text', required: true, full: true, disabled: !editable },
                 { name: 'status', label: 'Status', type: 'select', options: lk.taskStatuses.map(s => ({ value: s.key, label: s.label })), required: true, disabled: !editable },
@@ -356,7 +359,8 @@
                     ...(editable ? [{ label: 'Save', primary: true, onClick: async api => {
                         if (!f.validate()) return;
                         const v = f.get();
-                        await C.q(sb.from('tasks').update({ title: v.title.trim(), status: v.status, priority: v.priority, assignee_id: v.assignee_id || null, due_date: v.due_date || null, board_column_id: v.board_column_id, description: v.description || null }).eq('id', t.id));
+                        const { data: upd } = await C.q(sb.from('tasks').update({ title: v.title.trim(), status: v.status, priority: v.priority, assignee_id: v.assignee_id || null, due_date: v.due_date || null, board_column_id: v.board_column_id, description: v.description || null }).eq('id', t.id).select('id'));
+                        if (!upd || !upd.length) throw new Error('You do not have permission to change this card.');
                         if (v.assignee_id && v.assignee_id !== t.assignee_id) C.pushNotify({ to: v.assignee_id, title: 'Task assigned to you', body: v.title, url: `/tasks/?id=${t.id}`, tag: 'task' });
                         C.toast('Card saved', 'ok'); WSShell.refreshUnread(); api.close(); reload();
                     } }] : []),

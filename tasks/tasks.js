@@ -62,9 +62,17 @@
     }
 
     /* ------------------------------------------------------------ actions */
+    /** PostgREST returns zero rows (no error) when RLS refuses an update; treat that as a permission error. */
+    async function mustUpdate(builder, expected) {
+        const { data } = await C.q(builder.select('id'));
+        const n = (data || []).length;
+        if (!n) throw new Error('You do not have permission to change this task.');
+        if (expected && n < expected) C.toast(`${expected - n} task${expected - n > 1 ? 's were' : ' was'} skipped: no permission`, 'bad');
+        return n;
+    }
     async function setDone(t, done, after) {
         try {
-            await C.q(sb.from('tasks').update({ status: done ? DONE_KEY : OPEN_KEY }).eq('id', t.id));
+            await mustUpdate(sb.from('tasks').update({ status: done ? DONE_KEY : OPEN_KEY }).eq('id', t.id));
             C.toast(done ? 'Task completed' : 'Task reopened', 'ok');
             WSShell.refreshUnread();
             if (after) after();
@@ -72,14 +80,14 @@
     }
     async function assignToMe(t, after) {
         try {
-            await C.q(sb.from('tasks').update({ assignee_id: me.id }).eq('id', t.id));
+            await mustUpdate(sb.from('tasks').update({ assignee_id: me.id }).eq('id', t.id));
             C.toast('Assigned to you', 'ok'); WSShell.refreshUnread(); if (after) after();
         } catch (e) { C.toast(e.message, 'bad'); }
     }
     async function setArchived(t, archived, after) {
         if (archived && !await C.confirm({ title: `Archive "${t.title}"?`, message: 'Archived tasks disappear from lists and boards but keep their comments and history. You can restore them from the archived filter.', okText: 'Archive', danger: true })) return;
         try {
-            await C.q(sb.from('tasks').update({ archived_at: archived ? new Date().toISOString() : null }).eq('id', t.id));
+            await mustUpdate(sb.from('tasks').update({ archived_at: archived ? new Date().toISOString() : null }).eq('id', t.id));
             C.toast(archived ? 'Task archived' : 'Task restored', 'ok'); WSShell.refreshUnread(); if (after) after();
         } catch (e) { C.toast(e.message, 'bad'); }
     }
@@ -90,7 +98,7 @@
     }
     async function duplicateTask(t) {
         try {
-            const copy = { title: `Copy of ${t.title}`, description: t.description, status: OPEN_KEY, priority: t.priority, assignee_id: t.assignee_id, project_id: t.project_id, board_id: t.board_id, board_column_id: t.board_column_id, contact_id: t.contact_id, lead_id: t.lead_id, deal_id: t.deal_id, start_date: t.start_date, due_date: t.due_date, due_time: t.due_time, estimate_hours: t.estimate_hours, tags: t.tags || [], created_by: me.id };
+            const copy = { title: `Copy of ${t.title}`, description: t.description, status: OPEN_KEY, priority: t.priority, assignee_id: t.assignee_id, project_id: t.project_id, contact_id: t.contact_id, lead_id: t.lead_id, deal_id: t.deal_id, start_date: t.start_date, due_date: t.due_date, due_time: t.due_time, estimate_hours: t.estimate_hours, tags: t.tags || [], created_by: me.id };
             const { data } = await C.q(sb.from('tasks').insert(copy).select('id').single());
             C.toast('Task duplicated', 'ok'); go(`/tasks/?id=${data.id}`);
         } catch (e) { C.toast(e.message, 'bad'); }
@@ -107,10 +115,12 @@
         C.menu(anchor, [
             { label: 'Open', icon: 'arrow', onClick: () => go(`/tasks/?id=${t.id}`) },
             { label: 'Edit', icon: 'edit', onClick: () => editTask(t, after) },
-            isDone(t) ? { label: 'Reopen', icon: 'refresh', onClick: () => setDone(t, false, after) } : { label: 'Complete', icon: 'check', onClick: () => setDone(t, true, after) },
-            ...(t.assignee_id !== me.id ? [{ label: 'Assign to me', icon: 'user', onClick: () => assignToMe(t, after) }] : []),
-            'sep',
-            t.archived_at ? { label: 'Restore', icon: 'refresh', onClick: () => setArchived(t, false, after) } : { label: 'Archive', icon: 'trash', danger: true, onClick: () => setArchived(t, true, after) },
+            ...(L.canEdit(t, me) || ctx.isManager ? [
+                isDone(t) ? { label: 'Reopen', icon: 'refresh', onClick: () => setDone(t, false, after) } : { label: 'Complete', icon: 'check', onClick: () => setDone(t, true, after) },
+                ...(t.assignee_id !== me.id ? [{ label: 'Assign to me', icon: 'user', onClick: () => assignToMe(t, after) }] : []),
+                'sep',
+                t.archived_at ? { label: 'Restore', icon: 'refresh', onClick: () => setArchived(t, false, after) } : { label: 'Archive', icon: 'trash', danger: true, onClick: () => setArchived(t, true, after) },
+            ] : []),
         ]);
     }
 
@@ -232,7 +242,7 @@
                 <select id="bulk-priority" aria-label="Set priority"><option value="">Set priority…</option>${Object.entries(L.PRIORITY).map(([k, p]) => `<option value="${k}">${esc(p.label)}</option>`).join('')}</select>
                 <button type="button" class="ws-btn sm" id="bulk-archive">${C.icon('trash')}<span>Archive</span></button>
                 <span class="spacer"></span><button type="button" class="ws-btn sm ghost" id="bulk-clear">Clear</button>`;
-            const apply = async (patch, msg) => { try { await C.q(sb.from('tasks').update(patch).in('id', sel)); C.toast(msg, 'ok'); WSShell.refreshUnread(); await reload(); } catch (e) { C.toast(e.message, 'bad'); } };
+            const apply = async (patch, msg) => { try { await mustUpdate(sb.from('tasks').update(patch).in('id', sel), sel.length); C.toast(msg, 'ok'); WSShell.refreshUnread(); await reload(); } catch (e) { C.toast(e.message, 'bad'); } };
             bulk.querySelector('#bulk-assign').addEventListener('change', e => { if (e.target.value) apply({ assignee_id: e.target.value }, `Assigned ${sel.length} task${sel.length > 1 ? 's' : ''}`); });
             bulk.querySelector('#bulk-status').addEventListener('change', e => { if (e.target.value) apply({ status: e.target.value }, 'Status updated'); });
             bulk.querySelector('#bulk-priority').addEventListener('change', e => { if (e.target.value) apply({ priority: e.target.value }, 'Priority updated'); });
@@ -323,6 +333,7 @@
 
     /* ------------------------------------------------------------- record */
     async function showRecord(id) {
+        if (unsubscribe) { unsubscribe(); unsubscribe = null; }
         C.loading(view, 'Loading task…');
         let t;
         try { t = (await C.q(sb.from('tasks').select(SELECT).eq('id', id).maybeSingle())).data; }
@@ -453,7 +464,7 @@
             const input = subForm.querySelector('#sub-title'); const title = input.value.trim(); if (!title) return;
             input.disabled = true;
             try {
-                await C.q(sb.from('tasks').insert({ title, parent_task_id: id, project_id: t.project_id, board_id: t.board_id, contact_id: t.contact_id, deal_id: t.deal_id, lead_id: t.lead_id, assignee_id: t.assignee_id, priority: t.priority, status: OPEN_KEY, created_by: me.id }));
+                await C.q(sb.from('tasks').insert({ title, parent_task_id: id, project_id: t.project_id, contact_id: t.contact_id, deal_id: t.deal_id, lead_id: t.lead_id, assignee_id: t.assignee_id, priority: t.priority, status: OPEN_KEY, created_by: me.id }));
                 reloadRecord();
             } catch (err) { C.toast(err.message, 'bad'); input.disabled = false; }
         });

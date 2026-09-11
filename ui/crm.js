@@ -491,12 +491,14 @@
         document: { table: 'documents', select: 'id, name, mime_type, size_bytes', label: r => r.name, sub: r => L.fmtBytes(r.size_bytes), search: 'name' },
         task: { table: 'tasks', select: 'id, title, status', label: r => r.title, sub: r => r.status, search: 'title' },
         board: { table: 'boards', select: 'id, name, kind', label: r => r.name, sub: r => r.kind, search: 'name' },
-        invoice: { table: 'invoices', select: 'id, invoice_number, total, currency, status', label: r => r.invoice_number, sub: r => L.money(r.total, r.currency), search: 'invoice_number,bill_to_name' },
+        invoice: { table: 'invoices', select: 'id, invoice_number, total, currency, status', label: r => r.invoice_number, sub: r => L.money(r.total, r.currency), search: 'invoice_number,bill_to_name', noArchive: true },
+        event: { table: 'calendar_events', select: 'id, title, starts_at, event_type', label: r => r.title, sub: r => L.fmtDateTime(r.starts_at), search: 'title', noArchive: true },
     };
     async function searchEntities(type, term, limit) {
         const spec = ENTITY_QUERY[type]; if (!spec) return [];
         const sb = await client();
-        let b = sb.from(spec.table).select(spec.select).is('archived_at', null).limit(limit || 8);
+        let b = sb.from(spec.table).select(spec.select).limit(limit || 8);
+        if (!spec.noArchive) b = b.is('archived_at', null);
         const t = String(term || '').trim();
         if (t) b = b.or(spec.search.split(',').map(c => `${c}.ilike.%${t.replace(/[%,]/g, ' ')}%`).join(','));
         else b = b.order('created_at', { ascending: false });
@@ -1078,8 +1080,10 @@
     async function related(table, column, id, select, extra) {
         try {
             const sb = await client();
-            let b = sb.from(table).select(select || '*').eq(column, id).order('created_at', { ascending: false }).limit(200);
+            let b = sb.from(table).select(select || '*').eq(column, id).limit(200);
             if (extra) b = extra(b);
+            // Newest first unless the caller ordered the query itself.
+            if (!(b.url && b.url.searchParams && b.url.searchParams.has('order'))) b = b.order('created_at', { ascending: false });
             const r = await b; if (r.error) { if (!isMissingSchema(r.error)) console.warn('[crm] related', table, r.error); return []; }
             return r.data || [];
         } catch (e) { return []; }

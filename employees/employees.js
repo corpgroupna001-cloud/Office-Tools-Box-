@@ -151,7 +151,7 @@
         let p;
         try {
             const r = await sb.from('profiles').select(FULL).eq('id', id).maybeSingle();
-            if (r.error && String(r.error.code) === '42703') { const r2 = await sb.from('profiles').select('id, full_name, email, avatar_url, company, company2, department, job_title, employee_code, phone, joining_date, manager_id, status, is_wfh, shift_id, shift2_id, last_seen_at').eq('id', id).maybeSingle(); p = r2.data; }
+            if (r.error && String(r.error.code) === '42703') { const r2 = await sb.from('profiles').select('id, full_name, email, avatar_url, company, last_seen_at').eq('id', id).maybeSingle(); if (r2.error) throw r2.error; p = r2.data; }
             else { if (r.error) throw r.error; p = r.data; }
         } catch (e) { return C.errorState(view, C.friendly(e), () => showProfile(id)); }
         if (!p) { view.innerHTML = `<a class="crm-back" href="/employees/">${C.icon('arrow')}All employees</a>`; return C.empty(view.appendChild(document.createElement('div')), 'Employee not found'); }
