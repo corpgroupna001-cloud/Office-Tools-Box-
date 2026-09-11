@@ -603,7 +603,7 @@ Security, and **no new serverless functions** (the deployment stays at 12 of
 
 ## 1. Run the migrations (in this order)
 
-Supabase → **SQL Editor → New query**, paste, **Run**. All four are idempotent
+Supabase → **SQL Editor → New query**, paste, **Run**. All of them are idempotent
 and only add: no existing table, row, user, message, punch or result is
 changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 
@@ -614,6 +614,7 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 3 | `supabase-invoices-migration.sql` | `invoices`, `invoice_items`, `invoice_payments`, `invoice_counters`, database-owned totals, `invoice_duplicate()` |
 | 4 | `supabase-messenger-migration.sql` | `conversations`, `conversation_members`, group / reply / edit / pin / mention columns on `messages`, `ws_unread_counts()` |
 | 5 | `supabase-crm-reminders-migration.sql` | `crm_reminder_log`, `notifications.pushed_at`, `crm_run_reminders()` and a pg_cron schedule every 5 minutes (skipped with a notice where pg_cron is unavailable) |
+| 6 | `supabase-b24-migration.sql` | The Bitrix24-style workspace: company structure, CRM access roles, customer companies, custom fields, products, automation, project privacy, task views, whiteboards, document sharing and public links, calendar colours, per-person list settings — see [11. The Bitrix24-style workspace](#11-the-bitrix24-style-workspace) |
 | 7 | `supabase-messenger-calls-migration.sql` | Messenger & calls v2: `messages.client_id`, `ws_chat_inbox()`, `calls`, `call_participants` and the `ws_call_*` functions — see [10. Messenger & calls](#10-messenger--calls) |
 
 **Already ran 1–4 before 11 Sep 2026?** Run all five again, in order. They
@@ -668,16 +669,20 @@ admin console, to nobody else.
 |---|---|
 | `/crm/` | CRM dashboard (real counts and values, date / owner / company filters) |
 | `/contacts/` · `/contacts/?id=…` | Contacts list · contact record |
+| `/companies/` · `/companies/?id=…` | Customer companies |
+| `/crm/settings` | CRM settings: access permissions, custom fields, lead stages, automation, products (managers) |
 | `/leads/` · `/leads/?id=…` | Leads · lead record, **Convert lead** |
 | `/deals/` · `/deals/?id=…` | Deals pipeline (kanban / table) · deal record |
 | `/chat/` (also `/messenger`) | Messenger — direct and group chat, voice notes, files, replies, edits, pins, search, mentions and call history. Deep links `#thread=<userId>`, `#group=<id>`, `#call=<callId>` |
 | `/call/?id=…` | The call window (voice, video, screen share), opened by Messenger or an incoming-call banner |
-| `/boards/` · `/boards/?id=…` | Kanban boards |
+| `/boards/` · `/boards/?wb=…` · `/boards/?tab=kanban` · `/boards/?id=…` | Whiteboards (list and editor) · Kanban boards |
 | `/projects/` · `/projects/?id=…` | Projects |
 | `/tasks/` · `/tasks/?id=…` · `/tasks/?view=mine` | Tasks (My / All / Created by me / Overdue / Due today / Completed, list or kanban) |
-| `/documents/` · `/documents/?id=…` | Documents (private storage, signed URLs) |
-| `/calendar/` | Calendar (month / week / day / agenda) |
-| `/employees/` · `/employees/?id=…` | Employee directory and profiles (existing `profiles`) |
+| `/documents/` · `/documents/?id=…` | Documents drive: files and folders (private storage, signed URLs), WorkSuite documents, spreadsheets and presentations, sharing, Recycle bin |
+| `/documents/public?t=…` | A document someone published with a public link (read-only, no sign-in) |
+| `/calendar/` | Calendar (day / week / month / schedule, invitations, .ics import and export) |
+| `/employees/` · `/employees/?id=…` | Find employee and profiles (existing `profiles`) |
+| `/employees/structure/` | Company structure (org chart) |
 | `/invoices/` · `/invoices/?id=…` | Invoices (managers/admins) |
 
 Every existing URL keeps working. `/chat/` keeps its address and its deep
@@ -975,3 +980,41 @@ three, real WebRTC peers in one browser with a fake camera and microphone.
 It checks every connection, camera on and off, ICE restart, recovery from a
 lost offer, and late joiners. `npm run smoke:ui` now also opens the call
 window.
+
+## 11. The Bitrix24-style workspace
+
+`supabase-b24-migration.sql` is run **sixth**: after re-running 1 and 2, and
+before `supabase-messenger-calls-migration.sql`. Like the others it is
+idempotent and only adds; running it twice changes nothing.
+
+| Area | What it adds |
+|---|---|
+| Company structure | `departments` and `department_members` (seeded once from each profile's company and department), `profiles.invited_at` |
+| CRM access | `crm_roles`, `crm_role_permissions`, `crm_role_assignments`, seeded **Employee** and **Manager** roles that reproduce the earlier rules, `ws_crm_levels()` and the row checks behind the RLS on contacts, companies, leads, deals and invoices |
+| CRM data | `crm_companies`, record numbers, `crm_custom_fields` and a `custom` column on each record, `crm_products` and `crm_deal_products`, `crm_automation_rules` |
+| Projects and tasks | project privacy and join requests, `task_planner`, `task_views`, `task_templates` |
+| Boards | `whiteboards`, `whiteboard_shares` |
+| Documents | private / company / shared documents, `document_shares`, WorkSuite documents, spreadsheets and presentations (stored as JSON on the row), public links: `ws_published_document()` and a public `published` bucket |
+| Calendar | `calendar_events.color` |
+| Settings | `user_ui_settings` (list columns, saved filters, the left menu, per person), `workspace_settings` |
+| Feed | `feed_posts`, `feed_comments`, `feed_reactions`, `feed_post_views` (no page shows them yet) |
+
+**Before it has run** every page still works: lists fall back to the earlier
+columns, CRM access follows the earlier employee / manager rules, Boards shows
+a notice while Kanban boards keep working, Documents handles files and folders
+only, the calendar has no event colours, and Company structure draws a
+read-only chart from the profiles.
+
+**After running it:**
+
+1. **CRM → Settings → Access permissions:** check the two seeded roles; they
+   match the old behaviour until you change them.
+2. **Employees → Company structure:** departments were created from the
+   profiles. Choose heads and move people where needed (managers for their
+   company, admins for the whole group).
+3. **Public links** need no set-up. The `published` bucket is public on
+   purpose: a file is copied into it only when someone turns its link on, and
+   removed when they turn it off. WorkSuite documents are read through
+   `ws_published_document()`, which returns nothing once the link is off or
+   the document is in the Recycle bin.
+

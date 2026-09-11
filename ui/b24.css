@@ -1323,3 +1323,20 @@ body.ws-app .cal-week.three { grid-template-columns: 44px repeat(3, minmax(0, 1f
 .org-toggle:hover { background: #eef2f4; }
 @media (max-width: 640px) { .org-search input { width: 180px; } .org-node { width: 190px; } }
 body.ws-b24 .org-search input[type="search"] { padding-left: 32px; min-height: 32px; }
+/* Record tabs inside a light panel (profiles, file details, Kanban boards): dark text, not the wallpaper's white. */
+body.ws-b24 #view.b24-legacy-panel .crm-tabs { background: var(--ws-surface-2); }
+body.ws-b24 #view.b24-legacy-panel .crm-tab { color: var(--ws-text-2); }
+body.ws-b24 #view.b24-legacy-panel .crm-tab:hover { background: var(--ws-surface); color: var(--ws-text); }
+body.ws-b24 #view.b24-legacy-panel .crm-tab.active { background: var(--ws-surface); color: var(--ws-text); }
+/* The org-chart search: the wrapper is the field, so the icon never sits on the text. */
+body.ws-b24 .org-search { gap: 6px; height: 32px; padding: 0 12px; box-sizing: border-box; border: 1px solid var(--b24-line); border-radius: 16px; background: var(--b24-surface); }
+body.ws-b24 .org-search .ic { position: static; flex: 0 0 auto; }
+/* (the page-wide field style in corporate.css is very specific; this has to be more so) */
+body.ws-b24.ws-corporate #view .org-toolbar .org-search input[type="search"] { width: 230px; max-width: 50vw; height: 30px; min-height: 0; padding: 0; border: 0; background: transparent; box-shadow: none; outline: none; }
+body.ws-b24 .org-search:focus-within { border-color: #2fc6f6; box-shadow: 0 0 0 2px rgba(47, 198, 246, .25); }
+body.ws-b24 .cal-week .col .cal-ev { box-shadow: 0 0 0 1px #fff; }
+body.ws-b24 .cal-week .col .cal-ev:hover, body.ws-b24 .cal-week .col .cal-ev:focus-visible { z-index: 30 !important; }
+@media (max-width: 640px) {
+    body.ws-b24 .org-search { flex: 1 1 100%; min-width: 0; }
+    body.ws-b24.ws-corporate #view .org-toolbar .org-search input[type="search"] { flex: 1; width: auto; min-width: 0; max-width: none; }
+}
