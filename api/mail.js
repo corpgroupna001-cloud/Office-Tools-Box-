@@ -4,9 +4,32 @@ const { recordMail } = require('../lib/mail-audit');
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-worksuite-mail-key');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-worksuite-mail-key');
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
+
+  // A signed-in manager emailing an invoice. Authenticated by their own
+  // Supabase token; the recipient and content are built server-side from the
+  // invoice row (lib/invoice-mail.js), so this is not a relay either. It lives
+  // here rather than in a new file because the deployment is at the Vercel
+  // Hobby 12-function limit.
+  const authz = String(req.headers.authorization || '');
+  if (/^Bearer\s+/i.test(authz)) {
+    let parsed = null;
+    try { parsed = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {}); } catch { parsed = null; }
+    if (parsed && typeof parsed === 'object' && parsed.action === 'invoice') {
+      const SUPABASE_URL = process.env.SUPABASE_URL, SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!SUPABASE_URL || !SERVICE_KEY) return res.status(500).json({ error: 'Supabase server config missing' });
+      try {
+        const out = await require('../lib/invoice-mail').emailInvoice(parsed, {
+          url: SUPABASE_URL, key: SERVICE_KEY, token: authz.replace(/^Bearer\s+/i, ''), sendMail, recordMail,
+        });
+        return res.status(200).json(out);
+      } catch (e) {
+        return res.status(e.status || 502).json({ error: e.message || 'Could not email the invoice' });
+      }
+    }
+  }
 
   // Shared-secret gate so this endpoint isn't an open relay for the internet.
   const key = String(req.headers['x-worksuite-mail-key'] || '');

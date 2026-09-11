@@ -56,18 +56,37 @@
             return [r.invoice_number, r.bill_to_name, r.bill_to_email].some(v => v && String(v).toLowerCase().includes(q));
         });
     }
+    /**
+     * Money KPIs per currency — amounts in different currencies are never added
+     * together. The tiles lead with the currency most invoices use and list the
+     * others underneath. Counts are across every currency.
+     */
     function kpis(rows) {
         const today = L.todayIST();
         const month = L.dateRange('month');
-        const out = { outstanding: 0, overdue: 0, overdueCount: 0, paidMonth: 0, drafts: 0, cur: 'INR' };
+        const byCur = new Map();
+        const bucket = cur => { if (!byCur.has(cur)) byCur.set(cur, { count: 0, outstanding: 0, overdue: 0, paidMonth: 0 }); return byCur.get(cur); };
+        const out = { overdueCount: 0, drafts: 0, byCur, cur: 'INR' };
         rows.forEach(r => {
             const s = L.invoiceStatus(r, today);
+            const b = bucket(r.currency || 'INR');
+            b.count++;
             if (s === 'draft') out.drafts++;
-            if (['sent', 'partially_paid', 'overdue'].includes(s)) out.outstanding += Number(r.balance) || 0;
-            if (s === 'overdue') { out.overdue += Number(r.balance) || 0; out.overdueCount++; }
-            if (s === 'paid' && r.paid_at && L.istDate(r.paid_at) >= month.from && L.istDate(r.paid_at) <= month.to) out.paidMonth += Number(r.total) || 0;
-            if (r.currency && r.currency !== 'INR') out.cur = r.currency;      // best effort when a workspace bills in one currency
+            if (['sent', 'partially_paid', 'overdue'].includes(s)) b.outstanding += Number(r.balance) || 0;
+            if (s === 'overdue') { b.overdue += Number(r.balance) || 0; out.overdueCount++; }
+            if (s === 'paid' && r.paid_at && L.istDate(r.paid_at) >= month.from && L.istDate(r.paid_at) <= month.to) b.paidMonth += Number(r.total) || 0;
         });
+        let best = null;
+        byCur.forEach((b, cur) => { if (!best || b.count > byCur.get(best).count) best = cur; });
+        out.cur = best || 'INR';
+        const main = byCur.get(out.cur) || { outstanding: 0, overdue: 0, paidMonth: 0 };
+        out.outstanding = main.outstanding; out.overdue = main.overdue; out.paidMonth = main.paidMonth;
+        /** "Also $1,200.00 · €300.00" for the other currencies' value of one field, or ''. */
+        out.also = field => {
+            const parts = [];
+            byCur.forEach((b, cur) => { if (cur !== out.cur && Number(b[field])) parts.push(L.money(b[field], cur)); });
+            return parts.length ? `Also ${parts.join(' · ')}` : '';
+        };
         return out;
     }
     async function showList() {
@@ -109,10 +128,11 @@
         }
         function paintKpis(all) {
             const k = kpis(all);
+            const also = field => { const t = k.also(field); return t ? `<div class="sub">${esc(t)}</div>` : ''; };
             view.querySelector('#kpis').innerHTML = `
-                <a class="crm-kpi accent" href="#" data-status="outstanding"><div class="lbl">Outstanding</div><div class="val">${esc(L.money(k.outstanding, k.cur))}</div><div class="sub">Sent, not yet paid</div></a>
-                <a class="crm-kpi ${k.overdueCount ? 'bad' : ''}" href="#" data-status="overdue"><div class="lbl">Overdue</div><div class="val">${esc(L.money(k.overdue, k.cur))}</div><div class="sub ${k.overdueCount ? 'bad' : ''}">${k.overdueCount} invoice${k.overdueCount === 1 ? '' : 's'} past due</div></a>
-                <a class="crm-kpi ok" href="#" data-status="paid"><div class="lbl">Paid this month</div><div class="val">${esc(L.money(k.paidMonth, k.cur))}</div><div class="sub">By payment date</div></a>
+                <a class="crm-kpi accent" href="#" data-status="outstanding"><div class="lbl">Outstanding</div><div class="val">${esc(L.money(k.outstanding, k.cur))}</div><div class="sub">Sent, not yet paid</div>${also('outstanding')}</a>
+                <a class="crm-kpi ${k.overdueCount ? 'bad' : ''}" href="#" data-status="overdue"><div class="lbl">Overdue</div><div class="val">${esc(L.money(k.overdue, k.cur))}</div><div class="sub ${k.overdueCount ? 'bad' : ''}">${k.overdueCount} invoice${k.overdueCount === 1 ? '' : 's'} past due</div>${also('overdue')}</a>
+                <a class="crm-kpi ok" href="#" data-status="paid"><div class="lbl">Paid this month</div><div class="val">${esc(L.money(k.paidMonth, k.cur))}</div><div class="sub">By payment date</div>${also('paidMonth')}</a>
                 <a class="crm-kpi" href="#" data-status="draft"><div class="lbl">Drafts</div><div class="val">${k.drafts}</div><div class="sub">Not yet sent</div></a>`;
         }
         function columns() {
@@ -153,6 +173,7 @@
                 if (acts.edit) items.push({ label: 'Edit draft', icon: 'edit', onClick: () => go(`/invoices/?id=${r.id}&edit=1`) });
                 if (acts.send) items.push({ label: 'Mark sent', icon: 'mail', onClick: () => setStatus(r, 'sent', reload) });
                 if (acts.pay) items.push({ label: 'Record payment', icon: 'salary', onClick: () => recordPayment(r, reload) });
+                if (canEmail(r)) items.push({ label: 'Email invoice', icon: 'mail', onClick: () => openEmailDialog(r) });
                 items.push({ label: 'Duplicate', icon: 'plus', onClick: () => duplicate(r) });
             }
             items.push({ label: 'Print', icon: 'doc', onClick: () => { location.href = `/invoices/?id=${r.id}&print=1`; } });
@@ -176,8 +197,67 @@
             const { data } = await C.q(sb.from('invoices').update({ status }).eq('id', inv.id).select('id'));
             if (!data || !data.length) throw new Error('The invoice could not be updated. Reload and try again.');
             C.toast(status === 'sent' ? 'Invoice marked as sent' : 'Invoice reverted to draft', 'ok');
-            if (after) after();
-        } catch (e) { C.toast(e.message, 'bad'); }
+        } catch (e) { C.toast(e.message, 'bad'); return; }
+        // Marking it sent is the natural moment to actually send it.
+        if (status === 'sent') {
+            const to = await recipientFor(inv);
+            if (to && await C.confirm({ title: 'Email the invoice now?', message: `Email ${inv.invoice_number} to ${to} now?`, okText: 'Send email', cancelText: 'Not now' })) {
+                await sendInvoiceEmail(inv, false);
+            }
+        }
+        if (after) after();
+    }
+
+    /* -------------------------------------------------------------- email */
+    const EMAILABLE = ['sent', 'partially_paid', 'overdue', 'paid'];
+    function canEmail(inv) { return ctx.isManager && EMAILABLE.includes(L.invoiceStatus(inv)); }
+    /** Where the server will send it: the bill-to snapshot, else the linked contact's email. */
+    async function recipientFor(inv) {
+        if (inv.bill_to_email) return inv.bill_to_email;
+        if (!inv.contact_id) return '';
+        try {
+            const r = await sb.from('crm_contacts').select('email').eq('id', inv.contact_id).maybeSingle();
+            return (r.data && r.data.email) || '';
+        } catch (e) { return ''; }
+    }
+    /** POST to /api/mail with the signed-in user's token. Returns true when it went out. */
+    async function sendInvoiceEmail(inv, ccMe) {
+        try {
+            const { data: { session } } = await sb.auth.getSession();
+            if (!session) throw new Error('Your session has expired. Sign in again.');
+            const r = await fetch('/api/mail', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
+                body: JSON.stringify({ action: 'invoice', invoice_id: inv.id, cc_me: !!ccMe }),
+            });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(data.error || 'The invoice could not be emailed.');
+            C.toast(`Invoice emailed to ${(data.to || []).join(', ')}`, 'ok');
+            return true;
+        } catch (e) {
+            C.toast(/Failed to fetch|NetworkError|Load failed/i.test(e.message) ? 'Could not reach the server. Check your connection and try again.' : e.message, 'bad');
+            return false;
+        }
+    }
+    async function openEmailDialog(inv, after) {
+        const to = await recipientFor(inv);
+        if (!to) {
+            return C.alert({ title: 'No billing email', message: `${inv.invoice_number} has no billing email and its contact has none either. A sent invoice cannot be edited, so add an email address to the contact record and try again. (The bill-to details are a snapshot taken when the invoice was created; the contact's email is used when that snapshot has none.)` });
+        }
+        const paid = L.invoiceStatus(inv) === 'paid';
+        C.modal({
+            title: `Email ${inv.invoice_number}`,
+            body: `<p style="margin:0 0 12px">${paid ? 'A receipt' : 'The invoice'} will be emailed to <b>${esc(to)}</b> from ${esc(inv.company || 'your company')}'s mailbox, with the line items and totals in the message.</p>
+                   <label class="crm-check"><input type="checkbox" id="inv-cc-me"> <span>Send me a copy (${esc(me.email || '')})</span></label>`,
+            actions: [
+                { label: 'Cancel', close: true },
+                { label: 'Send email', primary: true, onClick: async api => {
+                    const cc = !!api.body.querySelector('#inv-cc-me').checked;
+                    const ok = await sendInvoiceEmail(inv, cc);
+                    if (ok) { api.close(); if (after) after(); }
+                } },
+            ],
+        });
     }
     async function cancelInvoice(inv, after) {
         if (!await C.confirm({ title: `Cancel ${inv.invoice_number}?`, message: 'A cancelled invoice cannot be reopened; duplicate it if you need a corrected copy. Recorded payments stay on file.', okText: 'Cancel invoice', danger: true })) return;
@@ -428,6 +508,7 @@
                     ${canManage && acts.edit ? `<button type="button" class="ws-btn" id="edit-btn">${C.icon('edit')}<span>Edit</span></button>` : ''}
                     ${canManage && acts.send ? `<button type="button" class="ws-btn primary" id="send-btn">${C.icon('mail')}<span>Mark sent</span></button>` : ''}
                     ${canManage && acts.pay ? `<button type="button" class="ws-btn primary" id="pay-btn">${C.icon('salary')}<span>Record payment</span></button>` : ''}
+                    ${canEmail(inv) ? `<button type="button" class="ws-btn" id="email-btn">${C.icon('mail')}<span>Email invoice</span></button>` : ''}
                     <button type="button" class="ws-btn" id="print-btn">${C.icon('doc')}<span>Print / PDF</span></button>
                     <button type="button" class="ws-btn icon" id="more-btn" aria-label="More actions">${C.icon('more')}</button>
                 </div>
@@ -513,6 +594,7 @@
         const pay = () => recordPayment(inv, () => showRecord(id));
         on('#pay-btn', pay); on('#pay-btn-2', pay);
         on('#print-btn', () => window.print());
+        on('#email-btn', () => openEmailDialog(inv, () => feed.reload()));
         on('#more-btn', e => {
             const items = [{ label: 'Print / save as PDF', icon: 'doc', onClick: () => window.print() }];
             if (canManage) {
