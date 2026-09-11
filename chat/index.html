@@ -4,7 +4,7 @@
     <script src="/authguard.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WorkSuite Chat & Calls</title>
+    <title>Messenger · WorkSuite</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="/presence.js"></script>
@@ -685,8 +685,9 @@
     <div id="app" class="app-container hidden">
         <!-- Contacts panel -->
         <aside class="contacts-panel glass-strong">
-            <div class="p-4 border-b border-white/10">
-                <input id="contact-search" type="text" placeholder="Search…" class="glass-subtle w-full px-4 py-2.5 rounded-xl text-sm font-medium text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
+            <div class="p-4 border-b border-white/10 contacts-head-row">
+                <input id="contact-search" type="text" placeholder="Search people and groups…" aria-label="Search people and groups" class="glass-subtle w-full px-4 py-2.5 rounded-xl text-sm font-medium text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
+                <button type="button" id="new-group-btn" class="hidden" title="New group" aria-label="New group">+</button>
             </div>
             <div id="contacts-list" class="flex-1 overflow-y-auto p-2 space-y-1"></div>
         </aside>
@@ -704,13 +705,14 @@
             <div id="chat-active" class="flex-1 flex flex-col hidden">
                 <!-- Chat header (pinned at top of chat panel — never scrolls with messages) -->
                 <div class="chat-header-fixed px-4 py-3 border-b border-white/10 flex items-center justify-between">
+                    <button type="button" id="chat-back" class="chat-back" title="Back to conversations" aria-label="Back to conversations">‹</button>
                     <div id="chat-header-clickable" class="flex items-center gap-3 min-w-0 cursor-pointer hover:opacity-80 transition" title="View profile">
                         <div id="chat-avatar" class="contact-avatar" style="width:44px;height:44px;">
                             ?
                             <span id="chat-presence-dot" class="presence-dot offline"></span>
                         </div>
                         <div class="min-w-0">
-                            <h3 id="chat-name" class="font-black text-white text-base truncate">—</h3>
+                            <h3 id="chat-name" class="font-black text-white text-base truncate">—<span id="chat-member-avatars" class="hidden"></span></h3>
                             <p id="chat-status" class="text-xs text-slate-400 font-semibold">—</p>
                             <div id="typing-hint" class="text-xs text-blue-300 font-bold hidden items-center gap-1">
                                 <span>typing</span>
@@ -719,6 +721,12 @@
                         </div>
                     </div>
                     <div class="flex gap-2">
+                        <button type="button" id="msg-search-btn" class="hdr-btn" title="Search in this conversation" aria-label="Search messages">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                        </button>
+                        <button type="button" id="group-info-btn" class="hdr-btn hidden" title="Group info" aria-label="Group info">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        </button>
                         <button id="clear-chat-btn" class="w-11 h-11 rounded-full flex items-center justify-center transition-transform hover:scale-105" style="background: rgba(244,63,94,0.15); border: 1px solid rgba(244,63,94,0.35); color: #fda4af;" title="Clear this chat">
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                         </button>
@@ -731,18 +739,31 @@
                     </div>
                 </div>
 
+                <!-- Pinned messages + in-thread search -->
+                <div id="pinned-bar" class="hidden" role="button" tabindex="0" title="Show pinned messages"><span>📌</span><span class="pin-txt"></span><span class="pin-count"></span></div>
+                <div id="msg-search-bar" class="hidden">
+                    <div class="row">
+                        <input id="msg-search-input" type="search" placeholder="Search messages in this conversation…" aria-label="Search messages" autocomplete="off">
+                        <button type="button" id="msg-search-close" class="hdr-btn" style="width:36px;height:36px" aria-label="Close search">✕</button>
+                    </div>
+                    <div id="msg-search-info"></div>
+                    <div id="msg-search-results"></div>
+                </div>
+
                 <!-- Messages -->
                 <div id="msg-list" class="flex-1 overflow-y-auto p-5 flex flex-col gap-2"></div>
 
                 <!-- Input -->
                 <div class="p-3 border-t border-white/10" style="background: rgba(15,23,42,0.3);">
+                    <div id="compose-context" class="hidden"><div class="cc-box"><b id="cc-title">Replying to</b><span id="cc-text"></span></div><button type="button" id="cc-cancel" aria-label="Cancel">✕</button></div>
                     <form id="msg-form" class="flex gap-2 items-center">
                         <input id="file-input" type="file" class="hidden" multiple>
                         <button type="button" id="attach-btn" class="w-12 h-12 rounded-full flex items-center justify-center shrink-0 transition-transform hover:scale-105" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); color: #cbd5e1;" title="Send photos or files (max 25 MB each)">
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
                         </button>
                         <div class="flex-1 relative">
-                            <input id="msg-input" type="text" placeholder="Type a message..." maxlength="1000" autocomplete="off"
+                            <div id="mention-menu" class="hidden" role="listbox"></div>
+                            <input id="msg-input" type="text" placeholder="Type a message... (@ to mention)" maxlength="1000" autocomplete="off"
                                 class="w-full pl-5 pr-4 py-3 rounded-full text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40 font-medium"
                                 style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); font-size: 15px;">
                         </div>
@@ -891,7 +912,10 @@
 
     <!-- Message actions popup (right-click / long-press on a message) -->
     <div id="msg-menu" class="fixed z-[70] hidden glass-strong rounded-xl p-1 shadow-2xl" style="min-width:180px;">
+        <button data-action="reply" class="w-full text-left px-3 py-2 rounded-lg text-sm text-white hover:bg-white/10 flex items-center gap-2 font-semibold">↩️ Reply</button>
         <button data-action="react" class="w-full text-left px-3 py-2 rounded-lg text-sm text-white hover:bg-white/10 flex items-center gap-2 font-semibold">😊 React</button>
+        <button data-action="pin" class="w-full text-left px-3 py-2 rounded-lg text-sm text-white hover:bg-white/10 flex items-center gap-2 font-semibold">📌 Pin</button>
+        <button data-action="edit" class="w-full text-left px-3 py-2 rounded-lg text-sm text-white hover:bg-white/10 flex items-center gap-2 font-semibold hidden">✏️ Edit</button>
         <button data-action="copy"  class="w-full text-left px-3 py-2 rounded-lg text-sm text-white hover:bg-white/10 flex items-center gap-2 font-semibold">📋 Copy text</button>
         <button data-action="delete" class="w-full text-left px-3 py-2 rounded-lg text-sm text-rose-300 hover:bg-rose-500/20 flex items-center gap-2 font-semibold hidden">🗑️ Delete for everyone</button>
     </div>
@@ -902,6 +926,9 @@
         <a id="img-viewer-dl" href="#" target="_blank" rel="noopener" class="absolute top-4 right-28 glass text-white font-bold px-4 py-2 rounded-xl text-sm z-10" download>⬇ Download</a>
         <img id="img-viewer-img" src="" alt="" style="max-width: 94vw; max-height: 92vh; object-fit: contain; border-radius: 12px;">
     </div>
+
+    <!-- Messenger dialogs (new group, group info, pinned list) -->
+    <div id="msgr-modal" role="dialog" aria-modal="true"><div class="card" id="msgr-modal-card"></div></div>
 
     <!-- Generic confirm modal (delete message / clear chat) -->
     <div id="ws-confirm" class="fixed inset-0 z-[86] hidden items-center justify-center p-4" style="background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);">
@@ -952,11 +979,94 @@
         .link-preview .lp-desc { font-size: 11px; color: #cbd5e1; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
         .link-preview .lp-host { font-size: 10px; color: #94a3b8; font-weight: 700; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
         #attach-btn.uploading { animation: attach-pulse 1s ease-in-out infinite; pointer-events: none; }
+
+        /* ---- Messenger: groups, replies, edits, pins, search, mentions ---- */
+        .contacts-head-row { display: flex; gap: 8px; align-items: center; }
+        .contacts-head-row input { flex: 1; min-width: 0; }
+        #new-group-btn:not(.hidden) { width: 40px; height: 40px; border-radius: 10px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+            background: var(--ws-primary-soft, rgba(59,130,246,.18)); color: var(--ws-primary, #93c5fd); border: 1px solid var(--ws-border, rgba(255,255,255,.14)); font-size: 20px; font-weight: 800; cursor: pointer; }
+        #new-group-btn:hover { filter: brightness(1.1); }
+        .group-avatar { background: var(--ws-primary, #2158a0) !important; color: #fff; font-size: 18px; }
+        .contact.muted-row .contact-name { opacity: .7; }
+        .contact .muted-ic { font-size: 11px; margin-left: 4px; opacity: .7; }
+        .chat-back { display: none; width: 36px; height: 36px; border-radius: 8px; align-items: center; justify-content: center; margin-right: 6px; flex: 0 0 auto;
+            border: 1px solid var(--ws-border, rgba(255,255,255,.14)); background: var(--ws-surface-2, rgba(255,255,255,.08)); color: inherit; cursor: pointer; font-size: 18px; }
+        .hdr-btn { width: 44px; height: 44px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+            background: var(--ws-surface, rgba(255,255,255,.08)); border: 1px solid var(--ws-border, rgba(255,255,255,.14)); color: var(--ws-text-2, #cbd5e1); }
+        .hdr-btn:hover { background: var(--ws-surface-2, rgba(255,255,255,.14)); }
+        .hdr-btn.on { color: var(--ws-primary, #93c5fd); border-color: var(--ws-primary, #93c5fd); }
+        #chat-member-avatars:not(.hidden) { display: inline-flex; margin-left: 6px; vertical-align: middle; }
+        #chat-member-avatars span { width: 18px; height: 18px; border-radius: 5px; font-size: 9px; font-weight: 800; color: #fff; display: inline-flex; align-items: center; justify-content: center; margin-left: -4px; border: 1.5px solid var(--ws-surface, #0f172a); overflow: hidden; }
+        #chat-member-avatars img { width: 100%; height: 100%; object-fit: cover; }
+        #pinned-bar:not(.hidden) { display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+            background: var(--ws-surface-2, rgba(255,255,255,.06)); border-bottom: 1px solid var(--ws-border, rgba(255,255,255,.1)); color: var(--ws-text, #e2e8f0); flex: 0 0 auto; }
+        #pinned-bar .pin-txt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #pinned-bar .pin-txt b { font-weight: 700; margin-right: 4px; }
+        #pinned-bar .pin-count { font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: var(--ws-primary-soft, rgba(59,130,246,.18)); color: var(--ws-primary, #93c5fd); white-space: nowrap; }
+        #msg-search-bar:not(.hidden) { display: flex; flex-direction: column; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--ws-border, rgba(255,255,255,.1)); background: var(--ws-surface, rgba(15,23,42,.4)); flex: 0 0 auto; }
+        #msg-search-bar .row { display: flex; gap: 8px; align-items: center; }
+        #msg-search-input { flex: 1; min-width: 0; padding: 8px 12px; border-radius: 6px; font-size: 14px; border: 1px solid var(--ws-border-2, rgba(255,255,255,.18)); background: var(--ws-surface-2, rgba(255,255,255,.08)); color: inherit; }
+        #msg-search-info { font-size: 12px; color: var(--ws-text-muted, #94a3b8); }
+        #msg-search-results { max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+        .search-hit { display: flex; gap: 10px; align-items: baseline; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+        .search-hit:hover { background: var(--ws-surface-2, rgba(255,255,255,.08)); }
+        .search-hit .who { font-weight: 700; white-space: nowrap; }
+        .search-hit .txt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .search-hit .when { font-size: 11px; color: var(--ws-text-muted, #94a3b8); white-space: nowrap; }
+        .msg-row.msg-hidden, .msg-sender-name.msg-hidden, .call-event.msg-hidden { display: none; }
+        mark.hl { background: rgba(250,204,21,.45); color: inherit; border-radius: 3px; padding: 0 1px; }
+        .msgr-quote { display: block; border-left: 3px solid rgba(255,255,255,.55); background: rgba(0,0,0,.14); border-radius: 6px; padding: 5px 9px; margin: 0 0 6px; font-size: 12.5px; cursor: pointer; max-width: 100%; overflow: hidden; }
+        .msg-recv .msgr-quote { border-left-color: var(--ws-primary, #93c5fd); background: rgba(0,0,0,.06); }
+        .msgr-quote b { display: block; font-size: 11px; opacity: .85; margin-bottom: 1px; }
+        .msgr-quote span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .9; }
+        .msg-edited { font-size: 10px; opacity: .7; margin-left: 4px; font-style: italic; }
+        .msg-pin-mark { font-size: 11px; margin-right: 3px; opacity: .85; }
+        .mention { font-weight: 800; color: #93c5fd; }
+        .msg-sent .mention { color: #fde68a; }
+        .msg-recv .mention { color: var(--ws-primary, #93c5fd); }
+        #compose-context:not(.hidden) { display: flex; align-items: center; gap: 10px; padding: 8px 14px 0; font-size: 13px; }
+        #compose-context .cc-box { flex: 1; min-width: 0; border-left: 3px solid var(--ws-primary, #93c5fd); background: var(--ws-surface-2, rgba(255,255,255,.08)); border-radius: 6px; padding: 6px 10px; }
+        #compose-context .cc-box b { display: block; font-size: 11.5px; color: var(--ws-primary, #93c5fd); }
+        #compose-context .cc-box span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ws-text-2, #cbd5e1); }
+        #compose-context button { width: 30px; height: 30px; border-radius: 6px; border: 1px solid var(--ws-border, rgba(255,255,255,.14)); background: transparent; color: inherit; cursor: pointer; }
+        #mention-menu.hidden { display: none; }
+        #mention-menu { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 60; min-width: 240px; max-height: 220px; overflow-y: auto;
+            background: var(--ws-surface, rgba(15,23,42,.98)); border: 1px solid var(--ws-border, rgba(255,255,255,.18)); border-radius: 10px; padding: 4px; box-shadow: 0 15px 40px rgba(0,0,0,.4); }
+        #mention-menu button { display: flex; width: 100%; align-items: center; gap: 8px; border: 0; background: none; font: inherit; font-size: 13.5px; padding: 7px 8px; border-radius: 6px; cursor: pointer; text-align: left; color: inherit; }
+        #mention-menu button.active, #mention-menu button:hover { background: var(--ws-primary-soft, rgba(59,130,246,.2)); color: var(--ws-primary, #93c5fd); }
+        .mm-av { width: 24px; height: 24px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; color: #fff; overflow: hidden; flex: 0 0 auto; }
+        .mm-av img { width: 100%; height: 100%; object-fit: cover; }
+        #msgr-modal { position: fixed; inset: 0; z-index: 62; display: none; align-items: center; justify-content: center; padding: 16px; background: rgba(11,17,32,0.72); backdrop-filter: blur(10px); }
+        #msgr-modal.show { display: flex; }
+        #msgr-modal .card { width: 100%; max-width: 460px; max-height: 88vh; overflow-y: auto; border-radius: 18px; padding: 22px; background: var(--ws-surface, rgba(23,30,48,.98)); border: 1px solid var(--ws-border, rgba(255,255,255,.14)); color: var(--ws-text, #e2e8f0); box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+        #msgr-modal h3 { margin: 0 0 12px; font-size: 18px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+        #msgr-modal h3 .x { margin-left: auto; border: 0; background: none; color: inherit; font-size: 18px; cursor: pointer; opacity: .7; }
+        #msgr-modal label { display: block; font-size: 12px; font-weight: 700; margin: 12px 0 4px; color: var(--ws-text-2, #cbd5e1); }
+        #msgr-modal input[type=text], #msgr-modal textarea, #msgr-modal select { width: 100%; box-sizing: border-box; padding: 9px 11px; border-radius: 6px; font: inherit; font-size: 14px;
+            border: 1px solid var(--ws-border-2, rgba(255,255,255,.18)); background: var(--ws-surface-2, rgba(255,255,255,.08)); color: inherit; }
+        #msgr-modal .member-pick { max-height: 200px; overflow-y: auto; border: 1px solid var(--ws-border, rgba(255,255,255,.12)); border-radius: 8px; padding: 4px; }
+        #msgr-modal .member-pick label { display: flex; align-items: center; gap: 8px; margin: 0; padding: 6px 8px; border-radius: 6px; font-weight: 500; font-size: 13.5px; cursor: pointer; }
+        #msgr-modal .member-pick label:hover { background: var(--ws-surface-2, rgba(255,255,255,.06)); }
+        #msgr-modal .member-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--ws-border, rgba(255,255,255,.08)); font-size: 13.5px; }
+        #msgr-modal .member-row:last-child { border-bottom: 0; }
+        #msgr-modal .member-row .nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #msgr-modal .member-row .role { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--ws-text-muted, #94a3b8); }
+        #msgr-modal .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+        #msgr-modal .actions button { flex: 1; padding: 11px; border-radius: 10px; border: 1px solid var(--ws-border, rgba(255,255,255,.14)); background: var(--ws-surface-2, rgba(255,255,255,.08)); color: inherit; font: inherit; font-weight: 700; cursor: pointer; }
+        #msgr-modal .actions button.primary { background: var(--ws-primary, #3b82f6); color: #fff; border-color: transparent; }
+        #msgr-modal .actions button.danger { color: #fda4af; }
+        #msgr-modal .err { color: #fda4af; font-size: 13px; margin-top: 8px; display: none; }
+        #msgr-modal .small-btn { border: 1px solid var(--ws-border, rgba(255,255,255,.14)); background: transparent; color: inherit; border-radius: 6px; padding: 4px 8px; font-size: 12px; cursor: pointer; }
+        .pin-list .search-hit { padding: 8px; }
+        @media (max-width: 768px) {
+            .chat-back { display: inline-flex; }
+            .contacts-panel.mobile-open ~ .chat-panel { display: none; }
+        }
         @keyframes attach-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.4 } }
     </style>
 
     <script src="/ui/shell.js"></script>
-    <script>WSShell.mount({ active: 'chat', crumb: 'Chat & Calls', pageClass: 'fill',
+    <script>WSShell.mount({ active: 'chat', crumb: 'Messenger', pageClass: 'fill',
         tools: '<button id="show-history-btn" type="button" class="ws-btn sm hidden" title="Call history"><span class="ic ic-clock"></span><span>Calls</span></button>' +
                '<button type="button" class="ws-btn sm" title="Chat and call rules" onclick="var f=document.getElementById(\'ws-rules-fab\'); if (f) f.click();"><span class="ic ic-shield"></span><span>Rules</span></button>' });</script>
     <script>
@@ -977,6 +1087,19 @@
         let presenceOnline = new Set();       // Realtime channel members (in chat right now)
         let lastSeenById = new Map();         // Map<userId, ISO string> from profiles.last_seen_at
         let lastSeenPollTimer = null;
+        // ---- Messenger state (groups, replies, edits, pins, search, mentions) ----
+        let messengerReady = null;          // null = unknown, true/false after probing the conversations table
+        let activeGroup = null;             // the open conversation row, or null when a DM is open
+        let groups = [];                    // my conversations: { ...conversation, member: { role, last_read_at, muted } }
+        let groupMembers = new Map();       // conversationId -> [{ user_id, role }]
+        let groupUnread = new Map();        // conversationId -> unread count
+        let lastMsgByGroup = new Map();     // conversationId -> { body, created_at, mine, sender_id }
+        let loadedMsgs = new Map();         // messageId -> message row in the open thread (replies, pins, search, dedupe)
+        let replyTo = null;                 // message being replied to
+        let editing = null;                 // message being edited
+        let pinnedMsgs = [];                // pinned messages of the open thread
+        let mentionState = null;            // { start, items, active } while the @ picker is open
+        let searchSeq = 0;
         // A user counts as online if they're in Realtime presence OR their last_seen is fresh (60s)
         function isOnline(userId) {
             if (presenceOnline.has(userId)) return true;
@@ -1076,7 +1199,7 @@
             document.getElementById('auth-modal').classList.add('hidden');
             document.getElementById('auth-modal').classList.remove('flex');
             document.getElementById('app').classList.remove('hidden');
-            loadContacts().then(() => handleUrlHash());
+            loadContacts().then(async () => { await loadGroups(); handleUrlHash(); syncMobilePanels(); });
             loadTeamStatus();
             // A day's status changes when leave is approved or midnight passes;
             // a quarter-hourly refresh is plenty and costs one small request.
@@ -1096,10 +1219,14 @@
             const params = new URLSearchParams(h);
             const threadId = params.get('thread');
             const answerFrom = params.get('answer');
+            const groupId = params.get('group');
             const focusId = answerFrom || threadId;
             if (focusId) {
                 const contact = allContacts.find(c => c.id === focusId);
                 if (contact) selectContact(focusId);
+            } else if (groupId) {
+                if (groups.some(g => g.id === groupId)) selectGroup(groupId);
+                else loadGroups().then(() => { if (groups.some(g => g.id === groupId)) selectGroup(groupId); });
             }
             if (answerFrom) {
                 autoAcceptFrom = answerFrom;
@@ -1154,7 +1281,7 @@
 
         // ---------- Contacts ----------
         async function loadContacts() {
-            const { data, error } = await sb.from('profiles').select('id, email, full_name, avatar_url, last_seen_at').order('full_name');
+            const { data, error } = await sb.from('profiles').select('id, email, full_name, avatar_url, last_seen_at, company').order('full_name');
             if (error) {
                 console.error('Load contacts failed:', error);
                 document.getElementById('contacts-list').innerHTML = `<p class="text-center text-rose-300 text-xs font-bold py-8 px-3">Could not load contacts.<br><br>If you're an admin, run <code class="bg-white/10 px-1 rounded">supabase-profiles-fix.sql</code> in your Supabase project.</p>`;
@@ -1184,6 +1311,18 @@
                     }
                 });
             } catch (e) { console.warn('seed lastMsgByUser failed', e); }
+            // Unread DMs survive a refresh: count what is still unread per sender.
+            try {
+                const { data: unread } = await sb.from('messages')
+                    .select('sender_id, body')
+                    .eq('recipient_id', currentUser.id)
+                    .is('read_at', null)
+                    .limit(2000);
+                (unread || []).forEach(m => {
+                    if (m.body === '__DELETED__' || (typeof m.body === 'string' && m.body.startsWith('__CALL__::'))) return;
+                    unreadByUser.set(m.sender_id, (unreadByUser.get(m.sender_id) || 0) + 1);
+                });
+            } catch (e) { console.warn('seed unread failed', e); }
             renderContacts();
         }
 
@@ -1428,8 +1567,10 @@
                 (c.full_name || '').toLowerCase().includes(search) ||
                 (c.email || '').toLowerCase().includes(search)
             );
+            const groupsHtml = groupsSectionHtml(search);
             if (filtered.length === 0) {
-                list.innerHTML = '<p class="text-center text-slate-400 text-sm font-bold py-8">No employees yet</p>';
+                list.innerHTML = groupsHtml + '<p class="text-center text-slate-400 text-sm font-bold py-8">No employees yet</p>';
+                bindGroupRows(list);
                 return;
             }
             // Sort by (has-unread desc, last-message time desc, name asc)
@@ -1445,7 +1586,7 @@
             // Split into online / offline groups
             const online  = sorted.filter(c => isOnline(c.id));
             const offline = sorted.filter(c => !isOnline(c.id));
-            let html = '';
+            let html = groupsHtml;
             if (online.length) {
                 html += `<div class="contacts-section-head"><span class="lbl">Online now</span><span class="cnt">${online.length}</span></div>`;
                 html += online.map(contactRowHtml).join('');
@@ -1455,22 +1596,26 @@
                 html += offline.map(contactRowHtml).join('');
             }
             list.innerHTML = html;
-            list.querySelectorAll('.contact').forEach(el => {
+            list.querySelectorAll('.contact[data-id]').forEach(el => {
                 el.addEventListener('click', () => selectContact(el.dataset.id));
             });
+            bindGroupRows(list);
         }
 
         async function selectContact(id) {
             activeContact = allContacts.find(c => c.id === id);
             if (!activeContact) return;
+            activeGroup = null;
             unreadByUser.delete(id);
+            resetComposeContext();
+            setThreadMode('dm');
             renderContacts();
 
             document.getElementById('chat-empty').classList.add('hidden');
             document.getElementById('chat-active').classList.remove('hidden');
             document.getElementById('chat-active').classList.add('flex');
             const name = activeContact.full_name || activeContact.email;
-            document.getElementById('chat-name').innerText = name;
+            setChatName(name);
             const online = isOnline(id);
             const status = document.getElementById('chat-status');
             status.innerText = online ? 'online' : formatLastSeen(lastSeenById.get(id));
@@ -1508,8 +1653,10 @@
                 .limit(200);
             if (error) { console.error(error); list.innerHTML = ''; return; }
             list.innerHTML = '';
+            loadedMsgs.clear();
             (data || []).forEach(renderMessage);
             list.scrollTop = list.scrollHeight;
+            loadPinned();
 
             // Mark unread messages FROM this peer as read
             const unreadIds = (data || []).filter(m => m.sender_id === peerId && !m.read_at).map(m => m.id);
@@ -1649,10 +1796,19 @@
         }
 
         function renderMessage(m) {
-            if (!activeContact) return;
+            if (!activeContact && !activeGroup) return;
             const mine = m.sender_id === currentUser.id;
-            const other = mine ? m.recipient_id : m.sender_id;
-            if (other !== activeContact.id) return;
+            if (m.conversation_id) {
+                if (!activeGroup || m.conversation_id !== activeGroup.id) return;
+            } else {
+                if (!activeContact) return;
+                const other = mine ? m.recipient_id : m.sender_id;
+                if (other !== activeContact.id) return;
+            }
+            if (m.id) {
+                if (loadedMsgs.has(m.id) && document.querySelector(`[data-msg-id="${m.id}"]`)) return;   // already on screen
+                loadedMsgs.set(m.id, m);
+            }
             const list = document.getElementById('msg-list');
 
             // Call event log — rendered as centered pill, not a bubble
@@ -1679,10 +1835,11 @@
             const row = document.createElement('div');
             row.className = `msg-row ${mine ? 'mine' : 'theirs'} last-of-burst`
                 + (isConsec ? ' consec' : ' first-of-burst');
+            if (m.id) row.dataset.rowFor = m.id;
 
             // Show sender name once at the top of an incoming-message burst
             if (!mine && !isConsec) {
-                const contact = allContacts.find(c => c.id === m.sender_id) || activeContact;
+                const contact = allContacts.find(c => c.id === m.sender_id) || (activeContact && activeContact.id === m.sender_id ? activeContact : null);
                 const senderName = contact ? (contact.full_name || contact.email) : 'Someone';
                 const nameEl = document.createElement('div');
                 nameEl.className = 'msg-sender-name';
@@ -1720,12 +1877,17 @@
                     body = '<i style="opacity:0.7">📎 Attachment</i>';
                 }
             } else {
-                body = linkify(escapeHtml(m.body)).replace(/\n/g, '<br>');
+                body = highlightMentions(linkify(escapeHtml(m.body))).replace(/\n/g, '<br>');
             }
             if (isDeleted) bubble.dataset.deleted = '1';
+            bubble.title = fmtFullDateTime(m.created_at);
 
             // Time + receipt floated inline at end so short messages have them beside text
-            bubble.innerHTML = `<span class="msg-body">${body}<span class="msg-meta">${time}${receipt}</span></span>`;
+            const editedMark = m.edited_at && !isDeleted ? '<span class="msg-edited">(edited)</span>' : '';
+            const pinMark = m.pinned_at && !isDeleted ? '<span class="msg-pin-mark" title="Pinned">📌</span>' : '';
+            bubble.innerHTML = `${quoteHtml(m)}<span class="msg-body">${pinMark}${body}<span class="msg-meta">${editedMark}${time}${receipt}</span></span>`;
+            const q = bubble.querySelector('.msgr-quote');
+            if (q) q.addEventListener('click', (e) => { e.stopPropagation(); scrollToMessage(q.dataset.target); });
 
             // Hydrate attachments with a signed URL (private bucket)
             if (isFile) {
@@ -1844,7 +2006,14 @@
             const reactBtn = menu.querySelector('[data-action="react"]');
             reactBtn.classList.toggle('hidden', isDeleted);
             const copyBtn = menu.querySelector('[data-action="copy"]');
-            copyBtn.classList.toggle('hidden', isDeleted || (typeof m.body === 'string' && (m.body.startsWith('__CALL__::') || m.body.startsWith('__FILE__::'))));
+            const special = typeof m.body === 'string' && (m.body.startsWith('__CALL__::') || m.body.startsWith('__FILE__::'));
+            copyBtn.classList.toggle('hidden', isDeleted || special);
+            const canMessenger = messengerReady === true && !!m.id;
+            menu.querySelector('[data-action="reply"]').classList.toggle('hidden', !canMessenger || isDeleted);
+            menu.querySelector('[data-action="edit"]').classList.toggle('hidden', !canMessenger || !mine || isDeleted || special);
+            const pinBtn = menu.querySelector('[data-action="pin"]');
+            pinBtn.classList.toggle('hidden', !canMessenger || isDeleted);
+            pinBtn.textContent = m.pinned_at ? '📌 Unpin' : '📌 Pin';
             // Position with clamp so it doesn't overflow
             menu.classList.remove('hidden');
             const w = 200, h = 140;
@@ -1870,6 +2039,12 @@
             closeMessageMenu();
             if (action === 'copy') {
                 try { await navigator.clipboard.writeText(m.body || ''); showToast('📋', 'Copied', 'Message copied to clipboard'); } catch {}
+            } else if (action === 'reply') {
+                startReply(m);
+            } else if (action === 'edit') {
+                startEdit(m);
+            } else if (action === 'pin') {
+                togglePin(m);
             } else if (action === 'react') {
                 const bubbleEl = document.querySelector(`[data-msg-id="${m.id}"]`);
                 if (bubbleEl) openEmojiPicker(m.id, bubbleEl);
@@ -1950,6 +2125,7 @@
             m.classList.add('hidden'); m.classList.remove('flex');
         });
         document.getElementById('chat-header-clickable').addEventListener('click', () => {
+            if (activeGroup) return openGroupInfo();
             if (activeContact) openProfileModal(activeContact);
         });
         document.getElementById('profile-voice').addEventListener('click', () => {
@@ -1965,51 +2141,89 @@
 
         document.getElementById('msg-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            if (!activeContact) return;
+            if (!activeContact && !activeGroup) return;
             const input = document.getElementById('msg-input');
             const body = input.value.trim();
             if (!body) return;
+            closeMentionMenu();
+
+            // Edit mode: change the text of one of my own messages.
+            if (editing) {
+                const target = editing;
+                resetComposeContext();
+                input.value = '';
+                if (body === target.body) return;
+                const { error } = await sb.from('messages').update({ body }).eq('id', target.id);
+                if (error) { showToast('❌', 'Could not edit', error.message); input.value = body; return; }
+                applyMessageUpdate({ ...target, body, edited_at: new Date().toISOString() });
+                return;
+            }
+
             input.value = '';
-            const msg = {
-                sender_id: currentUser.id,
-                recipient_id: activeContact.id,
-                body,
-                created_at: new Date().toISOString()
-            };
-            renderMessage(msg);  // optimistic
-            // Update contact-list preview for this thread
-            lastMsgByUser.set(activeContact.id, { body, created_at: msg.created_at, mine: true });
-            renderContacts();
-            const { error } = await sb.from('messages').insert({
-                sender_id: currentUser.id,
-                recipient_id: activeContact.id,
-                body
-            });
+            const mentions = mentionIdsIn(body);
+            const row = { sender_id: currentUser.id, body };
+            if (activeGroup) row.conversation_id = activeGroup.id; else row.recipient_id = activeContact.id;
+            if (messengerReady === true) {
+                if (replyTo) row.reply_to_id = replyTo.id;
+                if (mentions.length) row.mentions = mentions;
+            }
+            const replied = replyTo;
+            resetComposeContext();
+
+            // Before the messenger migration the reply/mention columns do not exist; fall back to the plain insert.
+            let { data: saved, error } = await sb.from('messages').insert(row).select('*').single();
+            if (error && String(error.code) === '42703' && (row.reply_to_id || row.mentions)) {
+                delete row.reply_to_id; delete row.mentions;
+                ({ data: saved, error } = await sb.from('messages').insert(row).select('*').single());
+            }
             if (error) {
                 console.error(error);
                 showToast('❌', 'Could not send', error.message);
-            } else if (window.WSPush) {
-                // Background push — reaches them even if their page is closed
-                WSPush.notify(sb, {
-                    to: activeContact.id,
-                    title: '💬 ' + currentUserName,
-                    body: body.slice(0, 140),
-                    url: '/chat/#thread=' + currentUser.id,
-                    tag: 'msg-' + currentUser.id
-                });
+                input.value = body;
+                if (replied) startReply(replied);
+                return;
+            }
+            const msg = saved || { ...row, created_at: new Date().toISOString() };
+            renderMessage(msg);
+            if (activeGroup) {
+                lastMsgByGroup.set(activeGroup.id, { body, created_at: msg.created_at, mine: true, sender_id: currentUser.id });
+                touchGroupRead(activeGroup.id);
+                renderContacts();
+                if (window.WSPush) {
+                    const others = (groupMembers.get(activeGroup.id) || []).map(x => x.user_id).filter(id => id !== currentUser.id);
+                    others.forEach(to => WSPush.notify(sb, {
+                        to, title: '💬 ' + activeGroup.name + ' · ' + currentUserName,
+                        body: body.slice(0, 140), url: '/chat/#group=' + activeGroup.id, tag: 'grp-' + activeGroup.id
+                    }));
+                }
+            } else {
+                lastMsgByUser.set(activeContact.id, { body, created_at: msg.created_at, mine: true });
+                renderContacts();
+                if (window.WSPush) {
+                    // Background push — reaches them even if their page is closed
+                    WSPush.notify(sb, {
+                        to: activeContact.id,
+                        title: '💬 ' + currentUserName,
+                        body: body.slice(0, 140),
+                        url: '/chat/#thread=' + currentUser.id,
+                        tag: 'msg-' + currentUser.id
+                    });
+                }
             }
         });
 
         // ---------- Attachments: photos & files ----------
         const MAX_FILE_MB = 25;
         document.getElementById('attach-btn').addEventListener('click', () => {
-            if (!activeContact) return showToast('💬', 'Pick a chat first', 'Open a conversation, then attach files.');
+            if (!activeContact && !activeGroup) return showToast('💬', 'Pick a chat first', 'Open a conversation, then attach files.');
             document.getElementById('file-input').click();
         });
         document.getElementById('file-input').addEventListener('change', async (e) => {
             const files = Array.from(e.target.files || []).slice(0, 5);
             e.target.value = '';
-            if (!files.length || !activeContact) return;
+            if (!files.length || (!activeContact && !activeGroup)) return;
+            const target = activeGroup ? { conversation_id: activeGroup.id } : { recipient_id: activeContact.id };
+            const targetGroup = activeGroup, targetContact = activeContact;
             const btn = document.getElementById('attach-btn');
             btn.classList.add('uploading');
             for (const file of files) {
@@ -2024,20 +2238,29 @@
                         .upload(path, file, { contentType: file.type || 'application/octet-stream' });
                     if (upErr) throw upErr;
                     const body = `__FILE__::${path}::${file.type || 'application/octet-stream'}::${file.size}::${file.name}`;
-                    const msg = { sender_id: currentUser.id, recipient_id: activeContact.id, body, created_at: new Date().toISOString() };
-                    const { error: insErr } = await sb.from('messages').insert({ sender_id: currentUser.id, recipient_id: activeContact.id, body });
+                    const { data: saved, error: insErr } = await sb.from('messages').insert({ sender_id: currentUser.id, ...target, body }).select('*').single();
                     if (insErr) throw insErr;
-                    renderMessage(msg); // optimistic
-                    lastMsgByUser.set(activeContact.id, { body, created_at: msg.created_at, mine: true });
-                    renderContacts();
-                    if (window.WSPush) {
-                        WSPush.notify(sb, {
-                            to: activeContact.id,
-                            title: '💬 ' + currentUserName,
-                            body: file.type.startsWith('image/') ? '🖼️ Sent you a photo' : '📎 Sent a file: ' + file.name.slice(0, 80),
-                            url: '/chat/#thread=' + currentUser.id,
-                            tag: 'msg-' + currentUser.id
-                        });
+                    const msg = saved || { sender_id: currentUser.id, ...target, body, created_at: new Date().toISOString() };
+                    renderMessage(msg);
+                    const pushBody = file.type.startsWith('image/') ? '🖼️ Sent you a photo' : '📎 Sent a file: ' + file.name.slice(0, 80);
+                    if (targetGroup) {
+                        lastMsgByGroup.set(targetGroup.id, { body, created_at: msg.created_at, mine: true, sender_id: currentUser.id });
+                        touchGroupRead(targetGroup.id);
+                        renderContacts();
+                        if (window.WSPush) (groupMembers.get(targetGroup.id) || []).map(x => x.user_id).filter(id => id !== currentUser.id)
+                            .forEach(to => WSPush.notify(sb, { to, title: '💬 ' + targetGroup.name + ' · ' + currentUserName, body: pushBody, url: '/chat/#group=' + targetGroup.id, tag: 'grp-' + targetGroup.id }));
+                    } else {
+                        lastMsgByUser.set(targetContact.id, { body, created_at: msg.created_at, mine: true });
+                        renderContacts();
+                        if (window.WSPush) {
+                            WSPush.notify(sb, {
+                                to: targetContact.id,
+                                title: '💬 ' + currentUserName,
+                                body: pushBody,
+                                url: '/chat/#thread=' + currentUser.id,
+                                tag: 'msg-' + currentUser.id
+                            });
+                        }
                     }
                 } catch (err) {
                     console.error('attachment failed', err);
@@ -2120,24 +2343,21 @@
                         if (el && m.read_at) { el.className = 'receipt receipt-read'; el.innerText = '✓✓'; }
                     })
                 .on('postgres_changes',
-                    // Messages I received that got updated (delete, edit) → refresh bubble
+                    // Messages I received that got updated (delete, edit, pin) → refresh bubble
                     { event: 'UPDATE', schema: 'public', table: 'messages', filter: `recipient_id=eq.${currentUser.id}` },
-                    (payload) => {
-                        const m = payload.new;
-                        if (m.body === '__DELETED__') {
-                            const bubble = document.querySelector(`[data-msg-id="${m.id}"]`);
-                            if (bubble) {
-                                bubble.dataset.deleted = '1';
-                                const bodyEl = bubble.querySelector('.msg-body');
-                                if (bodyEl) bodyEl.innerHTML = '<i style="opacity:0.7">🗑️ This message was deleted</i><span class="msg-meta">' + fmtTime(m.created_at) + '</span>';
-                                const wrap = bubble.closest('.msg-wrap');
-                                if (wrap) {
-                                    wrap.querySelector('.react-btn')?.remove();
-                                    wrap.querySelector('.msg-reactions')?.remove();
-                                }
-                            }
-                        }
-                    })
+                    (payload) => { applyMessageUpdate(payload.new); })
+                .on('postgres_changes',
+                    // Group messages: no filter (RLS only delivers rows I may read). DM rows are
+                    // ignored here — the filtered listeners above already handle them.
+                    { event: 'INSERT', schema: 'public', table: 'messages' },
+                    (payload) => { const m = payload.new; if (m && m.conversation_id) onGroupMessage(m); })
+                .on('postgres_changes',
+                    { event: 'UPDATE', schema: 'public', table: 'messages' },
+                    (payload) => { const m = payload.new; if (m && m.conversation_id) applyMessageUpdate(m); })
+                .on('postgres_changes',
+                    // Added to / removed from a group, or my read marker changed elsewhere
+                    { event: '*', schema: 'public', table: 'conversation_members', filter: `user_id=eq.${currentUser.id}` },
+                    () => { if (messengerReady !== false) loadGroups(); })
                 .on('postgres_changes',
                     // Reactions inserted or removed
                     { event: '*', schema: 'public', table: 'message_reactions' },
@@ -2190,11 +2410,634 @@
 
         // Typing indicator on message input
         document.getElementById('msg-input').addEventListener('input', () => {
+            updateMentionMenu();
             if (!activeContact) return;
             clearTimeout(typingTimer);
             broadcastTyping();
             typingTimer = setTimeout(() => {}, 1500);
         });
+
+
+        // ============================================================
+        // Messenger: groups, replies, edits, pins, search, mentions
+        // ============================================================
+        const el = (id) => document.getElementById(id);
+        const isSchemaMissing = (err) => !!err && ['42P01', 'PGRST205', '42703'].includes(String(err.code));
+        function fmtFullDateTime(iso) {
+            try { return new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }); }
+            catch { return ''; }
+        }
+        function nameOf(userId) {
+            if (userId === currentUser?.id) return 'You';
+            const c = allContacts.find(x => x.id === userId);
+            return c ? (c.full_name || c.email) : 'Someone';
+        }
+        function fullNameOf(userId) {
+            if (userId === currentUser?.id) return currentUserName;
+            const c = allContacts.find(x => x.id === userId);
+            return c ? (c.full_name || c.email) : '';
+        }
+        function avatarHtml(userId, size) {
+            const c = userId === currentUser?.id ? { full_name: currentUserName, avatar_url: currentUser.user_metadata?.avatar_url } : allContacts.find(x => x.id === userId);
+            const name = c ? (c.full_name || c.email || '?') : '?';
+            const inner = c && c.avatar_url ? `<img src="${escapeHtml(c.avatar_url)}" alt="">` : escapeHtml(name.charAt(0).toUpperCase());
+            return `<span class="mm-av" style="background:${pickColor(name)};${size ? `width:${size}px;height:${size}px;` : ''}" title="${escapeHtml(name)}">${inner}</span>`;
+        }
+
+        // ---------- thread mode / mobile ----------
+        function setChatName(text) {
+            // The heading also hosts the member-avatar strip; keep that node when the name changes.
+            const hd = el('chat-name'), av = el('chat-member-avatars');
+            hd.textContent = '';
+            hd.appendChild(document.createTextNode(text));
+            if (av) hd.appendChild(av);
+        }
+        function setThreadMode(mode) {
+            const group = mode === 'group';
+            el('call-audio-btn').classList.toggle('hidden', group);
+            el('call-video-btn').classList.toggle('hidden', group);
+            el('clear-chat-btn').classList.toggle('hidden', group);
+            el('group-info-btn').classList.toggle('hidden', !group);
+            el('chat-member-avatars').classList.toggle('hidden', !group);
+            el('chat-header-clickable').title = group ? 'Group info' : 'View profile';
+            el('pinned-bar').classList.add('hidden');
+            closeSearch();
+            pinnedMsgs = [];
+            const panel = document.querySelector('.contacts-panel');
+            if (panel) panel.classList.remove('mobile-open');
+        }
+        function syncMobilePanels() {
+            const panel = document.querySelector('.contacts-panel');
+            if (!panel) return;
+            const mobile = window.matchMedia('(max-width: 768px)').matches;
+            if (!mobile) { panel.classList.remove('mobile-open'); return; }
+            if (!activeContact && !activeGroup) panel.classList.add('mobile-open');
+        }
+        el('chat-back').addEventListener('click', () => {
+            const panel = document.querySelector('.contacts-panel');
+            if (panel) panel.classList.add('mobile-open');
+        });
+
+        // ---------- groups: load + list ----------
+        async function loadGroups() {
+            if (messengerReady === false) return;
+            try {
+                const { data, error } = await sb.from('conversation_members')
+                    .select('conversation_id, role, last_read_at, muted, conversation:conversations(*)')
+                    .eq('user_id', currentUser.id);
+                if (error) {
+                    if (isSchemaMissing(error)) { messengerReady = false; el('new-group-btn').classList.add('hidden'); return; }
+                    throw error;
+                }
+                messengerReady = true;
+                el('new-group-btn').classList.remove('hidden');
+                groups = (data || [])
+                    .filter(r => r.conversation && !r.conversation.archived_at)
+                    .map(r => ({ ...r.conversation, member: { role: r.role, last_read_at: r.last_read_at, muted: r.muted } }));
+                const ids = groups.map(g => g.id);
+                groupMembers = new Map(); groupUnread = new Map(); lastMsgByGroup = new Map();
+                if (ids.length) {
+                    const [mem, msgs] = await Promise.all([
+                        sb.from('conversation_members').select('conversation_id, user_id, role').in('conversation_id', ids),
+                        sb.from('messages').select('id, conversation_id, sender_id, body, created_at, deleted_at')
+                            .in('conversation_id', ids).order('created_at', { ascending: false }).limit(400),
+                    ]);
+                    (mem.data || []).forEach(r => {
+                        if (!groupMembers.has(r.conversation_id)) groupMembers.set(r.conversation_id, []);
+                        groupMembers.get(r.conversation_id).push(r);
+                    });
+                    const lastRead = new Map(groups.map(g => [g.id, g.member.last_read_at ? new Date(g.member.last_read_at).getTime() : 0]));
+                    (msgs.data || []).forEach(m => {
+                        if (!lastMsgByGroup.has(m.conversation_id) && m.body !== '__DELETED__') {
+                            lastMsgByGroup.set(m.conversation_id, { body: m.body, created_at: m.created_at, mine: m.sender_id === currentUser.id, sender_id: m.sender_id });
+                        }
+                        if (m.sender_id !== currentUser.id && !m.deleted_at && m.body !== '__DELETED__'
+                            && new Date(m.created_at).getTime() > (lastRead.get(m.conversation_id) || 0)) {
+                            groupUnread.set(m.conversation_id, (groupUnread.get(m.conversation_id) || 0) + 1);
+                        }
+                    });
+                }
+                if (activeGroup) {
+                    const fresh = groups.find(g => g.id === activeGroup.id);
+                    if (fresh) { activeGroup = fresh; paintGroupHeader(); } else { closeGroupThread(); }
+                }
+                renderContacts();
+            } catch (e) { console.warn('[messenger] groups', e); }
+        }
+        function groupsSectionHtml(search) {
+            if (messengerReady !== true) return '';
+            const q = (search || '').toLowerCase();
+            const list = groups.filter(g => !q || (g.name || '').toLowerCase().includes(q))
+                .sort((a, b) => {
+                    const ua = (groupUnread.get(a.id) || 0) > 0 ? 1 : 0, ub = (groupUnread.get(b.id) || 0) > 0 ? 1 : 0;
+                    if (ua !== ub) return ub - ua;
+                    const ta = lastMsgByGroup.get(a.id)?.created_at || a.created_at || '', tb = lastMsgByGroup.get(b.id)?.created_at || b.created_at || '';
+                    return ta < tb ? 1 : ta > tb ? -1 : 0;
+                });
+            let html = `<div class="contacts-section-head"><span class="lbl">Groups</span><span class="cnt" style="background:rgba(255,255,255,.08);color:#94a3b8;">${list.length}</span></div>`;
+            if (!list.length) {
+                html += `<p class="text-center text-slate-400 text-xs font-semibold py-3 px-3">${q ? 'No groups match' : 'No groups yet — tap + to start one'}</p>`;
+                return html;
+            }
+            html += list.map(g => {
+                const unread = groupUnread.get(g.id) || 0;
+                const last = lastMsgByGroup.get(g.id);
+                const preview = last ? `${last.mine ? '<span class="mine-prefix">You:</span>' : `<span class="mine-prefix">${escapeHtml(nameOf(last.sender_id).split(' ')[0])}:</span>`}${escapeHtml(previewText(last))}` : escapeHtml(g.description || `${(groupMembers.get(g.id) || []).length} members`);
+                const initials = (g.name || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+                return `<div class="contact group-row ${activeGroup?.id === g.id ? 'active' : ''} ${unread > 0 ? 'has-unread' : ''} ${g.member.muted ? 'muted-row' : ''}" data-group="${g.id}" role="button" tabindex="0">
+                    <div class="contact-avatar group-avatar">${escapeHtml(initials)}</div>
+                    <div class="contact-body">
+                        <div class="contact-top-row"><span class="contact-name">${escapeHtml(g.name)}${g.member.muted ? '<span class="muted-ic" title="Muted">🔕</span>' : ''}</span><span class="contact-time">${last ? fmtRelativeTime(last.created_at) : ''}</span></div>
+                        <div class="contact-bottom-row"><span class="contact-preview">${preview}</span>${unread > 0 && !g.member.muted ? `<div class="unread-badge">${unread}</div>` : ''}</div>
+                    </div></div>`;
+            }).join('');
+            return html;
+        }
+        function bindGroupRows(list) {
+            list.querySelectorAll('.group-row').forEach(row => {
+                row.addEventListener('click', () => selectGroup(row.dataset.group));
+                row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectGroup(row.dataset.group); } });
+            });
+        }
+
+        // ---------- groups: open a thread ----------
+        function paintGroupHeader() {
+            if (!activeGroup) return;
+            const members = groupMembers.get(activeGroup.id) || [];
+            setChatName(activeGroup.name);
+            el('chat-member-avatars').innerHTML = members.slice(0, 5).map(m => avatarHtml(m.user_id)).join('') + (members.length > 5 ? `<span style="background:#475569">+${members.length - 5}</span>` : '');
+            const status = el('chat-status');
+            status.textContent = `${members.length} member${members.length === 1 ? '' : 's'}${activeGroup.description ? ' · ' + activeGroup.description : ''} · tap for info`;
+            status.className = 'text-xs text-slate-400 font-semibold';
+            el('chat-presence-dot').className = 'presence-dot';
+            const avatar = el('chat-avatar');
+            avatar.innerHTML = escapeHtml((activeGroup.name || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase());
+            avatar.style.background = 'var(--ws-primary, #2158a0)';
+            avatar.appendChild(el('chat-presence-dot'));
+        }
+        async function selectGroup(id) {
+            const g = groups.find(x => x.id === id);
+            if (!g) return;
+            activeGroup = g;
+            activeContact = null;
+            resetComposeContext();
+            setThreadMode('group');
+            groupUnread.delete(id);
+            renderContacts();
+            el('chat-empty').classList.add('hidden');
+            el('chat-active').classList.remove('hidden');
+            el('chat-active').classList.add('flex');
+            paintGroupHeader();
+            lastRenderedDay = null; lastMsgSenderInThread = null; lastMsgTimeInThread = 0;
+            await loadGroupMessages(id);
+            touchGroupRead(id);
+            el('msg-input').focus();
+        }
+        function closeGroupThread() {
+            activeGroup = null;
+            el('chat-active').classList.add('hidden'); el('chat-active').classList.remove('flex');
+            el('chat-empty').classList.remove('hidden');
+            syncMobilePanels();
+        }
+        async function loadGroupMessages(convId, upToIso) {
+            const list = el('msg-list');
+            list.innerHTML = '<p class="text-center text-slate-400 font-bold animate-pulse">Loading…</p>';
+            let q = sb.from('messages').select('*').eq('conversation_id', convId);
+            if (upToIso) q = q.lte('created_at', upToIso);
+            const { data, error } = await q.order('created_at', { ascending: false }).limit(200);
+            if (error) { console.error(error); list.innerHTML = '<p class="text-center text-rose-300 font-bold py-6">Could not load messages.</p>'; return; }
+            const rows = (data || []).reverse();
+            list.innerHTML = '';
+            loadedMsgs.clear();
+            rows.forEach(renderMessage);
+            list.scrollTop = list.scrollHeight;
+            loadPinned();
+            const ids = rows.map(m => m.id).filter(Boolean);
+            if (ids.length) loadReactionsBulk(ids);
+        }
+        async function touchGroupRead(convId) {
+            try {
+                await sb.from('conversation_members').update({ last_read_at: new Date().toISOString() }).eq('conversation_id', convId).eq('user_id', currentUser.id);
+                const g = groups.find(x => x.id === convId); if (g) g.member.last_read_at = new Date().toISOString();
+                if (window.WSShell && WSShell.refreshUnread) WSShell.refreshUnread();
+            } catch {}
+        }
+        function onGroupMessage(m) {
+            if (loadedMsgs.has(m.id)) return;                       // my own send already rendered
+            if (!groups.some(g => g.id === m.conversation_id)) { loadGroups(); return; }
+            lastMsgByGroup.set(m.conversation_id, { body: m.body, created_at: m.created_at, mine: m.sender_id === currentUser.id, sender_id: m.sender_id });
+            if (activeGroup && activeGroup.id === m.conversation_id) {
+                renderMessage(m);
+                if (m.sender_id !== currentUser.id) touchGroupRead(m.conversation_id);
+                renderContacts();
+                return;
+            }
+            if (m.sender_id !== currentUser.id) {
+                groupUnread.set(m.conversation_id, (groupUnread.get(m.conversation_id) || 0) + 1);
+                const g = groups.find(x => x.id === m.conversation_id);
+                if (g && !g.member.muted) {
+                    const title = `${g.name} · ${nameOf(m.sender_id)}`;
+                    showToast('👥', title, previewText(m));
+                    notify(title, previewText(m));
+                }
+            }
+            renderContacts();
+        }
+
+        // ---------- updates: edit / delete / pin from anywhere ----------
+        function applyMessageUpdate(m) {
+            if (!m || !m.id) return;
+            const prev = loadedMsgs.get(m.id);
+            if (prev) loadedMsgs.set(m.id, { ...prev, ...m });
+            const bubble = document.querySelector(`[data-msg-id="${m.id}"]`);
+            if (m.read_at && bubble) {
+                const r = bubble.querySelector('.receipt');
+                if (r) { r.className = 'receipt receipt-read'; r.innerText = '✓✓'; }
+            }
+            if (m.body === '__DELETED__') {
+                if (bubble) {
+                    bubble.dataset.deleted = '1';
+                    const bodyEl = bubble.querySelector('.msg-body');
+                    if (bodyEl) bodyEl.innerHTML = '<i style="opacity:0.7">🗑️ This message was deleted</i><span class="msg-meta">' + fmtTime(m.created_at) + '</span>';
+                    bubble.querySelector('.msgr-quote')?.remove();
+                    const wrap = bubble.closest('.msg-wrap');
+                    if (wrap) { wrap.querySelector('.react-btn')?.remove(); wrap.querySelector('.msg-reactions')?.remove(); }
+                }
+                if (pinnedMsgs.some(p => p.id === m.id)) loadPinned();
+                return;
+            }
+            if (bubble && prev && (prev.body !== m.body || !!prev.pinned_at !== !!m.pinned_at || prev.edited_at !== m.edited_at)) {
+                const bodyEl = bubble.querySelector('.msg-body');
+                const mine = m.sender_id === currentUser.id;
+                const receipt = mine ? (m.read_at ? '<span class="receipt receipt-read">✓✓</span>' : '<span class="receipt receipt-sent">✓</span>') : '';
+                const isFile = typeof m.body === 'string' && m.body.startsWith('__FILE__::');
+                if (bodyEl && !isFile) {
+                    const editedMark = m.edited_at ? '<span class="msg-edited">(edited)</span>' : '';
+                    const pinMark = m.pinned_at ? '<span class="msg-pin-mark" title="Pinned">📌</span>' : '';
+                    bodyEl.innerHTML = `${pinMark}${highlightMentions(linkify(escapeHtml(m.body))).replace(/\n/g, '<br>')}<span class="msg-meta">${editedMark}${fmtTime(m.created_at)}${receipt}</span>`;
+                }
+            }
+            if (prev && !!prev.pinned_at !== !!m.pinned_at) loadPinned();
+        }
+
+        // ---------- reply / edit ----------
+        function resetComposeContext() {
+            replyTo = null; editing = null;
+            el('compose-context').classList.add('hidden');
+            closeMentionMenu();
+        }
+        function showComposeContext(title, text) {
+            el('cc-title').textContent = title;
+            el('cc-text').textContent = text;
+            el('compose-context').classList.remove('hidden');
+        }
+        function startReply(m) {
+            editing = null; replyTo = m;
+            showComposeContext(`Replying to ${nameOf(m.sender_id)}`, previewText(m) || 'Message');
+            el('msg-input').focus();
+        }
+        function startEdit(m) {
+            replyTo = null; editing = m;
+            showComposeContext('Editing message', 'Press Esc to cancel');
+            const input = el('msg-input');
+            input.value = m.body; input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+        }
+        el('cc-cancel').addEventListener('click', () => { const wasEdit = !!editing; resetComposeContext(); if (wasEdit) el('msg-input').value = ''; });
+        el('msg-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && (editing || replyTo)) { const wasEdit = !!editing; resetComposeContext(); if (wasEdit) el('msg-input').value = ''; }
+        });
+        function quoteHtml(m) {
+            if (!m.reply_to_id) return '';
+            const parent = loadedMsgs.get(m.reply_to_id);
+            const who = parent ? nameOf(parent.sender_id) : '…';
+            const txt = parent ? (previewText(parent) || 'Message') : 'Original message';
+            if (!parent) fetchParentForQuote(m.reply_to_id);
+            return `<span class="msgr-quote" data-target="${m.reply_to_id}" role="button" title="Jump to the original message"><b>${escapeHtml(who)}</b><span>${escapeHtml(txt)}</span></span>`;
+        }
+        const fetchingParents = new Set();
+        async function fetchParentForQuote(id) {
+            if (fetchingParents.has(id)) return;
+            fetchingParents.add(id);
+            try {
+                const { data } = await sb.from('messages').select('id, sender_id, body, created_at').eq('id', id).maybeSingle();
+                if (!data) return;
+                document.querySelectorAll(`.msgr-quote[data-target="${id}"]`).forEach(q => {
+                    q.querySelector('b').textContent = nameOf(data.sender_id);
+                    q.querySelector('span').textContent = previewText(data) || 'Message';
+                });
+            } catch {} finally { fetchingParents.delete(id); }
+        }
+        function scrollToMessage(id) {
+            const row = document.querySelector(`[data-row-for="${id}"]`);
+            if (!row) { showToast('🔎', 'Not loaded', 'That message is older than what is on screen. Use search to jump to it.'); return; }
+            row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            const b = row.querySelector('.msg-bubble');
+            if (b) { b.style.transition = 'box-shadow .2s'; b.style.boxShadow = '0 0 0 3px rgba(250,204,21,.7)'; setTimeout(() => { b.style.boxShadow = ''; }, 1400); }
+        }
+
+        // ---------- pins ----------
+        function threadFilter(q) {
+            if (activeGroup) return q.eq('conversation_id', activeGroup.id);
+            const me = currentUser.id, them = activeContact.id;
+            return q.or(`and(sender_id.eq.${me},recipient_id.eq.${them}),and(sender_id.eq.${them},recipient_id.eq.${me})`);
+        }
+        async function loadPinned() {
+            if (messengerReady !== true || (!activeContact && !activeGroup)) return;
+            try {
+                const { data, error } = await threadFilter(sb.from('messages').select('id, sender_id, body, created_at, pinned_at, pinned_by'))
+                    .not('pinned_at', 'is', null).neq('body', '__DELETED__').order('pinned_at', { ascending: false }).limit(20);
+                if (error) return;
+                pinnedMsgs = data || [];
+                const bar = el('pinned-bar');
+                if (!pinnedMsgs.length) { bar.classList.add('hidden'); return; }
+                const top = pinnedMsgs[0];
+                bar.querySelector('.pin-txt').innerHTML = `<b>${escapeHtml(nameOf(top.sender_id))}</b>${escapeHtml(previewText(top) || 'Message')}`;
+                bar.querySelector('.pin-count').textContent = pinnedMsgs.length === 1 ? 'Pinned' : `${pinnedMsgs.length} pinned`;
+                bar.classList.remove('hidden');
+            } catch {}
+        }
+        async function togglePin(m) {
+            const pin = !m.pinned_at;
+            const { error } = await sb.from('messages').update({ pinned_at: pin ? new Date().toISOString() : null }).eq('id', m.id);
+            if (error) { showToast('❌', pin ? 'Could not pin' : 'Could not unpin', error.message); return; }
+            applyMessageUpdate({ ...m, pinned_at: pin ? new Date().toISOString() : null });
+            showToast('📌', pin ? 'Pinned' : 'Unpinned', pin ? 'Everyone in this conversation sees it at the top.' : '');
+        }
+        function openPinnedList() {
+            if (!pinnedMsgs.length) return;
+            openMsgrModal(`<h3>📌 Pinned messages<button type="button" class="x" data-close aria-label="Close">✕</button></h3>
+                <div class="pin-list">${pinnedMsgs.map(p => `<div class="search-hit" data-jump="${p.id}" role="button" tabindex="0"><span class="who">${escapeHtml(nameOf(p.sender_id))}</span><span class="txt">${escapeHtml(previewText(p) || 'Message')}</span><span class="when">${escapeHtml(fmtRelativeTime(p.created_at))}</span></div>`).join('')}</div>`);
+            el('msgr-modal-card').querySelectorAll('[data-jump]').forEach(x => x.addEventListener('click', () => { closeMsgrModal(); scrollToMessage(x.dataset.jump); }));
+        }
+        el('pinned-bar').addEventListener('click', openPinnedList);
+        el('pinned-bar').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPinnedList(); } });
+
+        // ---------- search in thread ----------
+        function closeSearch() {
+            el('msg-search-bar').classList.add('hidden');
+            el('msg-search-btn').classList.remove('on');
+            el('msg-search-input').value = '';
+            el('msg-search-results').innerHTML = ''; el('msg-search-info').textContent = '';
+            document.querySelectorAll('#msg-list .msg-hidden').forEach(x => x.classList.remove('msg-hidden'));
+            document.querySelectorAll('#msg-list mark.hl').forEach(mk => mk.replaceWith(document.createTextNode(mk.textContent)));
+        }
+        el('msg-search-btn').addEventListener('click', () => {
+            if (!activeContact && !activeGroup) return;
+            const bar = el('msg-search-bar');
+            if (!bar.classList.contains('hidden')) return closeSearch();
+            bar.classList.remove('hidden'); el('msg-search-btn').classList.add('on');
+            el('msg-search-input').focus();
+        });
+        el('msg-search-close').addEventListener('click', closeSearch);
+        el('msg-search-input').addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSearch(); });
+        let searchTimer = null;
+        el('msg-search-input').addEventListener('input', () => {
+            const q = el('msg-search-input').value.trim();
+            filterLoadedMessages(q);
+            clearTimeout(searchTimer);
+            el('msg-search-results').innerHTML = '';
+            if (q.length >= 3) searchTimer = setTimeout(() => serverSearch(q), 300);
+            else el('msg-search-info').textContent = q ? 'Type at least 3 characters to search older messages' : '';
+        });
+        function filterLoadedMessages(q) {
+            const list = el('msg-list');
+            document.querySelectorAll('#msg-list mark.hl').forEach(mk => mk.replaceWith(document.createTextNode(mk.textContent)));
+            const rows = Array.from(list.querySelectorAll('.msg-row, .msg-sender-name, .call-event'));
+            if (!q) { rows.forEach(r => r.classList.remove('msg-hidden')); return; }
+            const lq = q.toLowerCase();
+            let shown = 0;
+            rows.forEach(r => {
+                if (!r.classList.contains('msg-row')) { r.classList.add('msg-hidden'); return; }
+                const m = loadedMsgs.get(r.dataset.rowFor);
+                const text = m && typeof m.body === 'string' && !m.body.startsWith('__') ? m.body : '';
+                const hit = text.toLowerCase().includes(lq);
+                r.classList.toggle('msg-hidden', !hit);
+                if (hit) { shown++; highlightIn(r.querySelector('.msg-body'), q); }
+            });
+            el('msg-search-info').textContent = `${shown} on screen`;
+        }
+        function highlightIn(node, q) {
+            if (!node) return;
+            const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+            const targets = [];
+            while (walker.nextNode()) { const t = walker.currentNode; if (t.parentElement.closest('.msg-meta')) continue; if (t.nodeValue.toLowerCase().includes(q.toLowerCase())) targets.push(t); }
+            targets.forEach(t => {
+                const idx = t.nodeValue.toLowerCase().indexOf(q.toLowerCase());
+                const before = t.nodeValue.slice(0, idx), match = t.nodeValue.slice(idx, idx + q.length), after = t.nodeValue.slice(idx + q.length);
+                const mk = document.createElement('mark'); mk.className = 'hl'; mk.textContent = match;
+                const frag = document.createDocumentFragment();
+                frag.append(document.createTextNode(before), mk, document.createTextNode(after));
+                t.replaceWith(frag);
+            });
+        }
+        async function serverSearch(q) {
+            if (!activeContact && !activeGroup) return;
+            const seq = ++searchSeq;
+            const safe = q.replace(/[%,()]/g, ' ').trim();
+            el('msg-search-info').textContent = 'Searching…';
+            try {
+                const { data, error } = await threadFilter(sb.from('messages').select('id, sender_id, body, created_at'))
+                    .ilike('body', `%${safe}%`).neq('body', '__DELETED__').order('created_at', { ascending: false }).limit(30);
+                if (seq !== searchSeq) return;
+                if (error) { el('msg-search-info').textContent = 'Search failed'; return; }
+                const hits = (data || []).filter(m => typeof m.body === 'string' && !m.body.startsWith('__'));
+                el('msg-search-info').textContent = hits.length ? `${hits.length} result${hits.length === 1 ? '' : 's'} in this conversation` : 'No results';
+                el('msg-search-results').innerHTML = hits.map(m => `<div class="search-hit" data-jump="${m.id}" data-at="${m.created_at}" role="button" tabindex="0"><span class="who">${escapeHtml(nameOf(m.sender_id))}</span><span class="txt">${escapeHtml(m.body.replace(/\s+/g, ' ').slice(0, 120))}</span><span class="when">${escapeHtml(fmtRelativeTime(m.created_at))}</span></div>`).join('');
+                el('msg-search-results').querySelectorAll('[data-jump]').forEach(x => {
+                    const go = async () => {
+                        const id = x.dataset.jump;
+                        if (!document.querySelector(`[data-row-for="${id}"]`)) {
+                            // Older than the loaded window: load the thread up to that moment.
+                            lastRenderedDay = null; lastMsgSenderInThread = null; lastMsgTimeInThread = 0;
+                            if (activeGroup) await loadGroupMessages(activeGroup.id, x.dataset.at);
+                            else await loadDmMessagesUpTo(activeContact.id, x.dataset.at);
+                        }
+                        setTimeout(() => scrollToMessage(id), 60);
+                    };
+                    x.addEventListener('click', go);
+                    x.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+                });
+            } catch { if (seq === searchSeq) el('msg-search-info').textContent = 'Search failed'; }
+        }
+        async function loadDmMessagesUpTo(peerId, upToIso) {
+            const list = el('msg-list');
+            const { data, error } = await sb.from('messages').select('*')
+                .or(`and(sender_id.eq.${currentUser.id},recipient_id.eq.${peerId}),and(sender_id.eq.${peerId},recipient_id.eq.${currentUser.id})`)
+                .lte('created_at', upToIso).order('created_at', { ascending: false }).limit(200);
+            if (error) return;
+            const rows = (data || []).reverse();
+            list.innerHTML = ''; loadedMsgs.clear();
+            rows.forEach(renderMessage);
+            const ids = rows.map(m => m.id).filter(Boolean);
+            if (ids.length) loadReactionsBulk(ids);
+            showToast('🕰️', 'Showing older messages', 'Reopen the conversation to return to the latest.');
+        }
+
+        // ---------- mentions ----------
+        function mentionCandidates() {
+            if (activeGroup) return (groupMembers.get(activeGroup.id) || []).map(m => m.user_id).filter(id => id !== currentUser.id).map(id => ({ id, name: fullNameOf(id) })).filter(x => x.name);
+            if (activeContact) return [{ id: activeContact.id, name: activeContact.full_name || activeContact.email }];
+            return [];
+        }
+        function closeMentionMenu() { mentionState = null; el('mention-menu').classList.add('hidden'); }
+        function updateMentionMenu() {
+            if (messengerReady !== true) return;
+            const input = el('msg-input');
+            const pos = input.selectionStart, text = input.value.slice(0, pos);
+            const at = text.lastIndexOf('@');
+            if (at < 0 || (at > 0 && !/\s/.test(text[at - 1]))) return closeMentionMenu();
+            const term = text.slice(at + 1);
+            if (term.length > 30 || /\s{2,}/.test(term)) return closeMentionMenu();
+            const items = mentionCandidates().filter(c => c.name.toLowerCase().includes(term.toLowerCase())).slice(0, 8);
+            if (!items.length) return closeMentionMenu();
+            mentionState = { start: at, items, active: 0 };
+            renderMentionMenu();
+        }
+        function renderMentionMenu() {
+            const menu = el('mention-menu');
+            menu.innerHTML = mentionState.items.map((c, i) => `<button type="button" data-i="${i}" class="${i === mentionState.active ? 'active' : ''}" role="option">${avatarHtml(c.id)}<span>${escapeHtml(c.name)}</span></button>`).join('');
+            menu.classList.remove('hidden');
+        }
+        function pickMention(i) {
+            if (!mentionState) return;
+            const c = mentionState.items[i]; if (!c) return;
+            const input = el('msg-input');
+            const before = input.value.slice(0, mentionState.start), after = input.value.slice(input.selectionStart);
+            input.value = `${before}@${c.name} ${after}`;
+            const p = before.length + c.name.length + 2;
+            input.setSelectionRange(p, p); input.focus();
+            closeMentionMenu();
+        }
+        el('mention-menu').addEventListener('mousedown', (e) => { const b = e.target.closest('[data-i]'); if (b) { e.preventDefault(); pickMention(Number(b.dataset.i)); } });
+        el('msg-input').addEventListener('keydown', (e) => {
+            if (!mentionState) return;
+            if (e.key === 'ArrowDown') { e.preventDefault(); mentionState.active = Math.min(mentionState.items.length - 1, mentionState.active + 1); renderMentionMenu(); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); mentionState.active = Math.max(0, mentionState.active - 1); renderMentionMenu(); }
+            else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickMention(mentionState.active); }
+            else if (e.key === 'Escape') { closeMentionMenu(); }
+        });
+        el('msg-input').addEventListener('blur', () => setTimeout(closeMentionMenu, 150));
+        function mentionIdsIn(body) {
+            const ids = [];
+            mentionCandidates().forEach(c => { if (c.name && body.includes('@' + c.name)) ids.push(c.id); });
+            return ids;
+        }
+        function highlightMentions(escaped) {
+            if (!escaped.includes('@')) return escaped;
+            let out = escaped;
+            const names = allContacts.map(c => c.full_name || c.email).concat([currentUserName]).filter(Boolean).sort((a, b) => b.length - a.length);
+            names.forEach(n => { const key = '@' + escapeHtml(n); if (out.includes(key)) out = out.split(key).join(`<span class="mention">${key}</span>`); });
+            return out;
+        }
+
+        // ---------- dialogs: new group / group info ----------
+        function openMsgrModal(html) {
+            const m = el('msgr-modal'); el('msgr-modal-card').innerHTML = html; m.classList.add('show');
+            m.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', closeMsgrModal));
+            setTimeout(() => { const f = m.querySelector('input, button'); if (f) f.focus(); }, 20);
+        }
+        function closeMsgrModal() { el('msgr-modal').classList.remove('show'); el('msgr-modal-card').innerHTML = ''; }
+        el('msgr-modal').addEventListener('click', (e) => { if (e.target === el('msgr-modal')) closeMsgrModal(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && el('msgr-modal').classList.contains('show')) closeMsgrModal(); });
+        function memberPickHtml(exclude) {
+            const ex = new Set(exclude || []);
+            return `<div class="member-pick">${allContacts.filter(c => !ex.has(c.id)).map(c => `<label><input type="checkbox" value="${c.id}">${avatarHtml(c.id)}<span>${escapeHtml(c.full_name || c.email)}</span></label>`).join('') || '<p class="text-slate-400 text-sm p-2">Nobody else to add.</p>'}</div>`;
+        }
+        el('new-group-btn').addEventListener('click', () => {
+            openMsgrModal(`<h3>👥 New group<button type="button" class="x" data-close aria-label="Close">✕</button></h3>
+                <label for="ng-name">Group name</label><input id="ng-name" type="text" maxlength="80" placeholder="e.g. Sales team">
+                <label for="ng-desc">Description (optional)</label><input id="ng-desc" type="text" maxlength="200" placeholder="What is this group for?">
+                <label>Members</label>${memberPickHtml([])}
+                <p class="err" id="ng-err"></p>
+                <div class="actions"><button type="button" data-close>Cancel</button><button type="button" class="primary" id="ng-create">Create group</button></div>`);
+            el('ng-create').addEventListener('click', async () => {
+                const name = el('ng-name').value.trim(); const err = el('ng-err');
+                const ids = Array.from(el('msgr-modal-card').querySelectorAll('input[type=checkbox]:checked')).map(x => x.value);
+                if (!name) { err.textContent = 'Give the group a name.'; err.style.display = 'block'; return; }
+                el('ng-create').disabled = true;
+                try {
+                    const { data: conv, error } = await sb.from('conversations').insert({ name, description: el('ng-desc').value.trim() || null, created_by: currentUser.id }).select('*').single();
+                    if (error) throw error;
+                    if (ids.length) {
+                        const { error: e2 } = await sb.from('conversation_members').insert(ids.map(id => ({ conversation_id: conv.id, user_id: id, added_by: currentUser.id })));
+                        if (e2) throw e2;
+                    }
+                    closeMsgrModal();
+                    await loadGroups();
+                    selectGroup(conv.id);
+                    showToast('👥', 'Group created', name);
+                } catch (e) { err.textContent = e.message || 'Could not create the group'; err.style.display = 'block'; el('ng-create').disabled = false; }
+            });
+        });
+        function isGroupAdmin(g) { return g && (g.created_by === currentUser.id || g.member.role === 'admin'); }
+        function openGroupInfo() {
+            const g = activeGroup; if (!g) return;
+            const members = (groupMembers.get(g.id) || []).slice().sort((a, b) => (a.role === 'admin' ? 0 : 1) - (b.role === 'admin' ? 0 : 1));
+            const admin = isGroupAdmin(g);
+            openMsgrModal(`<h3>👥 ${escapeHtml(g.name)}<button type="button" class="x" data-close aria-label="Close">✕</button></h3>
+                ${g.description ? `<p class="text-slate-300 text-sm" style="margin:0 0 6px">${escapeHtml(g.description)}</p>` : ''}
+                <p class="text-slate-400 text-xs" style="margin:0">Created by ${escapeHtml(nameOf(g.created_by))} · ${escapeHtml(fmtFullDateTime(g.created_at))}</p>
+                ${admin ? `<label for="gi-name">Name</label><div style="display:flex;gap:6px"><input id="gi-name" type="text" maxlength="80" value="${escapeHtml(g.name)}"><button type="button" class="small-btn" id="gi-save">Save</button></div>
+                <label for="gi-desc">Description</label><div style="display:flex;gap:6px"><input id="gi-desc" type="text" maxlength="200" value="${escapeHtml(g.description || '')}"><button type="button" class="small-btn" id="gi-save-desc">Save</button></div>` : ''}
+                <label>Members (${members.length})</label>
+                <div>${members.map(m => `<div class="member-row">${avatarHtml(m.user_id, 30)}<span class="nm">${escapeHtml(nameOf(m.user_id))}</span><span class="role">${m.role}</span>${admin && m.user_id !== currentUser.id ? `<button type="button" class="small-btn" data-remove="${m.user_id}">Remove</button>` : ''}</div>`).join('')}</div>
+                ${admin ? `<label>Add members</label>${memberPickHtml(members.map(m => m.user_id))}<div class="actions"><button type="button" id="gi-add">Add selected</button></div>` : ''}
+                <p class="err" id="gi-err"></p>
+                <div class="actions">
+                    <button type="button" id="gi-mute">${g.member.muted ? '🔔 Unmute' : '🔕 Mute'}</button>
+                    <button type="button" class="danger" id="gi-leave">Leave group</button>
+                    ${admin ? '<button type="button" class="danger" id="gi-archive">Archive group</button>' : ''}
+                </div>`);
+            const card = el('msgr-modal-card'); const err = el('gi-err');
+            const fail = (e) => { err.textContent = e.message || 'Something went wrong'; err.style.display = 'block'; };
+            if (admin) {
+                el('gi-save').addEventListener('click', async () => {
+                    const name = el('gi-name').value.trim(); if (!name) return;
+                    const { error } = await sb.from('conversations').update({ name }).eq('id', g.id);
+                    if (error) return fail(error);
+                    await loadGroups(); openGroupInfo(); showToast('✏️', 'Renamed', name);
+                });
+                el('gi-save-desc').addEventListener('click', async () => {
+                    const { error } = await sb.from('conversations').update({ description: el('gi-desc').value.trim() || null }).eq('id', g.id);
+                    if (error) return fail(error);
+                    await loadGroups(); openGroupInfo();
+                });
+                el('gi-add').addEventListener('click', async () => {
+                    const ids = Array.from(card.querySelectorAll('.member-pick input:checked')).map(x => x.value);
+                    if (!ids.length) return;
+                    const { error } = await sb.from('conversation_members').insert(ids.map(id => ({ conversation_id: g.id, user_id: id, added_by: currentUser.id })));
+                    if (error) return fail(error);
+                    await loadGroups(); openGroupInfo(); showToast('👥', 'Members added', `${ids.length} added`);
+                });
+                card.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', async () => {
+                    const ok = await wsConfirm({ icon: '👤', title: 'Remove this member?', message: `<b class="text-white">${escapeHtml(nameOf(b.dataset.remove))}</b> will no longer see this group.`, okText: 'Remove' });
+                    if (!ok) return;
+                    const { error } = await sb.from('conversation_members').delete().eq('conversation_id', g.id).eq('user_id', b.dataset.remove);
+                    if (error) return fail(error);
+                    await loadGroups(); openGroupInfo();
+                }));
+                el('gi-archive').addEventListener('click', async () => {
+                    const ok = await wsConfirm({ icon: '📦', title: 'Archive this group?', message: 'It disappears from everyone\'s list. Messages are kept.', okText: 'Archive' });
+                    if (!ok) return;
+                    const { error } = await sb.from('conversations').update({ archived_at: new Date().toISOString() }).eq('id', g.id);
+                    if (error) return fail(error);
+                    closeMsgrModal(); closeGroupThread(); await loadGroups();
+                });
+            }
+            el('gi-mute').addEventListener('click', async () => {
+                const { error } = await sb.from('conversation_members').update({ muted: !g.member.muted }).eq('conversation_id', g.id).eq('user_id', currentUser.id);
+                if (error) return fail(error);
+                await loadGroups(); openGroupInfo();
+            });
+            el('gi-leave').addEventListener('click', async () => {
+                const ok = await wsConfirm({ icon: '🚪', title: 'Leave this group?', message: 'You will stop receiving its messages. An admin can add you back.', okText: 'Leave' });
+                if (!ok) return;
+                const { error } = await sb.from('conversation_members').delete().eq('conversation_id', g.id).eq('user_id', currentUser.id);
+                if (error) return fail(error);
+                closeMsgrModal(); closeGroupThread(); await loadGroups();
+            });
+        }
+        el('group-info-btn').addEventListener('click', openGroupInfo);
 
         // ============================================================
         // WebRTC calls
@@ -2704,6 +3547,9 @@
             if (session) onLoggedIn(session);
             else onLoggedOut();
         });
+        // Links from notifications (#thread= / #group=) work without a reload.
+        window.addEventListener('hashchange', () => { if (currentUser) handleUrlHash(); });
+        window.addEventListener('resize', syncMobilePanels);
     </script>
 
 <!-- ============ Do's & Don'ts rules (self-contained) ============ -->
