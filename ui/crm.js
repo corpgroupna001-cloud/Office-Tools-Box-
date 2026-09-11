@@ -272,6 +272,7 @@
     function tagsHtml(tags) { return tags && tags.length ? `<span class="crm-tags">${tags.map(t => `<span class="crm-tag">${esc(t)}</span>`).join('')}</span>` : ''; }
     const ENTITY_META = {
         contact: { icon: 'user', path: '/contacts/', label: 'Contact' },
+        company: { icon: 'building', path: '/companies/', label: 'Company' },
         lead: { icon: 'target', path: '/leads/', label: 'Lead' },
         deal: { icon: 'deal', path: '/deals/', label: 'Deal' },
         project: { icon: 'folder', path: '/projects/', label: 'Project' },
@@ -485,6 +486,7 @@
     /* --------------------------------------------------- entity picker */
     const ENTITY_QUERY = {
         contact: { table: 'crm_contacts', select: 'id, full_name, organization, email', label: r => r.full_name || r.organization, sub: r => r.organization || r.email, search: 'full_name,organization,email' },
+        company: { table: 'crm_companies', select: 'id, title, city, email', label: r => r.title, sub: r => r.city || r.email, search: 'title,email,phone' },
         lead: { table: 'crm_leads', select: 'id, name, organization, status', label: r => r.name, sub: r => r.organization, search: 'name,organization,email' },
         deal: { table: 'crm_deals', select: 'id, title, value, currency, status', label: r => r.title, sub: r => L.money(r.value, r.currency), search: 'title,organization' },
         project: { table: 'projects', select: 'id, name, status', label: r => r.name, sub: r => L.PROJECT_STATUS[r.status] ? L.PROJECT_STATUS[r.status].label : r.status, search: 'name' },

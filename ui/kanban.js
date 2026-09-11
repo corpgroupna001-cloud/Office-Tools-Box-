@@ -36,7 +36,7 @@
                 const over = col.wipLimit && cards.length > col.wipLimit;
                 const collapsed = st.collapsed.has(col.id);
                 return `<section class="kb-col${collapsed ? ' collapsed' : ''}" data-col="${esc(col.id)}" role="listitem" aria-label="${esc(col.name)}">
-                    <header class="kb-col-head">
+                    <header class="kb-col-head"${col.hex && /^#[0-9a-f]{3,8}$/i.test(col.hex) ? ` style="--kb-color:${col.hex}"` : ''}>
                         ${col.color ? `<span class="crm-dot ${esc(col.color)}"></span>` : ''}
                         <span class="nm" title="${esc(col.name)}">${esc(col.name)}</span>
                         <span class="n${over ? ' over' : ''}" title="${over ? 'Over the WIP limit' : ''}">${cards.length}${col.wipLimit ? '/' + col.wipLimit : ''}</span>
