@@ -42,6 +42,9 @@
 
     // Runs at parse time, before the body exists. This is the anti-flash step.
     apply(read());
+    // The workspace wallpaper (ui/b24.css, chosen in the shell's Themes panel), for the same reason.
+    try { var wall = localStorage.getItem('ws-wallpaper'); if (wall && /^[a-z]+$/.test(wall)) root.setAttribute('data-wallpaper', wall); }
+    catch (e) { /* the default wallpaper is fine */ }
 
     // "No stored choice" means light. Keep this in step with the CSS - see
     // the header comment.
