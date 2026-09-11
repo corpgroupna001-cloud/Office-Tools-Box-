@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script src="/company-config.js"></script>
+    <script src="/authguard.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tasks · WorkSuite</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/icon-192.png">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/design-system.css">
+    <link rel="stylesheet" href="/responsive.css">
+    <link rel="stylesheet" href="/ui/app.css">
+    <link rel="stylesheet" href="/ui/corporate.css">
+    <link rel="stylesheet" href="/ui/crm.css">
+    <script src="/dialogs.js"></script>
+    <script defer src="/commandpalette.js"></script>
+</head>
+<body data-ws-page="tasks" class="ws-app ws-corporate">
+    <main id="view" aria-live="polite">
+        <div class="ws-empty"><span class="ws-skel" style="display:block;height:14px;width:40%;margin:0 auto 10px"></span>Loading tasks…</div>
+    </main>
+
+    <script src="/ui/shell.js"></script>
+    <script>WSShell.mount({ active: 'tasks', crumb: 'Tasks' });</script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/presence.js"></script>
+    <script src="/notifications.js"></script>
+    <script src="/push.js"></script>
+    <script src="/ui/crm-logic.js"></script>
+    <script src="/ui/crm.js"></script>
+    <script src="/ui/kanban.js"></script>
+    <script src="/tasks/tasks.js"></script>
+</body>
+</html>

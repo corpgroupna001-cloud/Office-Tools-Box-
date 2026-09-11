@@ -966,7 +966,7 @@
             { name: 'reminder', label: 'Remind me (in-app) a day before it is due', type: 'check', full: true },
         ];
         const values = isNew
-            ? { status: 'todo', priority: 'normal', assignee_id: d.assignee_id || state.user.id, project_id: d.project_id || null, contact_id: d.contact_id || null, deal_id: d.deal_id || null, due_date: d.due_date || null, title: d.title || '', reminder: false, assignees: d.assignees || [] }
+            ? { status: d.status || 'todo', priority: d.priority || 'normal', assignee_id: d.assignee_id || state.user.id, project_id: d.project_id || null, contact_id: d.contact_id || null, deal_id: d.deal_id || null, due_date: d.due_date || null, title: d.title || '', reminder: false, assignees: d.assignees || [] }
             : { ...t, reminder: !!t.reminder_at, assignees: opts.assignees || [] };
         return formModal({
             title: isNew ? 'New task' : 'Edit task', size: 'wide', fields, values, submitLabel: isNew ? 'Create task' : 'Save',

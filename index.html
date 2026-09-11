@@ -446,13 +446,29 @@
                     </div>
                 </div>
 
-                <!-- Tools -->
+                <!-- Business modules -->
                 <div class="ws-card ws-anim" style="--i:7">
+                    <div class="ws-card-head"><h3>Work &amp; CRM</h3><span class="sub">Customers, projects and tasks in one place</span><div class="right"><a class="more" href="/crm/">Dashboard →</a></div></div>
+                    <div class="ws-grid c2 ws-launcher">
+                        <a class="ws-tool" href="/contacts/"><span class="ico"><span class="ic ic-user"></span></span><div class="t"><b>Contacts</b><span>People and organisations</span></div></a>
+                        <a class="ws-tool" href="/leads/"><span class="ico amber"><span class="ic ic-target"></span></span><div class="t"><b>Leads</b><span>Enquiries and follow-ups</span></div></a>
+                        <a class="ws-tool" href="/deals/"><span class="ico green"><span class="ic ic-deal"></span></span><div class="t"><b>Deals</b><span>Sales pipeline</span></div></a>
+                        <a class="ws-tool" href="/tasks/?view=mine"><span class="ico teal"><span class="ic ic-tasks"></span></span><div class="t"><b>My tasks</b><span>Due today and overdue</span></div><span class="stat" id="tool-tasks">—</span></a>
+                        <a class="ws-tool" href="/projects/"><span class="ico violet"><span class="ic ic-folder"></span></span><div class="t"><b>Projects</b><span>Boards, files, members</span></div></a>
+                        <a class="ws-tool" href="/calendar/"><span class="ico rose"><span class="ic ic-calendar"></span></span><div class="t"><b>Calendar</b><span>Meetings and deadlines</span></div></a>
+                        <a class="ws-tool" href="/documents/"><span class="ico"><span class="ic ic-doc"></span></span><div class="t"><b>Documents</b><span>Shared files</span></div></a>
+                        <a class="ws-tool" href="/employees/"><span class="ico teal"><span class="ic ic-users"></span></span><div class="t"><b>Employees</b><span>Team directory</span></div></a>
+                        <a class="ws-tool" href="/invoices/" data-ws-role="manager" hidden><span class="ico amber"><span class="ic ic-invoice"></span></span><div class="t"><b>Invoices</b><span>Billing and payments</span></div></a>
+                    </div>
+                </div>
+
+                <!-- Tools -->
+                <div class="ws-card ws-anim" style="--i:8">
                     <div class="ws-card-head"><h3>Workplace tools</h3><span class="sub">Your everyday applications</span></div>
                     <div class="ws-grid c2 ws-launcher">
                         <a class="ws-tool" href="./typingtest/"><span class="ico"><span class="ic ic-keyboard"></span></span><div class="t"><b>Typing assessment</b><span>Practice and progress</span></div><span class="stat" id="tool-typing">—</span></a>
                         <a class="ws-tool" href="./mcqquiz/"><span class="ico amber"><span class="ic ic-quiz"></span></span><div class="t"><b>Knowledge assessments</b><span>10 topic categories</span></div><span class="stat" id="tool-quiz">—</span></a>
-                        <a class="ws-tool" href="./chat/"><span class="ico teal"><span class="ic ic-chat"></span></span><div class="t"><b>Chat &amp; Calls</b><span>Messages, voice, video</span></div><span class="stat" id="tool-chat">—</span></a>
+                        <a class="ws-tool" href="./chat/"><span class="ico teal"><span class="ic ic-chat"></span></span><div class="t"><b>Messenger</b><span>Messages, groups, calls</span></div><span class="stat" id="tool-chat">—</span></a>
                         <a class="ws-tool" href="./recordings/"><span class="ico rose"><span class="ic ic-video"></span></span><div class="t"><b>Friday Check-in</b><span>WFH weekly clips</span></div></a>
                         <a class="ws-tool" href="./signature/"><span class="ico violet"><span class="ic ic-pen"></span></span><div class="t"><b>Email Signature</b><span>Branded signature</span></div></a>
                     </div>
@@ -505,6 +521,19 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="/presence.js"></script>
     <script src="/notifications.js"></script>
+    <script>
+        // Role-gated launcher tiles (Invoices) appear once the shell knows the workspace role;
+        // the tasks tile mirrors the sidebar badge (overdue + due today).
+        document.addEventListener('ws-role', function (e) {
+            var rank = { employee: 0, manager: 1, admin: 2 }, mine = rank[e.detail.role] || 0;
+            document.querySelectorAll('.ws-launcher [data-ws-role]').forEach(function (el) { el.hidden = (rank[el.dataset.wsRole] || 0) > mine; });
+        });
+        document.addEventListener('ws-unread', function (e) {
+            var t = document.getElementById('tool-tasks'); if (!t) return;
+            var n = e.detail && e.detail.tasks;
+            t.textContent = n ? n + ' due' : 'Up to date'; t.classList.toggle('new', !!n);
+        });
+    </script>
     <script>
         // ---------- Root auth gate ----------
         let rootSb = null;
