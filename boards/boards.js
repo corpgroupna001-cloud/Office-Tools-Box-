@@ -10,9 +10,9 @@
    ============================================================================ */
 (async function () {
     'use strict';
-    const C = window.WSCrm, L = C.L, esc = C.esc;
+    const C = window.WSCrm, L = C.L, esc = C.esc, B = window.WSB24;
     const view = document.getElementById('view');
-    const ctx = await C.boot({ active: 'boards', crumb: 'Boards' });
+    const ctx = await C.boot({ active: 'boards', crumb: 'Boards', layout: 'b24' });
     const sb = ctx.sb, me = ctx.user;
     const lk = await C.lookups();
     const STATUS = lk.taskStatus;
@@ -25,9 +25,13 @@
     /* ------------------------------------------------------------ routing */
     function route() {
         if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+        cleanupWb();
         const id = C.param('id');
+        view.classList.toggle('b24-legacy-panel', !!id);
         if (id) return showBoard(id);
-        return showList();
+        if (C.param('wb')) return showWhiteboard(C.param('wb'));
+        if (C.param('tab') === 'kanban') return showList();
+        return showWhiteboards();
     }
     window.addEventListener('popstate', route);
     function go(url) { history.pushState(null, '', url); route(); }
@@ -80,8 +84,215 @@
         try {
             await sb.from('tasks').update({ board_id: null, board_column_id: null }).eq('board_id', b.id);
             await C.q(sb.from('boards').delete().eq('id', b.id));
-            C.toast('Board deleted', 'ok'); go('/boards/');
+            C.toast('Board deleted', 'ok'); go('/boards/?tab=kanban');
         } catch (e) { C.toast(e.message, 'bad'); }
+    }
+
+    /* -------------------------------------------- whiteboards (the "Boards" app) */
+    const wbPage = { grid: null, filter: null, board: null, timer: null, dirty: false, pending: null, unsub: null, presence: null, id: null };
+    const VIS = {
+        company: { label: 'Company', color: 'ok', hint: 'Everyone in the company can open and edit it' },
+        private: { label: 'Private', color: 'mute', hint: 'Only you' },
+        shared: { label: 'Shared', color: 'warn', hint: 'The people you choose' },
+    };
+    function tabsBar(active) {
+        return `<div class="b24-toolbar"><div class="b24-views" role="tablist" aria-label="Kind of board">
+            <a href="/boards/" data-tabnav="" class="${active === 'wb' ? 'on' : ''}">Whiteboards</a>
+            <a href="/boards/?tab=kanban" data-tabnav="kanban" class="${active === 'kanban' ? 'on' : ''}">Kanban boards</a></div></div>`;
+    }
+    view.addEventListener('click', e => {
+        const t = e.target.closest('[data-tabnav]'); if (!t || e.metaKey || e.ctrlKey) return;
+        e.preventDefault(); history.pushState(null, '', t.getAttribute('href')); route();
+    });
+    async function whiteboardsReady() {
+        const r = await sb.from('whiteboards').select('id').limit(1);
+        return !(r.error && ['42P01', 'PGRST205'].includes(String(r.error.code)));
+    }
+    const needMigration = () => `<div class="b24-area pad"><div class="crm-notice">${C.icon('lock')}<div><b>Whiteboards need the latest database update.</b><br>An administrator needs to run <code>supabase-b24-migration.sql</code> in Supabase → SQL Editor. Kanban boards keep working meanwhile.</div></div></div>`;
+    function cleanupWb() {
+        if (wbPage.pending && wbPage.id) saveNow(wbPage.id);          // do not lose the last strokes
+        clearTimeout(wbPage.timer);
+        if (wbPage.unsub) { wbPage.unsub(); wbPage.unsub = null; }
+        if (wbPage.presence) { try { sb.removeChannel(wbPage.presence); } catch (e) { /* already gone */ } wbPage.presence = null; }
+        if (wbPage.grid) { wbPage.grid.destroy(); wbPage.grid = null; }
+        if (wbPage.board) { wbPage.board.destroy(); wbPage.board = null; }
+        wbPage.id = null;
+    }
+    window.addEventListener('beforeunload', e => { if (wbPage.pending) { saveNow(wbPage.id); e.preventDefault(); e.returnValue = ''; } });
+    async function createWhiteboard() {
+        await C.formModal({
+            title: 'New board', submitLabel: 'Create and open',
+            fields: [{ name: 'name', label: 'Name', type: 'text', required: true, full: true, placeholder: 'e.g. Q4 campaign brainstorm' },
+                     { name: 'visibility', label: 'Access', type: 'select', required: true, full: true, options: Object.entries(VIS).map(([value, x]) => ({ value, label: `${x.label}: ${x.hint}` })) }],
+            values: { visibility: 'company' },
+            onSubmit: async v => {
+                const { data } = await C.q(sb.from('whiteboards').insert({ name: v.name.trim(), visibility: v.visibility, data: { v: 1, elements: [] }, created_by: me.id }).select('id').single());
+                history.pushState(null, '', `/boards/?wb=${data.id}`); route();
+            },
+        });
+    }
+    async function renameWb(w, after) {
+        await C.formModal({ title: 'Rename board', fields: [{ name: 'name', label: 'Name', type: 'text', required: true, full: true }], values: { name: w.name }, submitLabel: 'Save',
+            onSubmit: async v => { await C.q(sb.from('whiteboards').update({ name: v.name.trim() }).eq('id', w.id)); w.name = v.name.trim(); if (after) after(); } });
+    }
+    async function shareWb(w, after) {
+        const cur = await sb.from('whiteboard_shares').select('user_id, can_edit').eq('whiteboard_id', w.id);
+        const shares = cur.data || [];
+        await C.formModal({
+            title: `Access to ${w.name}`, size: 'wide', submitLabel: 'Save',
+            fields: [
+                { name: 'visibility', label: 'Who can open it', type: 'select', required: true, full: true, options: Object.entries(VIS).map(([value, x]) => ({ value, label: `${x.label}: ${x.hint}` })) },
+                { name: 'people', label: 'People', type: 'peoples', full: true },
+                { name: 'can_edit', label: 'They can draw and edit (otherwise view only)', type: 'check', full: true },
+            ],
+            values: { visibility: w.visibility, people: shares.map(s => s.user_id), can_edit: shares.length ? shares.every(s => s.can_edit) : true },
+            onReady: f => { const sync = () => { const shared = f.field('visibility').get() === 'shared'; f.field('people').wrap.hidden = !shared; f.field('can_edit').wrap.hidden = !shared; }; f.field('visibility').el.addEventListener('change', sync); sync(); },
+            onSubmit: async v => {
+                await C.q(sb.from('whiteboards').update({ visibility: v.visibility }).eq('id', w.id));
+                const want = v.visibility === 'shared' ? (v.people || []).filter(id => id !== me.id) : [];
+                const gone = shares.map(s => s.user_id).filter(id => !want.includes(id));
+                if (gone.length) await C.q(sb.from('whiteboard_shares').delete().eq('whiteboard_id', w.id).in('user_id', gone));
+                if (want.length) await C.q(sb.from('whiteboard_shares').upsert(want.map(id => ({ whiteboard_id: w.id, user_id: id, can_edit: !!v.can_edit })), { onConflict: 'whiteboard_id,user_id' }));
+                want.filter(id => !shares.some(s => s.user_id === id)).forEach(id => C.pushNotify({ to: id, title: 'A board was shared with you', body: w.name, url: `/boards/?wb=${w.id}`, tag: 'board' }));
+                w.visibility = v.visibility;
+                C.toast('Access updated', 'ok'); if (after) after();
+            },
+        });
+    }
+    async function copyWb(w) {
+        try {
+            const src = (await C.q(sb.from('whiteboards').select('name, data, thumbnail').eq('id', w.id).single())).data;
+            const { data } = await C.q(sb.from('whiteboards').insert({ name: `Copy of ${src.name}`, data: src.data, thumbnail: src.thumbnail, visibility: 'private', created_by: me.id }).select('id').single());
+            C.toast('Copy created (private to you)', 'ok'); history.pushState(null, '', `/boards/?wb=${data.id}`); route();
+        } catch (e) { C.toast(e.message, 'bad'); }
+    }
+    async function deleteWb(w, after) {
+        if (!await C.confirm({ title: `Delete ${w.name}?`, message: 'The drawing is removed for everyone. This cannot be undone.', okText: 'Delete', danger: true })) return;
+        try { await C.q(sb.from('whiteboards').delete().eq('id', w.id)); C.toast('Board deleted', 'ok'); if (after) after(); }
+        catch (e) { C.toast(e.message, 'bad'); }
+    }
+
+    async function showWhiteboards() {
+        WSShell.setCrumb('Boards');
+        document.title = 'Boards · WorkSuite';
+        if (!await whiteboardsReady()) { view.innerHTML = B.titleBar({ title: 'Boards' }) + tabsBar('wb') + needMigration(); return; }
+        view.innerHTML = B.titleBar({ title: 'Boards', createLabel: 'Create' }) + tabsBar('wb') + '<div id="body"></div>';
+        wbPage.filter = WSFilter.mount(view.querySelector('[data-filter]'), {
+            id: 'whiteboards', me: me.id, defaultPreset: 'all', onChange: () => wbPage.grid && wbPage.grid.reload(),
+            presets: [{ key: 'all', title: 'All boards', values: {} }, { key: 'mine', title: 'My boards', values: { mine: true } }, { key: 'shared', title: 'Shared with me', values: { sharedme: true } }],
+            fields: [
+                { key: 'mine', title: 'Created by me', type: 'check', apply: b => b.eq('created_by', me.id) },
+                { key: 'sharedme', title: 'Shared with me', type: 'check', apply: b => b.neq('created_by', me.id).eq('visibility', 'shared') },
+                { key: 'visibility', title: 'Access', type: 'select', options: Object.entries(VIS).map(([value, x]) => ({ value, label: x.label })) },
+                { key: 'modified', title: 'Modified', type: 'date', column: 'updated_at', datetime: true },
+            ],
+        });
+        view.querySelector('[data-create]').addEventListener('click', createWhiteboard);
+        const host = document.createElement('div');
+        view.querySelector('#body').appendChild(host);
+        const scopedWb = b => wbPage.filter.apply(b.is('archived_at', null), { searchColumns: ['name'] });
+        const reload = () => wbPage.grid && wbPage.grid.refresh();
+        wbPage.grid = WSGrid.mount(host, {
+            id: 'whiteboards', sort: { key: 'updated_at', dir: 'desc' },
+            columns: [
+                { key: 'name', title: 'Name', width: 360, render: w => `<span class="b24-who"><span class="wb-thumb">${w.thumbnail ? `<img src="${esc(w.thumbnail)}" alt="">` : C.icon('board')}</span><span><a href="/boards/?wb=${esc(w.id)}" data-wb="${esc(w.id)}">${esc(w.name)}</a><span class="sub">${esc((VIS[w.visibility] || {}).hint || '')}</span></span></span>`,
+                  edit: { type: 'text', save: async (w, val) => { if (!val) throw new Error('Name the board.'); await C.q(sb.from('whiteboards').update({ name: val }).eq('id', w.id)); } } },
+                { key: 'visibility', title: 'Access', width: 120, render: w => C.badge((VIS[w.visibility] || {}).color || 'mute', (VIS[w.visibility] || {}).label || w.visibility) },
+                { key: 'created_by', title: 'Created by', width: 180, render: w => C.personHtml(w.created_by, { link: false }) },
+                { key: 'updated_at', title: 'Modified', width: 140, render: w => `<span class="muted">${esc(L.fmtRelative(w.updated_at))}</span>` },
+                { key: 'updated_by', title: 'Modified by', width: 170, default: false, render: w => w.updated_by ? C.personHtml(w.updated_by, { link: false }) : '' },
+                { key: 'created_at', title: 'Created', width: 130, default: false, render: w => esc(L.fmtDate(w.created_at, { short: true })) },
+            ],
+            load: async ({ offset, limit, sort }) => {
+                let b = scopedWb(sb.from('whiteboards').select('id, name, thumbnail, visibility, created_by, updated_by, created_at, updated_at'));
+                b = sort ? b.order(sort.key, { ascending: sort.dir === 'asc' }) : b.order('updated_at', { ascending: false });
+                return (await C.q(b.range(offset, offset + limit - 1))).data || [];
+            },
+            count: async () => (await C.q(scopedWb(sb.from('whiteboards').select('id', { count: 'exact', head: true })))).count || 0,
+            onOpen: w => { history.pushState(null, '', `/boards/?wb=${w.id}`); route(); },
+            rowMenu: w => {
+                const mine = w.created_by === me.id;
+                return [
+                    { label: 'Open', icon: 'arrow', onClick: () => { history.pushState(null, '', `/boards/?wb=${w.id}`); route(); } },
+                    ...(mine ? [{ label: 'Rename', icon: 'edit', onClick: () => renameWb(w, reload) }, { label: 'Access…', icon: 'users', onClick: () => shareWb(w, reload) }] : []),
+                    { label: 'Make a copy', icon: 'plus', onClick: () => copyWb(w) },
+                    ...(mine || ctx.isManager ? ['sep', { label: 'Delete', icon: 'trash', danger: true, onClick: () => deleteWb(w, reload) }] : []),
+                ];
+            },
+            empty: { title: 'No boards yet', sub: 'Create a board to sketch, plan and brainstorm together.' },
+        });
+        host.addEventListener('click', e => { const a = e.target.closest('[data-wb]'); if (a && !e.metaKey && !e.ctrlKey) { e.preventDefault(); history.pushState(null, '', `/boards/?wb=${a.dataset.wb}`); route(); } });
+        if (C.param('new') === '1') { C.setParam('new', null, true); createWhiteboard(); }
+    }
+
+    function setWbStatus(text, bad) { const s = view.querySelector('[data-status]'); if (s) { s.textContent = text; s.classList.toggle('bad', !!bad); } }
+    function scheduleSave(id, data) {
+        wbPage.pending = data; wbPage.dirty = true;
+        setWbStatus('Unsaved changes…');
+        clearTimeout(wbPage.timer);
+        wbPage.timer = setTimeout(() => saveNow(id), 800);
+    }
+    async function saveNow(id) {
+        const data = wbPage.pending; if (!data || !id) return;
+        wbPage.pending = null;
+        setWbStatus('Saving…');
+        const thumb = wbPage.board ? wbPage.board.thumbnail() : null;
+        const r = await sb.from('whiteboards').update({ data, updated_by: me.id, thumbnail: thumb }).eq('id', id).select('id');
+        if (r.error || !(r.data || []).length) { wbPage.pending = wbPage.pending || data; setWbStatus(r.error ? `Not saved: ${C.friendly(r.error)}` : 'Not saved: you can only view this board', true); return; }
+        wbPage.dirty = !!wbPage.pending;
+        if (!wbPage.dirty) setWbStatus('All changes saved');
+    }
+    async function showWhiteboard(id) {
+        C.loading(view, 'Opening board…');
+        const r = await sb.from('whiteboards').select('*').eq('id', id).maybeSingle();
+        if (r.error && ['42P01', 'PGRST205'].includes(String(r.error.code))) { view.innerHTML = B.titleBar({ title: 'Boards' }) + needMigration(); return; }
+        if (r.error) return C.errorState(view, new Error(C.friendly(r.error)), () => showWhiteboard(id));
+        const w = r.data;
+        if (!w) { view.innerHTML = '<div class="b24-area pad"></div>'; C.empty(view.firstElementChild, 'Board not found', 'It may have been deleted, or it has not been shared with you.', '<a class="ws-btn" href="/boards/">All boards</a>'); return; }
+        let canEditWb = w.created_by === me.id || w.visibility === 'company';
+        if (!canEditWb && w.visibility === 'shared') { const s = await sb.from('whiteboard_shares').select('can_edit').eq('whiteboard_id', id).eq('user_id', me.id).maybeSingle(); canEditWb = !!(s.data && s.data.can_edit); }
+        const mine = w.created_by === me.id;
+        document.title = `${w.name} · Boards · WorkSuite`;
+        WSShell.setCrumb(w.name);
+        view.innerHTML = `
+            <div class="b24-titlebar wb-titlebar">
+                <a class="b24-btn-glass" href="/boards/" data-tabnav="">${C.icon('arrow')}<span>Boards</span></a>
+                <h1 class="b24-title" data-name>${esc(w.name)}</h1>
+                ${mine ? `<button type="button" class="b24-btn-glass round" data-rename aria-label="Rename">${C.icon('edit')}</button>` : ''}
+                <span class="wb-status" data-status>${canEditWb ? 'All changes saved' : 'View only'}</span>
+                <span class="grow"></span>
+                <span class="wb-people" data-people></span>
+                ${mine ? `<button type="button" class="b24-btn-glass" data-share>${C.icon('users')}<span>Access</span></button>` : ''}
+                <button type="button" class="b24-btn-glass" data-export>${C.icon('download')}<span>Export</span></button>
+            </div>
+            <div class="b24-area wb-host" id="wb"></div>`;
+        wbPage.id = id;
+        wbPage.board = WSWhiteboard.mount(view.querySelector('#wb'), { data: w.data, canEdit: canEditWb, onChange: data => scheduleSave(id, data) });
+        const rn = view.querySelector('[data-rename]'); if (rn) rn.addEventListener('click', () => renameWb(w, () => { view.querySelector('[data-name]').textContent = w.name; WSShell.setCrumb(w.name); }));
+        const sh = view.querySelector('[data-share]'); if (sh) sh.addEventListener('click', () => shareWb(w));
+        const ex = view.querySelector('[data-export]');
+        ex.addEventListener('click', () => C.menu(ex, [
+            { label: 'Download as PNG', icon: 'download', onClick: () => wbPage.board.exportPng(w.name) },
+            { label: 'Download as SVG', icon: 'download', onClick: () => wbPage.board.exportSvg(w.name) },
+        ]));
+        // Someone else saved: take their drawing unless there is work of ours still to save.
+        wbPage.unsub = C.subscribe('whiteboard', [{ event: 'UPDATE', table: 'whiteboards', filter: `id=eq.${id}` }], async payload => {
+            const row = payload && payload.new;
+            if (row && row.updated_by === me.id) return;
+            if (wbPage.dirty || (wbPage.board && wbPage.board.busy)) return;
+            const fresh = row && row.data ? row : (await sb.from('whiteboards').select('data, updated_by').eq('id', id).maybeSingle()).data;
+            if (fresh && fresh.updated_by !== me.id && wbPage.board && wbPage.board.setData(fresh.data)) setWbStatus(`Updated by ${C.personName(fresh.updated_by)}`);
+        });
+        // Who else has the board open.
+        try {
+            const ch = sb.channel(`wb-presence:${id}`, { config: { presence: { key: me.id } } });
+            ch.on('presence', { event: 'sync' }, () => {
+                const others = Object.keys(ch.presenceState()).filter(k => k !== me.id);
+                const el = view.querySelector('[data-people]');
+                if (el) el.innerHTML = others.length ? `${C.avatarsHtml(others, 5)}<span>${others.length === 1 ? C.personName(others[0]).split(' ')[0] + ' is here' : others.length + ' people here'}</span>` : '';
+            }).subscribe(status => { if (status === 'SUBSCRIBED') ch.track({ at: Date.now() }); });
+            wbPage.presence = ch;
+        } catch (e) { /* presence is a nicety */ }
     }
 
     /* --------------------------------------------------------------- list */
@@ -90,17 +301,16 @@
         WSShell.setCrumb('Boards');
         document.title = 'Boards · WorkSuite';
         view.innerHTML = `
-            <div class="ws-page-head">
-                <div><p class="ws-eyebrow">Collaboration</p><h1>Boards</h1><p>Kanban boards for tasks, projects and any other flow of work.</p></div>
-                <div class="actions"><button type="button" class="ws-btn primary" id="new-btn">${C.icon('plus')}<span>New board</span></button></div>
-            </div>
+            <div class="b24-titlebar"><h1 class="b24-title">Boards</h1><span class="b24-create"><button type="button" class="b24-btn-create" id="new-btn">Create</button></span></div>
+            ${tabsBar('kanban')}
+            <div class="b24-area pad">
             <div class="crm-toolbar">
                 <div class="crm-search grow">${C.icon('search', 'sm')}<input type="search" id="q" placeholder="Search boards…" aria-label="Search boards"></div>
                 <select id="f-kind" aria-label="Kind"><option value="">All kinds</option>${Object.entries(KIND).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('')}</select>
                 <label class="crm-check" style="min-height:auto"><input type="checkbox" id="f-archived"> Archived</label>
                 <span class="crm-count" id="count"></span>
             </div>
-            <div id="grid"></div>`;
+            <div id="grid"></div></div>`;
         const grid = view.querySelector('#grid');
         C.skeletonRows(grid, 4);
         view.querySelector('#q').value = ls.q; view.querySelector('#f-kind').value = ls.kind; view.querySelector('#f-archived').checked = ls.archived;
@@ -165,7 +375,7 @@
         let board;
         try { board = (await C.q(sb.from('boards').select('*').eq('id', id).maybeSingle())).data; }
         catch (e) { return C.errorState(view, e, () => showBoard(id)); }
-        if (!board) { view.innerHTML = `<a class="crm-back" href="/boards/">${C.icon('arrow')}All boards</a>`; C.empty(view.appendChild(document.createElement('div')), 'Board not found', 'It may have been deleted, or you may not have access to it.'); return; }
+        if (!board) { view.innerHTML = `<a class="crm-back" href="/boards/?tab=kanban">${C.icon('arrow')}All boards</a>`; C.empty(view.appendChild(document.createElement('div')), 'Board not found', 'It may have been deleted, or you may not have access to it.'); return; }
         document.title = `${board.name} · Boards · WorkSuite`;
         WSShell.setCrumb(board.name);
         const bs = { columns: [], cards: [], assignee: '', project: null, members: [] };
@@ -179,7 +389,7 @@
         const manage = canManage(board) || onProject;
 
         view.innerHTML = `
-            <a class="crm-back" href="/boards/" data-nav>${C.icon('arrow')}All boards</a>
+            <a class="crm-back" href="/boards/?tab=kanban" data-nav>${C.icon('arrow')}All boards</a>
             <div class="crm-record-head">
                 <div class="titles">
                     <h1>${esc(board.name)}</h1>
@@ -200,7 +410,7 @@
                 </div>
             </div>
             <div id="kanban"></div>`;
-        view.querySelector('[data-nav]').addEventListener('click', e => { e.preventDefault(); go('/boards/'); });
+        view.querySelector('[data-nav]').addEventListener('click', e => { e.preventDefault(); go('/boards/?tab=kanban'); });
         const kbEl = view.querySelector('#kanban');
         let kb = null;
 
