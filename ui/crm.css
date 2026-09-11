@@ -492,3 +492,19 @@ body.ws-app .inv-sheet .stamp.draft { color: var(--ws-text-muted); }
     body.ws-app .inv-sheet, body.ws-app .inv-sheet * { color: #000 !important; background: transparent !important; }
     @page { margin: 16mm; }
 }
+
+/* ---------- fixes from the browser smoke test --------------------------- */
+/* corporate.css pads every input in .ws-page with a far more specific selector;
+   the search icon needs its gap back or it sits on the first letter. */
+body.ws-app .crm-search input { padding-left: 36px !important; }
+/* The drop zone is a <label>: without a block box its border wraps the text. */
+body.ws-app .crm-drop { display: block; }
+/* Two KPI tiles per row on a phone instead of one screen-tall column. */
+body.ws-app .crm-kpis { grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 1fr)); }
+@media (max-width: 640px) {
+    body.ws-app .crm-kpi { padding: 12px 14px; }
+    body.ws-app .crm-kpi .val { font-size: 21px; }
+    /* Invoice lines scroll sideways inside the sheet rather than being clipped. */
+    body.ws-app .inv-sheet table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    body.ws-app .inv-sheet .top > div:last-child { text-align: left; }
+}

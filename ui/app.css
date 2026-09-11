@@ -880,3 +880,21 @@ body.ws-app.page-chat .call-event-pill { background: var(--ws-surface-2); border
 .ws-iconbtn .dot.count { width: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; font-size: 9.5px; font-weight: 800; color: #fff; display: none; align-items: center; justify-content: center; top: 2px; right: 2px; }
 .ws-iconbtn.has .dot.count { display: inline-flex; }
 @media (max-width: 960px) { .ws-notif { right: 8px; } }
+
+/* Command palette follows the theme. Its panel used to stay navy while its
+   text followed the light theme, leaving titles dark-on-dark. */
+#ws-cmdk-overlay { background: var(--ws-scrim, rgba(17, 24, 39, .45)); }
+.ws-cmdk-panel { background: var(--ws-surface); border-color: var(--ws-border); box-shadow: var(--ws-shadow-lg); border-radius: 14px; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.ws-cmdk-panel::before { display: none; }
+.ws-cmdk-input-row { border-bottom-color: var(--ws-border); }
+.ws-cmdk-input-row input { color: var(--ws-text); }
+.ws-cmdk-input-row .kbd, .ws-cmdk-footer .kbd { background: var(--ws-surface-2); border-color: var(--ws-border); color: var(--ws-text-muted); }
+.ws-cmdk-item .item-icon { background: var(--ws-surface-2); border-color: var(--ws-border); color: var(--ws-text); }
+.ws-cmdk-item .item-title { color: var(--ws-text); }
+.ws-cmdk-item:hover, .ws-cmdk-item.active { background: var(--ws-primary-soft); }
+.ws-cmdk-item.active .item-title { color: var(--ws-primary); }
+.ws-cmdk-footer { background: var(--ws-surface-2); border-top-color: var(--ws-border); color: var(--ws-text-muted); }
+
+/* A long page title in the top bar ends in an ellipsis instead of being cut mid-word. */
+.ws-top .crumb { min-width: 0; overflow: hidden; white-space: nowrap; }
+.ws-top .crumb b { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
