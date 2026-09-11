@@ -13,15 +13,18 @@
    ============================================================================ */
 (async function () {
     'use strict';
-    const C = window.WSCrm, L = C.L, esc = C.esc, h = C.h;
+    const C = window.WSCrm, L = C.L, esc = C.esc, h = C.h, B = window.WSB24;
     const view = document.getElementById('view');
-    const ctx = await C.boot({ active: 'tasks', crumb: 'Tasks' });
+    const ctx = await C.boot({ active: 'tasks', crumb: 'Tasks', layout: 'b24' });
     const sb = ctx.sb, me = ctx.user;
     const lk = await C.lookups();
     const STATUS = lk.taskStatus;
     const DONE_KEY = (lk.taskStatuses.find(s => s.is_done) || { key: 'completed' }).key;
     const OPEN_KEY = (lk.taskStatuses.find(s => !s.is_done) || { key: 'todo' }).key;
-    const SELECT = 'id, company, title, description, status, priority, assignee_id, project_id, board_id, board_column_id, position, parent_task_id, contact_id, lead_id, deal_id, start_date, due_date, due_time, reminder_at, completed_at, estimate_hours, tags, archived_at, created_by, created_at, updated_at';
+    const BASE = 'id, company, title, description, status, priority, assignee_id, project_id, board_id, board_column_id, position, parent_task_id, contact_id, lead_id, deal_id, start_date, due_date, due_time, reminder_at, completed_at, estimate_hours, tags, archived_at, created_by, created_at, updated_at';
+    const [cols, tplProbe] = await Promise.all([B.columns('tasks', BASE + ', number', BASE), sb.from('task_templates').select('id').limit(1)]);
+    const SELECT = cols.select;
+    const hasTemplates = !tplProbe.error;
     const VIEWS = [
         { key: 'mine', label: 'My Tasks' }, { key: 'all', label: 'All Tasks' }, { key: 'created', label: 'Created by Me' },
         { key: 'overdue', label: 'Overdue' }, { key: 'today', label: 'Due Today' }, { key: 'completed', label: 'Completed' },
@@ -33,6 +36,7 @@
         if (unsubscribe) { unsubscribe(); unsubscribe = null; }
         const id = C.param('id');
         if (id) return showRecord(id);
+        if (page.mode === 'list') return refreshList(true);
         return showList();
     }
     window.addEventListener('popstate', route);
@@ -93,7 +97,7 @@
     }
     async function deleteTask(t) {
         if (!await C.confirm({ title: 'Delete this task permanently?', message: 'Subtasks, comments and attachments links are removed with it. Archiving keeps the history.', okText: 'Delete permanently', danger: true })) return;
-        try { await C.q(sb.from('tasks').delete().eq('id', t.id)); C.toast('Task deleted', 'ok'); WSShell.refreshUnread(); go('/tasks/'); }
+        try { await C.q(sb.from('tasks').delete().eq('id', t.id)); C.toast('Task deleted', 'ok'); WSShell.refreshUnread(); if (WSShell.inSlider) { WSShell.sliderMessage('deleted', { id: t.id }); WSShell.closeSlider(); } else go('/tasks/'); }
         catch (e) { C.toast(e.message, 'bad'); }
     }
     async function duplicateTask(t) {
@@ -111,235 +115,479 @@
         const assignees = await loadAssignees(t.id);
         return C.openTaskEditor({ task: t, assignees, onSaved: after });
     }
-    function rowMenu(anchor, t, after) {
-        C.menu(anchor, [
-            { label: 'Open', icon: 'arrow', onClick: () => go(`/tasks/?id=${t.id}`) },
-            { label: 'Edit', icon: 'edit', onClick: () => editTask(t, after) },
-            ...(L.canEdit(t, me) || ctx.isManager ? [
-                isDone(t) ? { label: 'Reopen', icon: 'refresh', onClick: () => setDone(t, false, after) } : { label: 'Complete', icon: 'check', onClick: () => setDone(t, true, after) },
-                ...(t.assignee_id !== me.id ? [{ label: 'Assign to me', icon: 'user', onClick: () => assignToMe(t, after) }] : []),
-                'sep',
-                t.archived_at ? { label: 'Restore', icon: 'refresh', onClick: () => setArchived(t, false, after) } : { label: 'Archive', icon: 'trash', danger: true, onClick: () => setArchived(t, true, after) },
-            ] : []),
-        ]);
-    }
-
-    /* --------------------------------------------------------------- list */
-    const ls = { view: 'mine', display: 'list', q: '', assignee: '', priority: '', status: '', project: '', archived: false, open: [], completed: [], myExtra: new Set(), completedCount: 0 };
-    async function fetchOpen() {
-        let b = sb.from('tasks').select(SELECT).is('completed_at', null).order('due_date', { ascending: true, nullsFirst: false }).order('created_at', { ascending: false }).limit(1000);
-        b = ls.archived ? b.not('archived_at', 'is', null) : b.is('archived_at', null);
-        const [{ data }, extra] = await Promise.all([C.q(b), sb.from('task_assignees').select('task_id').eq('user_id', me.id)]);
-        ls.open = data || [];
-        ls.myExtra = new Set((extra.data || []).map(x => x.task_id));
-        await resolveNames(ls.open);
-    }
-    async function fetchCompleted() {
-        let b = sb.from('tasks').select(SELECT).not('completed_at', 'is', null).order('completed_at', { ascending: false }).limit(300);
-        b = ls.archived ? b.not('archived_at', 'is', null) : b.is('archived_at', null);
-        const { data, count } = await C.q(b);
-        ls.completed = data || [];
-        await resolveNames(ls.completed);
-        const c = await sb.from('tasks').select('id', { count: 'exact', head: true }).not('completed_at', 'is', null).is('archived_at', null);
-        ls.completedCount = c.count != null ? c.count : (count || ls.completed.length);
-    }
+    /* ----------------------------------------------- list (workspace layout) */
+    const page = { mode: null, grid: null, board: null, filter: null, view: 'list', role: 'ongoing', onlyIds: null, month: null, ganttStart: null };
     const today = L.todayIST();
-    function mine(t) { return t.assignee_id === me.id || ls.myExtra.has(t.id); }
-    function viewRows(key) {
-        const o = ls.open;
-        switch (key) {
-            case 'mine': return o.filter(mine);
-            case 'created': return o.filter(t => t.created_by === me.id);
-            case 'overdue': return o.filter(t => L.taskDueState(t, today) === 'overdue');
-            case 'today': return o.filter(t => L.taskDueState(t, today) === 'today');
-            case 'completed': return ls.completed;
-            default: return o;
-        }
+    const NONE_ID = '00000000-0000-0000-0000-000000000000';
+    const openTask = id => B.openRecord(`/tasks/?id=${id}`, () => refreshList(true));
+    const roleIds = { assisting: [], following: [] };
+    async function loadRoleIds() {
+        const [a, w] = await Promise.all([
+            sb.from('task_assignees').select('task_id').eq('user_id', me.id).limit(3000),
+            sb.from('task_watchers').select('task_id').eq('user_id', me.id).limit(3000),
+        ]);
+        roleIds.assisting = (a.data || []).map(x => x.task_id);
+        roleIds.following = (w.data || []).map(x => x.task_id);
     }
-    function applyFilters(rows) {
-        const q = ls.q.trim().toLowerCase();
-        return rows.filter(t => {
-            if (q && !(t.title.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q) || (t.tags || []).some(x => x.toLowerCase().includes(q)))) return false;
-            if (ls.assignee === 'me' && !mine(t)) return false;
-            if (ls.assignee === 'none' && t.assignee_id) return false;
-            if (ls.assignee && ls.assignee !== 'me' && ls.assignee !== 'none' && t.assignee_id !== ls.assignee) return false;
-            if (ls.priority && t.priority !== ls.priority) return false;
-            if (ls.status && t.status !== ls.status) return false;
-            if (ls.project && t.project_id !== ls.project) return false;
-            return true;
-        });
+    const ROLES = [['ongoing', 'Ongoing'], ['assisting', 'Assisting'], ['created', 'Set by me'], ['following', 'Following'], ['all', 'All tasks']];
+    function roleApply(b, role) {
+        if (role === 'ongoing') return b.eq('assignee_id', me.id);
+        if (role === 'assisting') return b.in('id', roleIds.assisting.length ? roleIds.assisting : [NONE_ID]);
+        if (role === 'created') return b.eq('created_by', me.id);
+        if (role === 'following') return b.in('id', roleIds.following.length ? roleIds.following : [NONE_ID]);
+        return b;
     }
-    function prioRank(t) { return (L.PRIORITY[t.priority] || L.PRIORITY.normal).rank; }
-    function defaultSort(rows) {
-        return rows.slice().sort((a, b) => {
-            const da = a.due_date ? L.dayNumber(a.due_date) : Infinity, db = b.due_date ? L.dayNumber(b.due_date) : Infinity;
-            if (da !== db) return da - db;
-            return prioRank(b) - prioRank(a);
-        });
+    function stateApply(b, v) {
+        if (v === 'open') return b.is('completed_at', null);
+        if (v === 'done') return b.not('completed_at', 'is', null);
+        if (v === 'overdue') return b.is('completed_at', null).lt('due_date', today);
+        return b;
     }
+    let projectOpts = [];
+    function filterFields() {
+        return [
+            { key: 'state', title: 'State', type: 'select', apply: stateApply, options: [{ value: 'open', label: 'In progress' }, { value: 'overdue', label: 'Overdue' }, { value: 'done', label: 'Completed' }, { value: 'archived', label: 'Recycle bin' }] },
+            { key: 'due', title: 'Deadline', type: 'date', column: 'due_date' },
+            { key: 'responsible', title: 'Responsible', type: 'user', column: 'assignee_id', options: B.peopleOptions() },
+            { key: 'creator', title: 'Created by', type: 'user', column: 'created_by', options: B.peopleOptions(), none: false },
+            { key: 'project', title: 'Project', type: 'select', column: 'project_id', options: projectOpts },
+            { key: 'priority', title: 'Priority', type: 'select', options: Object.entries(L.PRIORITY).map(([value, p]) => ({ value, label: p.label })) },
+            { key: 'status', title: 'Status', type: 'multiselect', options: lk.taskStatuses.map(s => ({ value: s.key, label: s.label })), default: false },
+            { key: 'created', title: 'Created', type: 'date', column: 'created_at', datetime: true, default: false },
+            { key: 'tag', title: 'Tag', type: 'text', default: false, apply: (b, v) => b.contains('tags', [String(v).trim()]) },
+        ];
+    }
+    const PRESETS = [
+        { key: 'progress', title: 'In progress', values: { state: 'open' } },
+        { key: 'overdue', title: 'Overdue', values: { state: 'overdue' } },
+        { key: 'high', title: 'High priority', values: { state: 'open', priority: 'high' } },
+        { key: 'completed', title: 'Completed', values: { state: 'done' } },
+        { key: 'bin', title: 'Recycle bin', values: { state: 'archived' } },
+        { key: 'all', title: 'All tasks', values: {} },
+    ];
+    function scoped(b, o) {
+        const v = page.filter.get().values;
+        b = v.state === 'archived' ? b.not('archived_at', 'is', null) : b.is('archived_at', null);
+        if (!(o && o.noRole)) b = roleApply(b, page.role);
+        if (page.onlyIds) b = b.in('id', page.onlyIds.length ? page.onlyIds : [NONE_ID]);
+        return page.filter.apply(b, { searchColumns: ['title', 'description'] });
+    }
+    const VIEW_LIST = [['list', 'List'], ['deadline', 'Deadline'], ['planner', 'Planner'], ['calendar', 'Calendar'], ['gantt', 'Gantt'], ['kanban', 'Kanban']];
 
     async function showList() {
+        page.mode = 'list';
         WSShell.setCrumb('Tasks');
         document.title = 'Tasks · WorkSuite';
-        const v = C.param('view'); if (v && VIEWS.some(x => x.key === v)) ls.view = v;
-        const d = C.param('display'); if (d === 'kanban' || d === 'list') ls.display = d;
-        view.innerHTML = `
-            <div class="ws-page-head">
-                <div><p class="ws-eyebrow">Collaboration</p><h1>Tasks</h1><p>Work assigned to you and your team, with due dates that show up on the calendar.</p></div>
-                <div class="actions">
-                    <div class="crm-seg" role="group" aria-label="Display"><button type="button" data-display="list">${C.icon('tasks', 'sm')} List</button><button type="button" data-display="kanban">${C.icon('board', 'sm')} Kanban</button></div>
-                    <button type="button" class="ws-btn primary" id="new-btn">${C.icon('plus')}<span>New task</span></button>
-                </div>
+        const pr = await sb.from('projects').select('id, name').is('archived_at', null).order('name').limit(300);
+        projectOpts.splice(0, projectOpts.length, ...(pr.data || []).map(p => ({ value: p.id, label: p.name })));
+        (pr.data || []).forEach(p => { names.project[p.id] = p.name; });
+        const r0 = C.param('role'); if (ROLES.some(r => r[0] === r0)) page.role = r0;
+        const v0 = C.param('view'); if (v0 === 'mine') page.role = 'ongoing'; else if (v0 === 'created') page.role = 'created'; else if (v0 === 'all') page.role = 'all';
+        view.innerHTML = B.titleBar({ title: 'Tasks', createLabel: 'Create', createMenu: hasTemplates }) + `
+            <div class="b24-toolbar">
+                <div class="b24-views" role="tablist" aria-label="Role">${ROLES.map(([k, t]) => `<button type="button" role="tab" data-role="${k}">${esc(t)}<span class="b24-n" data-rc="${k}"></span></button>`).join('')}</div>
+                <div class="b24-counters" id="counters"></div>
+                <span class="grow"></span>
+                <div class="b24-views" role="tablist" aria-label="View">${VIEW_LIST.map(([k, t]) => `<button type="button" role="tab" data-view="${k}">${esc(t)}</button>`).join('')}</div>
             </div>
-            <div class="crm-toolbar">
-                <div class="crm-seg" id="views" role="tablist" aria-label="Task views">${VIEWS.map(x => `<button type="button" role="tab" data-view="${x.key}">${esc(x.label)}<span class="n" data-count="${x.key}">…</span></button>`).join('')}</div>
-            </div>
-            <div class="crm-toolbar">
-                <div class="crm-search grow">${C.icon('search', 'sm')}<input type="search" id="q" placeholder="Search tasks…" aria-label="Search tasks"></div>
-                <select id="f-assignee" aria-label="Assignee"><option value="">Any assignee</option><option value="me">Assigned to me</option><option value="none">Unassigned</option>${C.peopleOptions('', { none: null })}</select>
-                <select id="f-project" aria-label="Project"><option value="">Any project</option></select>
-                <select id="f-priority" aria-label="Priority"><option value="">Any priority</option>${Object.entries(L.PRIORITY).map(([k, p]) => `<option value="${k}">${esc(p.label)}</option>`).join('')}</select>
-                <select id="f-status" aria-label="Status"><option value="">Any status</option>${lk.taskStatuses.map(s => `<option value="${esc(s.key)}">${esc(s.label)}</option>`).join('')}</select>
-                <label class="crm-check" style="min-height:auto"><input type="checkbox" id="f-archived"> Archived</label>
-                <span class="crm-count" id="count"></span>
-            </div>
-            <div id="bulk" class="crm-bulkbar" hidden></div>
-            <div id="list-wrap" class="ws-card flush"><div id="table"></div></div>
-            <div id="kanban" hidden></div>`;
-        const tableEl = view.querySelector('#table'), kbEl = view.querySelector('#kanban'), listWrap = view.querySelector('#list-wrap');
-        C.skeletonRows(tableEl, 6);
-        view.querySelector('#q').value = ls.q;
-        view.querySelector('#f-assignee').value = ls.assignee;
-        view.querySelector('#f-priority').value = ls.priority;
-        view.querySelector('#f-status').value = ls.status;
-        view.querySelector('#f-archived').checked = ls.archived;
-        const newTask = () => C.openTaskEditor({ defaults: { assignee_id: me.id }, onSaved: t => go(`/tasks/?id=${t.id}`) });
-        on('#new-btn', newTask);
+            <div id="only" hidden></div>
+            <div id="body"></div>`;
+        page.filter = WSFilter.mount(view.querySelector('[data-filter]'), { id: 'tasks', fields: filterFields(), presets: PRESETS, defaultPreset: 'progress', me: me.id, onChange: () => refreshList() });
+        const create = () => C.openTaskEditor({ defaults: { assignee_id: me.id }, onSaved: t => { refreshList(); if (t && t.id) openTask(t.id); } });
+        view.querySelector('[data-create]').addEventListener('click', create);
+        const more = view.querySelector('[data-create-menu]');
+        if (more) more.addEventListener('click', () => C.menu(more, [
+            { label: 'Create from a template…', icon: 'star', onClick: pickTemplate },
+            { label: 'Task templates', icon: 'edit', onClick: manageTemplates },
+        ]));
+        view.querySelector('.b24-toolbar').addEventListener('click', e => {
+            const r = e.target.closest('[data-role]');
+            if (r) { page.role = r.dataset.role; C.setParam('role', page.role === 'ongoing' ? null : page.role, true); syncTabs(); return refreshList(); }
+            const vb = e.target.closest('[data-view]');
+            if (vb) { try { localStorage.setItem('ws-tasks-view', vb.dataset.view); } catch (err) { /* private mode */ } mountView(vb.dataset.view); }
+            const c = e.target.closest('[data-counter]');
+            if (c && c.dataset.counter === 'overdue') { page.role = 'ongoing'; syncTabs(); page.filter.set({ state: 'overdue' }); }
+            if (c && c.dataset.counter === 'comments') { page.onlyIds = page.commentIds || []; showOnly(); refreshList(); }
+        });
+        await loadRoleIds();
+        syncTabs();
+        let v = VIEW_LIST.some(x => x[0] === C.param('display')) ? C.param('display') : null;   // deep link: ?display=deadline|planner|calendar|gantt|kanban|list
+        if (!v) { try { v = localStorage.getItem('ws-tasks-view') || 'list'; } catch (e) { v = 'list'; } }
+        if (!VIEW_LIST.some(x => x[0] === v)) v = 'list';
+        mountView(v);
+        loadCounters();
+        if (C.param('new') === '1') { C.setParam('new', null, true); create(); }
+    }
+    function syncTabs() {
+        view.querySelectorAll('[data-role]').forEach(b => { b.classList.toggle('on', b.dataset.role === page.role); b.setAttribute('aria-selected', String(b.dataset.role === page.role)); });
+    }
+    function showOnly() {
+        const el = view.querySelector('#only');
+        el.hidden = !page.onlyIds;
+        el.innerHTML = page.onlyIds ? `<div class="b24-area pad b24-only">Showing ${page.onlyIds.length} task${page.onlyIds.length === 1 ? '' : 's'} with new comments. <button type="button" class="b24-link" data-clear-only>Show all</button></div>` : '';
+        const b = el.querySelector('[data-clear-only]'); if (b) b.addEventListener('click', () => { page.onlyIds = null; showOnly(); refreshList(); });
+    }
+    function mountView(kind) {
+        page.view = kind;
+        view.querySelectorAll('[data-view]').forEach(b => { b.classList.toggle('on', b.dataset.view === kind); b.setAttribute('aria-selected', String(b.dataset.view === kind)); });
+        if (page.grid) { page.grid.destroy(); page.grid = null; }
+        if (page.board) { page.board.destroy(); page.board = null; }
+        const body = view.querySelector('#body'); body.innerHTML = '';
+        ({ list: mountGrid, deadline: mountDeadline, planner: mountPlanner, calendar: mountCalendar, gantt: mountGantt, kanban: mountStatusBoard })[kind](body);
+    }
+    function refreshList(quiet) {
+        if (page.mode !== 'list') return;
+        loadCounters();
+        if (page.grid) return quiet ? page.grid.refresh() : page.grid.reload();
+        if (page.reloadView) return page.reloadView();
+    }
+    async function loadCounters() {
+        const el = view.querySelector('#counters'); if (!el) return;
+        const head = () => sb.from('tasks').select('id', { count: 'exact', head: true }).is('archived_at', null).is('completed_at', null);
+        try {
+            const results = await Promise.all([
+                head().eq('assignee_id', me.id).lt('due_date', today),
+                ...ROLES.map(([k]) => roleApply(head(), k)),
+            ]);
+            const n = r => (r && !r.error && r.count) || 0;
+            ROLES.forEach(([k], i) => { const s = view.querySelector(`[data-rc="${k}"]`); if (s) s.textContent = n(results[i + 1]) || ''; });
+            const overdue = n(results[0]);
+            const comments = await newCommentIds();
+            page.commentIds = comments;
+            el.innerHTML = `<button type="button" class="b24-counter${overdue ? ' red' : ''}" data-counter="overdue"><span class="n">${overdue}</span>Overdue</button>
+                ${comments ? `<button type="button" class="b24-counter${comments.length ? ' green' : ''}" data-counter="comments"><span class="n">${comments.length}</span>New comments</button>` : ''}`;
+        } catch (e) { el.innerHTML = ''; }
+    }
+    /** Tasks I work on with comments from others since I last opened them (needs task_views). */
+    async function newCommentIds() {
+        const mine = await sb.from('tasks').select('id').is('archived_at', null).or(`assignee_id.eq.${me.id},created_by.eq.${me.id}`).limit(500);
+        const ids = [...new Set((mine.data || []).map(x => x.id).concat(roleIds.assisting, roleIds.following))].slice(0, 500);
+        if (!ids.length) return [];
+        const since = new Date(Date.now() - 30 * 86400000).toISOString();
+        const [cm, seen] = await Promise.all([
+            sb.from('comments').select('entity_id, created_at, author_id').eq('entity_type', 'task').in('entity_id', ids).gte('created_at', since).limit(2000),
+            sb.from('task_views').select('task_id, viewed_at').eq('user_id', me.id).in('task_id', ids),
+        ]);
+        if (seen.error) return null;
+        const last = new Map((seen.data || []).map(v => [v.task_id, v.viewed_at]));
+        const out = new Set();
+        (cm.data || []).forEach(c => { if (c.author_id !== me.id && (!last.has(c.entity_id) || c.created_at > last.get(c.entity_id))) out.add(c.entity_id); });
+        return [...out];
+    }
 
-        let tbl = null, kb = null;
-        const bulk = view.querySelector('#bulk');
-        function syncControls() {
-            view.querySelectorAll('[data-view]').forEach(b => { b.classList.toggle('on', b.dataset.view === ls.view); b.setAttribute('aria-selected', b.dataset.view === ls.view); });
-            view.querySelectorAll('[data-display]').forEach(b => b.classList.toggle('on', b.dataset.display === ls.display));
-            view.querySelector('#f-status').disabled = ls.display === 'kanban';
-            listWrap.hidden = ls.display !== 'list'; kbEl.hidden = ls.display !== 'kanban';
-        }
-        function counts() {
-            const c = { mine: viewRows('mine').length, all: ls.open.length, created: viewRows('created').length, overdue: viewRows('overdue').length, today: viewRows('today').length, completed: ls.completedCount };
-            Object.entries(c).forEach(([k, n]) => { const el = view.querySelector(`[data-count="${k}"]`); if (el) el.textContent = n; });
-        }
-        function projectOptions() {
-            const sel = view.querySelector('#f-project');
-            const ids = Array.from(new Set([...ls.open, ...ls.completed].map(t => t.project_id).filter(Boolean)));
-            sel.innerHTML = '<option value="">Any project</option>' + ids.map(id => `<option value="${esc(id)}"${id === ls.project ? ' selected' : ''}>${esc(names.project[id] || 'Project')}</option>`).join('');
-        }
-        function renderBulk(sel) {
-            bulk.hidden = !sel.length;
-            if (!sel.length) return;
-            bulk.innerHTML = `<span>${sel.length} selected</span>
-                <select id="bulk-assign" aria-label="Assign"><option value="">Assign to…</option>${C.peopleOptions('', { none: null })}</select>
-                <select id="bulk-status" aria-label="Set status"><option value="">Set status…</option>${lk.taskStatuses.map(s => `<option value="${esc(s.key)}">${esc(s.label)}</option>`).join('')}</select>
-                <select id="bulk-priority" aria-label="Set priority"><option value="">Set priority…</option>${Object.entries(L.PRIORITY).map(([k, p]) => `<option value="${k}">${esc(p.label)}</option>`).join('')}</select>
-                <button type="button" class="ws-btn sm" id="bulk-archive">${C.icon('trash')}<span>Archive</span></button>
-                <span class="spacer"></span><button type="button" class="ws-btn sm ghost" id="bulk-clear">Clear</button>`;
-            const apply = async (patch, msg) => { try { await mustUpdate(sb.from('tasks').update(patch).in('id', sel), sel.length); C.toast(msg, 'ok'); WSShell.refreshUnread(); await reload(); } catch (e) { C.toast(e.message, 'bad'); } };
-            bulk.querySelector('#bulk-assign').addEventListener('change', e => { if (e.target.value) apply({ assignee_id: e.target.value }, `Assigned ${sel.length} task${sel.length > 1 ? 's' : ''}`); });
-            bulk.querySelector('#bulk-status').addEventListener('change', e => { if (e.target.value) apply({ status: e.target.value }, 'Status updated'); });
-            bulk.querySelector('#bulk-priority').addEventListener('change', e => { if (e.target.value) apply({ priority: e.target.value }, 'Priority updated'); });
-            bulk.querySelector('#bulk-archive').addEventListener('click', async () => {
-                if (!await C.confirm({ title: `Archive ${sel.length} task${sel.length > 1 ? 's' : ''}?`, message: 'They are hidden from lists and boards but keep their history.', okText: 'Archive', danger: true })) return;
-                apply({ archived_at: new Date().toISOString() }, 'Archived');
-            });
-            bulk.querySelector('#bulk-clear').addEventListener('click', () => tbl && tbl.clearSelection());
-        }
-        const subCounts = {};
-        async function loadSubCounts(rows) {
-            const ids = rows.filter(t => !t.parent_task_id).map(t => t.id);
-            if (!ids.length) return;
-            const r = await sb.from('tasks').select('parent_task_id').in('parent_task_id', ids.slice(0, 500)).is('archived_at', null);
-            Object.keys(subCounts).forEach(k => delete subCounts[k]);
-            (r.data || []).forEach(x => { subCounts[x.parent_task_id] = (subCounts[x.parent_task_id] || 0) + 1; });
-        }
-        function columns() {
-            return [
-                { key: 'title', label: 'Task', lead: true, render: t => `<div style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" data-done="${esc(t.id)}" aria-label="Complete" ${isDone(t) ? 'checked' : ''} style="margin-top:3px;width:17px;height:17px;accent-color:var(--ws-primary)"><div style="min-width:0"><span class="primary-text" style="${isDone(t) ? 'text-decoration:line-through;color:var(--ws-text-muted)' : ''}">${esc(t.title)}</span>${t.reminder_at ? ` <span class="ic ic-bell sm" title="Reminder ${esc(L.fmtDateTime(t.reminder_at))}" style="color:var(--ws-text-muted)"></span>` : ''}${t.parent_task_id ? ' <span class="crm-tag">subtask</span>' : ''}${subCounts[t.id] ? ` <span class="crm-tag">${subCounts[t.id]} subtask${subCounts[t.id] > 1 ? 's' : ''}</span>` : ''}<span class="sub">${subtitle(t) || '—'}</span></div></div>` },
-                { key: 'status', label: 'Status', render: t => C.statusBadge(STATUS, t.status) },
-                { key: 'priority', label: 'Priority', value: t => prioRank(t), render: t => C.priorityBadge(t.priority) },
-                { key: 'assignee_id', label: 'Assignee', value: t => C.personName(t.assignee_id), render: t => C.personHtml(t.assignee_id, { link: false }) },
-                { key: 'due_date', label: 'Due', render: t => C.dueHtml(t, today) },
-                { key: 'updated_at', label: 'Updated', num: true, hideMobile: true, render: t => `<span class="muted">${esc(L.fmtRelative(t.updated_at))}</span>` },
-                { key: 'actions', label: '', sort: false, cls: 'actions', render: t => `<button type="button" class="ws-btn sm icon" data-menu="${esc(t.id)}" aria-label="Actions">${C.icon('more')}</button>` },
-            ];
-        }
-        function currentRows() { return defaultSort(applyFilters(viewRows(ls.view))); }
-        function emptyFor() {
-            const has = ls.q || ls.assignee || ls.priority || ls.status || ls.project;
-            const t = { mine: 'You have no open tasks', all: 'No open tasks', created: 'You have not created any tasks', overdue: 'Nothing overdue', today: 'Nothing due today', completed: 'No completed tasks yet' }[ls.view];
-            return { title: has ? 'No tasks match' : t, sub: has ? 'Try clearing a filter.' : (ls.view === 'overdue' || ls.view === 'today' ? 'Nice — keep it that way.' : 'Create a task to get going.'), action: has ? '' : `<button type="button" class="ws-btn primary" onclick="document.getElementById('new-btn').click()">${C.icon('plus')}<span>New task</span></button>` };
-        }
-        function paint() {
-            syncControls(); counts(); projectOptions();
-            const rows = currentRows();
-            view.querySelector('#count').textContent = `${rows.length} task${rows.length === 1 ? '' : 's'}`;
-            if (ls.display === 'list') {
-                if (!tbl) tbl = C.table(tableEl, { columns: columns(), rows, sort: null, selectable: true, pageSize: 50, onRow: t => go(`/tasks/?id=${t.id}`), onSelectionChange: renderBulk, empty: emptyFor(), rowClass: t => isDone(t) ? 'done' : '' });
-                else tbl.update(rows);
-            } else {
-                const cards = rows.map(t => ({ ...t, columnId: t.status, position: t.position || 0 }));
-                const cols = lk.taskStatuses.map(s => ({ id: s.key, name: s.label, color: s.color }));
-                if (!kb) kb = WSKanban.mount(kbEl, {
-                    columns: cols, cards, emptyText: 'No tasks',
-                    renderCard: t => `<div class="t">${esc(t.title)}</div>${chipText(t) ? `<div class="s">${chipText(t)}</div>` : ''}<div class="f">${C.priorityBadge(t.priority)}${C.dueHtml(t, today)}<span class="spacer"></span>${t.assignee_id ? C.avatarHtml(t.assignee_id) : ''}</div>`,
-                    onMove: async ({ card, toColumnId, position }) => { await C.q(sb.from('tasks').update({ status: toColumnId, position }).eq('id', card.id)); WSShell.refreshUnread(); await reload(true); },
-                    onCardClick: t => go(`/tasks/?id=${t.id}`),
-                    onAddCard: colId => C.openTaskEditor({ defaults: { assignee_id: me.id, status: colId }, onSaved: async s => { if (s.status !== colId) await sb.from('tasks').update({ status: colId }).eq('id', s.id); reload(); } }),
-                });
-                else kb.update({ columns: cols, cards });
-            }
-        }
-        async function reload(silent) {
+    /* ----- List ----- */
+    function mountGrid(body) {
+        const host = document.createElement('div'); body.appendChild(host);
+        page.reloadView = null;
+        const people = [{ value: '', label: 'Not assigned' }].concat(B.peopleOptions());
+        const saveField = key => async (t, v) => { await mustUpdate(sb.from('tasks').update({ [key]: v }).eq('id', t.id)); WSShell.refreshUnread(); };
+        page.grid = WSGrid.mount(host, {
+            id: 'tasks', sort: { key: 'due_date', dir: 'asc' },
+            columns: [
+                ...(cols.full ? [{ key: 'number', title: 'ID', width: 70, render: t => esc(t.number == null ? '' : t.number) }] : []),
+                { key: 'title', title: 'Name', width: 340, render: t => `<span class="b24-task${isDone(t) ? ' done' : ''}"><input type="checkbox" data-done="${esc(t.id)}"${isDone(t) ? ' checked' : ''} aria-label="Complete"><span><a href="/tasks/?id=${esc(t.id)}" data-open>${esc(t.title)}</a>${chipText(t) ? `<span class="sub">${chipText(t)}</span>` : ''}</span></span>`, edit: { type: 'text', save: saveField('title') } },
+                { key: 'due_date', title: 'Deadline', width: 160, render: t => C.dueHtml(t, today), edit: { type: 'date', save: saveField('due_date') } },
+                { key: 'assignee_id', title: 'Responsible', width: 180, render: t => C.personHtml(t.assignee_id, { link: false }), edit: { type: 'people', options: people, save: saveField('assignee_id') } },
+                { key: 'created_by', title: 'Created by', width: 170, render: t => C.personHtml(t.created_by, { link: false }) },
+                { key: 'status', title: 'Status', width: 140, render: t => C.statusBadge(STATUS, t.status), edit: { type: 'select', options: lk.taskStatuses.map(s => ({ value: s.key, label: s.label })), save: saveField('status') } },
+                { key: 'priority', title: 'Priority', width: 110, render: t => C.priorityBadge(t.priority), edit: { type: 'select', options: Object.entries(L.PRIORITY).map(([value, p]) => ({ value, label: p.label })), save: saveField('priority') } },
+                { key: 'project_id', title: 'Project', width: 170, render: t => t.project_id ? esc(names.project[t.project_id] || 'Project') : '' },
+                { key: 'updated_at', title: 'Activity date', width: 130, render: t => `<span class="muted">${esc(L.fmtRelative(t.updated_at))}</span>` },
+                { key: 'start_date', title: 'Start', width: 120, default: false, render: t => esc(L.fmtDate(t.start_date) || ''), edit: { type: 'date', save: saveField('start_date') } },
+                { key: 'estimate_hours', title: 'Estimate, h', width: 110, align: 'right', default: false, render: t => esc(t.estimate_hours == null ? '' : t.estimate_hours) },
+                { key: 'created_at', title: 'Created', width: 120, default: false, render: t => esc(L.fmtDate(t.created_at, { short: true })) },
+                { key: 'tags', title: 'Tags', width: 160, default: false, sortable: false, render: t => C.tagsHtml(t.tags) },
+            ],
+            load: async ({ offset, limit, sort }) => {
+                let b = scoped(sb.from('tasks').select(SELECT));
+                b = sort ? b.order(sort.key, { ascending: sort.dir === 'asc', nullsFirst: false }) : b.order('due_date', { ascending: true, nullsFirst: false });
+                const rows = (await C.q(b.order('created_at', { ascending: false }).range(offset, offset + limit - 1))).data || [];
+                await resolveNames(rows);
+                return rows;
+            },
+            count: async () => (await C.q(scoped(sb.from('tasks').select('id', { count: 'exact', head: true })))).count || 0,
+            onOpen: t => openTask(t.id),
+            rowMenu: t => {
+                const items = [{ label: 'Open', icon: 'arrow', onClick: () => openTask(t.id) }, { label: 'Edit', icon: 'edit', onClick: () => editTask(t, () => refreshList(true)) }];
+                items.push(isDone(t) ? { label: 'Resume', icon: 'refresh', onClick: () => setDone(t, false, () => refreshList(true)) } : { label: 'Complete', icon: 'check', onClick: () => setDone(t, true, () => refreshList(true)) });
+                if (t.assignee_id !== me.id) items.push({ label: 'Take it', icon: 'user', onClick: () => assignToMe(t, () => refreshList(true)) });
+                items.push({ label: 'Copy', icon: 'plus', onClick: () => duplicateTask(t) });
+                items.push('sep', t.archived_at ? { label: 'Restore', icon: 'refresh', onClick: () => setArchived(t, false, () => refreshList(true)) } : { label: 'Move to recycle bin', icon: 'trash', danger: true, onClick: () => setArchived(t, true, () => refreshList(true)) });
+                return items;
+            },
+            bulk: [
+                { label: 'Complete', icon: 'check', run: async (ids, o) => bulkPatch(ids, o, { status: DONE_KEY }, 'Completed') },
+                { label: 'Change responsible', icon: 'user', run: async (ids, o) => { const v = await B.pick('Change responsible', { type: 'people', label: 'Responsible', none: 'Not assigned' }, ''); if (v === undefined) return false; return bulkPatch(ids, o, { assignee_id: v || null }, 'Responsible changed'); } },
+                { label: 'Set deadline', icon: 'calendar', run: async (ids, o) => { const v = await B.pick('Set deadline', { type: 'date', label: 'Deadline' }, today); if (v === undefined) return false; return bulkPatch(ids, o, { due_date: v || null }, 'Deadline set'); } },
+                { label: 'Priority', icon: 'star', run: async (ids, o) => { const v = await B.pick('Set priority', { type: 'select', label: 'Priority', required: true, options: Object.entries(L.PRIORITY).map(([value, p]) => ({ value, label: p.label })) }, 'high'); if (!v) return false; return bulkPatch(ids, o, { priority: v }, 'Priority set'); } },
+                { label: 'Move to recycle bin', icon: 'trash', danger: true, run: async (ids, o) => { if (!await C.confirm({ title: o.all ? 'Move every task in this filter to the recycle bin?' : `Move ${ids.length} task${ids.length > 1 ? 's' : ''} to the recycle bin?`, message: 'They keep their comments and history and can be restored from the Recycle bin filter.', okText: 'Move', danger: true })) return false; return bulkPatch(ids, o, { archived_at: new Date().toISOString() }, 'Moved to the recycle bin'); } },
+            ],
+            empty: { title: 'No tasks here', sub: 'Change the role tab or the filter, or create a task.' },
+        });
+        host.addEventListener('change', async e => {
+            const cb = e.target.closest('[data-done]'); if (!cb) return;
+            const rows = page.grid.rows(); const t = rows.find(x => x.id === cb.dataset.done); if (!t) return;
+            await setDone(t, cb.checked, () => refreshList(true));
+        });
+    }
+    async function bulkPatch(ids, o, patch, msg) {
+        let b = sb.from('tasks').update(patch);
+        b = o.all ? scoped(b) : b.in('id', ids);
+        await mustUpdate(b, o.all ? null : ids.length);
+        C.toast(msg, 'ok'); WSShell.refreshUnread();
+    }
+    async function loadRows(extra) {
+        let b = scoped(sb.from('tasks').select(SELECT));
+        if (extra) b = extra(b);
+        const rows = (await C.q(b.order('due_date', { ascending: true, nullsFirst: false }).limit(600))).data || [];
+        await resolveNames(rows);
+        return rows;
+    }
+    function taskCard(t) {
+        return `<div class="b24-kcard"><a class="t" href="/tasks/?id=${esc(t.id)}" data-open>${esc(t.title)}</a>${chipText(t) ? `<div class="org">${chipText(t)}</div>` : ''}<div class="meta">${t.assignee_id ? C.avatarHtml(t.assignee_id, 'sm') : ''}${C.dueHtml(t, today)}${t.priority === 'high' || t.priority === 'urgent' ? C.priorityBadge(t.priority) : ''}</div></div>`;
+    }
+
+    /* ----- Deadline: Kanban by due period ----- */
+    function weekEnd(offsetWeeks) { const dow = (new Date(today + 'T00:00:00Z').getUTCDay() + 6) % 7; return L.addDays(today, 6 - dow + 7 * (offsetWeeks || 0)); }
+    const DEADLINES = [
+        { id: 'overdue', name: 'Overdue', hex: '#ff5752' }, { id: 'today', name: 'Due today', hex: '#ffa900' }, { id: 'week', name: 'Due this week', hex: '#2fc6f6' },
+        { id: 'next', name: 'Due next week', hex: '#39a8ef' }, { id: 'none', name: 'No deadline', hex: '#a8adb4' }, { id: 'later', name: 'Due in over two weeks', hex: '#9b7cf5' },
+    ];
+    function bucketOf(t) {
+        if (!t.due_date) return 'none';
+        if (t.due_date < today) return 'overdue';
+        if (t.due_date === today) return 'today';
+        if (t.due_date <= weekEnd(0)) return 'week';
+        if (t.due_date <= weekEnd(1)) return 'next';
+        return 'later';
+    }
+    function dateFor(bucket) { return { today, week: weekEnd(0), next: weekEnd(1), later: L.addDays(weekEnd(1), 7), none: null }[bucket]; }
+    function mountDeadline(body) {
+        body.innerHTML = '<div class="b24-board-area"><div id="kb"></div></div>';
+        page.board = WSKanban.mount(body.querySelector('#kb'), {
+            columns: [], cards: [], renderCard: c => taskCard(c.task), emptyText: 'Nothing here',
+            canDrag: () => true,
+            onCardClick: (c, e) => { if (e) e.preventDefault(); openTask(c.task.id); },
+            onMove: async ({ card, toColumnId }) => {
+                if (toColumnId === 'overdue') throw new Error('Pick a new deadline instead: drop the task on Today or a later column.');
+                await mustUpdate(sb.from('tasks').update({ due_date: dateFor(toColumnId) }).eq('id', card.task.id));
+                C.toast(toColumnId === 'none' ? 'Deadline removed' : `Deadline: ${L.fmtDate(dateFor(toColumnId))}`, 'ok');
+                page.reloadView(); WSShell.refreshUnread();
+            },
+        });
+        page.reloadView = async () => {
             try {
-                if (!silent && ls.display === 'list' && !tbl) C.skeletonRows(tableEl, 6);
-                await fetchOpen();
-                if (ls.view === 'completed' || !ls.completedCount) await fetchCompleted();
-                await loadSubCounts([...ls.open, ...ls.completed]);
-                paint();
-            } catch (e) { C.errorState(ls.display === 'list' ? tableEl : kbEl, e, () => reload()); }
+                const rows = await loadRows(b => b.is('completed_at', null));
+                page.board.update({ columns: DEADLINES, cards: rows.map((t, i) => ({ id: t.id, columnId: bucketOf(t), position: i, task: t })) });
+            } catch (e) { C.errorState(body, e, page.reloadView); }
+        };
+        page.reloadView();
+    }
+
+    /* ----- Planner: my own board (task_planner) ----- */
+    const PLANNER = [{ id: 'new', name: 'New tasks', hex: '#2fc6f6' }, { id: 'today', name: 'Do today', hex: '#ffa900' }, { id: 'week', name: 'This week', hex: '#7bd500' }, { id: 'later', name: 'Later', hex: '#9b7cf5' }];
+    function mountPlanner(body) {
+        body.innerHTML = '<div class="b24-board-area"><div id="kb"></div></div>';
+        let plan = new Map();
+        page.board = WSKanban.mount(body.querySelector('#kb'), {
+            columns: [], cards: [], renderCard: c => taskCard(c.task), emptyText: 'Drop tasks here',
+            onCardClick: (c, e) => { if (e) e.preventDefault(); openTask(c.task.id); },
+            onMove: async ({ card, toColumnId, position }) => {
+                await C.q(sb.from('task_planner').upsert({ user_id: me.id, task_id: card.task.id, stage: toColumnId, position, updated_at: new Date().toISOString() }, { onConflict: 'user_id,task_id' }));
+                plan.set(card.task.id, { stage: toColumnId, position });
+            },
+        });
+        page.reloadView = async () => {
+            try {
+                const p = await sb.from('task_planner').select('task_id, stage, position').eq('user_id', me.id);
+                if (p.error) { body.innerHTML = `<div class="b24-area pad"><div class="crm-notice">${C.icon('lock')}<div><b>The planner needs the latest database update.</b><br>An administrator needs to run <code>supabase-b24-migration.sql</code>.</div></div></div>`; return; }
+                plan = new Map((p.data || []).map(x => [x.task_id, x]));
+                // The planner is personal: open tasks I am responsible for or assisting on.
+                const rows = await loadRows(b => b.is('completed_at', null));
+                const mineRows = rows.filter(t => t.assignee_id === me.id || roleIds.assisting.includes(t.id) || page.role !== 'ongoing');
+                page.board.update({ columns: PLANNER, cards: mineRows.map((t, i) => { const x = plan.get(t.id); return { id: t.id, columnId: x ? x.stage : 'new', position: x ? Number(x.position) : i, task: t }; }) });
+            } catch (e) { C.errorState(body, e, page.reloadView); }
+        };
+        page.reloadView();
+    }
+
+    /* ----- Calendar: tasks on their deadlines ----- */
+    function mountCalendar(body) {
+        if (!page.month) page.month = today.slice(0, 7);
+        page.reloadView = async () => {
+            const [y, m] = page.month.split('-').map(Number);
+            const first = `${page.month}-01`;
+            const startDow = (new Date(first + 'T00:00:00Z').getUTCDay() + 6) % 7;
+            const gridStart = L.addDays(first, -startDow);
+            const days = Array.from({ length: 42 }, (_, i) => L.addDays(gridStart, i));
+            body.innerHTML = '<div class="b24-area pad"><div class="ws-empty">Loading…</div></div>';
+            try {
+                const rows = await loadRows(b => b.gte('due_date', days[0]).lte('due_date', days[41]));
+                const byDay = new Map(); rows.forEach(t => { if (!byDay.has(t.due_date)) byDay.set(t.due_date, []); byDay.get(t.due_date).push(t); });
+                const label = new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, 1)));
+                body.innerHTML = `<div class="b24-area b24-cal">
+                    <div class="head"><button type="button" class="ws-btn sm" data-mon="-1" aria-label="Previous month">‹</button><b>${esc(label)}</b><button type="button" class="ws-btn sm" data-mon="1" aria-label="Next month">›</button><button type="button" class="ws-btn sm" data-mon="0">Today</button></div>
+                    <div class="grid">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="dow">${d}</div>`).join('')}
+                    ${days.map(d => { const list = byDay.get(d) || []; return `<div class="day${d.slice(0, 7) !== page.month ? ' other' : ''}${d === today ? ' today' : ''}"><span class="n">${Number(d.slice(8))}</span>
+                        ${list.slice(0, 4).map(t => `<a class="chip ${isDone(t) ? 'done' : L.taskDueState(t, today)}" href="/tasks/?id=${esc(t.id)}" data-open title="${esc(t.title)}">${esc(t.title)}</a>`).join('')}${list.length > 4 ? `<span class="more">+${list.length - 4} more</span>` : ''}</div>`; }).join('')}</div></div>`;
+                body.querySelectorAll('[data-mon]').forEach(b => b.addEventListener('click', () => {
+                    const k = Number(b.dataset.mon);
+                    if (!k) page.month = today.slice(0, 7);
+                    else { const d = new Date(Date.UTC(y, m - 1 + k, 1)); page.month = d.toISOString().slice(0, 7); }
+                    page.reloadView();
+                }));
+            } catch (e) { C.errorState(body, e, page.reloadView); }
+        };
+        page.reloadView();
+    }
+
+    /* ----- Gantt: bars from start to deadline; drag to shift ----- */
+    function mountGantt(body) {
+        const DAY = 30, SPAN = 42;
+        if (!page.ganttStart) { const dow = (new Date(today + 'T00:00:00Z').getUTCDay() + 6) % 7; page.ganttStart = L.addDays(today, -dow - 7); }
+        page.reloadView = async () => {
+            const start = page.ganttStart, end = L.addDays(start, SPAN - 1);
+            body.innerHTML = '<div class="b24-area pad"><div class="ws-empty">Loading…</div></div>';
+            try {
+                const rows = (await loadRows(b => b.or(`due_date.gte.${start},start_date.gte.${start}`))).filter(t => (t.start_date || t.due_date) && (t.start_date || t.due_date) <= end);
+                const days = Array.from({ length: SPAN }, (_, i) => L.addDays(start, i));
+                const off = d => L.daysBetween(start, d);
+                body.innerHTML = `<div class="b24-area b24-gantt">
+                    <div class="head"><button type="button" class="ws-btn sm" data-shift="-28">‹ 4 weeks</button><b>${esc(L.fmtDate(start))} – ${esc(L.fmtDate(end))}</b><button type="button" class="ws-btn sm" data-shift="28">4 weeks ›</button><button type="button" class="ws-btn sm" data-shift="0">Today</button><span class="hint">Drag a bar to move its dates.</span></div>
+                    <div class="wrap"><div class="chart" style="--day:${DAY}px;--days:${SPAN}">
+                        <div class="row axis"><div class="name"></div><div class="lane">${days.map(d => `<span class="d${d === today ? ' today' : ''}${[5, 6].includes((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7) ? ' we' : ''}">${Number(d.slice(8))}${d.slice(8) === '01' || d === start ? `<small>${esc(new Intl.DateTimeFormat('en-IN', { month: 'short', timeZone: 'UTC' }).format(new Date(d + 'T00:00:00Z')))}</small>` : ''}</span>`).join('')}</div></div>
+                        ${rows.map(t => {
+                            const s = t.start_date || t.due_date, e = t.due_date || t.start_date;
+                            const a = Math.max(0, off(s)), b = Math.min(SPAN - 1, off(e));
+                            return `<div class="row"><div class="name"><a href="/tasks/?id=${esc(t.id)}" data-open>${esc(t.title)}</a></div><div class="lane">${b >= 0 && a <= SPAN - 1 ? `<span class="bar ${isDone(t) ? 'done' : L.taskDueState(t, today)}" data-bar="${esc(t.id)}" style="left:${a * DAY}px;width:${(b - a + 1) * DAY - 4}px" title="${esc(t.title)} · ${esc(L.fmtDate(s))} – ${esc(L.fmtDate(e))}"></span>` : ''}</div></div>`;
+                        }).join('') || '<div class="ws-empty">No tasks with dates in these weeks.</div>'}
+                        <span class="now" style="left:calc(var(--name-w) + ${off(today) * DAY + DAY / 2}px)"></span>
+                    </div></div></div>`;
+                body.querySelectorAll('[data-shift]').forEach(b => b.addEventListener('click', () => {
+                    const k = Number(b.dataset.shift);
+                    if (!k) { const dow = (new Date(today + 'T00:00:00Z').getUTCDay() + 6) % 7; page.ganttStart = L.addDays(today, -dow - 7); } else page.ganttStart = L.addDays(page.ganttStart, k);
+                    page.reloadView();
+                }));
+                body.querySelectorAll('[data-bar]').forEach(bar => bar.addEventListener('pointerdown', ev => {
+                    const t = rows.find(x => x.id === bar.dataset.bar); if (!t) return;
+                    ev.preventDefault(); bar.setPointerCapture(ev.pointerId);
+                    const x0 = ev.clientX, left0 = parseFloat(bar.style.left);
+                    let delta = 0;
+                    const move = e2 => { delta = Math.round((e2.clientX - x0) / DAY); bar.style.left = (left0 + delta * DAY) + 'px'; };
+                    const up = async () => {
+                        bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', up);
+                        if (!delta) return openTask(t.id);
+                        const patch = {}; if (t.start_date) patch.start_date = L.addDays(t.start_date, delta); if (t.due_date) patch.due_date = L.addDays(t.due_date, delta);
+                        try { await mustUpdate(sb.from('tasks').update(patch).eq('id', t.id)); C.toast(`Moved ${delta > 0 ? '+' : ''}${delta} day${Math.abs(delta) === 1 ? '' : 's'}`, 'ok'); }
+                        catch (err) { C.toast(err.message, 'bad'); }
+                        page.reloadView();
+                    };
+                    bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', up);
+                }));
+            } catch (e) { C.errorState(body, e, page.reloadView); }
+        };
+        page.reloadView();
+    }
+
+    /* ----- Kanban by status ----- */
+    function mountStatusBoard(body) {
+        body.innerHTML = '<div class="b24-board-area"><div id="kb"></div></div>';
+        page.board = WSKanban.mount(body.querySelector('#kb'), {
+            columns: [], cards: [], renderCard: c => taskCard(c.task), emptyText: 'No tasks',
+            onCardClick: (c, e) => { if (e) e.preventDefault(); openTask(c.task.id); },
+            onAddCard: colId => C.openTaskEditor({ defaults: { assignee_id: me.id, status: colId }, onSaved: async s => { if (s && s.status !== colId) await sb.from('tasks').update({ status: colId }).eq('id', s.id); page.reloadView(); } }),
+            onMove: async ({ card, toColumnId, position }) => { await mustUpdate(sb.from('tasks').update({ status: toColumnId, position }).eq('id', card.task.id)); WSShell.refreshUnread(); page.reloadView(); },
+        });
+        page.reloadView = async () => {
+            try {
+                const rows = await loadRows();
+                page.board.update({ columns: lk.taskStatuses.map((s, i) => ({ id: s.key, name: s.label, hex: B.hex(s.color, i) })), cards: rows.map(t => ({ id: t.id, columnId: t.status, position: Number(t.position) || 0, task: t })) });
+            } catch (e) { C.errorState(body, e, page.reloadView); }
+        };
+        page.reloadView();
+    }
+    view.addEventListener('click', e => {
+        const a = e.target.closest('a[data-open]');
+        if (!a || e.metaKey || e.ctrlKey || e.shiftKey || page.mode !== 'list') return;
+        e.preventDefault();
+        const id = new URL(a.href, location.href).searchParams.get('id');
+        if (id) openTask(id);
+    });
+
+    /* ----- Templates ----- */
+    async function pickTemplate() {
+        const r = await sb.from('task_templates').select('*').order('title');
+        if (r.error) return C.toast(C.friendly(r.error), 'bad');
+        const list = r.data || [];
+        if (!list.length) return C.alert({ title: 'No templates yet', message: 'Save a task as a template from its card, or add one under Task templates.' });
+        const v = await B.pick('Create from a template', { type: 'select', label: 'Template', required: true, options: list.map(x => ({ value: x.id, label: x.title })) }, list[0].id);
+        if (!v) return;
+        const tpl = list.find(x => x.id === v);
+        await C.openTaskEditor({
+            defaults: { title: tpl.title, description: tpl.description, priority: tpl.priority, assignee_id: tpl.assignee_id || me.id, estimate_hours: tpl.estimate_hours, tags: tpl.tags || [], due_date: tpl.deadline_days != null ? L.addDays(today, tpl.deadline_days) : null },
+            onSaved: async t => {
+                const items = Array.isArray(tpl.checklist) ? tpl.checklist.map(x => (typeof x === 'string' ? x : x.title)).filter(Boolean) : [];
+                if (t && t.id && items.length) await sb.from('tasks').insert(items.map(title => ({ title, parent_task_id: t.id, assignee_id: t.assignee_id, project_id: t.project_id, status: OPEN_KEY, created_by: me.id })));
+                refreshList(); if (t && t.id) openTask(t.id);
+            },
+        });
+    }
+    function templateFields() {
+        return [
+            { name: 'title', label: 'Task name', type: 'text', required: true, full: true },
+            { name: 'description', label: 'Description', type: 'textarea', full: true },
+            { name: 'assignee_id', label: 'Responsible', type: 'people', none: 'Whoever creates it' },
+            { name: 'priority', label: 'Priority', type: 'select', options: Object.entries(L.PRIORITY).map(([value, p]) => ({ value, label: p.label })) },
+            { name: 'deadline_days', label: 'Deadline, days after creation', type: 'number', min: 0 },
+            { name: 'estimate_hours', label: 'Estimate, hours', type: 'number', step: '0.25', min: 0 },
+            { name: 'checklist', label: 'Checklist (one item per line, becomes subtasks)', type: 'textarea', full: true, rows: 4 },
+            { name: 'tags', label: 'Tags', type: 'tags', full: true },
+        ];
+    }
+    async function saveTemplate(values, id) {
+        const row = { title: values.title.trim(), description: values.description || null, assignee_id: values.assignee_id || null, priority: values.priority || 'normal',
+            deadline_days: values.deadline_days == null || values.deadline_days === '' ? null : Number(values.deadline_days), estimate_hours: values.estimate_hours == null || values.estimate_hours === '' ? null : Number(values.estimate_hours),
+            checklist: String(values.checklist || '').split('\n').map(s => s.trim()).filter(Boolean), tags: values.tags || [] };
+        if (id) await C.q(sb.from('task_templates').update(row).eq('id', id)); else await C.q(sb.from('task_templates').insert({ ...row, created_by: me.id }));
+    }
+    async function manageTemplates() {
+        const body = document.createElement('div');
+        const m = C.modal({ title: 'Task templates', size: 'wide', body, actions: [{ label: 'New template', onClick: () => edit(null) }, { label: 'Done', primary: true, close: true }] });
+        async function render() {
+            const r = await sb.from('task_templates').select('*').order('title');
+            const list = r.data || [];
+            body.innerHTML = list.length ? `<ul class="crm-list">${list.map(x => `<li><div class="main"><b>${esc(x.title)}</b><span>${esc([x.deadline_days != null ? `deadline in ${x.deadline_days} day${x.deadline_days === 1 ? '' : 's'}` : 'no deadline', (x.checklist || []).length ? `${x.checklist.length} checklist item${x.checklist.length === 1 ? '' : 's'}` : '', x.assignee_id ? C.personName(x.assignee_id) : ''].filter(Boolean).join(' · '))}</span></div><div class="right"><button type="button" class="ws-btn sm" data-edit="${esc(x.id)}">Edit</button> <button type="button" class="ws-btn sm danger" data-del="${esc(x.id)}">Delete</button></div></li>`).join('')}</ul>`
+                : '<div class="ws-empty"><b>No templates yet</b>Templates pre-fill recurring tasks, checklists included.</div>';
+            body.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => edit(list.find(x => x.id === b.dataset.edit))));
+            body.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => { if (!await C.confirm({ title: 'Delete this template?', okText: 'Delete', danger: true })) return; try { await C.q(sb.from('task_templates').delete().eq('id', b.dataset.del)); render(); } catch (e) { C.toast(e.message, 'bad'); } }));
         }
-        view.querySelector('#views').addEventListener('click', async e => {
-            const b = e.target.closest('[data-view]'); if (!b) return;
-            ls.view = b.dataset.view; C.setParam('view', ls.view, true);
-            if (ls.view === 'completed') { await fetchCompleted(); await loadSubCounts(ls.completed); }
-            if (tbl) tbl.clearSelection();
-            paint();
-        });
-        view.querySelectorAll('[data-display]').forEach(b => b.addEventListener('click', () => { ls.display = b.dataset.display; C.setParam('display', ls.display, true); paint(); }));
-        tableEl.addEventListener('click', async e => {
-            const done = e.target.closest('[data-done]');
-            if (done) { const t = [...ls.open, ...ls.completed].find(x => x.id === done.dataset.done); if (t) await setDone(t, done.checked, reload); return; }
-            const b = e.target.closest('[data-menu]'); if (!b) return;
-            e.stopPropagation();
-            const t = [...ls.open, ...ls.completed].find(x => x.id === b.dataset.menu); if (t) rowMenu(b, t, reload);
-        });
-        view.querySelector('#q').addEventListener('input', C.debounce(() => { ls.q = view.querySelector('#q').value; paint(); }, 180));
-        view.querySelector('#f-assignee').addEventListener('change', e => { ls.assignee = e.target.value; paint(); });
-        view.querySelector('#f-project').addEventListener('change', e => { ls.project = e.target.value; paint(); });
-        view.querySelector('#f-priority').addEventListener('change', e => { ls.priority = e.target.value; paint(); });
-        view.querySelector('#f-status').addEventListener('change', e => { ls.status = e.target.value; paint(); });
-        view.querySelector('#f-archived').addEventListener('change', e => { ls.archived = e.target.checked; ls.completedCount = 0; reload(); });
-        await reload();
-        if (C.param('new') === '1') { C.setParam('new', null, true); newTask(); }
+        async function edit(x) {
+            await C.formModal({ title: x ? 'Edit template' : 'New template', size: 'wide', fields: templateFields(), values: x ? { ...x, checklist: (x.checklist || []).join('\n') } : { priority: 'normal' }, submitLabel: 'Save', onSubmit: async v => { await saveTemplate(v, x && x.id); render(); } });
+        }
+        render();
+        return m;
+    }
+    async function saveAsTemplate(t, subtasks) {
+        await C.formModal({ title: 'Save as a template', size: 'wide', fields: templateFields(), submitLabel: 'Save template',
+            values: { title: t.title, description: t.description, assignee_id: t.assignee_id, priority: t.priority, estimate_hours: t.estimate_hours, tags: t.tags || [],
+                deadline_days: t.due_date ? Math.max(0, L.daysBetween(L.istDate(t.created_at), t.due_date)) : null, checklist: (subtasks || []).map(s => s.title).join('\n') },
+            onSubmit: async v => { await saveTemplate(v, null); C.toast('Template saved', 'ok'); } });
     }
 
     /* ------------------------------------------------------------- record */
     async function showRecord(id) {
         if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+        page.mode = 'record';
+        if (page.grid) { page.grid.destroy(); page.grid = null; }
+        if (page.board) { page.board.destroy(); page.board = null; }
+        page.reloadView = null;
         C.loading(view, 'Loading task…');
         let t;
         try { t = (await C.q(sb.from('tasks').select(SELECT).eq('id', id).maybeSingle())).data; }
         catch (e) { return C.errorState(view, e, () => showRecord(id)); }
         if (!t) { view.innerHTML = `<a class="crm-back" href="/tasks/">${C.icon('arrow')}All tasks</a>`; C.empty(view.appendChild(document.createElement('div')), 'Task not found', 'It may have been deleted, or you may not have access to it.'); return; }
         document.title = `${t.title} · Tasks · WorkSuite`;
+        sb.from('task_views').upsert({ user_id: me.id, task_id: id, viewed_at: new Date().toISOString() }, { onConflict: 'user_id,task_id' }).then(() => {}, () => {});
         WSShell.setCrumb(t.title);
         const [assignees, watchers, subtasks, parent, board, column] = await Promise.all([
             loadAssignees(id),
@@ -357,24 +605,15 @@
         const linked = [t.project_id && ['project', t.project_id, names.project[t.project_id]], t.contact_id && ['contact', t.contact_id, names.contact[t.contact_id]], t.deal_id && ['deal', t.deal_id, names.deal[t.deal_id]], t.lead_id && ['lead', t.lead_id, names.lead[t.lead_id]]].filter(Boolean);
 
         view.innerHTML = `
-            <a class="crm-back" href="/tasks/" data-nav>${C.icon('arrow')}All tasks</a>
-            <div class="crm-record-head">
-                <div class="titles">
-                    ${parent ? `<div class="muted" style="font-size:13px;margin-bottom:4px">Subtask of <a class="crm-link" href="/tasks/?id=${esc(parent.id)}">${esc(parent.title)}</a></div>` : ''}
-                    <h1 style="${done ? 'text-decoration:line-through;color:var(--ws-text-muted)' : ''}">${esc(t.title)}</h1>
-                    <div class="meta">
-                        ${C.statusBadge(STATUS, t.status)} ${C.priorityBadge(t.priority)}
-                        ${t.due_date ? C.dueHtml(t, today) : ''}
-                        <span>Assignee: ${C.personHtml(t.assignee_id)}</span>
-                        ${assignees.length ? `<span>+ ${C.avatarsHtml(assignees)}</span>` : ''}
-                        ${linked.map(([k, i, n]) => C.entityChip(k, i, n)).join(' ')}
-                    </div>
-                </div>
-                <div class="actions">
-                    ${canEdit ? `<button type="button" class="ws-btn ${done ? '' : 'primary'}" id="done-btn">${C.icon(done ? 'refresh' : 'check')}<span>${done ? 'Reopen' : 'Complete'}</span></button>` : ''}
-                    ${canEdit ? `<button type="button" class="ws-btn" id="edit-btn">${C.icon('edit')}<span>Edit</span></button>` : ''}
-                    <button type="button" class="ws-btn" id="watch-btn" aria-pressed="${watching}">${C.icon(watching ? 'bell' : 'star')}<span>${watching ? 'Watching' : 'Watch'}</span></button>
-                    <button type="button" class="ws-btn icon" id="more-btn" aria-label="More actions">${C.icon('more')}</button>
+            <div class="b24-card-head">
+                <h1 class="b24-card-title"><span class="t" style="${done ? 'text-decoration:line-through;opacity:.7' : ''}">${esc(t.title)}</span>${cols.full && t.number != null ? `<span class="num">#${esc(t.number)}</span>` : ''}</h1>
+                <div class="sub">${parent ? `Subtask of <a href="/tasks/?id=${esc(parent.id)}" style="color:inherit">${esc(parent.title)}</a> · ` : ''}${C.statusBadge(STATUS, t.status)} ${C.priorityBadge(t.priority)} ${t.due_date ? C.dueHtml(t, today) : ''} ${linked.map(([k, i, n]) => C.entityChip(k, i, n)).join(' ')}</div>
+                <div class="acts">
+                    ${WSShell.inSlider ? '' : `<a class="b24-btn-card" href="/tasks/" data-nav>${C.icon('arrow')}<span>All tasks</span></a>`}
+                    ${canEdit ? `<button type="button" class="${done ? 'b24-btn-card' : 'b24-btn-create'}" id="done-btn">${done ? `${C.icon('refresh')}<span>Resume</span>` : 'Complete'}</button>` : ''}
+                    ${canEdit ? `<button type="button" class="b24-btn-card" id="edit-btn">${C.icon('edit')}<span>Edit</span></button>` : ''}
+                    <button type="button" class="b24-btn-card" id="watch-btn" aria-pressed="${watching}">${C.icon(watching ? 'bell' : 'star')}<span>${watching ? 'Following' : 'Follow'}</span></button>
+                    <button type="button" class="b24-btn-card round" id="more-btn" aria-label="More actions">${C.icon('more')}</button>
                 </div>
             </div>
             <div class="crm-detail">
@@ -423,7 +662,8 @@
                     ${linked.length ? `<div class="ws-card"><div class="crm-section-title"><h3>Linked to</h3></div><ul class="crm-list compact">${linked.map(([k, i, n]) => `<li>${C.icon(C.ENTITY_META[k].icon)}<div class="main"><b><a href="${esc(C.entityUrl(k, i))}">${esc(n || C.ENTITY_META[k].label)}</a></b><span>${esc(C.ENTITY_META[k].label)}</span></div></li>`).join('')}</ul></div>` : ''}
                 </div>
             </div>`;
-        view.querySelector('[data-nav]').addEventListener('click', e => { e.preventDefault(); go('/tasks/'); });
+        const navBtn = view.querySelector('[data-nav]');
+        if (navBtn) navBtn.addEventListener('click', e => { e.preventDefault(); history.pushState(null, '', '/tasks/'); showList(); });
         const reloadRecord = () => showRecord(id);
         on('#done-btn', () => setDone(t, !done, reloadRecord));
         on('#edit-btn', () => C.openTaskEditor({ task: t, assignees, onSaved: reloadRecord }));
@@ -436,7 +676,8 @@
         });
         on('#more-btn', e => {
             const items = [
-                { label: 'Duplicate', icon: 'plus', onClick: () => duplicateTask(t) },
+                { label: 'Copy', icon: 'plus', onClick: () => duplicateTask(t) },
+                ...(hasTemplates ? [{ label: 'Save as a template', icon: 'star', onClick: () => saveAsTemplate(t, subtasks) }] : []),
                 ...(t.assignee_id !== me.id ? [{ label: 'Assign to me', icon: 'user', onClick: () => assignToMe(t, reloadRecord) }] : []),
                 { label: 'Open on calendar', icon: 'calendar', href: t.due_date ? `/calendar/?date=${t.due_date}` : '/calendar/' },
                 'sep',
