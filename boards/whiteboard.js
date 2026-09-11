@@ -102,8 +102,28 @@
         setTimeout(() => URL.revokeObjectURL(url), 2000);
     }
 
+    const HEX6 = /^#[0-9a-f]{6}$/i;
+    const EL_TYPES = new Set(['path', 'rect', 'ellipse', 'line', 'arrow', 'text', 'note']);
+    const num = (v, d) => { const n = Number(v); return isFinite(n) ? Math.max(-1e6, Math.min(1e6, n)) : d; };
+    /** Drawings come from the database: keep only well-formed elements, hex colours and real numbers,
+        so nothing stored through the API can break out of the SVG markup. */
+    function clean(list) {
+        return (Array.isArray(list) ? list : []).slice(0, 5000).map(el => {
+            if (!el || typeof el !== 'object' || !EL_TYPES.has(el.type)) return null;
+            const out = { id: String(el.id || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 40) || uid(), type: el.type,
+                          color: HEX6.test(el.color || '') ? el.color : '#1f2a36', size: Math.max(1, Math.min(40, num(el.size, 2))) };
+            if (HEX6.test(el.fill || '')) out.fill = el.fill;
+            if (el.type === 'path' || el.type === 'line' || el.type === 'arrow') {
+                out.points = (Array.isArray(el.points) ? el.points : []).slice(0, 20000).filter(Array.isArray).map(p => [num(p[0], 0), num(p[1], 0)]);
+                if (!out.points.length) return null;
+            } else { out.x = num(el.x, 0); out.y = num(el.y, 0); out.w = num(el.w, 0); out.h = num(el.h, 0); }
+            if (el.type === 'text' || el.type === 'note') { out.text = String(el.text == null ? '' : el.text).slice(0, 10000); out.fontSize = Math.max(8, Math.min(96, num(el.fontSize, el.type === 'note' ? 16 : 20))); }
+            return out;
+        }).filter(Boolean);
+    }
+
     function mount(container, opts) {
-        let els = (opts.data && Array.isArray(opts.data.elements)) ? JSON.parse(JSON.stringify(opts.data.elements)) : [];
+        let els = clean(opts.data && opts.data.elements);
         const canEdit = opts.canEdit !== false;
         let v = { x: 40, y: 40, z: 1 };
         let tool = canEdit ? 'pen' : 'pan', color = COLORS[0], size = 3, noteFill = NOTES[0];
@@ -320,7 +340,7 @@
             getData: () => ({ v: 1, elements: JSON.parse(JSON.stringify(els)) }),
             setData(data) {
                 if (drag || editing) return false;             // never pull the drawing from under the pen
-                els = data && Array.isArray(data.elements) ? JSON.parse(JSON.stringify(data.elements)) : [];
+                els = clean(data && data.elements);
                 selected = new Set([...selected].filter(id => els.some(el => el.id === id)));
                 render(); return true;
             },

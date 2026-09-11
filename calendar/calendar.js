@@ -627,9 +627,10 @@
             try { parsed = ICS.parseIcs(await f.text()).filter(x => !x.cancelled); } catch (e) { parsed = []; }
             if (!parsed.length) return C.alert({ title: 'No events found', message: `${f.name} has no events WorkSuite can read.` });
             const repeating = parsed.filter(x => x.recurring).length, capped = parsed.length > 1000;
+            const unknownZones = [...new Set(parsed.map(x => x.unknownZone).filter(Boolean))];
             await C.formModal({
                 title: `Import ${Math.min(parsed.length, 1000)} event${parsed.length === 1 ? '' : 's'}`, submitLabel: 'Import',
-                intro: `<div class="crm-info">From ${esc(f.name)}. ${repeating ? `${repeating} repeating event${repeating === 1 ? '' : 's'} will be added once, on the first date. ` : ''}${capped ? 'Only the first 1,000 events are imported. ' : ''}Events already in your calendar with the same title and start time are skipped. Times without a time zone are read as IST.</div>`,
+                intro: `<div class="crm-info">From ${esc(f.name)}. ${repeating ? `${repeating} repeating event${repeating === 1 ? '' : 's'} will be added once, on the first date. ` : ''}${capped ? 'Only the first 1,000 events are imported. ' : ''}Events already in your calendar with the same title and start time are skipped. Times without a time zone are read as IST.${unknownZones.length ? ` <b>Time zone not recognised (${esc(unknownZones.slice(0, 3).join(', '))}${unknownZones.length > 3 ? '…' : ''}): those times are read as IST; check them after importing.</b>` : ''}</div>`,
                 fields: [{ name: 'visibility', label: 'Who can see them', type: 'select', required: true, full: true, options: [{ value: 'private', label: 'Only me' }, { value: 'company', label: 'Everyone in the company' }] }],
                 values: { visibility: 'private' },
                 onSubmit: async v => {

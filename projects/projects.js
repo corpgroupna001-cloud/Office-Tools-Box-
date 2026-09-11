@@ -149,7 +149,8 @@
     const PRIVACY = { public: { label: 'Open', color: 'ok', hint: 'Anyone in the company can see it and join' }, private: { label: 'Private', color: 'warn', hint: 'Everyone sees it; people ask to join' }, secret: { label: 'Secret', color: 'mute', hint: 'Only members know it exists' } };
     const openProject = id => B.openRecord(`/projects/?id=${id}`, () => refreshList(true));
     const PCOLORS = ['#39a8ef', '#ffa900', '#7bd500', '#9b7cf5', '#f76fa6', '#2fc6f6', '#ff5752', '#47e4c2'];
-    function projColor(p) { if (p.avatar_color) return p.avatar_color; let n = 0; for (const ch of String(p.id)) n = (n * 31 + ch.charCodeAt(0)) >>> 0; return PCOLORS[n % PCOLORS.length]; }
+    // Only a hex colour reaches the style attribute.
+    function projColor(p) { if (/^#[0-9a-f]{6}$/i.test(p.avatar_color || '')) return p.avatar_color; let n = 0; for (const ch of String(p.id)) n = (n * 31 + ch.charCodeAt(0)) >>> 0; return PCOLORS[n % PCOLORS.length]; }
     function projAvatar(p, cls) { return `<span class="b24-proj-av${cls ? ' ' + cls : ''}" style="background:${projColor(p)}">${esc(L.initials(p.name))}</span>`; }
     function privacyBadge(p) { const x = PRIVACY[p.privacy || 'public']; return x ? `<span title="${esc(x.hint)}">${C.badge(x.color, x.label)}</span>` : ''; }
     function myRole(p) {
@@ -375,6 +376,7 @@
         let p;
         try { p = (await C.q(sb.from('projects').select(SELECT).eq('id', id).maybeSingle())).data; }
         catch (e) { return C.errorState(view, e, () => showRecord(id)); }
+        if (myRoute !== routeSeq) return;                    // navigated away while it loaded
         if (!p) { view.innerHTML = `<a class="crm-back" href="/projects/">${C.icon('arrow')}All projects</a>`; C.empty(view.appendChild(document.createElement('div')), 'Project not found', 'It may have been deleted, or you may not have access to it.'); return; }
         const lk = await C.lookups();
         const taskStatusMap = Object.fromEntries(lk.taskStatuses.map(s => [s.key, s]));
@@ -382,6 +384,7 @@
         WSShell.setCrumb(p.name);
 
         let members = await membersFor([id]);
+        if (myRoute !== routeSeq) return;
         let tasks = [];
         let events = [];
         let columns = [];
@@ -399,10 +402,12 @@
         }
         await Promise.all([loadTasks(), loadEvents(), loadColumns()]);
         const [contactLabel, dealLabel] = await Promise.all([p.contact_id ? C.entityLabel('contact', p.contact_id) : '', p.deal_id ? C.entityLabel('deal', p.deal_id) : '']);
+        if (myRoute !== routeSeq) return;
 
         const mids = () => members.map(m => m.user_id);
         const canEdit = () => canEditProject(p, mids());
-        const canManageMembers = () => ctx.isManager || p.owner_id === me.id || p.manager_id === me.id || p.created_by === me.id || members.some(m => m.user_id === me.id && ['owner', 'manager', 'moderator'].includes(m.role));
+        // The same people project_members_manage lets in (moderators approve join requests, which a trigger turns into members).
+        const canManageMembers = () => ctx.isManager || p.owner_id === me.id || p.manager_id === me.id || p.created_by === me.id;
         const prog = () => L.projectProgress(tasks);
 
         function headHtml() {
@@ -679,13 +684,20 @@
             el.dataset.bound = '1';
             el.addEventListener('change', async e => {
                 const s = e.target.closest('select[data-role]'); if (!s) return;
-                try { await C.q(sb.from('project_members').update({ role: s.value }).eq('project_id', id).eq('user_id', s.dataset.role)); C.toast('Role updated', 'ok'); members = await membersFor([id]); }
+                try {
+                    const r = await C.q(sb.from('project_members').update({ role: s.value }).eq('project_id', id).eq('user_id', s.dataset.role).select('user_id'));
+                    if (!(r.data || []).length) throw new Error('Only the project owner, its manager or a workspace manager can change roles.');
+                    C.toast('Role updated', 'ok'); members = await membersFor([id]);
+                }
                 catch (err) { C.toast(err.message, 'bad'); renderMembersTab(); }
             });
             el.addEventListener('click', async e => {
                 const b = e.target.closest('[data-remove]'); if (!b) return;
                 if (!await C.confirm({ title: `Remove ${C.personName(b.dataset.remove)} from the project?`, message: 'Their tasks stay assigned to them.', okText: 'Remove', danger: true })) return;
-                try { await C.q(sb.from('project_members').delete().eq('project_id', id).eq('user_id', b.dataset.remove)); C.toast('Member removed', 'ok'); members = await membersFor([id]); tabs.setCount('members', members.length); renderMembersTab(); renderOverview(); }
+                try {
+                    const r = await C.q(sb.from('project_members').delete().eq('project_id', id).eq('user_id', b.dataset.remove).select('user_id'));
+                    if (!(r.data || []).length) throw new Error('Only the project owner, its manager or a workspace manager can remove members.');
+                    C.toast('Member removed', 'ok'); members = await membersFor([id]); tabs.setCount('members', members.length); renderMembersTab(); renderOverview(); }
                 catch (err) { C.toast(err.message, 'bad'); }
             });
         }

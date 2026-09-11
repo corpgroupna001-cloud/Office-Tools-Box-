@@ -7,9 +7,11 @@
                                | { …, all_day: true, start_date, end_date }]   (IST days, inclusive)
 
    Timed events are written in UTC; all-day events as IST dates (DTEND is
-   the day after, as the standard wants). When importing, times marked UTC
-   are UTC, and times with any other or no time zone are read as IST (the
-   company's zone). Repeating events come in once, on their first date.
+   the day after, as the standard wants). When importing, times in a named
+   zone (standard names, and Outlook's common Windows names) are converted
+   through Intl; times with no zone are read as IST (the company's zone), and
+   so are times in a zone this browser does not know (reported as
+   unknownZone). Repeating events come in once, on their first date.
    ============================================================================ */
 (function (root, factory) {
     const api = factory();
@@ -78,16 +80,50 @@
         return { name: parts[0].toUpperCase(), params, value: line.slice(i + 1) };
     }
     const UTC_ZONES = /^(utc|etc\/utc|gmt|etc\/gmt|z|zulu)$/i;
+    // Outlook writes Windows zone names; the common ones map to the standard (IANA) names.
+    const WINDOWS_ZONES = {
+        'india standard time': 'Asia/Kolkata', 'gmt standard time': 'Europe/London', 'greenwich standard time': 'Atlantic/Reykjavik',
+        'w. europe standard time': 'Europe/Berlin', 'romance standard time': 'Europe/Paris', 'central europe standard time': 'Europe/Budapest',
+        'central european standard time': 'Europe/Warsaw', 'e. europe standard time': 'Europe/Chisinau', 'fle standard time': 'Europe/Kiev',
+        'russian standard time': 'Europe/Moscow', 'arabian standard time': 'Asia/Dubai', 'arab standard time': 'Asia/Riyadh',
+        'pakistan standard time': 'Asia/Karachi', 'bangladesh standard time': 'Asia/Dhaka', 'nepal standard time': 'Asia/Kathmandu',
+        'sri lanka standard time': 'Asia/Colombo', 'se asia standard time': 'Asia/Bangkok', 'singapore standard time': 'Asia/Singapore',
+        'china standard time': 'Asia/Shanghai', 'tokyo standard time': 'Asia/Tokyo', 'korea standard time': 'Asia/Seoul',
+        'aus eastern standard time': 'Australia/Sydney', 'new zealand standard time': 'Pacific/Auckland',
+        'eastern standard time': 'America/New_York', 'central standard time': 'America/Chicago', 'mountain standard time': 'America/Denver',
+        'pacific standard time': 'America/Los_Angeles', 'e. south america standard time': 'America/Sao_Paulo', 'south africa standard time': 'Africa/Johannesburg',
+        'e. africa standard time': 'Africa/Nairobi', 'egypt standard time': 'Africa/Cairo', 'utc': 'UTC',
+    };
+    /** A wall-clock time in a named zone -> UTC milliseconds; null when the zone is unknown. */
+    function zonedMs(y, mo, d, hh, mi, ss, zone) {
+        const tz = WINDOWS_ZONES[String(zone).toLowerCase()] || zone;
+        let fmt;
+        try { fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }); }
+        catch (e) { return null; }
+        const want = Date.UTC(y, mo - 1, d, hh, mi, ss);
+        let guess = want;
+        for (let i = 0; i < 3; i++) {                 // the zone's offset at that moment, refined for daylight-saving edges
+            const p = {}; fmt.formatToParts(new Date(guess)).forEach(x => { p[x.type] = x.value; });
+            const shown = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second);
+            const diff = shown - want; if (!diff) break;
+            guess -= diff;
+        }
+        return guess;
+    }
     function parseWhen(p) {
         const v = String(p.value || '').trim();
         let m = /^(\d{4})(\d{2})(\d{2})$/.exec(v);
         if (m || String(p.params.VALUE || '').toUpperCase() === 'DATE') return m ? { date: `${m[1]}-${m[2]}-${m[3]}` } : null;
         m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?$/.exec(v);
         if (!m) return null;
-        const [, y, mo, d, hh, mi, ss, z] = m;
-        const utc = !!z || UTC_ZONES.test(p.params.TZID || '');
-        const ms = Date.UTC(+y, +mo - 1, +d, +hh, +mi, +(ss || 0)) - (utc ? 0 : IST_MS);
-        return isNaN(ms) ? null : { iso: new Date(ms).toISOString() };
+        const [, y, mo, d, hh, mi, ss, z] = m, tzid = String(p.params.TZID || '').trim();
+        let ms, unknownZone = null;
+        if (z || UTC_ZONES.test(tzid)) ms = Date.UTC(+y, +mo - 1, +d, +hh, +mi, +(ss || 0));
+        else if (tzid) {
+            ms = zonedMs(+y, +mo, +d, +hh, +mi, +(ss || 0), tzid);
+            if (ms == null) { unknownZone = tzid; ms = Date.UTC(+y, +mo - 1, +d, +hh, +mi, +(ss || 0)) - IST_MS; }
+        } else ms = Date.UTC(+y, +mo - 1, +d, +hh, +mi, +(ss || 0)) - IST_MS;          // no zone at all: the company's (IST)
+        return isNaN(ms) ? null : { iso: new Date(ms).toISOString(), unknownZone };
     }
     function durationMs(v) {
         const m = /^([+-])?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/.exec(String(v || '').trim());
@@ -117,7 +153,7 @@
         let end = e && e.iso ? e.iso : null;
         if (!end && dur != null) end = new Date(Date.parse(s.iso) + dur).toISOString();
         if (!end || Date.parse(end) < Date.parse(s.iso)) end = s.iso;             // no end: an instant
-        return { ...base, all_day: false, starts_at: s.iso, ends_at: end };
+        return { ...base, all_day: false, starts_at: s.iso, ends_at: end, unknownZone: s.unknownZone || (e && e.unknownZone) || null };
     }
     function parseIcs(text) {
         const lines = String(text || '').replace(/\r\n[ \t]/g, '').replace(/\n[ \t]/g, '').split(/\r?\n/);

@@ -1199,6 +1199,9 @@ create trigger crm_leads_automation after insert or update of status on public.c
 -- ---------------------------------------------------------------------------
 alter table public.projects add column if not exists privacy text not null default 'public';
 alter table public.projects add column if not exists avatar_color text;
+-- Only a hex colour: the value is drawn into a style attribute. NOT VALID keeps any older rows as they are.
+alter table public.projects drop constraint if exists projects_avatar_color_ck;
+alter table public.projects add constraint projects_avatar_color_ck check (avatar_color is null or avatar_color ~ '^#[0-9A-Fa-f]{6}$') not valid;
 alter table public.projects drop constraint if exists projects_privacy_ck;
 alter table public.projects add constraint projects_privacy_ck check (privacy in ('public', 'private', 'secret'));
 alter table public.project_members drop constraint if exists project_members_role_ck;
@@ -1697,6 +1700,35 @@ drop trigger if exists documents_touch on public.documents;
 create trigger documents_touch before update on public.documents
   for each row execute procedure public.ws_touch_updated_at();
 
+-- What an editor may not change: who owns a document, its company, the stored
+-- file behind it (a row pointing at someone else's file would open that file
+-- through ws_document_visible), or, unless they own it, who can see it.
+create or replace function public.documents_guard()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then return new; end if;            -- the service role and migrations
+  if new.created_by is distinct from old.created_by then
+    raise exception 'The owner of a document cannot be changed' using errcode = '42501';
+  end if;
+  if new.company is distinct from old.company then
+    raise exception 'A document cannot move to another company' using errcode = '42501';
+  end if;
+  if new.storage_path is distinct from old.storage_path or new.bucket is distinct from old.bucket or new.sha256 is distinct from old.sha256 then
+    raise exception 'The stored file of a document cannot be swapped' using errcode = '42501';
+  end if;
+  if new.visibility is distinct from old.visibility and old.created_by is distinct from auth.uid() then
+    raise exception 'Only the owner can change who can see a document' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists documents_guard on public.documents;
+create trigger documents_guard before update on public.documents
+  for each row execute procedure public.documents_guard();
+
 create table if not exists public.document_shares (
   document_id uuid not null references public.documents(id) on delete cascade,
   user_id     uuid not null references public.profiles(id) on delete cascade,
@@ -1797,7 +1829,11 @@ security definer
 set search_path = public
 as $$
   select jsonb_build_object('name', d.name, 'doc_kind', d.doc_kind, 'mime_type', d.mime_type, 'size_bytes', d.size_bytes,
-                            'content', case when d.doc_kind <> 'file' then d.content end,
+                            -- speaker notes are for the presenter, never for the public link
+                            'content', case when d.doc_kind = 'presentation' and jsonb_typeof(d.content -> 'slides') = 'array'
+                                              then jsonb_set(d.content, '{slides}', coalesce((select jsonb_agg(case when jsonb_typeof(s) = 'object' then s - 'notes' else s end)
+                                                                                                   from jsonb_array_elements(d.content -> 'slides') s), '[]'::jsonb))
+                                            when d.doc_kind <> 'file' then d.content end,
                             'path', case when d.doc_kind = 'file' then d.published_token || '/file' end,
                             'published_at', d.published_at)
     from public.documents d

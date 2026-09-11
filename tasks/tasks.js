@@ -32,7 +32,9 @@
     let unsubscribe = null;
 
     /* ------------------------------------------------------------ routing */
+    let recordSeq = 0;                     // bumped on every navigation, so a slow task load cannot land on the next page
     function route() {
+        recordSeq++;
         if (unsubscribe) { unsubscribe(); unsubscribe = null; }
         const id = C.param('id');
         if (id) return showRecord(id);
@@ -183,6 +185,9 @@
         (pr.data || []).forEach(p => { names.project[p.id] = p.name; });
         const r0 = C.param('role'); if (ROLES.some(r => r[0] === r0)) page.role = r0;
         const v0 = C.param('view'); if (v0 === 'mine') page.role = 'ongoing'; else if (v0 === 'created') page.role = 'created'; else if (v0 === 'all') page.role = 'all';
+        // Older links (the CRM dashboard, bookmarks): /tasks/?view=overdue|today|completed open that filter.
+        const urlFilter = { overdue: ['overdue', { state: 'overdue' }], today: [null, { state: 'open', due: { kind: 'today' } }], completed: ['completed', { state: 'done' }] }[v0];
+        if (urlFilter) page.role = 'all';
         view.innerHTML = B.titleBar({ title: 'Tasks', createLabel: 'Create', createMenu: hasTemplates }) + `
             <div class="b24-toolbar">
                 <div class="b24-views" role="tablist" aria-label="Role">${ROLES.map(([k, t]) => `<button type="button" role="tab" data-role="${k}">${esc(t)}<span class="b24-n" data-rc="${k}"></span></button>`).join('')}</div>
@@ -193,6 +198,7 @@
             <div id="only" hidden></div>
             <div id="body"></div>`;
         page.filter = WSFilter.mount(view.querySelector('[data-filter]'), { id: 'tasks', fields: filterFields(), presets: PRESETS, defaultPreset: 'progress', me: me.id, onChange: () => refreshList() });
+        if (urlFilter) { C.setParam('view', null, true); page.filter.set(urlFilter[1], urlFilter[0]); }
         const create = () => C.openTaskEditor({ defaults: { assignee_id: me.id }, onSaved: t => { refreshList(); if (t && t.id) openTask(t.id); } });
         view.querySelector('[data-create]').addEventListener('click', create);
         const more = view.querySelector('[data-create-menu]');
@@ -370,6 +376,7 @@
             onCardClick: (c, e) => { if (e) e.preventDefault(); openTask(c.task.id); },
             onMove: async ({ card, toColumnId }) => {
                 if (toColumnId === 'overdue') throw new Error('Pick a new deadline instead: drop the task on Today or a later column.');
+                if (toColumnId === 'week' && weekEnd(0) === today) throw new Error('This week ends today: drop the task on Due today or Due next week.');
                 await mustUpdate(sb.from('tasks').update({ due_date: dateFor(toColumnId) }).eq('id', card.task.id));
                 C.toast(toColumnId === 'none' ? 'Deadline removed' : `Deadline: ${L.fmtDate(dateFor(toColumnId))}`, 'ok');
                 page.reloadView(); WSShell.refreshUnread();
@@ -474,15 +481,16 @@
                     const x0 = ev.clientX, left0 = parseFloat(bar.style.left);
                     let delta = 0;
                     const move = e2 => { delta = Math.round((e2.clientX - x0) / DAY); bar.style.left = (left0 + delta * DAY) + 'px'; };
+                    const cancel = () => { bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', up); bar.removeEventListener('pointercancel', cancel); bar.style.left = left0 + 'px'; };
                     const up = async () => {
-                        bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', up);
+                        bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', up); bar.removeEventListener('pointercancel', cancel);
                         if (!delta) return openTask(t.id);
                         const patch = {}; if (t.start_date) patch.start_date = L.addDays(t.start_date, delta); if (t.due_date) patch.due_date = L.addDays(t.due_date, delta);
                         try { await mustUpdate(sb.from('tasks').update(patch).eq('id', t.id)); C.toast(`Moved ${delta > 0 ? '+' : ''}${delta} day${Math.abs(delta) === 1 ? '' : 's'}`, 'ok'); }
                         catch (err) { C.toast(err.message, 'bad'); }
                         page.reloadView();
                     };
-                    bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', up);
+                    bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', up); bar.addEventListener('pointercancel', cancel);
                 }));
             } catch (e) { C.errorState(body, e, page.reloadView); }
         };
@@ -582,9 +590,11 @@
         if (page.board) { page.board.destroy(); page.board = null; }
         page.reloadView = null;
         C.loading(view, 'Loading task…');
+        const mySeq = recordSeq;
         let t;
         try { t = (await C.q(sb.from('tasks').select(SELECT).eq('id', id).maybeSingle())).data; }
         catch (e) { return C.errorState(view, e, () => showRecord(id)); }
+        if (mySeq !== recordSeq) return;                     // navigated away while it loaded
         if (!t) { view.innerHTML = `<a class="crm-back" href="/tasks/">${C.icon('arrow')}All tasks</a>`; C.empty(view.appendChild(document.createElement('div')), 'Task not found', 'It may have been deleted, or you may not have access to it.'); return; }
         document.title = `${t.title} · Tasks · WorkSuite`;
         sb.from('task_views').upsert({ user_id: me.id, task_id: id, viewed_at: new Date().toISOString() }, { onConflict: 'user_id,task_id' }).then(() => {}, () => {});
@@ -599,6 +609,7 @@
         ]);
         await resolveNames([t]);
         const canEdit = L.canEdit({ created_by: t.created_by, assignee_id: t.assignee_id, assignee_ids: assignees }, me) || (t.project_id && await onProject(t.project_id));
+        if (mySeq !== recordSeq) return;
         const canDelete = L.canDelete(t, me);
         const watching = watchers.includes(me.id);
         const done = isDone(t);

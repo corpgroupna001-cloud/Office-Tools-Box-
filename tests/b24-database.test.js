@@ -283,6 +283,13 @@ test('whiteboards and drive documents: private, shared, and published links', { 
   assert.equal((await q(C, `update documents set name = 'x' where id = $1 returning id`, [doc.id])).length, 0, 'read-only share');
   assert.equal((await q(M, `delete from documents where id = $1 returning id`, [doc.id])).length, 0, 'a manager cannot delete a private file they cannot see');
   await assert.rejects(q(A, `insert into documents (name, doc_kind, mime_type, size_bytes) values ('Lost', 'file', 'application/pdf', 1)`), /documents_drive_ck/);
+  // An editor share lets C edit the content, but not take the document over or swap its file.
+  await q(A, `update document_shares set can_edit = true where document_id = $1 and user_id = $2`, [doc.id, C]);
+  assert.equal((await q(C, `update documents set name = 'Notes (C)' where id = $1 returning id`, [doc.id])).length, 1, 'an editor can edit');
+  await assert.rejects(q(C, `update documents set created_by = $2 where id = $1`, [doc.id, C]), /owner of a document cannot be changed/);
+  await assert.rejects(q(C, `update documents set storage_path = $2 where id = $1`, [doc.id, `${A}/someone-elses-file.pdf`]), /stored file of a document cannot be swapped/);
+  await assert.rejects(q(C, `update documents set visibility = 'company' where id = $1`, [doc.id]), /Only the owner can change who can see/);
+  await q(A, `update documents set name = 'Notes' where id = $1`, [doc.id]);
   const stamp = (await one(A, `select updated_at from documents where id = $1`, [doc.id])).updated_at;
   const moved = await one(A, `update documents set description = 'Meeting notes' where id = $1 returning updated_at > $2::timestamptz as moved`, [doc.id, stamp]);
   assert.equal(moved.moved, true, 'every save moves updated_at, so editors can spot a newer version');
@@ -295,6 +302,17 @@ test('whiteboards and drive documents: private, shared, and published links', { 
   assert.equal((await anon(`select public.ws_published_document('short') d`))[0].d, null, 'guessable tokens are refused');
   await q(A, `update documents set published_token = null where id = $1`, [doc.id]);
   assert.equal((await anon(`select public.ws_published_document($1) d`, [token]))[0].d, null, 'unpublishing ends the link');
+
+  const deck = await one(A, `insert into documents (name, doc_kind, visibility, content, mime_type, size_bytes)
+                             values ('Pitch', 'presentation', 'private', '{"v":1,"slides":[{"id":"s1","title":"Hello","notes":"Say the price is flexible"}]}', 'application/json', 0) returning id`);
+  const deckToken = 'b'.repeat(32);
+  await q(A, `update documents set published_token = $1, published_at = now() where id = $2`, [deckToken, deck.id]);
+  const shown = json(json((await anon(`select public.ws_published_document($1) d`, [deckToken]))[0].d).content);
+  assert.equal(shown.slides[0].title, 'Hello');
+  assert.equal('notes' in shown.slides[0], false, 'speaker notes never reach the public link');
+
+  const proj = await one(A, `insert into projects (name) values ('Colour test') returning id`).catch(() => null);
+  if (proj) await assert.rejects(q(A, `update projects set avatar_color = 'red;background:url(x)' where id = $1`, [proj.id]), /projects_avatar_color_ck/);
 });
 
 test('invoices follow the matrix: employees read only their own, a responsible person is stamped', { skip }, async () => {

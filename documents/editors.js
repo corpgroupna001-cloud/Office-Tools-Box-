@@ -176,6 +176,8 @@
         return {
             get,
             set(c) { if (this.busy) return false; set(c); return true; },
+            /** Report a change still waiting for the typing pause right away (before leaving the page). */
+            flush() { if (timer) { clearTimeout(timer); timer = null; words(); if (o.onChange) o.onChange(get()); } },
             get busy() { return !!timer || Date.now() - last < 2500; },
             exportAs(fmt) {
                 const html = get().html, name = o.name || 'Document';

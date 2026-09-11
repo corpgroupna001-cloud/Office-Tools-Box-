@@ -61,7 +61,9 @@
 
     /* ------------------------------------------------------------ routing */
     const page = { grid: null, filter: null, mode: 'list' };
+    let navSeq = 0;                                          // bumped on every navigation, so a slow profile cannot land on the next page
     function route() {
+        navSeq++;
         if (page.grid) { page.grid.destroy(); page.grid = null; }
         if (page.filter) { page.filter.destroy(); page.filter = null; }
         const id = C.param('id');
@@ -213,6 +215,7 @@
 
     /* ------------------------------------------------------------ profile */
     async function showProfile(id) {
+        const mySeq = navSeq;
         view.classList.add('b24-legacy-panel');
         C.loading(view, 'Loading profile…');
         let p;
@@ -230,7 +233,8 @@
         WSShell.setCrumb(name);
         const reports = people.filter(x => x.manager_id === p.id && (x.status || 'active') !== 'inactive');
         await loadShifts();
-        const shift = window.WSCompanies ? WSCompanies.resolveShift(p, shifts) : shifts.find(s => String(s.id) === String(p.shift_id));
+        if (mySeq !== navSeq) return;                        // navigated away while it loaded
+        const shift =window.WSCompanies ? WSCompanies.resolveShift(p, shifts) : shifts.find(s => String(s.id) === String(p.shift_id));
         const shift2 = p.shift2_id ? shifts.find(s => String(s.id) === String(p.shift2_id)) : null;
 
         view.innerHTML = `

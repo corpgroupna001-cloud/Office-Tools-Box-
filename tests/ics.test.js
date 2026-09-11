@@ -38,6 +38,22 @@ test('parseIcs reads back what toIcs writes', () => {
   assert.deepEqual([back[1].all_day, back[1].start_date, back[1].end_date], [true, '2026-09-16', '2026-09-16']);
 });
 
+test('parseIcs converts named time zones, including Outlook names, and flags unknown ones', () => {
+  const ev = n => ['BEGIN:VEVENT', 'SUMMARY:x', n, 'END:VEVENT'].join('\r\n');
+  const all = I.parseIcs(['BEGIN:VCALENDAR',
+    ev('DTSTART;TZID=Europe/London:20260914T090000'),          // BST, UTC+1
+    ev('DTSTART;TZID=America/New_York:20261215T090000'),       // EST, UTC-5
+    ev('DTSTART;TZID=India Standard Time:20260914T090000'),    // Outlook's name for IST
+    ev('DTSTART;TZID=Mars/Olympus_Mons:20260914T090000'),      // unknown: read as IST, flagged
+    'END:VCALENDAR'].join('\r\n'));
+  assert.equal(all[0].starts_at, '2026-09-14T08:00:00.000Z');
+  assert.equal(all[1].starts_at, '2026-12-15T14:00:00.000Z');
+  assert.equal(all[2].starts_at, '2026-09-14T03:30:00.000Z');
+  assert.equal(all[2].unknownZone, null);
+  assert.equal(all[3].starts_at, '2026-09-14T03:30:00.000Z');
+  assert.equal(all[3].unknownZone, 'Mars/Olympus_Mons');
+});
+
 test('parseIcs handles other calendars: folding, zones, durations, alarms, repeats, junk', () => {
   const text = ['BEGIN:VCALENDAR', 'BEGIN:VTIMEZONE', 'TZID:Asia/Kolkata', 'END:VTIMEZONE',
     'BEGIN:VEVENT', 'UID:1', 'SUMMARY:Weekly sync with a long title that the producer ', ' folded', 'DTSTART;TZID=Asia/Kolkata:20260914T100000', 'DURATION:PT1H30M',

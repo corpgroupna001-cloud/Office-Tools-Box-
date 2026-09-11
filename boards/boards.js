@@ -89,7 +89,7 @@
     }
 
     /* -------------------------------------------- whiteboards (the "Boards" app) */
-    const wbPage = { grid: null, filter: null, board: null, timer: null, dirty: false, pending: null, unsub: null, presence: null, id: null };
+    const wbPage = { grid: null, filter: null, board: null, timer: null, dirty: false, pending: null, unsub: null, presence: null, id: null, stamp: null, base: null, saving: false };
     const VIS = {
         company: { label: 'Company', color: 'ok', hint: 'Everyone in the company can open and edit it' },
         private: { label: 'Private', color: 'mute', hint: 'Only you' },
@@ -109,7 +109,9 @@
         return !(r.error && ['42P01', 'PGRST205'].includes(String(r.error.code)));
     }
     const needMigration = () => `<div class="b24-area pad"><div class="crm-notice">${C.icon('lock')}<div><b>Whiteboards need the latest database update.</b><br>An administrator needs to run <code>supabase-b24-migration.sql</code> in Supabase → SQL Editor. Kanban boards keep working meanwhile.</div></div></div>`;
+    let wbSeq = 0;                                                     // bumped on every navigation, so a slow load cannot land on the next page
     function cleanupWb() {
+        wbSeq++;
         if (wbPage.pending && wbPage.id) saveNow(wbPage.id);          // do not lose the last strokes
         clearTimeout(wbPage.timer);
         if (wbPage.unsub) { wbPage.unsub(); wbPage.unsub = null; }
@@ -195,8 +197,12 @@
         wbPage.grid = WSGrid.mount(host, {
             id: 'whiteboards', sort: { key: 'updated_at', dir: 'desc' },
             columns: [
-                { key: 'name', title: 'Name', width: 360, render: w => `<span class="b24-who"><span class="wb-thumb">${w.thumbnail ? `<img src="${esc(w.thumbnail)}" alt="">` : C.icon('board')}</span><span><a href="/boards/?wb=${esc(w.id)}" data-wb="${esc(w.id)}">${esc(w.name)}</a><span class="sub">${esc((VIS[w.visibility] || {}).hint || '')}</span></span></span>`,
-                  edit: { type: 'text', save: async (w, val) => { if (!val) throw new Error('Name the board.'); await C.q(sb.from('whiteboards').update({ name: val }).eq('id', w.id)); } } },
+                { key: 'name', title: 'Name', width: 360, render: w => `<span class="b24-who"><span class="wb-thumb">${w.thumbnail && /^data:image\/(svg\+xml|png|jpeg);/.test(w.thumbnail) ? `<img src="${esc(w.thumbnail)}" alt="">` : C.icon('board')}</span><span><a href="/boards/?wb=${esc(w.id)}" data-wb="${esc(w.id)}">${esc(w.name)}</a><span class="sub">${esc((VIS[w.visibility] || {}).hint || '')}</span></span></span>`,
+                  edit: { type: 'text', save: async (w, val) => {
+                      if (!val) throw new Error('Name the board.');
+                      const r = await C.q(sb.from('whiteboards').update({ name: val }).eq('id', w.id).select('id'));
+                      if (!(r.data || []).length) throw new Error('Only people who can edit this board can rename it.');
+                  } } },
                 { key: 'visibility', title: 'Access', width: 120, render: w => C.badge((VIS[w.visibility] || {}).color || 'mute', (VIS[w.visibility] || {}).label || w.visibility) },
                 { key: 'created_by', title: 'Created by', width: 180, render: w => C.personHtml(w.created_by, { link: false }) },
                 { key: 'updated_at', title: 'Modified', width: 140, render: w => `<span class="muted">${esc(L.fmtRelative(w.updated_at))}</span>` },
@@ -232,25 +238,63 @@
         clearTimeout(wbPage.timer);
         wbPage.timer = setTimeout(() => saveNow(id), 800);
     }
+    /* Saves only over the version this page loaded (updated_at). When someone saved first, their drawing
+       and ours are merged element by element (what we changed wins, what they added or changed stays,
+       deletions on either side hold) and saved again, so nobody's strokes are overwritten. */
+    function snapshotBase(elements) { wbPage.base = new Map((elements || []).map(e => [e.id, JSON.stringify(e)])); }
+    function mergeDrawings(base, theirs, ours) {
+        const T = (theirs && theirs.elements) || [], O = (ours && ours.elements) || [];
+        const oMap = new Map(O.map(e => [e.id, e])), tMap = new Map(T.map(e => [e.id, e]));
+        const oursChanged = id => oMap.has(id) && base.get(id) !== JSON.stringify(oMap.get(id));
+        const out = [];
+        T.forEach(e => { if (oursChanged(e.id)) out.push(oMap.get(e.id)); else if (oMap.has(e.id) || !base.has(e.id)) out.push(e); });
+        O.forEach(e => { if (!tMap.has(e.id) && oursChanged(e.id)) out.push(e); });
+        return { v: 1, elements: out };
+    }
+    async function resolveConflict(id, base) {
+        if (wbPage.id !== id || !wbPage.board) return;
+        if (wbPage.board.busy) { setTimeout(() => resolveConflict(id, base), 300); return; }
+        const fresh = (await sb.from('whiteboards').select('data, updated_at, updated_by').eq('id', id).maybeSingle()).data;
+        if (!fresh || wbPage.id !== id || !wbPage.board) return;
+        const merged = mergeDrawings(base, fresh.data, wbPage.board.getData());
+        wbPage.stamp = fresh.updated_at; snapshotBase((fresh.data || {}).elements);
+        wbPage.board.setData(merged);
+        scheduleSave(id, merged);
+        setWbStatus(`Merged with ${C.personName(fresh.updated_by)}'s changes…`);
+    }
     async function saveNow(id) {
         const data = wbPage.pending; if (!data || !id) return;
-        wbPage.pending = null;
+        if (wbPage.saving) { clearTimeout(wbPage.timer); wbPage.timer = setTimeout(() => saveNow(id), 300); return; }
+        const base = wbPage.base || new Map();
+        wbPage.pending = null; wbPage.saving = true;
         setWbStatus('Saving…');
         const thumb = wbPage.board ? wbPage.board.thumbnail() : null;
-        const r = await sb.from('whiteboards').update({ data, updated_by: me.id, thumbnail: thumb }).eq('id', id).select('id');
-        if (r.error || !(r.data || []).length) { wbPage.pending = wbPage.pending || data; setWbStatus(r.error ? `Not saved: ${C.friendly(r.error)}` : 'Not saved: you can only view this board', true); return; }
+        let b = sb.from('whiteboards').update({ data, updated_by: me.id, thumbnail: thumb }).eq('id', id);
+        if (wbPage.stamp) b = b.eq('updated_at', wbPage.stamp);
+        const r = await b.select('updated_at');
+        wbPage.saving = false;
+        if (r.error) { wbPage.pending = wbPage.pending || data; setWbStatus(`Not saved: ${C.friendly(r.error)}`, true); return; }
+        if (!(r.data || []).length) {
+            const now = (await sb.from('whiteboards').select('updated_at').eq('id', id).maybeSingle()).data;
+            if (now && now.updated_at !== wbPage.stamp) { wbPage.pending = null; return resolveConflict(id, base); }
+            wbPage.pending = wbPage.pending || data; setWbStatus('Not saved: you can only view this board', true); return;
+        }
+        if (wbPage.id === id) { wbPage.stamp = r.data[0].updated_at; snapshotBase(data.elements); }
         wbPage.dirty = !!wbPage.pending;
         if (!wbPage.dirty) setWbStatus('All changes saved');
     }
     async function showWhiteboard(id) {
+        const mySeq = wbSeq;
         C.loading(view, 'Opening board…');
         const r = await sb.from('whiteboards').select('*').eq('id', id).maybeSingle();
+        if (mySeq !== wbSeq) return;                         // navigated away while it loaded
         if (r.error && ['42P01', 'PGRST205'].includes(String(r.error.code))) { view.innerHTML = B.titleBar({ title: 'Boards' }) + needMigration(); return; }
         if (r.error) return C.errorState(view, new Error(C.friendly(r.error)), () => showWhiteboard(id));
         const w = r.data;
         if (!w) { view.innerHTML = '<div class="b24-area pad"></div>'; C.empty(view.firstElementChild, 'Board not found', 'It may have been deleted, or it has not been shared with you.', '<a class="ws-btn" href="/boards/">All boards</a>'); return; }
         let canEditWb = w.created_by === me.id || w.visibility === 'company';
         if (!canEditWb && w.visibility === 'shared') { const s = await sb.from('whiteboard_shares').select('can_edit').eq('whiteboard_id', id).eq('user_id', me.id).maybeSingle(); canEditWb = !!(s.data && s.data.can_edit); }
+        if (mySeq !== wbSeq) return;
         const mine = w.created_by === me.id;
         document.title = `${w.name} · Boards · WorkSuite`;
         WSShell.setCrumb(w.name);
@@ -266,7 +310,7 @@
                 <button type="button" class="b24-btn-glass" data-export>${C.icon('download')}<span>Export</span></button>
             </div>
             <div class="b24-area wb-host" id="wb"></div>`;
-        wbPage.id = id;
+        wbPage.id = id; wbPage.stamp = w.updated_at; snapshotBase((w.data || {}).elements);
         wbPage.board = WSWhiteboard.mount(view.querySelector('#wb'), { data: w.data, canEdit: canEditWb, onChange: data => scheduleSave(id, data) });
         const rn = view.querySelector('[data-rename]'); if (rn) rn.addEventListener('click', () => renameWb(w, () => { view.querySelector('[data-name]').textContent = w.name; WSShell.setCrumb(w.name); }));
         const sh = view.querySelector('[data-share]'); if (sh) sh.addEventListener('click', () => shareWb(w));
@@ -276,12 +320,22 @@
             { label: 'Download as SVG', icon: 'download', onClick: () => wbPage.board.exportSvg(w.name) },
         ]));
         // Someone else saved: take their drawing unless there is work of ours still to save.
-        wbPage.unsub = C.subscribe('whiteboard', [{ event: 'UPDATE', table: 'whiteboards', filter: `id=eq.${id}` }], async payload => {
+        // With work of ours still to save, the save itself merges; otherwise take the new version now
+        // (retrying while the pen is down). Our own saves come back with the stamp we already hold.
+        const applyRemote = async () => {
+            if (wbPage.id !== id || !wbPage.board || wbPage.dirty || wbPage.saving) return;
+            if (wbPage.board.busy) { setTimeout(applyRemote, 800); return; }
+            const fresh = (await sb.from('whiteboards').select('data, updated_at, updated_by').eq('id', id).maybeSingle()).data;
+            if (!fresh || fresh.updated_at === wbPage.stamp || wbPage.dirty || wbPage.id !== id) return;
+            if (wbPage.board.setData(fresh.data)) {
+                wbPage.stamp = fresh.updated_at; snapshotBase((fresh.data || {}).elements);
+                setWbStatus(fresh.updated_by === me.id ? 'Updated from your other window' : `Updated by ${C.personName(fresh.updated_by)}`);
+            } else setTimeout(applyRemote, 800);
+        };
+        wbPage.unsub = C.subscribe('whiteboard', [{ event: 'UPDATE', table: 'whiteboards', filter: `id=eq.${id}` }], payload => {
             const row = payload && payload.new;
-            if (row && row.updated_by === me.id) return;
-            if (wbPage.dirty || (wbPage.board && wbPage.board.busy)) return;
-            const fresh = row && row.data ? row : (await sb.from('whiteboards').select('data, updated_by').eq('id', id).maybeSingle()).data;
-            if (fresh && fresh.updated_by !== me.id && wbPage.board && wbPage.board.setData(fresh.data)) setWbStatus(`Updated by ${C.personName(fresh.updated_by)}`);
+            if (row && row.updated_at && row.updated_at === wbPage.stamp) return;
+            applyRemote();
         });
         // Who else has the board open.
         try {
@@ -289,7 +343,7 @@
             ch.on('presence', { event: 'sync' }, () => {
                 const others = Object.keys(ch.presenceState()).filter(k => k !== me.id);
                 const el = view.querySelector('[data-people]');
-                if (el) el.innerHTML = others.length ? `${C.avatarsHtml(others, 5)}<span>${others.length === 1 ? C.personName(others[0]).split(' ')[0] + ' is here' : others.length + ' people here'}</span>` : '';
+                if (el) el.innerHTML = others.length ? `${C.avatarsHtml(others, 5)}<span>${others.length === 1 ? esc(C.personName(others[0]).split(' ')[0]) + ' is here' : others.length + ' people here'}</span>` : '';
             }).subscribe(status => { if (status === 'SUBSCRIBED') ch.track({ at: Date.now() }); });
             wbPage.presence = ch;
         } catch (e) { /* presence is a nicety */ }

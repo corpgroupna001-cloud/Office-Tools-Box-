@@ -123,8 +123,20 @@
     }
     window.addEventListener('popstate', route);
     function go(url) { history.pushState(null, '', url); route(); }
+    /** Leaving the editor: save what is left once any save in flight has finished (same version check). */
+    function saveOnLeave(d, data) {
+        const json = JSON.parse(JSON.stringify(data));
+        Promise.resolve(dv.saveP).then(async () => {
+            let b = sb.from('documents').update({ content: json, updated_by: me.id, size_bytes: JSON.stringify(json).length }).eq('id', d.id);
+            if (d._stamp) b = b.eq('updated_at', d._stamp);
+            const r = await b.select('updated_at');
+            if (r.error || !(r.data || []).length) C.toast(`Your last change to ${d.name} was not saved: ${r.error ? C.friendly(r.error) : 'someone saved a newer version first'}.`, 'bad');
+            else d._stamp = r.data[0].updated_at;
+        });
+    }
     function cleanup() {
-        if (dv.pending && dv.doc) saveNow();                     // do not lose the last keystrokes
+        if (dv.editor && dv.editor.flush) dv.editor.flush();     // the text editor waits for a pause in typing before reporting
+        if (dv.pending && dv.doc) saveOnLeave(dv.doc, dv.pending);
         clearTimeout(dv.timer);
         if (dv.unsub) { dv.unsub(); dv.unsub = null; }
         if (dv.presence) { try { sb.removeChannel(dv.presence); } catch (e) { /* already gone */ } dv.presence = null; }
@@ -135,7 +147,10 @@
         window.removeEventListener('resize', onResize);
         dv.inDrive = false; dv.cards = null; dv.doc = null; dv.pending = null;
     }
-    window.addEventListener('beforeunload', e => { if (dv.pending && dv.doc) { saveNow(); e.preventDefault(); e.returnValue = ''; } });
+    window.addEventListener('beforeunload', e => {
+        if (dv.editor && dv.editor.flush) dv.editor.flush();
+        if ((dv.pending || dv.saving) && dv.doc) { if (dv.pending) saveNow(); e.preventDefault(); e.returnValue = ''; }
+    });
 
     /* ------------------------------------------------------------ folders */
     let folders = [];
@@ -236,13 +251,19 @@
     }
     async function toTrash(d, after) {
         try {
-            await C.q(sb.from('documents').update({ archived_at: new Date().toISOString() }).eq('id', d.id));
-            d.archived_at = new Date().toISOString();
+            if (d.published_token) await unpublishCopy(d);                 // a deleted item is not public any more
+            const r = await C.q(sb.from('documents').update({ archived_at: new Date().toISOString(), ...(cols.full ? { published_token: null, published_at: null } : {}) }).eq('id', d.id).select('id'));
+            if (!(r.data || []).length) throw new Error('Only people who can edit this item can delete it.');
+            d.archived_at = new Date().toISOString(); d.published_token = null;
             C.toast(`${d.name} moved to the Recycle bin`, 'ok'); if (after) after();
         } catch (e) { C.toast(e.message, 'bad'); }
     }
     async function restoreDoc(d, after) {
-        try { await C.q(sb.from('documents').update({ archived_at: null }).eq('id', d.id)); d.archived_at = null; C.toast('Restored', 'ok'); if (after) after(); }
+        try {
+            const r = await C.q(sb.from('documents').update({ archived_at: null }).eq('id', d.id).select('id'));
+            if (!(r.data || []).length) throw new Error('Only people who can edit this item can restore it.');
+            d.archived_at = null; C.toast('Restored', 'ok'); if (after) after();
+        }
         catch (e) { C.toast(e.message, 'bad'); }
     }
     async function removeForGood(d) {
@@ -374,10 +395,13 @@
 
     function docMenu(d, after) {
         after = after || refreshDrive;
-        if (d.archived_at) return [
-            { label: 'Restore', icon: 'refresh', onClick: () => restoreDoc(d, after) },
-            ...(canDelete(d) ? ['sep', { label: 'Delete for good', icon: 'trash', danger: true, onClick: () => deleteDoc(d, after) }] : []),
-        ];
+        if (d.archived_at) {
+            const items = [
+                ...(canEdit(d) ? [{ label: 'Restore', icon: 'refresh', onClick: () => restoreDoc(d, after) }] : []),
+                ...(canDelete(d) ? ['sep', { label: 'Delete for good', icon: 'trash', danger: true, onClick: () => deleteDoc(d, after) }] : []),
+            ].filter((x, i) => !(x === 'sep' && i === 0));
+            return items.length ? items : [{ label: 'Only the owner or a manager can restore this', icon: 'lock', onClick: () => {} }];
+        }
         const items = [
             { label: isNative(d) ? 'Open' : 'Preview', icon: 'doc', onClick: () => openItem(d) },
             { label: 'Download', icon: 'download', onClick: () => download(d) },
@@ -624,7 +648,11 @@
             } },
             { label: 'Delete', icon: 'trash', danger: true, run: async (ids, o) => {
                 const list = await docIdsFor(ids, o); if (!list.length) return;
-                const r = await C.q(sb.from('documents').update({ archived_at: new Date().toISOString() }).in('id', list).select('id'));
+                if (cols.full) {                                            // deleted items are not public any more
+                    const pub = (await sb.from('documents').select('id, published_token, storage_path').in('id', list).not('published_token', 'is', null)).data || [];
+                    for (const x of pub) await unpublishCopy(x);
+                }
+                const r = await C.q(sb.from('documents').update({ archived_at: new Date().toISOString(), ...(cols.full ? { published_token: null, published_at: null } : {}) }).in('id', list).select('id'));
                 const n = (r.data || []).length;
                 C.toast(n === list.length ? `${n} moved to the Recycle bin` : `${n} of ${list.length} moved to the Recycle bin: you can only delete items you can edit`, n === list.length ? 'ok' : 'warn');
                 refreshDrive();
@@ -659,8 +687,8 @@
                 { key: 'name', title: 'Name', width: 400, render: nameCell,
                   edit: { type: 'text', save: async (d, val) => {
                       if (!val) throw new Error('Enter a name.');
-                      if (d._folder) await C.q(sb.from('document_folders').update({ name: val }).eq('id', d.id));
-                      else await C.q(sb.from('documents').update({ name: val }).eq('id', d.id));
+                      const r = await C.q(sb.from(d._folder ? 'document_folders' : 'documents').update({ name: val }).eq('id', d.id).select('id'));
+                      if (!(r.data || []).length) throw new Error(d._folder ? 'Only the person who made this folder, or a manager, can rename it.' : 'Only people who can edit this item can rename it.');
                   } } },
                 ...(cols.full ? [{ key: 'visibility', title: 'Access', width: 110, render: d => (d._folder ? '' : accessBadge(d)) }] : []),
                 { key: 'updated_at', title: 'Modified', width: 150, render: d => `<span class="muted" title="${esc(L.fmtDateTime(d.updated_at || d.created_at))}">${esc(L.fmtRelative(d.updated_at || d.created_at))}</span>` },
@@ -790,12 +818,15 @@
         clearTimeout(dv.timer);
         if (dv.saving) { dv.timer = setTimeout(() => saveNow(force), 400); return; }
         dv.pending = null; dv.saving = true;
+        let finished; dv.saveP = new Promise(res => { finished = res; });
         setStatus('Saving…');
         const json = JSON.parse(JSON.stringify(data));          // a snapshot: the editor keeps changing its own object
         let b = sb.from('documents').update({ content: json, updated_by: me.id, size_bytes: JSON.stringify(json).length }).eq('id', d.id);
         if (!force && dv.stamp) b = b.eq('updated_at', dv.stamp);
         const r = await b.select('updated_at');
         dv.saving = false;
+        if (!r.error && (r.data || []).length) d._stamp = r.data[0].updated_at;
+        finished();
         if (dv.doc !== d) return;
         if (r.error) { dv.pending = dv.pending || data; setStatus(`Not saved: ${C.friendly(r.error)}`, true); return; }
         if (!(r.data || []).length) {
@@ -825,7 +856,7 @@
         if (!force && (dv.pending || dv.saving || dv.editor.busy)) return;
         if (force) mountEditor(d, r.content);
         else if (!dv.editor.set(r.content)) return;
-        dv.stamp = r.updated_at;
+        dv.stamp = r.updated_at; d._stamp = r.updated_at;
         setStatus(r.updated_by && r.updated_by !== me.id ? `Updated by ${C.personName(r.updated_by)}` : 'All changes saved');
     }
     function onVisible() { if (document.visibilityState === 'visible' && dv.doc) reloadContent(false); }
@@ -853,7 +884,7 @@
         const editable = canEdit(d) && !d.archived_at;
         document.title = `${d.name} · Documents · WorkSuite`;
         WSShell.setCrumb(d.name);
-        dv.doc = d; dv.stamp = d.updated_at; dv.pending = null;
+        dv.doc = d; dv.stamp = d.updated_at; d._stamp = d.updated_at; dv.pending = null;
         const back = d.folder_id ? `/documents/?folder=${d.folder_id}` : '/documents/';
         const publishLabel = () => (d.published_token ? 'Public link on' : 'Public link');
         view.innerHTML = `
