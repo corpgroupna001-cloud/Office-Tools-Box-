@@ -22,6 +22,7 @@
 
     let lk = await C.lookups();
     let unsub = null;
+    let routeSeq = 0;
 
     /* ------------------------------------------------------------ routing */
     function route() {
@@ -154,6 +155,7 @@
         return ls.rows.filter(d => !q || [d.title, d.organization, contactName(d), (d.tags || []).join(' ')].some(v => v && String(v).toLowerCase().includes(q)));
     }
     async function showList() {
+        const myRoute = ++routeSeq;
         // Deep links: ?status=won|lost|open|all opens the table filtered; ?view=board|table picks the view.
         { const st = C.param('status'), vw = C.param('view');
           if (vw === 'board' || vw === 'table') ls.view = vw;
@@ -331,12 +333,15 @@
         }
         await reload();
         const liveReload = C.debounce(() => reload(true), 800);
+        if (myRoute !== routeSeq) return;
         unsub = C.subscribe('deals', [{ table: 'crm_deals' }], liveReload);
         if (C.param('new') === '1') { C.setParam('new', null, true); openDealEditor(null, { pipeline_id: ls.pipeline }, d => go(`/deals/?id=${d.id}`)); }
     }
 
     /* ------------------------------------------------------------- record */
     async function showRecord(id) {
+        const myRoute = ++routeSeq;
+        if (unsub) { unsub(); unsub = null; }
         C.loading(view, 'Loading deal…');
         let d;
         try { d = (await C.q(sb.from('crm_deals').select(SELECT).eq('id', id).maybeSingle())).data; }
@@ -517,6 +522,7 @@
             if (ctx.isManager) items.push({ label: 'Delete permanently', icon: 'trash', danger: true, onClick: () => deleteDeal(d) });
             C.menu(e.currentTarget, items);
         });
+        if (myRoute !== routeSeq) return;
         unsub = C.subscribe('deal', [{ table: 'crm_deals', filter: `id=eq.${id}` }], C.debounce(() => { if (C.param('id') === id) showRecord(id); }, 600));
     }
 
@@ -559,7 +565,7 @@
                 { name: 'is_default', label: 'Make this the default pipeline', type: 'check', full: true },
             ], values: { scope: 'mine' }, submitLabel: 'Create', onSubmit: async v => {
                 const company = ctx.isAdmin && v.scope === 'shared' ? null : (me.company || null);
-                if (v.is_default) await sb.from('crm_pipelines').update({ is_default: false }).eq('is_default', true).is('company', company);
+                if (v.is_default) await sb.from('crm_pipelines').update({ is_default: false }).eq('is_default', true)[company == null ? 'is' : 'eq']('company', company == null ? null : company);
                 const { data } = await C.q(sb.from('crm_pipelines').insert({ name: v.name.trim(), company, is_default: !!v.is_default, created_by: me.id }).select('id').single());
                 const seed = [['New Opportunity', 1, 10, false, false, 'pending'], ['Qualification', 2, 25, false, false, 'late'], ['Proposal', 3, 50, false, false, 'leave'], ['Negotiation', 4, 75, false, false, 'holiday'], ['Won', 5, 100, true, false, 'present'], ['Lost', 6, 0, false, true, 'absent']];
                 await C.q(sb.from('crm_pipeline_stages').insert(seed.map(([name, position, probability, is_won, is_lost, color]) => ({ pipeline_id: data.id, name, position, probability, is_won, is_lost, color }))));

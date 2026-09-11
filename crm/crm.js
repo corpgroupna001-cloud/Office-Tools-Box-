@@ -168,7 +168,7 @@
                 // Pipeline by stage
                 const stEl = view.querySelector('#w-stages');
                 const pipelineIds = Array.from(new Set(open.map(d => lk.stageById[d.stage_id] && lk.stageById[d.stage_id].pipeline_id).filter(Boolean)));
-                const stages = L.stagesOf(lk.stages, pipelineIds.length === 1 ? pipelineIds[0] : (lk.defaultPipeline && lk.defaultPipeline.id)).filter(s => !s.is_won && !s.is_lost);
+                const stages = L.stagesOf(lk.stages, pipelineIds.length === 1 ? pipelineIds[0] : ((lk.defaultPipeline && lk.defaultPipeline.id) || pipelineIds[0])).filter(s => !s.is_won && !s.is_lost);
                 if (!open.length) C.empty(stEl, 'No open deals', 'Deals in the pipeline will be summarised here.', `<a class="ws-btn sm" href="/deals/?new=1">${C.icon('plus')}<span>New deal</span></a>`);
                 else stEl.innerHTML = bars(stages.map(s => ({ label: s.name, color: s.color, value: (m.by_stage[s.id] || { value: 0 }).value, count: (m.by_stage[s.id] || { count: 0 }).count })), i => `${i.count} · ${L.moneyShort(i.value, cur)}`) +
                     (pipelineIds.length > 1 ? '<p class="muted" style="font-size:12px;margin:10px 0 0">Several pipelines are in use; the default pipeline\'s stages are shown.</p>' : '');
@@ -204,7 +204,7 @@
             const el = view.querySelector('#k3'); const out = [];
             let tasks = [];
             try {
-                tasks = await rows('tasks', 'id, title, status, priority, due_date, assignee_id, completed_at, archived_at, project_id', b => b.is('archived_at', null).is('completed_at', null).not('due_date', 'is', null).lte('due_date', today).order('due_date'), { ownerCol: 'assignee_id' }, 500);
+                tasks = await rows('tasks', 'id, title, status, priority, due_date, assignee_id, completed_at, archived_at, project_id', b => b.is('archived_at', null).is('completed_at', null).not('due_date', 'is', null).lte('due_date', today).order('due_date'), { ownerCol: 'assignee_id' }, 2000);
                 const c = L.taskCounts(tasks, today);
                 out.push(kpi({ label: 'Overdue tasks', value: c.overdue, href: `/tasks/?view=overdue${owner ? '&owner=' + encodeURIComponent(f.owner) : ''}`, cls: c.overdue ? 'bad' : '' }));
                 out.push(kpi({ label: 'Due today', value: c.due_today, href: '/tasks/?view=today', cls: c.due_today ? 'warn' : '' }));
@@ -244,7 +244,7 @@
 
         // --- Recent activity (RLS scopes to the company; owner filter narrows to that actor)
         try {
-            C.activityFeed(view.querySelector('#w-activity'), { limit: 25, withComments: false, actor_id: owner || undefined });
+            C.activityFeed(view.querySelector('#w-activity'), { limit: 25, withComments: false, actor_id: owner || undefined, company: f.company || undefined, from: iso.from, to: iso.to });
         } catch (e) { widgetError(view.querySelector('#w-activity'), e); }
     }
 

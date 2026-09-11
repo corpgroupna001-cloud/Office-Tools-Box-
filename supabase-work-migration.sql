@@ -776,7 +776,8 @@ create policy projects_insert on public.projects for insert to authenticated
 drop policy if exists projects_update on public.projects;
 create policy projects_update on public.projects for update to authenticated
   using ((select public.ws_same_company(company))
-         and (owner_id = auth.uid() or manager_id = auth.uid() or created_by = auth.uid() or (select public.ws_is_manager())))
+         and (owner_id = auth.uid() or manager_id = auth.uid() or created_by = auth.uid()
+              or public.ws_on_project(id) or (select public.ws_is_manager())))
   with check ((select public.ws_same_company(company)));
 drop policy if exists projects_delete on public.projects;
 create policy projects_delete on public.projects for delete to authenticated
@@ -924,7 +925,7 @@ create policy event_participants_delete on public.event_participants for delete 
 do $$
 declare t text;
 begin
-  foreach t in array array['tasks', 'comments', 'crm_deals'] loop
+  foreach t in array array['tasks', 'comments', 'crm_deals', 'calendar_events', 'event_participants'] loop
     if not exists (select 1 from pg_publication_tables
                     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
       execute format('alter publication supabase_realtime add table public.%I', t);

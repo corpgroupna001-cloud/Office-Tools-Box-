@@ -97,6 +97,7 @@
             values: isNew ? { status: 'active', owner_id: me.id } : contact, submitLabel: isNew ? 'Create contact' : 'Save changes',
             onSubmit: async (v, api) => {
                 const values = cleanValues(v);
+                if (contact && contact.status === 'archived') delete values.status;   // Restore is the explicit way back
                 api.close();                                           // the duplicate dialog needs the stage
                 const proceed = await duplicateCheck(values, contact && contact.id);
                 if (!proceed) return null;

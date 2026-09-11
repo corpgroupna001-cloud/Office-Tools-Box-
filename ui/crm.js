@@ -687,7 +687,7 @@
         return { who, verb: d.verb, detail: d.detail, target };
     }
     /**
-     * activityFeed(container, { entity_type, entity_id | contact_id | lead_id | deal_id | project_id | actor_id | company: true, limit, withComments, includeLinked })
+     * activityFeed(container, { entity_type, entity_id | contact_id | lead_id | deal_id | project_id | actor_id | company, from, to (ISO), limit, withComments, actions })
      * Renders the timeline; returns { reload() }.
      */
     function activityFeed(container, filter) {
@@ -703,6 +703,9 @@
                 if (ors.length) b = b.or(ors.join(','));
                 if (filter.actor_id) b = b.eq('actor_id', filter.actor_id);
                 if (filter.actions) b = b.in('action', filter.actions);
+                if (filter.company) b = b.eq('company', filter.company);
+                if (filter.from) b = b.gte('created_at', filter.from);
+                if (filter.to) b = b.lt('created_at', filter.to);
                 const { data: acts } = await q(b);
                 let comments = [];
                 if (filter.withComments !== false && filter.entity_type && filter.entity_id) {

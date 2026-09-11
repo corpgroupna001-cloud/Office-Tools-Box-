@@ -19,6 +19,7 @@
     const STATUS_OPTS = Object.entries(L.PROJECT_STATUS).map(([k, v]) => ({ value: k, label: v.label }));
     const PRIORITY_OPTS = Object.entries(L.PRIORITY).map(([k, v]) => ({ value: k, label: v.label }));
     let unsubscribe = null;
+    let routeSeq = 0;               // guards against a slow list load finishing after the user opened a record
 
     /* ------------------------------------------------------------ routing */
     function route() {
@@ -170,6 +171,7 @@
         });
     }
     async function showList() {
+        const myRoute = ++routeSeq;
         // Deep links: ?status=active|planning|on_hold|completed|all|archived selects the segment.
         { const st = C.param('status'); if (st && ['active', 'planning', 'on_hold', 'completed', 'all', 'archived'].includes(st)) { listState.seg = st; C.setParam('status', null, true); } }
         WSShell.setCrumb('Projects');
@@ -279,6 +281,8 @@
 
     /* ------------------------------------------------------------- record */
     async function showRecord(id) {
+        const myRoute = ++routeSeq;
+        if (unsubscribe) { unsubscribe(); unsubscribe = null; }
         C.loading(view, 'Loading project…');
         let p;
         try { p = (await C.q(sb.from('projects').select(SELECT).eq('id', id).maybeSingle())).data; }
@@ -463,7 +467,7 @@
                 { key: 'assignee_id', label: 'Assignee', value: t => C.personName(t.assignee_id), render: t => C.personHtml(t.assignee_id, { link: false }) },
                 { key: 'due_date', label: 'Due', render: t => C.dueHtml(t) },
             ];
-            if (!tasksTable || !el.querySelector('table')) tasksTable = C.table(el, { columns, rows, sort: { key: 'due_date', dir: 'asc' }, pageSize: 50, onRow: t => { location.href = `/tasks/?id=${t.id}`; }, empty: { title: tasks.length ? 'No tasks match' : 'No tasks yet', sub: tasks.length ? 'Change the filters to see more.' : 'Add the first task to this project.' } });
+            if (!tasksTable || !el.firstElementChild) tasksTable = C.table(el, { columns, rows, sort: { key: 'due_date', dir: 'asc' }, pageSize: 50, onRow: t => { location.href = `/tasks/?id=${t.id}`; }, empty: { title: tasks.length ? 'No tasks match' : 'No tasks yet', sub: tasks.length ? 'Change the filters to see more.' : 'Add the first task to this project.' } });
             else tasksTable.update(rows);
         }
 
@@ -567,6 +571,8 @@
                     C.toast('Member added', 'ok'); members = await membersFor([id]); tabs.setCount('members', members.length); renderMembersTab(); renderOverview();
                 } catch (err) { C.toast(err.message, 'bad'); }
             });
+            if (el.dataset.bound) return;            // the delegated handlers below are bound once per panel element
+            el.dataset.bound = '1';
             el.addEventListener('change', async e => {
                 const s = e.target.closest('select[data-role]'); if (!s) return;
                 try { await C.q(sb.from('project_members').update({ role: s.value }).eq('project_id', id).eq('user_id', s.dataset.role)); C.toast('Role updated', 'ok'); members = await membersFor([id]); }
@@ -601,11 +607,12 @@
             if (loaded.calendar) renderCalendarTab();
         }
         const refreshDebounced = C.debounce(async () => { await refreshTasks(); if (loaded.activity) loaded.activity.reload(); }, 600);
+        if (myRoute !== routeSeq) return;        // the user has already navigated elsewhere
         unsubscribe = C.subscribe('project-tasks', [{ event: '*', table: 'tasks', filter: `project_id=eq.${id}` }], () => refreshDebounced());
 
         /* ---- actions ---- */
-        const newTask = () => C.openTaskEditor({ defaults: { project_id: id, board_id: p.board_id || undefined, title: '' }, onSaved: () => refreshTasks() });
-        const newMeeting = () => C.openEventEditor({ defaults: { project_id: id, title: `${p.name} meeting`, participants: mids().filter(u => u !== me.id) }, onSaved: async () => { await loadEvents(); tabs.setCount('calendar', events.filter(e => e.status !== 'cancelled').length); if (loaded.overview) renderOverview(); if (loaded.calendar) renderCalendarTab(); } });
+        function newTask() { return C.openTaskEditor({ defaults: { project_id: id, board_id: p.board_id || undefined, title: '' }, onSaved: () => refreshTasks() }); }
+        function newMeeting() { return C.openEventEditor({ defaults: { project_id: id, title: `${p.name} meeting`, participants: mids().filter(u => u !== me.id) }, onSaved: async () => { await loadEvents(); tabs.setCount('calendar', events.filter(e => e.status !== 'cancelled').length); if (loaded.overview) renderOverview(); if (loaded.calendar) renderCalendarTab(); } }); }
         on('#edit-btn', () => openProjectEditor(p, mids(), () => showRecord(id)));
         on('#task-btn', newTask);
         on('#meet-btn', newMeeting);

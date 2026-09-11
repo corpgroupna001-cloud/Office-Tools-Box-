@@ -50,7 +50,8 @@
     function filterRows(rows) {
         const q = listState.q.trim().toLowerCase();
         return rows.filter(r => {
-            if (listState.status && L.invoiceStatus(r) !== listState.status) return false;
+            if (listState.status === 'outstanding') { if (!['sent', 'partially_paid', 'overdue'].includes(L.invoiceStatus(r))) return false; }
+            else if (listState.status && L.invoiceStatus(r) !== listState.status) return false;
             if (!q) return true;
             return [r.invoice_number, r.bill_to_name, r.bill_to_email].some(v => v && String(v).toLowerCase().includes(q));
         });
@@ -109,7 +110,7 @@
         function paintKpis(all) {
             const k = kpis(all);
             view.querySelector('#kpis').innerHTML = `
-                <a class="crm-kpi accent" href="#" data-status="sent"><div class="lbl">Outstanding</div><div class="val">${esc(L.money(k.outstanding, k.cur))}</div><div class="sub">Sent, not yet paid</div></a>
+                <a class="crm-kpi accent" href="#" data-status="outstanding"><div class="lbl">Outstanding</div><div class="val">${esc(L.money(k.outstanding, k.cur))}</div><div class="sub">Sent, not yet paid</div></a>
                 <a class="crm-kpi ${k.overdueCount ? 'bad' : ''}" href="#" data-status="overdue"><div class="lbl">Overdue</div><div class="val">${esc(L.money(k.overdue, k.cur))}</div><div class="sub ${k.overdueCount ? 'bad' : ''}">${k.overdueCount} invoice${k.overdueCount === 1 ? '' : 's'} past due</div></a>
                 <a class="crm-kpi ok" href="#" data-status="paid"><div class="lbl">Paid this month</div><div class="val">${esc(L.money(k.paidMonth, k.cur))}</div><div class="sub">By payment date</div></a>
                 <a class="crm-kpi" href="#" data-status="draft"><div class="lbl">Drafts</div><div class="val">${k.drafts}</div><div class="sub">Not yet sent</div></a>`;
@@ -172,19 +173,20 @@
         const msgs = { sent: 'Once sent, its lines are locked and payments can be recorded against it.', draft: 'Only possible while nothing has been paid. You can then edit the lines again.' };
         if (labels[status] && !await C.confirm({ title: labels[status], message: msgs[status], okText: status === 'sent' ? 'Mark sent' : 'Revert to draft' })) return;
         try {
-            await C.q(sb.from('invoices').update({ status }).eq('id', inv.id));
+            const { data } = await C.q(sb.from('invoices').update({ status }).eq('id', inv.id).select('id'));
+            if (!data || !data.length) throw new Error('The invoice could not be updated. Reload and try again.');
             C.toast(status === 'sent' ? 'Invoice marked as sent' : 'Invoice reverted to draft', 'ok');
             if (after) after();
         } catch (e) { C.toast(e.message, 'bad'); }
     }
     async function cancelInvoice(inv, after) {
         if (!await C.confirm({ title: `Cancel ${inv.invoice_number}?`, message: 'A cancelled invoice cannot be reopened; duplicate it if you need a corrected copy. Recorded payments stay on file.', okText: 'Cancel invoice', danger: true })) return;
-        try { await C.q(sb.from('invoices').update({ status: 'cancelled' }).eq('id', inv.id)); C.toast('Invoice cancelled', 'ok'); if (after) after(); }
+        try { const { data } = await C.q(sb.from('invoices').update({ status: 'cancelled' }).eq('id', inv.id).select('id')); if (!data || !data.length) throw new Error('The invoice could not be cancelled. Reload and try again.'); C.toast('Invoice cancelled', 'ok'); if (after) after(); }
         catch (e) { C.toast(e.message, 'bad'); }
     }
     async function deleteDraft(inv) {
         if (!await C.confirm({ title: `Delete draft ${inv.invoice_number}?`, message: 'Only drafts can be deleted. The number is not reused.', okText: 'Delete draft', danger: true })) return;
-        try { await C.q(sb.from('invoices').delete().eq('id', inv.id)); C.toast('Draft deleted', 'ok'); go('/invoices/'); }
+        try { const { data } = await C.q(sb.from('invoices').delete().eq('id', inv.id).select('id')); if (!data || !data.length) throw new Error('Only a draft you may manage can be deleted.'); C.toast('Draft deleted', 'ok'); go('/invoices/'); }
         catch (e) { C.toast(e.message, 'bad'); }
     }
     async function duplicate(inv) {
@@ -335,6 +337,13 @@
                         if (!form.validate()) return;
                         const live = items.filter(x => String(x.description || '').trim());
                         if (!live.length) { api.setMessage('Add at least one line item with a description.'); return; }
+                        // The database checks these too; catching them here avoids a half-saved draft.
+                        for (let i = 0; i < live.length; i++) {
+                            const it = live[i];
+                            if (num(it.quantity) < 0 || num(it.unit_price) < 0) { api.setMessage(`Line ${i + 1}: quantity and unit price cannot be negative.`); return; }
+                            if (num(it.discount_pct) < 0 || num(it.discount_pct) > 100) { api.setMessage(`Line ${i + 1}: discount must be between 0 and 100%.`); return; }
+                            if (num(it.tax_rate) < 0 || num(it.tax_rate) > 100) { api.setMessage(`Line ${i + 1}: tax rate must be between 0 and 100%.`); return; }
+                        }
                         const v = form.get();
                         const header = {
                             contact_id: v.contact_id || null, deal_id: v.deal_id || null, project_id: v.project_id || null,
@@ -345,7 +354,13 @@
                         if (isNew) {
                             const r = await C.q(sb.from('invoices').insert({ ...header, status: 'draft', created_by: me.id }).select('id').single());
                             id = r.data.id;
-                            await C.q(sb.from('invoice_items').insert(live.map((it, i) => ({ invoice_id: id, position: i + 1, description: it.description.trim(), quantity: num(it.quantity), unit_price: num(it.unit_price), discount_pct: num(it.discount_pct), tax_rate: num(it.tax_rate) }))));
+                            try {
+                                await C.q(sb.from('invoice_items').insert(live.map((it, i) => ({ invoice_id: id, position: i + 1, description: it.description.trim(), quantity: num(it.quantity), unit_price: num(it.unit_price), discount_pct: num(it.discount_pct), tax_rate: num(it.tax_rate) }))));
+                            } catch (e) {
+                                // Do not leave a numbered, empty draft behind.
+                                try { await sb.from('invoices').delete().eq('id', id); } catch (e2) { /* best effort */ }
+                                throw e;
+                            }
                         } else {
                             id = inv.id;
                             await C.q(sb.from('invoices').update(header).eq('id', id));
@@ -384,8 +399,8 @@
             inv = r.data;
             if (inv) {
                 const [it, pay] = await Promise.all([
-                    sb.from('invoice_items').select('*').eq('invoice_id', id).order('position'),
-                    sb.from('invoice_payments').select('*').eq('invoice_id', id).order('paid_on', { ascending: false }),
+                    C.q(sb.from('invoice_items').select('*').eq('invoice_id', id).order('position')),
+                    C.q(sb.from('invoice_payments').select('*').eq('invoice_id', id).order('paid_on', { ascending: false })),
                 ]);
                 items = it.data || []; payments = pay.data || [];
             }
