@@ -215,6 +215,33 @@
         return m;
     }
 
+    /* ---------- create pages (WSCreate) ---------- */
+    /** Form fields for a record's custom fields (the custom section of a create page). */
+    function cfFormFields(fields) {
+        return fields.map(f => ({
+            name: 'cf_' + f.code, label: f.label, type: cfType(f), options: cfOptions(f), required: !!f.required, full: f.field_type === 'text',
+            placeholder: f.field_type === 'list' ? 'Not selected' : undefined, none: f.field_type === 'employee' ? 'Not selected' : undefined,
+        }));
+    }
+    /** Create-page values -> the record's own columns and its custom fields (blank custom values are left out). */
+    function splitCustom(v, fields) {
+        const values = {}, custom = {};
+        Object.entries(v || {}).forEach(([k, val]) => { if (!k.startsWith('cf_')) values[k] = val; });
+        (fields || []).forEach(f => { const val = (v || {})['cf_' + f.code]; if (!(val == null || val === '' || (Array.isArray(val) && !val.length))) custom[f.code] = val; });
+        return { values, custom };
+    }
+    /** After a create page saves: show the new record in the same slider (or page) and tell the list behind it. */
+    function afterCreate(base, id) {
+        const inSlider = !!(window.WSShell && WSShell.inSlider);
+        if (inSlider && WSShell.sliderMessage) WSShell.sliderMessage('changed', { id });
+        location.replace(`${base}?id=${encodeURIComponent(id)}${inSlider ? '&slider=1' : ''}`);
+    }
+    function leaveCreate(base) {
+        if (window.WSShell && WSShell.inSlider && WSShell.closeSlider) return WSShell.closeSlider();
+        if (history.length > 1) history.back(); else location.href = base;
+    }
+    const fieldsSettingsUrl = entity => `/crm/settings?section=fields&entity=${encodeURIComponent(entity)}`;
+
     window.WSB24 = { columns, customFields, cfColumns, cfFilters, cfSection, cfDisplay, levels, allowed, hex, peopleOptions, openRecord, pick, titleBar,
-                     csvParse, csvStringify, exportCsv, importCsv, download };
+                     csvParse, csvStringify, exportCsv, importCsv, download, cfFormFields, splitCustom, afterCreate, leaveCreate, fieldsSettingsUrl };
 })();

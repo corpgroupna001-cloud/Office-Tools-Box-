@@ -66,6 +66,7 @@
     /* ------------------------------------------------------------ routing */
     function route() {
         const id = C.param('id');
+        if (id === 'new') return showCreate();
         if (id) return showRecord(id);
         if (page.mode === 'list') return refreshList();
         return showList();
@@ -252,7 +253,7 @@
             id: 'deals', fields: filterFields(), presets: PRESETS, defaultPreset: 'open', me: me.id, onChange: () => refreshList(),
         });
         const create = view.querySelector('[data-create]');
-        if (create) create.addEventListener('click', () => openDealEditor({ pipeline_id: page.pipeline }, d => { refreshList(); openDeal(d.id); }));
+        if (create) create.addEventListener('click', () => B.openRecord(`/deals/?id=new&pipeline=${encodeURIComponent(page.pipeline || '')}`, refreshList));
         const gear = view.querySelector('[data-gear]');
         if (gear) gear.addEventListener('click', () => C.menu(gear, [
             { label: 'Configure pipelines and stages', icon: 'board', onClick: () => openPipelineSettings(() => { lk = null; showList(); }) },
@@ -281,7 +282,7 @@
         loadCounters();
         if (page.unsub) page.unsub();
         page.unsub = C.subscribe('deals', [{ table: 'crm_deals' }], C.debounce(() => refreshList(true), 900));
-        if (C.param('new') === '1' && canAdd) { C.setParam('new', null, true); openDealEditor({ pipeline_id: page.pipeline }, d => { refreshList(); openDeal(d.id); }); }
+        if (C.param('new') === '1' && canAdd) { C.setParam('new', null, true); B.openRecord(`/deals/?id=new&pipeline=${encodeURIComponent(page.pipeline || '')}`, refreshList); }
     }
     function mountView(kind) {
         page.view = kind;
@@ -494,6 +495,72 @@
     });
 
     /* ------------------------------------------------------------- card */
+    /* ---------------------------------------------- new deal (Bitrix24-style create page) */
+    async function showCreate() {
+        page.mode = 'create';
+        if (page.unsub) { page.unsub(); page.unsub = null; }
+        if (page.grid) { page.grid.destroy(); page.grid = null; }
+        if (page.board) { page.board.destroy(); page.board = null; }
+        document.title = 'New deal · WorkSuite';
+        WSShell.setCrumb('New deal');
+        C.loading(view, 'Opening…');
+        lk = await C.lookups();
+        if (!lk.pipelines.length) { view.innerHTML = '<div class="b24-area pad"></div>'; return C.empty(view.firstElementChild, 'No pipeline yet', ctx.isManager ? 'Set up a sales pipeline first (the gear next to the filter on Deals).' : 'Ask a manager to set up a sales pipeline first.'); }
+        let pid = pipelineOf(C.param('pipeline')) ? C.param('pipeline') : ((lk.defaultPipeline && lk.defaultPipeline.id) || lk.pipelines[0].id);
+        const lv = await B.levels('deal', pid);
+        if (lv.add === 'none') { view.innerHTML = '<div class="b24-area pad"></div>'; return C.empty(view.firstElementChild, 'You cannot add deals here', 'Your access permissions do not allow new deals in this pipeline.'); }
+        const stagesOf = p => stagesFor(p).filter(s => !s.is_lost).map(s => ({ key: s.id, title: s.name, hex: stageHex(s) }));
+        const firstStage = p => (L.firstOpenStage(lk.stages, p) || stagesFor(p)[0] || {}).id;
+        let cf = cols.full ? await B.customFields('deal', pid) : [];
+        const about = () => [
+            { name: 'title', label: 'Deal name', type: 'text', required: true, full: true, placeholder: 'e.g. Annual supply contract' },
+            ...(lk.pipelines.length > 1 ? [{ name: 'pipeline_id', label: 'Pipeline', type: 'select', required: true, options: lk.pipelines.map(p => ({ value: p.id, label: p.name })) }] : []),
+            { name: 'contact_id', label: 'Contact', type: 'entity', entity: 'contact', placeholder: 'Contact name, phone or email' },
+            ...(cols.full ? [{ name: 'company_id', label: 'Company', type: 'entity', entity: 'company', placeholder: 'Company name, phone or email' }] : []),
+            { name: 'value', label: 'Amount', type: 'money', required: true },
+            { name: 'currency', label: 'Currency', type: 'select', options: CURRENCIES, required: true },
+            { name: 'owner_id', label: 'Responsible', type: 'people', none: 'Not assigned' },
+            { name: 'expected_close_date', label: 'Expected close', type: 'date' },
+            { name: 'source', label: 'Source', type: 'select', options: SOURCES, placeholder: 'Not selected', optional: true },
+            { name: 'organization', label: 'Company name (text)', type: 'text', optional: true },
+            { name: 'tags', label: 'Tags', type: 'tags', optional: true, full: true },
+            { name: 'description', label: 'Comment', type: 'textarea', full: true },
+        ];
+        const sectionsFor = () => [{ title: 'About deal', fields: about() }, ...(cf.length ? [{ title: 'More about the deal', fields: B.cfFormFields(cf) }] : [])];
+        view.innerHTML = '<div class="b24-new-host"></div>';
+        const pageApi = WSCreate.mount(view.firstElementChild, {
+            title: 'New deal', entity: 'deal', sections: sectionsFor(),
+            stages: stagesOf(pid), stage: C.param('stage_id') && lk.stageById[C.param('stage_id')] ? C.param('stage_id') : firstStage(pid), stageField: 'stage_id',
+            values: { pipeline_id: pid, value: 0, currency: 'INR', owner_id: me.id, contact_id: C.param('contact_id') || null, company_id: C.param('company_id') || null, title: C.param('title') || '' },
+            note: 'You are now adding a deal…',
+            createFieldHref: ctx.isManager && cols.full ? B.fieldsSettingsUrl('deal') : null,
+            onChange: async (name, value, api) => {
+                if (name !== 'pipeline_id' || !value || value === pid) return;
+                pid = value;
+                api.setStages(stagesOf(pid), firstStage(pid));
+                if (cols.full) { cf = await B.customFields('deal', pid); api.setSections(sectionsFor()); }
+            },
+            onSave: async v => {
+                const { values, custom } = B.splitCustom(v, cf);
+                const row = {
+                    title: String(values.title || '').trim(), contact_id: values.contact_id || null, organization: values.organization ? String(values.organization).trim() || null : null,
+                    owner_id: values.owner_id || null, pipeline_id: values.pipeline_id || pid, stage_id: values.stage_id, value: Number(values.value) || 0, currency: values.currency,
+                    expected_close_date: values.expected_close_date || null, source: values.source || null, tags: values.tags || [], description: values.description || null, created_by: me.id,
+                };
+                if (!row.title) throw new Error('The deal needs a name.');
+                if (cols.full) row.company_id = values.company_id || null;
+                if (C.param('lead_id')) row.lead_id = C.param('lead_id');
+                if (cf.length) row.custom = custom;
+                const saved = (await C.q(sb.from('crm_deals').insert(row).select(SELECT).single())).data;
+                if (saved.owner_id && saved.owner_id !== me.id) C.pushNotify({ to: saved.owner_id, title: 'Deal assigned to you', body: saved.title, url: `/deals/?id=${saved.id}`, tag: 'crm' });
+                C.toast('Deal created', 'ok');
+                B.afterCreate('/deals/', saved.id);
+            },
+            onCancel: () => B.leaveCreate('/deals/'),
+        });
+        pageApi.focus();
+    }
+
     async function showRecord(id) {
         page.mode = 'record';
         if (page.unsub) { page.unsub(); page.unsub = null; }

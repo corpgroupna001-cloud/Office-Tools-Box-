@@ -42,6 +42,7 @@
     const page = { mode: null, grid: null, board: null, filter: null };
     function route() {
         const id = C.param('id');
+        if (id === 'new') return showCreate();
         if (id) return showRecord(id);
         if (page.mode === 'list') return refreshList();      // back from a slide-over: keep the list, refresh it
         return showList();
@@ -344,7 +345,7 @@
             placeholder: 'Filter + search', onChange: () => refreshList(),
         });
         const create = view.querySelector('[data-create]');
-        if (create) create.addEventListener('click', () => openLeadEditor(null, l => { refreshList(); openLead(l.id); }));
+        if (create) create.addEventListener('click', () => B.openRecord('/leads/?id=new', refreshList));
         view.querySelector('.b24-views').addEventListener('click', e => {
             const b = e.target.closest('[data-view]'); if (!b) return;
             try { localStorage.setItem('ws-leads-view', b.dataset.view); } catch (err) { /* private mode */ }
@@ -358,7 +359,7 @@
         });
         mountView(current);
         loadCounters();
-        if (C.param('new') === '1' && canAdd) { C.setParam('new', null, true); openLeadEditor(null, l => { refreshList(); openLead(l.id); }); }
+        if (C.param('new') === '1' && canAdd) { C.setParam('new', null, true); B.openRecord('/leads/?id=new', refreshList); }
     }
     function mountView(kind) {
         page.view = kind;
@@ -579,6 +580,55 @@
     });
 
     /* ------------------------------------------------------------- card */
+    /* ---------------------------------------------- new lead (Bitrix24-style create page) */
+    async function showCreate() {
+        page.mode = 'create';
+        if (page.grid) { page.grid.destroy(); page.grid = null; }
+        if (page.board) { page.board.destroy(); page.board = null; }
+        document.title = 'New lead · WorkSuite';
+        WSShell.setCrumb('New lead');
+        C.loading(view, 'Opening…');
+        const cf = cols.full ? await B.customFields('lead') : [];
+        const stageList = statuses.filter(s => !s.is_closed && !s.is_converted).map(s => ({ key: s.key, title: s.label, hex: hexOf(s.key) }));
+        const info = [
+            { name: 'name', label: 'Lead name', type: 'text', required: true, full: true, placeholder: 'Lead #' },
+            { name: 'source', label: 'Source', type: 'select', options: SOURCES, placeholder: 'Not selected' },
+            { name: 'owner_id', label: 'Responsible', type: 'people', none: 'Unassigned' },
+            { name: 'organization', label: 'Company name', type: 'text' },
+            ...(cols.full ? [{ name: 'company_id', label: 'Company', type: 'entity', entity: 'company', placeholder: 'Company name, phone or email' }] : []),
+            { name: 'phone', label: 'Phone', type: 'tel' },
+            { name: 'email', label: 'E-mail', type: 'email' },
+            { name: 'estimated_value', label: 'Amount', type: 'money' },
+            { name: 'currency', label: 'Currency', type: 'select', options: CURRENCIES, required: true },
+            { name: 'priority', label: 'Priority', type: 'select', options: PRIORITIES, required: true },
+            { name: 'source_detail', label: 'Source information', type: 'text', optional: true, placeholder: 'e.g. Diwali campaign, LinkedIn ad' },
+            { name: 'next_follow_up_at', label: 'Next follow-up', type: 'datetime', optional: true, full: true },
+            { name: 'tags', label: 'Tags', type: 'tags', optional: true, full: true },
+            { name: 'notes', label: 'Comment', type: 'textarea', full: true },
+        ];
+        const sections = [{ title: 'Lead information', fields: info }];
+        if (cf.length) sections.push({ title: 'More about the lead', fields: B.cfFormFields(cf) });
+        view.innerHTML = '<div class="b24-new-host"></div>';
+        WSCreate.mount(view.firstElementChild, {
+            title: 'New lead', entity: 'lead', sections,
+            stages: stageList, stage: (stageList.find(s => s.key === C.param('status')) || stageList[0] || {}).key, stageField: 'status',
+            values: { priority: 'normal', owner_id: me.id, currency: 'INR' },
+            note: 'You are now adding a lead…',
+            createFieldHref: ctx.isManager && cols.full ? B.fieldsSettingsUrl('lead') : null,
+            onSave: async v => {
+                const { values, custom } = B.splitCustom(v, cf);
+                const row = cleanValues(values);
+                if (!cols.full) delete row.company_id;
+                if (!await duplicateCheck(row, null)) throw Object.assign(new Error('Not saved'), { silent: true });
+                const saved = (await C.q(sb.from('crm_leads').insert({ ...row, ...(cf.length ? { custom } : {}), created_by: me.id }).select(SELECT).single())).data;
+                if (saved.owner_id && saved.owner_id !== me.id) C.pushNotify({ to: saved.owner_id, title: 'Lead assigned to you', body: saved.name, url: `/leads/?id=${saved.id}`, tag: 'crm' });
+                C.toast('Lead created', 'ok');
+                B.afterCreate('/leads/', saved.id);
+            },
+            onCancel: () => B.leaveCreate('/leads/'),
+        }).focus();
+    }
+
     async function showRecord(id) {
         page.mode = 'record';
         if (page.grid) { page.grid.destroy(); page.grid = null; }

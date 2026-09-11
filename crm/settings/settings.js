@@ -114,15 +114,17 @@
                     <p class="b24-hint">Roles decide what people see and change in the CRM. A person's rights are the strongest of all their roles; workspace admins always have full access. Changes apply at once, everywhere, including to direct API calls.</p>
                     ${canEdit ? '' : '<div class="crm-info" style="margin-bottom:12px">Only workspace admins can change roles. You can see how they are set up.</div>'}
                     <div class="b24-roles">
-                        <div class="list">${roles.map(r => `<button type="button" data-role="${esc(r.id)}" class="${r.id === roleId ? 'on' : ''}">${esc(r.name)}${r.is_system ? ' <small>built in</small>' : ''}</button>`).join('')}
+                        <div class="list">${roles.map(r => { const n = assigns.filter(a => a.role_id === r.id).length; return `<button type="button" data-role="${esc(r.id)}" class="${r.id === roleId ? 'on' : ''}">${esc(r.name)}${r.is_system ? ' <small>built in</small>' : ''}<small class="n">${n ? `${n} assignment${n === 1 ? '' : 's'}` : 'not assigned'}</small></button>`; }).join('')}
                             ${canEdit ? `<button type="button" class="add" data-add-role>${C.icon('plus')} Add role</button>` : ''}</div>
                         ${role ? `<div class="role">
                             <div class="head"><h2>${esc(role.name)}</h2>${role.description ? `<p>${esc(role.description)}</p>` : ''}
-                                ${canEdit ? `<span class="grow"></span><button type="button" class="ws-btn sm" data-rename-role>${C.icon('edit')}<span>Rename</span></button>${role.is_system ? '' : `<button type="button" class="ws-btn sm danger" data-del-role>${C.icon('trash')}<span>Delete</span></button>`}` : ''}</div>
+                                ${canEdit ? `<span class="grow"></span><button type="button" class="ws-btn sm" data-rename-role>${C.icon('edit')}<span>Rename</span></button><button type="button" class="ws-btn sm" data-copy-role>${C.icon('plus')}<span>Copy</span></button>${role.is_system ? '' : `<button type="button" class="ws-btn sm danger" data-del-role>${C.icon('trash')}<span>Delete</span></button>`}` : ''}</div>
                             <div class="b24-matrix-wrap"><table class="b24-matrix">
-                                <thead><tr><th>Entity</th>${allActions.map(a => `<th>${esc(ACTIONS[a])}</th>`).join('')}</tr></thead>
+                                <thead><tr><th>Entity</th>${canEdit ? '<th>Every action</th>' : ''}${allActions.map(a => `<th>${esc(ACTIONS[a])}</th>`).join('')}</tr></thead>
                                 <tbody>${ENTITIES.map(ent => {
-                                    const row = (pipeline, label) => `<tr${pipeline ? ' class="sub"' : ''}><th>${esc(label)}</th>${allActions.map(a => ent.actions.includes(a) ? cell(role.id, ent.key, pipeline, a) : '<td class="na">—</td>').join('')}</tr>`;
+                                    // "Every action": set one level for the whole row in one go.
+                                    const rowAll = pipeline => canEdit ? `<td><select data-perm-row="${esc(ent.key)}|${esc(pipeline || '')}" aria-label="Every action for ${esc(ent.title)}"><option value="__">Set all…</option>${(pipeline ? [{ value: '', label: 'As for all pipelines' }] : []).concat(LEVELS).map(o => `<option value="${o.value}">${esc(o.label)}</option>`).join('')}</select></td>` : '';
+                                    const row = (pipeline, label) => `<tr${pipeline ? ' class="sub"' : ''}><th>${esc(label)}</th>${rowAll(pipeline)}${allActions.map(a => ent.actions.includes(a) ? cell(role.id, ent.key, pipeline, a) : '<td class="na">—</td>').join('')}</tr>`;
                                     return row(null, ent.title) + (ent.pipelines ? lk.pipelines.map(p => row(p.id, `↳ ${p.name}`)).join('') : '');
                                 }).join('')}</tbody>
                             </table></div>
@@ -138,7 +140,22 @@
             perms.splice(0, perms.length, ...(p.data || [])); assigns.splice(0, assigns.length, ...(a.data || [])); roles.splice(0, roles.length, ...(r.data || []));
             render();
         }
+        async function setLevel(entity, pipeline, action, value) {
+            const existing = permOf(roleId, entity, pipeline || null, action);
+            if (!value) { if (existing) await C.q(sb.from('crm_role_permissions').delete().eq('id', existing.id)); }
+            else if (existing) await C.q(sb.from('crm_role_permissions').update({ level: value }).eq('id', existing.id));
+            else await C.q(sb.from('crm_role_permissions').insert({ role_id: roleId, entity, pipeline_id: pipeline || null, action, level: value }));
+        }
         body.addEventListener('change', async e => {
+            const rs = e.target.closest('[data-perm-row]');
+            if (rs) {
+                if (rs.value === '__') return;
+                const [entity, pipeline] = rs.dataset.permRow.split('|');
+                const ent = ENTITIES.find(x => x.key === entity);
+                try { for (const action of ent.actions) await setLevel(entity, pipeline, action, rs.value); C.toast(`${ent.title}: every action updated`, 'ok'); }
+                catch (err) { C.toast(err.message, 'bad'); }
+                return reloadData();
+            }
             const s = e.target.closest('[data-perm]'); if (!s) return;
             const [entity, pipeline, action] = s.dataset.perm.split('|');
             const existing = permOf(roleId, entity, pipeline || null, action);
@@ -161,6 +178,17 @@
             if (e.target.closest('[data-rename-role]')) {
                 const role = roles.find(x => x.id === roleId);
                 await C.formModal({ title: 'Rename role', fields: [{ name: 'name', label: 'Name', type: 'text', required: true, full: true }, { name: 'description', label: 'Description', type: 'textarea', full: true }], values: role, onSubmit: async v => { await C.q(sb.from('crm_roles').update({ name: v.name.trim(), description: v.description || null }).eq('id', roleId)); await reloadData(); } });
+                return;
+            }
+            if (e.target.closest('[data-copy-role]')) {
+                const src = roles.find(x => x.id === roleId);
+                await C.formModal({ title: `Copy ${src.name}`, submitLabel: 'Create copy', fields: [{ name: 'name', label: 'Name of the new role', type: 'text', required: true, full: true }], values: { name: `Copy of ${src.name}` }, onSubmit: async v => {
+                    const { data } = await C.q(sb.from('crm_roles').insert({ name: v.name.trim(), description: src.description || null }).select('id').single());
+                    const rows = perms.filter(p => p.role_id === src.id).map(p => ({ role_id: data.id, entity: p.entity, pipeline_id: p.pipeline_id || null, action: p.action, level: p.level, extra: p.extra || {} }));
+                    if (rows.length) await C.q(sb.from('crm_role_permissions').insert(rows));
+                    C.toast('Role copied: give it to people with "Give this role to…"', 'ok');
+                    roleId = data.id; await reloadData();
+                } });
                 return;
             }
             if (e.target.closest('[data-del-role]')) {

@@ -32,6 +32,7 @@
     const page = { mode: null, grid: null, filter: null, view: 'list' };
     function route() {
         const id = C.param('id');
+        if (id === 'new') return showCreate();
         if (id) return showRecord(id);
         if (page.mode === 'list') return refreshList();
         return showList();
@@ -220,13 +221,13 @@
             <div id="body"></div>`;
         page.filter = WSFilter.mount(view.querySelector('[data-filter]'), { id: 'contacts', fields: filterFields(), presets: PRESETS, defaultPreset: 'active', me: me.id, onChange: () => refreshList() });
         const create = view.querySelector('[data-create]');
-        if (create) create.addEventListener('click', () => openContactEditor(null, c => { refreshList(); openContact(c.id); }));
+        if (create) create.addEventListener('click', () => B.openRecord('/contacts/?id=new', refreshList));
         const more = view.querySelector('[data-create-menu]');
         if (more) more.addEventListener('click', () => C.menu(more, menu));
         const ex = view.querySelector('[data-export]'); if (ex) ex.addEventListener('click', exportContacts);
         view.querySelector('.b24-views').addEventListener('click', e => { const b = e.target.closest('[data-view]'); if (b) mountView(b.dataset.view); });
         mountView(C.param('view') === 'activity' ? 'activity' : 'list');
-        if (C.param('new') === '1' && canAdd) { C.setParam('new', null, true); openContactEditor(null, c => { refreshList(); openContact(c.id); }); }
+        if (C.param('new') === '1' && canAdd) { C.setParam('new', null, true); B.openRecord('/contacts/?id=new', refreshList); }
     }
     function mountView(kind) {
         page.view = kind;
@@ -391,6 +392,57 @@
     }
 
     /* ------------------------------------------------------------ card */
+    /* ------------------------------------------- new contact (Bitrix24-style create page) */
+    async function showCreate() {
+        page.mode = 'create';
+        if (page.grid) { page.grid.destroy(); page.grid = null; }
+        document.title = 'New contact · WorkSuite';
+        WSShell.setCrumb('New contact');
+        C.loading(view, 'Opening…');
+        const cf = cols.full ? await B.customFields('contact') : [];
+        const about = [
+            { name: 'first_name', label: 'First name', type: 'text', required: true },
+            { name: 'last_name', label: 'Last name', type: 'text' },
+            { name: 'job_title', label: 'Position', type: 'text' },
+            { name: 'owner_id', label: 'Responsible', type: 'people', none: 'Not assigned' },
+            ...(cols.full ? [{ name: 'company_id', label: 'Company', type: 'entity', entity: 'company', placeholder: 'Company name, phone or email', full: true }] : []),
+            { name: 'phone', label: 'Phone', type: 'tel' },
+            { name: 'email', label: 'E-mail', type: 'email' },
+            { name: 'source', label: 'Source', type: 'select', options: SOURCES, placeholder: 'Not selected' },
+            { name: 'organization', label: 'Company name (text)', type: 'text', optional: true },
+            { name: 'phone2', label: 'Second phone', type: 'tel', optional: true },
+            { name: 'email2', label: 'Second e-mail', type: 'email', optional: true },
+            { name: 'website', label: 'Website', type: 'url', optional: true, placeholder: 'https://' },
+            { name: 'address', label: 'Address', type: 'text', optional: true, full: true },
+            { name: 'city', label: 'City', type: 'text', optional: true },
+            { name: 'state', label: 'State', type: 'text', optional: true },
+            { name: 'country', label: 'Country', type: 'text', optional: true },
+            { name: 'postal_code', label: 'Postal code', type: 'text', optional: true },
+            { name: 'tags', label: 'Tags', type: 'tags', optional: true, full: true },
+            { name: 'notes', label: 'Comment', type: 'textarea', full: true },
+        ];
+        const sections = [{ title: 'About contact', fields: about }];
+        if (cf.length) sections.push({ title: 'More about the contact', fields: B.cfFormFields(cf) });
+        view.innerHTML = '<div class="b24-new-host"></div>';
+        WSCreate.mount(view.firstElementChild, {
+            title: 'New contact', entity: 'contact', sections,
+            values: { owner_id: me.id, ...Object.fromEntries(['first_name', 'last_name', 'email', 'phone', 'company_id', 'organization'].filter(k => C.param(k)).map(k => [k, C.param(k)])) },
+            note: 'You are now adding a contact…',
+            createFieldHref: ctx.isManager && cols.full ? B.fieldsSettingsUrl('contact') : null,
+            onSave: async v => {
+                const { values, custom } = B.splitCustom(v, cf);
+                const row = clean(values);
+                if (!cols.full) delete row.company_id;
+                if (!await duplicateCheck(row, null)) throw Object.assign(new Error('Not saved'), { silent: true });
+                const saved = (await C.q(sb.from('crm_contacts').insert({ ...row, ...(cf.length ? { custom } : {}), status: 'active', created_by: me.id }).select(SELECT).single())).data;
+                if (saved.owner_id && saved.owner_id !== me.id) C.pushNotify({ to: saved.owner_id, title: 'Contact assigned to you', body: nameOf(saved), url: `/contacts/?id=${saved.id}`, tag: 'crm' });
+                C.toast('Contact created', 'ok');
+                B.afterCreate('/contacts/', saved.id);
+            },
+            onCancel: () => B.leaveCreate('/contacts/'),
+        }).focus();
+    }
+
     async function showRecord(id) {
         page.mode = 'record';
         if (page.grid) { page.grid.destroy(); page.grid = null; }
