@@ -1745,17 +1745,32 @@
         }
 
         // ---------- Typing indicator ----------
+        // presence:global reaches every open WorkSuite page, so typing is sent at most
+        // every 1.5s (the receiver's hint lasts 3s, so it still reads as continuous).
+        let lastTypingSentAt = 0;
         function broadcastTyping() {
-            if (!callChannel || !activeContact) return;
+            if (!callChannel || (!activeContact && !activeGroup)) return;
+            if (Date.now() - lastTypingSentAt < 1500) return;
+            lastTypingSentAt = Date.now();
             callChannel.send({
                 type: 'broadcast', event: 'typing',
-                payload: { from: currentUser.id, to: activeContact.id }
+                // A group sends only its id; members resolve the name from their own contact list.
+                payload: activeGroup ? { from: currentUser.id, conv: activeGroup.id } : { from: currentUser.id, to: activeContact.id }
             });
         }
         function onRemoteTyping(payload) {
-            if (payload.to !== currentUser.id) return;
-            if (!activeContact || activeContact.id !== payload.from) return;
+            if (!payload || payload.from === currentUser.id) return;
             const hint = document.getElementById('typing-hint');
+            const label = hint.querySelector('span');
+            if (payload.conv) {
+                if (!activeGroup || activeGroup.id !== payload.conv) return;
+                const who = allContacts.find(c => c.id === payload.from);
+                if (label) label.textContent = `${(who && (who.full_name || who.email) || 'Someone').split(' ')[0]} is typing`;
+            } else {
+                if (payload.to !== currentUser.id) return;
+                if (activeGroup || !activeContact || activeContact.id !== payload.from) return;
+                if (label) label.textContent = 'typing';
+            }
             hint.classList.remove('hidden');
             hint.classList.add('flex');
             document.getElementById('chat-status').classList.add('hidden');
@@ -2411,7 +2426,7 @@
         // Typing indicator on message input
         document.getElementById('msg-input').addEventListener('input', () => {
             updateMentionMenu();
-            if (!activeContact) return;
+            if (!activeContact && !activeGroup) return;
             clearTimeout(typingTimer);
             broadcastTyping();
             typingTimer = setTimeout(() => {}, 1500);
