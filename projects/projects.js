@@ -9,12 +9,14 @@
    ============================================================================ */
 (async function () {
     'use strict';
-    const C = window.WSCrm, L = C.L, esc = C.esc;
+    const C = window.WSCrm, L = C.L, esc = C.esc, B = window.WSB24;
     const view = document.getElementById('view');
-    const ctx = await C.boot({ active: 'projects', crumb: 'Projects' });
+    const ctx = await C.boot({ active: 'projects', crumb: 'Projects', layout: 'b24' });
     const sb = ctx.sb, me = ctx.user;
 
-    const SELECT = 'id, company, name, description, owner_id, manager_id, status, priority, start_date, due_date, completed_at, contact_id, deal_id, board_id, tags, archived_at, created_by, created_at, updated_at';
+    const BASE = 'id, company, name, description, owner_id, manager_id, status, priority, start_date, due_date, completed_at, contact_id, deal_id, board_id, tags, archived_at, created_by, created_at, updated_at';
+    const cols = await B.columns('projects', BASE + ', privacy, number, avatar_color', BASE);
+    const SELECT = cols.select;
     const TASK_SELECT = 'id, title, status, priority, assignee_id, project_id, board_id, board_column_id, position, due_date, due_time, completed_at, archived_at, created_by, created_at';
     const STATUS_OPTS = Object.entries(L.PROJECT_STATUS).map(([k, v]) => ({ value: k, label: v.label }));
     const PRIORITY_OPTS = Object.entries(L.PRIORITY).map(([k, v]) => ({ value: k, label: v.label }));
@@ -26,6 +28,7 @@
         if (unsubscribe) { unsubscribe(); unsubscribe = null; }
         const id = C.param('id');
         if (id) return showRecord(id);
+        if (page.mode === 'list') return refreshList(true);
         return showList();
     }
     window.addEventListener('popstate', route);
@@ -67,6 +70,7 @@
             { name: 'owner_id', label: 'Owner', type: 'people', none: null },
             { name: 'manager_id', label: 'Project manager', type: 'people', none: 'Not assigned' },
             { name: 'status', label: 'Status', type: 'select', options: STATUS_OPTS, required: true },
+            ...(cols.full ? [{ name: 'privacy', label: 'Privacy', type: 'select', required: true, options: [{ value: 'public', label: 'Open: anyone in the company can join' }, { value: 'private', label: 'Private: visible, people ask to join' }, { value: 'secret', label: 'Secret: only members see it' }] }] : []),
             { name: 'priority', label: 'Priority', type: 'select', options: PRIORITY_OPTS, required: true },
             { name: 'start_date', label: 'Start date', type: 'date' },
             { name: 'due_date', label: 'Due date', type: 'date', validate: (v, all) => v && all.start_date && L.dayNumber(v) < L.dayNumber(all.start_date) ? 'Due date is before the start date' : '' },
@@ -87,13 +91,14 @@
         const isNew = !project;
         return C.formModal({
             title: isNew ? 'New project' : 'Edit project', size: 'wide', fields: projectFields(),
-            values: isNew ? { status: 'planning', priority: 'normal', owner_id: me.id, manager_id: me.id, members: [] } : { ...project, members: currentMemberIds || [] },
+            values: isNew ? { status: 'planning', priority: 'normal', owner_id: me.id, manager_id: me.id, members: [], privacy: 'public' } : { ...project, members: currentMemberIds || [] },
             submitLabel: isNew ? 'Create project' : 'Save changes',
             onSubmit: async v => {
                 const row = {
                     name: v.name.trim(), description: v.description || null, owner_id: v.owner_id || me.id, manager_id: v.manager_id || null,
                     status: v.status, priority: v.priority, start_date: v.start_date || null, due_date: v.due_date || null,
                     contact_id: v.contact_id || null, deal_id: v.deal_id || null, tags: v.tags || [],
+                    ...(cols.full ? { privacy: v.privacy || 'public' } : {}),
                     completed_at: v.status === 'completed' ? (project && project.completed_at) || L.todayIST() : null,
                 };
                 let saved;
@@ -132,156 +137,239 @@
     }
     async function deleteProject(p) {
         if (!await C.confirm({ title: 'Delete this project permanently?', message: 'Its board is removed and its tasks lose the project link (they are kept). Archiving is usually the better choice.', okText: 'Delete permanently', danger: true })) return;
-        try { await C.q(sb.from('projects').delete().eq('id', p.id)); C.toast('Project deleted', 'ok'); go('/projects/'); }
+        try { await C.q(sb.from('projects').delete().eq('id', p.id)); C.toast('Project deleted', 'ok'); if (WSShell.inSlider) { WSShell.sliderMessage('deleted', { id: p.id }); WSShell.closeSlider(); } else go('/projects/'); }
         catch (e) { C.toast(e.message, 'bad'); }
     }
     function statusMenuItems(p, after) {
         return STATUS_OPTS.filter(o => o.value !== p.status).map(o => ({ label: `Mark ${o.label.toLowerCase()}`, icon: 'check', onClick: () => changeStatus(p, o.value, after) }));
     }
 
-    /* --------------------------------------------------------------- list */
-    let listState = { seg: 'active', q: '', person: '', priority: '', mine: false, mode: 'cards', rows: [], members: [], tasks: [] };
-    try { listState.mode = localStorage.getItem('ws-projects-mode') === 'table' ? 'table' : 'cards'; } catch (e) { /* private mode */ }
-
-    async function fetchProjects() {
-        let b = sb.from('projects').select(SELECT).order('updated_at', { ascending: false }).limit(500);
-        if (listState.seg === 'archived') b = b.not('archived_at', 'is', null);
-        else {
-            b = b.is('archived_at', null);
-            if (listState.seg !== 'all') b = b.eq('status', listState.seg);
-        }
-        if (listState.priority) b = b.eq('priority', listState.priority);
-        const { data } = await C.q(b);
-        const rows = data || [];
+    /* ----------------------------------------------- list (workspace layout) */
+    const page = { mode: null, grid: null, filter: null, view: 'list', members: [], tasks: [], myIds: [], requests: new Set(), reloadView: null };
+    const PRIVACY = { public: { label: 'Open', color: 'ok', hint: 'Anyone in the company can see it and join' }, private: { label: 'Private', color: 'warn', hint: 'Everyone sees it; people ask to join' }, secret: { label: 'Secret', color: 'mute', hint: 'Only members know it exists' } };
+    const openProject = id => B.openRecord(`/projects/?id=${id}`, () => refreshList(true));
+    const PCOLORS = ['#39a8ef', '#ffa900', '#7bd500', '#9b7cf5', '#f76fa6', '#2fc6f6', '#ff5752', '#47e4c2'];
+    function projColor(p) { if (p.avatar_color) return p.avatar_color; let n = 0; for (const ch of String(p.id)) n = (n * 31 + ch.charCodeAt(0)) >>> 0; return PCOLORS[n % PCOLORS.length]; }
+    function projAvatar(p, cls) { return `<span class="b24-proj-av${cls ? ' ' + cls : ''}" style="background:${projColor(p)}">${esc(L.initials(p.name))}</span>`; }
+    function privacyBadge(p) { const x = PRIVACY[p.privacy || 'public']; return x ? `<span title="${esc(x.hint)}">${C.badge(x.color, x.label)}</span>` : ''; }
+    function myRole(p) {
+        if (p.owner_id === me.id) return 'Owner';
+        if (p.manager_id === me.id) return 'Project manager';
+        const m = page.members.find(x => x.project_id === p.id && x.user_id === me.id);
+        return m ? ({ manager: 'Manager', moderator: 'Moderator', owner: 'Owner' }[m.role] || 'Member') : '';
+    }
+    function memberIdsOf(pid) { return page.members.filter(m => m.project_id === pid).map(m => m.user_id); }
+    function progressOfP(pid) { return L.projectProgress(page.tasks.filter(t => t.project_id === pid)); }
+    function joinHtml(p) {
+        if (!cols.full || myRole(p) || p.archived_at) return '';
+        if ((p.privacy || 'public') === 'public') return `<button type="button" class="ws-btn sm" data-join="${esc(p.id)}">Join</button>`;
+        if (p.privacy === 'private') return page.requests.has(p.id) ? '<span class="muted" style="font-size:12.5px">Request sent</span>' : `<button type="button" class="ws-btn sm" data-ask="${esc(p.id)}">Request to join</button>`;
+        return '';
+    }
+    async function loadMine() {
+        const [m, r] = await Promise.all([
+            sb.from('project_members').select('project_id').eq('user_id', me.id).limit(2000),
+            cols.full ? sb.from('project_join_requests').select('project_id').eq('user_id', me.id).eq('status', 'pending') : Promise.resolve({ data: [] }),
+        ]);
+        page.myIds = (m.data || []).map(x => x.project_id);
+        page.requests = new Set((r.data || []).map(x => x.project_id));
+    }
+    const mineOr = () => [`owner_id.eq.${me.id}`, `manager_id.eq.${me.id}`, page.myIds.length ? `id.in.(${page.myIds.join(',')})` : null].filter(Boolean).join(',');
+    function stateApply(b, v) {
+        if (v === 'active') return b.not('status', 'in', '(completed,cancelled)');
+        if (v === 'completed') return b.eq('status', 'completed');
+        return b;
+    }
+    function filterFields() {
+        return [
+            { key: 'state', title: 'State', type: 'select', apply: stateApply, options: [{ value: 'active', label: 'In progress' }, { value: 'completed', label: 'Completed' }, { value: 'archived', label: 'Archived' }] },
+            { key: 'mine', title: 'My projects', type: 'check', checkLabel: 'Only projects I am in', apply: b => b.or(mineOr()) },
+            ...(cols.full ? [
+                { key: 'privacy', title: 'Privacy', type: 'select', options: Object.entries(PRIVACY).map(([value, x]) => ({ value, label: x.label })) },
+                { key: 'joinable', title: 'Open to join', type: 'check', checkLabel: 'Projects I can join', default: false, apply: b => { b = b.in('privacy', ['public', 'private']); return page.myIds.length ? b.not('id', 'in', `(${page.myIds.join(',')})`).neq('owner_id', me.id) : b.neq('owner_id', me.id); } },
+            ] : []),
+            { key: 'status', title: 'Status', type: 'select', options: STATUS_OPTS, default: false },
+            { key: 'manager', title: 'Project manager', type: 'user', column: 'manager_id', options: B.peopleOptions() },
+            { key: 'owner', title: 'Owner', type: 'user', column: 'owner_id', options: B.peopleOptions(), none: false, default: false },
+            { key: 'priority', title: 'Priority', type: 'select', options: PRIORITY_OPTS, default: false },
+            { key: 'due', title: 'Deadline', type: 'date', column: 'due_date' },
+            { key: 'tag', title: 'Tag', type: 'text', default: false, apply: (b, v) => b.contains('tags', [String(v).trim()]) },
+        ];
+    }
+    const PRESETS = [
+        { key: 'mine', title: 'My projects', values: { mine: true, state: 'active' } },
+        { key: 'active', title: 'Projects in progress', values: { state: 'active' } },
+        ...(cols.full ? [{ key: 'join', title: 'Open to join', values: { joinable: true, state: 'active' } }] : []),
+        { key: 'completed', title: 'Completed projects', values: { state: 'completed' } },
+        { key: 'archived', title: 'Archived projects', values: { state: 'archived' } },
+        { key: 'all', title: 'All projects', values: {} },
+    ];
+    function scoped(b) {
+        const v = page.filter.get().values;
+        b = v.state === 'archived' ? b.not('archived_at', 'is', null) : b.is('archived_at', null);
+        return page.filter.apply(b, { searchColumns: ['name', 'description'] });
+    }
+    async function withExtras(rows) {
         const ids = rows.map(r => r.id);
-        const [members, tasks] = await Promise.all([membersFor(ids), progressTasksFor(ids)]);
-        listState.members = members; listState.tasks = tasks;
+        const [mem, tsk] = await Promise.all([membersFor(ids), progressTasksFor(ids)]);
+        page.members = mem; page.tasks = tsk;
         return rows;
     }
-    function memberIds(projectId) { return listState.members.filter(m => m.project_id === projectId).map(m => m.user_id); }
-    function progressOf(projectId) { return L.projectProgress(listState.tasks.filter(t => t.project_id === projectId)); }
-    function filterRows(rows) {
-        const q = listState.q.trim().toLowerCase();
-        return rows.filter(r => {
-            const mids = memberIds(r.id);
-            if (listState.mine && !(r.owner_id === me.id || r.manager_id === me.id || mids.includes(me.id))) return false;
-            if (listState.person && !(r.owner_id === listState.person || r.manager_id === listState.person)) return false;
-            if (!q) return true;
-            return [r.name, r.description, (r.tags || []).join(' '), C.personName(r.manager_id), C.personName(r.owner_id)].some(v => v && String(v).toLowerCase().includes(q));
-        });
-    }
+
     async function showList() {
-        const myRoute = ++routeSeq;
-        // Deep links: ?status=active|planning|on_hold|completed|all|archived selects the segment.
-        { const st = C.param('status'); if (st && ['active', 'planning', 'on_hold', 'completed', 'all', 'archived'].includes(st)) { listState.seg = st; C.setParam('status', null, true); } }
+        page.mode = 'list';
         WSShell.setCrumb('Projects');
         document.title = 'Projects · WorkSuite';
-        view.innerHTML = `
-            <div class="ws-page-head">
-                <div><p class="ws-eyebrow">Collaboration</p><h1>Projects</h1><p>Plan work, assign your team and track progress from the tasks that get done.</p></div>
-                <div class="actions"><button type="button" class="ws-btn primary" id="new-btn">${C.icon('plus')}<span>New project</span></button></div>
+        view.innerHTML = B.titleBar({ title: 'Projects', createLabel: 'Create' }) + `
+            <div class="b24-toolbar">
+                <div class="b24-views" role="tablist" aria-label="View"><button type="button" role="tab" data-view="list">List</button><button type="button" role="tab" data-view="tiles">Tiles</button></div>
+                <div class="b24-counters" id="counters"></div>
             </div>
-            <div class="crm-toolbar">
-                <div class="crm-seg" id="seg" role="tablist">
-                    ${[['active', 'Active'], ['planning', 'Planning'], ['on_hold', 'On hold'], ['completed', 'Completed'], ['all', 'All'], ['archived', 'Archived']].map(([k, l]) => `<button type="button" role="tab" data-seg="${k}" class="${listState.seg === k ? 'on' : ''}" aria-selected="${listState.seg === k}">${l}</button>`).join('')}
-                </div>
-                <div class="crm-search grow">${C.icon('search', 'sm')}<input type="search" id="q" placeholder="Search projects…" aria-label="Search projects"></div>
-                <select id="f-person" aria-label="Owner or project manager"><option value="">Anyone</option>${C.peopleOptions('', { none: null })}</select>
-                <select id="f-priority" aria-label="Priority"><option value="">Any priority</option>${PRIORITY_OPTS.map(o => `<option value="${o.value}">${esc(o.label)}</option>`).join('')}</select>
-                <label class="crm-check" style="min-height:38px"><input type="checkbox" id="f-mine"> Mine</label>
-                <span class="crm-count" id="count"></span>
-                <div class="crm-seg" id="mode"><button type="button" data-mode="cards" class="${listState.mode === 'cards' ? 'on' : ''}" title="Cards">${C.icon('board', 'sm')}</button><button type="button" data-mode="table" class="${listState.mode === 'table' ? 'on' : ''}" title="Table">${C.icon('tasks', 'sm')}</button></div>
-            </div>
-            <div id="list"></div>`;
-        const listEl = view.querySelector('#list');
-        C.skeletonRows(listEl, 6);
-        view.querySelector('#q').value = listState.q;
-        view.querySelector('#f-person').value = listState.person;
-        view.querySelector('#f-priority').value = listState.priority;
-        view.querySelector('#f-mine').checked = listState.mine;
-        on('#new-btn', () => openProjectEditor(null, [], p => go(`/projects/?id=${p.id}`)));
-
-        let tbl = null;
-        function rowMenu(btn, r) {
-            const after = reload;
-            C.menu(btn, [
-                { label: 'Open', icon: 'arrow', onClick: () => go(`/projects/?id=${r.id}`) },
-                { label: 'Edit', icon: 'edit', onClick: () => openProjectEditor(r, memberIds(r.id), after) },
-                ...(r.archived_at ? [] : statusMenuItems(r, after)),
-                'sep',
-                r.archived_at ? { label: 'Restore', icon: 'refresh', onClick: () => setArchived(r, false, after) } : { label: 'Archive', icon: 'trash', danger: true, onClick: () => setArchived(r, true, after) },
-            ]);
-        }
-        function cardHtml(r) {
-            const prog = progressOf(r.id);
-            return `<a class="ws-card hover emp-card" href="/projects/?id=${esc(r.id)}" data-open="${esc(r.id)}" style="flex-direction:column;align-items:stretch;gap:10px">
-                <div style="display:flex;align-items:flex-start;gap:8px">
-                    <div style="flex:1;min-width:0"><b style="font-size:15px;font-weight:600;display:block;overflow-wrap:anywhere">${esc(r.name)}</b>
-                    <span class="muted" style="font-size:12.5px;display:block;margin-top:2px">${esc(r.description ? r.description.replace(/\s+/g, ' ').slice(0, 90) : '')}</span></div>
-                    <button type="button" class="ws-btn sm icon" data-menu="${esc(r.id)}" aria-label="Actions">${C.icon('more')}</button>
-                </div>
-                <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">${C.statusBadge(L.PROJECT_STATUS, r.status)}${C.priorityBadge(r.priority)}${dueChip(r)}</div>
-                ${progressHtml(prog, true)}
-                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px">
-                    <span class="muted">PM:</span>${C.personHtml(r.manager_id, { link: false, none: 'Not assigned' })}<span class="spacer" style="flex:1"></span>${C.avatarsHtml(memberIds(r.id), 4)}
-                </div>
-            </a>`;
-        }
-        function paint() {
-            const rows = filterRows(listState.rows);
-            view.querySelector('#count').textContent = `${rows.length} project${rows.length === 1 ? '' : 's'}`;
-            view.querySelectorAll('#seg [data-seg]').forEach(b => { b.classList.toggle('on', b.dataset.seg === listState.seg); b.setAttribute('aria-selected', b.dataset.seg === listState.seg); });
-            view.querySelectorAll('#mode [data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === listState.mode));
-            if (!rows.length) {
-                tbl = null;
-                C.empty(listEl, listState.q || listState.person || listState.priority || listState.mine ? 'No projects match' : listState.seg === 'archived' ? 'No archived projects' : 'No projects yet',
-                    listState.q ? 'Try a different search or clear the filters.' : 'Create a project to plan work and track progress.',
-                    listState.q || listState.seg === 'archived' ? '' : `<button type="button" class="ws-btn primary" onclick="document.getElementById('new-btn').click()">${C.icon('plus')}<span>New project</span></button>`);
-                return;
-            }
-            if (listState.mode === 'cards') {
-                tbl = null;
-                listEl.innerHTML = `<div class="emp-grid" style="grid-template-columns:repeat(auto-fill,minmax(290px,1fr))">${rows.map(cardHtml).join('')}</div>`;
-                return;
-            }
-            if (!listEl.querySelector('.crm-table-wrap')) { tbl = null; listEl.innerHTML = '<div class="ws-card flush"><div id="table"></div></div>'; }
-            const tableEl = listEl.querySelector('#table');
-            const columns = [
-                { key: 'name', label: 'Project', lead: true, render: r => `<span class="primary-text">${esc(r.name)}</span><span class="sub">${esc([C.personName(r.manager_id, 'No PM'), (r.tags || []).join(', ')].filter(Boolean).join(' · '))}</span>` },
-                { key: 'status', label: 'Status', render: r => C.statusBadge(L.PROJECT_STATUS, r.status) },
-                { key: 'priority', label: 'Priority', value: r => L.PRIORITY[r.priority] ? L.PRIORITY[r.priority].rank : 0, render: r => C.priorityBadge(r.priority) },
-                { key: 'manager_id', label: 'Project manager', value: r => C.personName(r.manager_id), render: r => C.personHtml(r.manager_id, { link: false, none: 'Not assigned' }) },
-                { key: 'members', label: 'Members', sort: false, hideMobile: true, render: r => C.avatarsHtml(memberIds(r.id), 5) || '<span class="muted">—</span>' },
-                { key: 'progress', label: 'Progress', value: r => progressOf(r.id).pct, render: r => { const p = progressOf(r.id); return `<div style="min-width:120px">${progressHtml(p, false)}<span class="muted" style="font-size:12px">${p.done}/${p.total} · ${p.pct}%</span></div>`; } },
-                { key: 'due_date', label: 'Due', render: r => dueChip(r) },
-                { key: 'actions', label: '', sort: false, cls: 'actions', render: r => `<button type="button" class="ws-btn sm icon" data-menu="${esc(r.id)}" aria-label="Actions">${C.icon('more')}</button>` },
-            ];
-            if (!tbl) tbl = C.table(tableEl, { columns, rows, sort: { key: 'due_date', dir: 'asc' }, pageSize: 50, onRow: r => go(`/projects/?id=${r.id}`), empty: { title: 'No projects' } });
-            else tbl.update(rows);
-        }
-        async function reload() {
-            try { listState.rows = await fetchProjects(); paint(); }
-            catch (e) { C.errorState(listEl, e, reload); }
-        }
-        listEl.addEventListener('click', e => {
-            const b = e.target.closest('[data-menu]');
-            if (b) { e.preventDefault(); e.stopPropagation(); const r = listState.rows.find(x => x.id === b.dataset.menu); if (r) rowMenu(b, r); return; }
-            const a = e.target.closest('a[data-open]');
-            if (a) { e.preventDefault(); go(`/projects/?id=${a.dataset.open}`); }
+            <div id="body"></div>`;
+        await loadMine();
+        page.filter = WSFilter.mount(view.querySelector('[data-filter]'), { id: 'projects', fields: filterFields(), presets: PRESETS, defaultPreset: 'mine', me: me.id, onChange: () => refreshList() });
+        view.querySelector('[data-create]').addEventListener('click', () => openProjectEditor(null, [], p => { refreshList(); openProject(p.id); }));
+        view.querySelector('.b24-toolbar').addEventListener('click', e => {
+            const b = e.target.closest('[data-view]');
+            if (b) { try { localStorage.setItem('ws-projects-view', b.dataset.view); } catch (err) { /* private mode */ } return mountView(b.dataset.view); }
+            if (e.target.closest('[data-counter="requests"]')) openRequests();
         });
-        view.querySelector('#seg').addEventListener('click', e => { const b = e.target.closest('[data-seg]'); if (!b) return; listState.seg = b.dataset.seg; reload(); });
-        view.querySelector('#mode').addEventListener('click', e => { const b = e.target.closest('[data-mode]'); if (!b) return; listState.mode = b.dataset.mode; try { localStorage.setItem('ws-projects-mode', listState.mode); } catch (err) { /* ignore */ } paint(); });
-        view.querySelector('#q').addEventListener('input', C.debounce(() => { listState.q = view.querySelector('#q').value; paint(); }, 180));
-        view.querySelector('#f-person').addEventListener('change', e => { listState.person = e.target.value; paint(); });
-        view.querySelector('#f-priority').addEventListener('change', e => { listState.priority = e.target.value; reload(); });
-        view.querySelector('#f-mine').addEventListener('change', e => { listState.mine = e.target.checked; paint(); });
-        await reload();
-        if (C.param('new') === '1') { C.setParam('new', null, true); openProjectEditor(null, [], p => go(`/projects/?id=${p.id}`)); }
+        let v = 'list'; try { v = localStorage.getItem('ws-projects-view') || (localStorage.getItem('ws-projects-mode') === 'cards' ? 'tiles' : 'list'); } catch (e) { /* private mode */ }
+        if (['list', 'tiles'].includes(C.param('view'))) v = C.param('view');   // deep link: ?view=tiles
+        mountView(v === 'tiles' ? 'tiles' : 'list');
+        loadCounters();
+        if (C.param('new') === '1') { C.setParam('new', null, true); openProjectEditor(null, [], p => { refreshList(); openProject(p.id); }); }
     }
+    function mountView(kind) {
+        page.view = kind;
+        view.querySelectorAll('[data-view]').forEach(b => { b.classList.toggle('on', b.dataset.view === kind); b.setAttribute('aria-selected', String(b.dataset.view === kind)); });
+        if (page.grid) { page.grid.destroy(); page.grid = null; }
+        page.reloadView = null;
+        const body = view.querySelector('#body'); body.innerHTML = '';
+        if (kind === 'tiles') return mountTiles(body);
+        mountGrid(body);
+    }
+    async function refreshList(quiet) {
+        if (page.mode !== 'list') return;
+        await loadMine();
+        loadCounters();
+        if (page.grid) return quiet ? page.grid.refresh() : page.grid.reload();
+        if (page.reloadView) return page.reloadView();
+    }
+    async function loadCounters() {
+        const el = view.querySelector('#counters'); if (!el || !cols.full) return;
+        const r = await sb.from('project_join_requests').select('id, user_id').eq('status', 'pending').neq('user_id', me.id).limit(500);
+        const n = r.error ? 0 : (r.data || []).length;
+        el.innerHTML = n ? `<button type="button" class="b24-counter red" data-counter="requests"><span class="n">${n}</span>Requests to join</button>` : '';
+    }
+    async function openRequests() {
+        const r = await sb.from('project_join_requests').select('id, project_id, user_id, message, created_at').eq('status', 'pending').neq('user_id', me.id).order('created_at');
+        const list = r.data || [];
+        const pr = list.length ? await sb.from('projects').select('id, name').in('id', [...new Set(list.map(x => x.project_id))]) : { data: [] };
+        const pname = id => ((pr.data || []).find(p => p.id === id) || {}).name || 'Project';
+        const body = document.createElement('div');
+        body.innerHTML = list.length ? `<ul class="crm-list">${list.map(x => `<li>${C.avatarHtml(x.user_id)}<div class="main"><b>${esc(C.personName(x.user_id))} → ${esc(pname(x.project_id))}</b><span>${esc(x.message || 'No message')} · ${esc(L.fmtRelative(x.created_at))}</span></div><div class="right"><button type="button" class="ws-btn sm primary" data-ok="${esc(x.id)}">Accept</button> <button type="button" class="ws-btn sm" data-no="${esc(x.id)}">Decline</button></div></li>`).join('')}</ul>` : '<div class="ws-empty">No requests waiting.</div>';
+        const m = C.modal({ title: 'Requests to join', body, size: 'wide', actions: [{ label: 'Done', primary: true, close: true }], onClose: () => refreshList(true) });
+        body.addEventListener('click', async e => {
+            const b = e.target.closest('[data-ok], [data-no]'); if (!b) return;
+            const ok = !!b.dataset.ok, id = b.dataset.ok || b.dataset.no;
+            try { await C.q(sb.from('project_join_requests').update({ status: ok ? 'approved' : 'rejected' }).eq('id', id)); b.closest('li').remove(); C.toast(ok ? 'Request accepted' : 'Request declined', 'ok'); }
+            catch (err) { C.toast(err.message, 'bad'); }
+        });
+        return m;
+    }
+    async function joinProject(p) {
+        try { await C.q(sb.from('project_members').insert({ project_id: p.id, user_id: me.id, role: 'member', added_by: me.id })); C.toast(`You joined ${p.name}`, 'ok'); refreshList(true); }
+        catch (e) { C.toast(e.message, 'bad'); }
+    }
+    async function askToJoin(p) {
+        await C.formModal({ title: `Request to join ${p.name}`, fields: [{ name: 'message', label: 'Message to the project team (optional)', type: 'textarea', full: true }], submitLabel: 'Send request',
+            onSubmit: async v => { await C.q(sb.from('project_join_requests').insert({ project_id: p.id, user_id: me.id, message: v.message || null })); C.toast('Request sent', 'ok'); refreshList(true); } });
+    }
+    async function leaveProject(p) {
+        if (!await C.confirm({ title: `Leave ${p.name}?`, message: 'Your tasks in the project stay assigned to you.', okText: 'Leave' })) return;
+        try { await C.q(sb.from('project_members').delete().eq('project_id', p.id).eq('user_id', me.id)); C.toast('You left the project', 'ok'); refreshList(true); }
+        catch (e) { C.toast(e.message, 'bad'); }
+    }
+    function projectMenu(p) {
+        const role = myRole(p);
+        const items = [{ label: 'Open', icon: 'arrow', onClick: () => openProject(p.id) }];
+        if (cols.full && !role && !p.archived_at && (p.privacy || 'public') === 'public') items.push({ label: 'Join', icon: 'plus', onClick: () => joinProject(p) });
+        if (cols.full && !role && p.privacy === 'private' && !page.requests.has(p.id)) items.push({ label: 'Request to join', icon: 'mail', onClick: () => askToJoin(p) });
+        if (role === 'Member' || role === 'Moderator' || role === 'Manager') items.push({ label: 'Leave project', icon: 'logout', onClick: () => leaveProject(p) });
+        if (canEditProject(p, memberIdsOf(p.id))) {
+            items.push({ label: 'Edit', icon: 'edit', onClick: () => openProjectEditor(p, memberIdsOf(p.id), () => refreshList(true)) });
+            if (!p.archived_at) items.push(...statusMenuItems(p, () => refreshList(true)));
+            items.push('sep', p.archived_at ? { label: 'Restore', icon: 'refresh', onClick: () => setArchived(p, false, () => refreshList(true)) } : { label: 'Archive', icon: 'trash', onClick: () => setArchived(p, true, () => refreshList(true)) });
+        }
+        return items;
+    }
+    function mountGrid(body) {
+        const host = document.createElement('div'); body.appendChild(host);
+        page.grid = WSGrid.mount(host, {
+            id: 'projects', sort: { key: 'updated_at', dir: 'desc' },
+            columns: [
+                ...(cols.full ? [{ key: 'number', title: 'ID', width: 70, render: p => esc(p.number == null ? '' : p.number) }] : []),
+                { key: 'name', title: 'Project', width: 300, render: p => `<span class="b24-who">${projAvatar(p)}<span><a href="/projects/?id=${esc(p.id)}" data-open>${esc(p.name)}</a>${p.description ? `<span class="sub">${esc(p.description.replace(/\s+/g, ' ').slice(0, 80))}</span>` : ''}</span></span>` },
+                { key: 'updated_at', title: 'Activity date', width: 130, render: p => `<span class="muted">${esc(L.fmtRelative(p.updated_at))}</span>` },
+                { key: 'members', title: 'Members', width: 150, sortable: false, render: p => C.avatarsHtml([p.owner_id, p.manager_id].filter(Boolean).concat(memberIdsOf(p.id)).filter((x, i, a) => a.indexOf(x) === i), 5) },
+                { key: 'role', title: 'My role', width: 130, sortable: false, render: p => esc(myRole(p)) || joinHtml(p) },
+                ...(cols.full ? [{ key: 'privacy', title: 'Privacy', width: 110, render: privacyBadge }] : []),
+                { key: 'progress', title: 'Progress', width: 150, sortable: false, render: p => { const pr = progressOfP(p.id); return `<div style="min-width:110px">${progressHtml(pr, false)}<span class="muted" style="font-size:12px">${pr.done}/${pr.total} · ${pr.pct}%</span></div>`; } },
+                { key: 'status', title: 'Status', width: 120, render: p => C.statusBadge(L.PROJECT_STATUS, p.status) },
+                { key: 'due_date', title: 'Deadline', width: 150, render: p => dueChip(p) },
+                { key: 'manager_id', title: 'Project manager', width: 170, default: false, render: p => C.personHtml(p.manager_id, { link: false, none: 'Not assigned' }) },
+                { key: 'priority', title: 'Priority', width: 110, default: false, render: p => C.priorityBadge(p.priority) },
+                { key: 'created_at', title: 'Created', width: 120, default: false, render: p => esc(L.fmtDate(p.created_at, { short: true })) },
+                { key: 'tags', title: 'Tags', width: 160, default: false, sortable: false, render: p => C.tagsHtml(p.tags) },
+            ],
+            load: async ({ offset, limit, sort }) => {
+                let b = scoped(sb.from('projects').select(SELECT));
+                b = sort ? b.order(sort.key, { ascending: sort.dir === 'asc', nullsFirst: false }) : b.order('updated_at', { ascending: false });
+                return withExtras((await C.q(b.range(offset, offset + limit - 1))).data || []);
+            },
+            count: async () => (await C.q(scoped(sb.from('projects').select('id', { count: 'exact', head: true })))).count || 0,
+            onOpen: p => openProject(p.id),
+            rowMenu: projectMenu,
+            empty: { title: 'No projects here', sub: 'Change the filter, or create a project for your team.' },
+        });
+    }
+    function mountTiles(body) {
+        page.reloadView = async () => {
+            body.innerHTML = '<div class="b24-area pad"><div class="ws-empty">Loading…</div></div>';
+            try {
+                const rows = await withExtras((await C.q(scoped(sb.from('projects').select(SELECT)).order('updated_at', { ascending: false }).limit(200))).data || []);
+                if (!rows.length) { body.innerHTML = '<div class="b24-area pad"></div>'; C.empty(body.firstElementChild, 'No projects here', 'Change the filter, or create a project for your team.'); return; }
+                body.innerHTML = `<div class="b24-tiles">${rows.map(p => { const pr = progressOfP(p.id); return `<article class="b24-tile" data-id="${esc(p.id)}">
+                    <div class="top">${projAvatar(p, 'lg')}<div class="t"><a href="/projects/?id=${esc(p.id)}" data-open>${esc(p.name)}</a><span>${esc(myRole(p) || (cols.full ? PRIVACY[p.privacy || 'public'].label + ' project' : ''))}</span></div><button type="button" class="g-rowmenu" data-tile-menu="${esc(p.id)}" aria-label="Actions">☰</button></div>
+                    <div class="badges">${C.statusBadge(L.PROJECT_STATUS, p.status)}${cols.full ? privacyBadge(p) : ''}${dueChip(p)}</div>
+                    ${progressHtml(pr, true)}
+                    <div class="foot">${C.avatarsHtml([p.owner_id, p.manager_id].filter(Boolean).concat(memberIdsOf(p.id)).filter((x, i, a) => a.indexOf(x) === i), 5)}<span class="grow"></span>${joinHtml(p)}</div>
+                </article>`; }).join('')}</div>`;
+                body.querySelectorAll('[data-tile-menu]').forEach(b => b.addEventListener('click', () => { const p = rows.find(x => x.id === b.dataset.tileMenu); if (p) C.menu(b, projectMenu(p)); }));
+                page.tileRows = rows;
+            } catch (e) { C.errorState(body, e, page.reloadView); }
+        };
+        page.reloadView();
+    }
+    view.addEventListener('click', e => {
+        if (page.mode !== 'list') return;
+        const rows = (page.grid ? page.grid.rows() : page.tileRows) || [];
+        const j = e.target.closest('[data-join]'); if (j) { const p = rows.find(x => x.id === j.dataset.join); if (p) joinProject(p); return; }
+        const q = e.target.closest('[data-ask]'); if (q) { const p = rows.find(x => x.id === q.dataset.ask); if (p) askToJoin(p); return; }
+        const a = e.target.closest('a[data-open]');
+        if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return;
+        e.preventDefault();
+        const id = new URL(a.href, location.href).searchParams.get('id');
+        if (id) openProject(id);
+    });
 
     /* ------------------------------------------------------------- record */
     async function showRecord(id) {
         const myRoute = ++routeSeq;
+        page.mode = 'record';
+        if (page.grid) { page.grid.destroy(); page.grid = null; }
+        page.reloadView = null;
         if (unsubscribe) { unsubscribe(); unsubscribe = null; }
         C.loading(view, 'Loading project…');
         let p;
@@ -314,34 +402,28 @@
 
         const mids = () => members.map(m => m.user_id);
         const canEdit = () => canEditProject(p, mids());
-        const canManageMembers = () => ctx.isManager || p.owner_id === me.id || p.manager_id === me.id || p.created_by === me.id;
+        const canManageMembers = () => ctx.isManager || p.owner_id === me.id || p.manager_id === me.id || p.created_by === me.id || members.some(m => m.user_id === me.id && ['owner', 'manager', 'moderator'].includes(m.role));
         const prog = () => L.projectProgress(tasks);
 
         function headHtml() {
             const pr = prog();
+            const role = p.owner_id === me.id ? 'Owner' : p.manager_id === me.id ? 'Project manager' : (() => { const m = members.find(x => x.user_id === me.id); return m ? ({ manager: 'Manager', moderator: 'Moderator', owner: 'Owner' }[m.role] || 'Member') : ''; })();
             return `
-                <a class="crm-back" href="/projects/" data-nav>${C.icon('arrow')}All projects</a>
-                <div class="crm-record-head">
-                    <span class="ws-avatar xl" style="background:var(--ws-primary-soft);color:var(--ws-primary)">${C.icon('folder', 'lg')}</span>
-                    <div class="titles">
-                        <h1>${esc(p.name)}</h1>
-                        <div class="meta">
-                            ${C.statusBadge(L.PROJECT_STATUS, p.status)}${C.priorityBadge(p.priority)}${dueChip(p)}
-                            ${p.archived_at ? C.badge('mute', 'Archived') : ''}
-                            <span>PM: ${C.personHtml(p.manager_id, { none: 'Not assigned' })}</span>
-                            <span>Owner: ${C.personHtml(p.owner_id)}</span>
-                            ${p.contact_id ? C.entityChip('contact', p.contact_id, contactLabel) : ''}${p.deal_id ? C.entityChip('deal', p.deal_id, dealLabel) : ''}
-                        </div>
-                        <div style="margin-top:10px;max-width:420px" id="head-progress">${progressHtml(pr, true)}</div>
+                <div class="b24-card-head">
+                    <h1 class="b24-card-title">${projAvatar(p, 'lg')}<span class="t">${esc(p.name)}</span>${cols.full && p.number != null ? `<span class="num">#${esc(p.number)}</span>` : ''}</h1>
+                    <div class="sub">${C.statusBadge(L.PROJECT_STATUS, p.status)} ${cols.full ? privacyBadge(p) : ''} ${C.priorityBadge(p.priority)} ${dueChip(p)} ${p.archived_at ? C.badge('mute', 'Archived') : ''} ${role ? `· You: ${esc(role)}` : ''} ${p.contact_id ? C.entityChip('contact', p.contact_id, contactLabel) : ''}${p.deal_id ? C.entityChip('deal', p.deal_id, dealLabel) : ''}</div>
+                    <div class="acts">
+                        ${WSShell.inSlider ? '' : `<a class="b24-btn-card" href="/projects/" data-nav>${C.icon('arrow')}<span>All projects</span></a>`}
+                        ${!role && cols.full && !p.archived_at && (p.privacy || 'public') === 'public' ? '<button type="button" class="b24-btn-create" id="join-btn">Join</button>' : ''}
+                        ${!role && cols.full && !p.archived_at && p.privacy === 'private' ? '<button type="button" class="b24-btn-create" id="ask-btn">Request to join</button>' : ''}
+                        <button type="button" class="b24-btn-card" id="task-btn">${C.icon('tasks')}<span>New task</span></button>
+                        <button type="button" class="b24-btn-card" id="meet-btn">${C.icon('calendar')}<span>Schedule</span></button>
+                        ${canEdit() ? `<button type="button" class="b24-btn-card" id="edit-btn">${C.icon('edit')}<span>Edit</span></button>` : ''}
+                        ${canEdit() ? `<button type="button" class="b24-btn-card" id="status-btn">${C.icon('check')}<span>Status</span></button>` : ''}
+                        <button type="button" class="b24-btn-card round" id="more-btn" aria-label="More actions">${C.icon('more')}</button>
                     </div>
-                    <div class="actions">
-                        ${canEdit() ? `<button type="button" class="ws-btn" id="edit-btn">${C.icon('edit')}<span>Edit</span></button>` : ''}
-                        <button type="button" class="ws-btn" id="task-btn">${C.icon('tasks')}<span>New task</span></button>
-                        <button type="button" class="ws-btn" id="meet-btn">${C.icon('calendar')}<span>Schedule</span></button>
-                        ${canEdit() ? `<button type="button" class="ws-btn primary" id="status-btn">${C.icon('check')}<span>Status</span></button>` : ''}
-                        <button type="button" class="ws-btn icon" id="more-btn" aria-label="More actions">${C.icon('more')}</button>
-                    </div>
-                </div>`;
+                </div>
+                <div class="b24-area b24-proj-progress" id="head-progress">${progressHtml(pr, true)}</div>`;
         }
         view.innerHTML = headHtml() + `
             <div id="tabs"></div>
@@ -353,7 +435,8 @@
             <section class="crm-tabpanel" data-panel="activity" hidden><div class="ws-card"><div id="activity"></div></div></section>
             <section class="crm-tabpanel" data-panel="members" hidden><div id="members-panel"></div></section>`;
 
-        view.querySelector('[data-nav]').addEventListener('click', e => { e.preventDefault(); go('/projects/'); });
+        const navBtn = view.querySelector('[data-nav]');
+        if (navBtn) navBtn.addEventListener('click', e => { e.preventDefault(); history.pushState(null, '', '/projects/'); showList(); });
         const tabItems = [
             { key: 'overview', label: 'Overview' }, { key: 'tasks', label: 'Tasks', count: tasks.filter(t => !t.completed_at).length },
             { key: 'board', label: 'Board' }, { key: 'files', label: 'Files' }, { key: 'calendar', label: 'Calendar', count: events.filter(e => e.status !== 'cancelled').length },
@@ -548,6 +631,26 @@
         }
 
         /* ---- members ---- */
+        async function loadJoinRequests(el) {
+            const r = await sb.from('project_join_requests').select('id, user_id, message, created_at').eq('project_id', id).eq('status', 'pending').order('created_at');
+            const list = r.error ? [] : (r.data || []);
+            const box = document.createElement('div');
+            box.className = 'ws-card flush';
+            box.style.marginTop = '12px';
+            box.innerHTML = `<div class="ws-card-head"><h3>Requests to join</h3><span class="sub">${list.length}</span></div>` + (list.length
+                ? `<ul class="crm-list" style="padding:0 20px 12px">${list.map(x => `<li>${C.avatarHtml(x.user_id)}<div class="main"><b>${esc(C.personName(x.user_id))}</b><span>${esc(x.message || 'No message')} · ${esc(L.fmtRelative(x.created_at))}</span></div><div class="right"><button type="button" class="ws-btn sm primary" data-req-ok="${esc(x.id)}">Accept</button> <button type="button" class="ws-btn sm" data-req-no="${esc(x.id)}">Decline</button></div></li>`).join('')}</ul>`
+                : '<div class="ws-empty" style="padding:14px">No requests waiting.</div>');
+            el.appendChild(box);
+            box.addEventListener('click', async e => {
+                const b = e.target.closest('[data-req-ok], [data-req-no]'); if (!b) return;
+                const ok = !!b.dataset.reqOk;
+                try {
+                    await C.q(sb.from('project_join_requests').update({ status: ok ? 'approved' : 'rejected' }).eq('id', b.dataset.reqOk || b.dataset.reqNo));
+                    C.toast(ok ? 'Request accepted' : 'Request declined', 'ok');
+                    members = await membersFor([id]); tabs.setCount('members', members.length); renderMembersTab();
+                } catch (err) { C.toast(err.message, 'bad'); }
+            });
+        }
         function renderMembersTab() {
             const el = view.querySelector('#members-panel');
             const manage = canManageMembers();
@@ -557,11 +660,12 @@
                 <div class="crm-table-wrap"><table class="ws-table cards"><thead><tr><th>Person</th><th>Role</th><th>Added</th>${manage ? '<th></th>' : ''}</tr></thead><tbody>
                 ${[...(p.owner_id ? [{ user_id: p.owner_id, role: 'owner' }] : []), ...(p.manager_id && p.manager_id !== p.owner_id ? [{ user_id: p.manager_id, role: 'pm' }] : []), ...members.filter(m => m.user_id !== p.owner_id && m.user_id !== p.manager_id)].map(m => `<tr>
                     <td class="lead" data-label="Person"><a class="crm-person link" href="/employees/?id=${esc(m.user_id)}">${C.avatarHtml(m.user_id)}<span class="nm">${esc(C.personName(m.user_id))}</span></a></td>
-                    <td data-label="Role">${m.role === 'owner' ? C.badge('pending', 'Owner') : m.role === 'pm' ? C.badge('leave', 'Project manager') : manage ? `<select data-role="${esc(m.user_id)}" aria-label="Role"><option value="member"${m.role === 'member' ? ' selected' : ''}>Member</option><option value="manager"${m.role === 'manager' ? ' selected' : ''}>Manager</option></select>` : C.badge(m.role === 'manager' ? 'leave' : 'mute', m.role === 'manager' ? 'Manager' : 'Member')}</td>
+                    <td data-label="Role">${m.role === 'owner' ? C.badge('pending', 'Owner') : m.role === 'pm' ? C.badge('leave', 'Project manager') : manage ? `<select data-role="${esc(m.user_id)}" aria-label="Role"><option value="member"${m.role === 'member' ? ' selected' : ''}>Member</option><option value="moderator"${m.role === 'moderator' ? ' selected' : ''}>Moderator</option><option value="manager"${m.role === 'manager' ? ' selected' : ''}>Manager</option></select>` : C.badge(m.role === 'manager' || m.role === 'moderator' ? 'leave' : 'mute', m.role === 'manager' ? 'Manager' : m.role === 'moderator' ? 'Moderator' : 'Member')}</td>
                     <td data-label="Added"><span class="muted">${m.created_at ? esc(L.fmtDate(m.created_at)) + ' by ' + esc(C.personName(m.added_by)) : '—'}</span></td>
                     ${manage ? `<td class="actions">${m.role === 'owner' || m.role === 'pm' ? '' : `<button type="button" class="ws-btn sm icon" data-remove="${esc(m.user_id)}" aria-label="Remove">${C.icon('x')}</button>`}</td>` : ''}
                 </tr>`).join('') || `<tr><td colspan="4" class="muted" style="text-align:center;padding:24px">No members yet.</td></tr>`}
                 </tbody></table></div></div>`;
+            if (manage && cols.full) loadJoinRequests(el);
             if (!manage) return;
             el.querySelector('#add-member').addEventListener('change', async e => {
                 const uid = e.target.value; if (!uid) return;
@@ -616,6 +720,8 @@
         on('#edit-btn', () => openProjectEditor(p, mids(), () => showRecord(id)));
         on('#task-btn', newTask);
         on('#meet-btn', newMeeting);
+        on('#join-btn', async () => { await joinProject(p); showRecord(id); });
+        on('#ask-btn', () => askToJoin(p));
         on('#status-btn', e => C.menu(e.currentTarget, statusMenuItems(p, () => showRecord(id))));
         on('#more-btn', e => {
             const items = [
