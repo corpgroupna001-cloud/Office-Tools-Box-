@@ -532,10 +532,19 @@
                 <nav class="dv-crumbs" aria-label="Where you are" data-crumbs></nav>
                 <span class="grow"></span>
                 <button type="button" class="ws-btn sm" data-empty-trash hidden>${C.icon('trash')}<span>Empty the Recycle bin</span></button>
+                <button type="button" class="ws-btn sm" data-open-trash>${C.icon('trash')}<span>Recycle bin</span></button>
                 <select class="dv-sort" data-sort aria-label="Sort by">${CARD_SORTS.map(([v, l]) => `<option value="${v}"${v === cs.value ? ' selected' : ''}>${l}</option>`).join('')}</select>
                 <div class="b24-views" role="tablist" aria-label="View"><button type="button" role="tab" data-view="list">List</button><button type="button" role="tab" data-view="grid">Grid</button><button type="button" role="tab" data-view="tiles">Tiles</button></div>
             </div>`
             + (cols.full ? '' : `<div class="crm-notice" style="margin:0 0 12px">${C.icon('lock')}<div><b>Private and shared documents, public links and WorkSuite documents need the latest database update.</b><br>An administrator needs to run <code>supabase-b24-migration.sql</code> in Supabase → SQL Editor. Files and folders work as before.</div></div>`)
+            // The row of big "create" tiles above the drive.
+            + `<div class="dv-create" data-create-strip role="group" aria-label="Create">
+                ${cols.full ? [['document', 'doc', 'DOC', 'Document'], ['spreadsheet', 'xls', 'XLS', 'Spreadsheet'], ['presentation', 'ppt', 'PPT', 'Presentation']].map(([k, cls, g, label]) => `<button type="button" class="dv-tile" data-new-kind="${k}"><span class="dv-ico big k-${cls}">${g}</span><span class="plus" aria-hidden="true">+</span><span class="l">${label}</span></button>`).join('') : ''}
+                <button type="button" class="dv-tile" data-new-board><span class="dv-ico big k-board">BOARD</span><span class="plus" aria-hidden="true">+</span><span class="l">Board</span></button>
+                <span class="dv-create-sep" aria-hidden="true"></span>
+                <button type="button" class="dv-tile open" data-new-upload><span class="dv-ico big k-file">${C.icon('upload')}</span><span class="l">Upload from computer</span></button>
+                <button type="button" class="dv-tile open" data-new-folder><span class="dv-ico big k-folder"></span><span class="l">New folder</span></button>
+            </div>`
             + '<div id="body"></div>';
         dv.filter = WSFilter.mount(view.querySelector('[data-filter]'), {
             id: 'documents', me: me.id, defaultPreset: 'drive', presets, placeholder: 'Filter + search',
@@ -566,6 +575,13 @@
             go(a.getAttribute('href'));
         });
         view.querySelector('[data-empty-trash]').addEventListener('click', emptyTrash);
+        view.querySelector('[data-open-trash]').addEventListener('click', () => dv.filter.set({ trash: true }, 'trash'));
+        view.querySelector('[data-create-strip]').addEventListener('click', e => {
+            const k = e.target.closest('[data-new-kind]'); if (k) return createNative(k.dataset.newKind);
+            if (e.target.closest('[data-new-board]')) { location.href = '/boards/?new=1'; return; }
+            if (e.target.closest('[data-new-upload]')) return fileInput.click();
+            if (e.target.closest('[data-new-folder]')) return newFolder(dv.folderId, refreshDrive);
+        });
         paintCrumbs();
         mountBody();
         const create = C.param('create');
@@ -587,6 +603,8 @@
             el.innerHTML = `<a href="/documents/" data-crumb="">Documents</a>${path.map(f => `<span class="sep">›</span><a href="/documents/?folder=${esc(f.id)}" data-crumb="${esc(f.id)}">${esc(f.name)}</a>`).join('')}`;
         }
         view.querySelector('[data-empty-trash]').hidden = !inTrash();
+        view.querySelector('[data-open-trash]').hidden = inTrash();
+        view.querySelector('[data-create-strip]').hidden = !folderMode();
     }
     async function refreshDrive() {
         if (!dv.inDrive) return;
@@ -612,6 +630,27 @@
         if (dv.mode === 'list') mountList(host); else mountCards(host, dv.mode === 'tiles');
     }
 
+    // Who each item on screen is shared with (Shared column).
+    const shareMap = new Map();
+    async function loadShares(docs) {
+        const ids = docs.filter(d => vis(d) === 'shared').map(d => d.id);
+        if (!cols.full || !ids.length) return;
+        const r = await sb.from('document_shares').select('document_id, user_id').in('document_id', ids);
+        ids.forEach(id => shareMap.set(id, []));
+        (r.data || []).forEach(s => shareMap.get(s.document_id).push(s.user_id));
+    }
+    function sharedCell(d) {
+        if (d._folder) return '';
+        if (vis(d) === 'private') return `<span class="muted" title="Only the owner">${C.icon('lock', 'sm')} Only ${mine(d) ? 'me' : 'the owner'}</span>`;
+        if (vis(d) === 'company') return `<span class="muted" title="Everyone in the company">${C.icon('users', 'sm')} Company</span>`;
+        const ids = shareMap.get(d.id) || [];
+        return ids.length ? `<span title="${esc(ids.map(id => C.personName(id)).join(', '))}">${C.avatarsHtml(ids, 3)}</span>` : '<span class="muted">No one yet</span>';
+    }
+    function pubCell(d) {
+        if (d._folder) return '';
+        const on = !!d.published_token, can = canEdit(d) && !d.archived_at;
+        return `<button type="button" class="dv-switch${on ? ' on' : ''}" role="switch" aria-checked="${on}" data-pub="${esc(d.id)}"${can ? '' : ' disabled'} title="${can ? (on ? 'Turn the public link off' : 'Publish with a public link') : 'Only people who can edit it can publish it'}"><i></i></button><span class="dv-switch-l">${on ? 'Published' : 'Not published'}</span>`;
+    }
     function nameCell(d) {
         if (d._folder) return `<span class="b24-who">${ico(d)}<span><a href="/documents/?folder=${esc(d.id)}" data-folder="${esc(d.id)}">${esc(d.name)}</a><span class="sub">Folder</span></span></span>`;
         return `<span class="b24-who">${ico(d)}<span><a href="/documents/?id=${esc(d.id)}" data-doc="${esc(d.id)}">${esc(d.name)}</a><span class="sub">${esc(typeText(d))}${d.description ? ' · ' + esc(d.description) : ''}</span></span></span>`;
@@ -697,7 +736,10 @@
                 { key: 'mime_type', title: 'Type', width: 150, default: false, render: d => esc(typeText(d)) },
                 { key: 'links', title: 'Attached to', width: 220, default: false, sortable: false, render: d => ((d.links || []).length ? chips(d.links, 2) : '') },
                 { key: 'created_at', title: 'Created', width: 130, default: false, render: d => esc(L.fmtDate(d.created_at, { short: true })) },
-                ...(cols.full ? [{ key: 'published_at', title: 'Public link', width: 110, default: false, render: d => (d.published_token ? C.badge('warn', 'On') : '') }] : []),
+                ...(cols.full ? [
+                    { key: 'shared', title: 'Shared', width: 130, sortable: false, render: sharedCell },
+                    { key: 'published_at', title: 'Published', width: 150, render: pubCell },
+                ] : []),
             ],
             load: async ({ offset, limit, sort }) => {
                 // Folders come first (page 1 onwards), then the documents of this folder.
@@ -710,7 +752,7 @@
                     let b = scoped(sb.from('documents').select(cols.select));
                     b = sort ? b.order(sort.key, { ascending: sort.dir === 'asc' }) : b.order('updated_at', { ascending: false });
                     docs = (await C.q(b.range(from, from + need - 1))).data || [];
-                    await labelsFor(docs.flatMap(d => (d.links || []).slice(0, 2)));
+                    await Promise.all([labelsFor(docs.flatMap(d => (d.links || []).slice(0, 2))), loadShares(docs)]);
                 }
                 return fr.concat(docs);
             },
@@ -720,7 +762,19 @@
             bulk: bulkActions(),
             empty: emptyState(),
         });
-        host.addEventListener('click', e => {
+        host.addEventListener('click', async e => {
+            const sw = e.target.closest('[data-pub]');
+            if (sw) {
+                e.preventDefault();
+                const d = dv.grid && dv.grid.rows().find(r => r.id === sw.dataset.pub); if (!d || sw.disabled) return;
+                sw.disabled = true;
+                try {
+                    if (d.published_token) { await unpublish(d); C.toast('Public link turned off', 'ok'); }
+                    else { await publish(d); publishDoc(d, refreshDrive); }
+                    if (dv.grid) dv.grid.refresh();
+                } catch (err) { C.toast(err.message, 'bad'); sw.disabled = false; }
+                return;
+            }
             const a = e.target.closest('a[data-folder], a[data-doc]'); if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return;
             e.preventDefault();
             if (a.dataset.folder) return go(`/documents/?folder=${a.dataset.folder}`);

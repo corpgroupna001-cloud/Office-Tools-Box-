@@ -34,6 +34,23 @@
     function outcomeStage(pid, kind) { return stagesFor(pid).find(s => kind === 'won' ? s.is_won : s.is_lost) || null; }
     function stageHex(s) { const list = stagesFor(s.pipeline_id); return B.hex(s.color, list.indexOf(s)); }
     function stagePill(stageId) { const s = lk.stageById[stageId]; return s ? `<span class="b24-stage-pill" style="--c:${stageHex(s)}">${esc(s.name)}</span>` : ''; }
+    /** The Bitrix-style stage bar in the list: a segment per stage, filled up to the deal's stage; clicking one moves the deal there. */
+    function stageBar(d) {
+        const cur = lk.stageById[d.stage_id]; if (!cur) return '';
+        const shown = stagesFor(d.pipeline_id).filter(s => !s.is_lost);
+        const at = cur.is_lost ? shown.length - 1 : shown.findIndex(s => s.id === cur.id);
+        const can = page.lv.edit !== 'none' && canEditDeal(d);
+        return `<div class="b24-stagebar${cur.is_lost ? ' lost' : ''}" style="--c:${stageHex(cur)}">${shown.map((s, i) => `<button type="button" class="seg${i <= at ? ' on' : ''}"${can && s.id !== cur.id ? ` data-deal-seg="${esc(d.id)}" data-stage="${esc(s.id)}"` : ' tabindex="-1"'} title="${esc(can && s.id !== cur.id ? 'Move to ' + s.name : s.name)}" aria-label="${esc(can && s.id !== cur.id ? 'Move to ' + s.name : s.name)}"></button>`).join('')}</div><span class="b24-stagebar-l">${esc(cur.name)}</span>`;
+    }
+    view.addEventListener('click', async e => {
+        const b = e.target.closest('[data-deal-seg]'); if (!b) return;
+        e.preventDefault();
+        const d = (page.grid ? page.grid.rows() : []).find(x => String(x.id) === b.dataset.dealSeg), s = lk.stageById[b.dataset.stage];
+        if (!d || !s) return;
+        const bar = b.closest('.b24-stagebar'); if (bar) bar.classList.add('busy');
+        try { const ok = await moveToStage(d, s); if (page.grid) page.grid.refresh(); if (ok === false && bar) bar.classList.remove('busy'); }
+        catch (err) { C.toast(err.message, 'bad'); if (bar) bar.classList.remove('busy'); }
+    });
     function contactName(d) { return d.contact ? (d.contact.full_name || d.contact.organization) : ''; }
     function companyName(d) { return (d.company_rec && d.company_rec.title) || d.organization || ''; }
     const canEditDeal = (d, lv) => B.allowed((lv || page.lv).edit, d, me);
@@ -359,7 +376,7 @@
         return [
             ...(cols.full ? [{ key: 'number', title: 'ID', width: 70, render: r => esc(r.number == null ? '' : r.number) }] : []),
             { key: 'title', title: 'Deal', width: 250, render: r => `<a href="/deals/?id=${esc(r.id)}" data-open>${esc(r.title)}</a>${companyName(r) ? `<span class="sub">${esc(companyName(r))}</span>` : ''}`, edit: can ? { type: 'text', save: save('title') } : undefined },
-            { key: 'stage_id', title: 'Stage', width: 170, sortable: false, render: r => stagePill(r.stage_id),
+            { key: 'stage_id', title: 'Stage', width: 210, sortable: false, render: r => stageBar(r),
               edit: can ? { type: 'select', options: r => stagesFor(r.pipeline_id).map(s => ({ value: s.id, label: s.name })), save: async (r, v) => { if (!canEditDeal(r)) throw new Error('You do not have permission to change this deal.'); const ok = await moveToStage(r, lk.stageById[v]); if (ok === false) throw new Error('Stage not changed'); } } : undefined },
             { key: 'value', title: 'Amount', width: 140, align: 'right', render: r => esc(L.money(r.value, r.currency)), edit: can ? { type: 'money', save: save('value') } : undefined },
             { key: 'owner_id', title: 'Responsible', width: 180, render: r => C.personHtml(r.owner_id, { link: false }), edit: can ? { type: 'people', options: people, save: save('owner_id') } : undefined },

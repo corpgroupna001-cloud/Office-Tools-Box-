@@ -230,7 +230,14 @@
                     (it.key === active ? ' aria-current="page"' : '');
         var inner = (editable ? '<span class="grip" aria-hidden="true">⋮⋮</span>' : '') +
                     '<span class="ic ic-' + esc(it.icon) + '"></span><span class="t">' + esc(it.title) + '</span>' + extra +
-                    (editable && it.key !== 'home' ? '<button type="button" class="hide-btn" data-hide="' + esc(it.key) + '">' + (state.menu.hidden.indexOf(it.key) >= 0 ? 'Show' : 'Hide') + '</button>' : '');
+                    (editable && it.key !== 'home' ? (function () {
+                        var hidden = state.menu.hidden.indexOf(it.key) >= 0, label = hidden ? 'Show ' + it.title + ' in the menu' : 'Hide ' + it.title + ' from the menu';
+                        return '<button type="button" class="hide-btn' + (hidden ? ' is-hidden' : '') + '" data-hide="' + esc(it.key) + '" title="' + esc(label) + '" aria-label="' + esc(label) + '">' +
+                            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                            (hidden ? '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'
+                                    : '<path d="M3 3l18 18M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.2M6.6 6.6A17.4 17.4 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/>') +
+                            '</svg></button>';
+                    })() : '');
         if (it.tab) return '<button type="button" class="' + cls + '" data-tab="' + esc(it.tab) + '"' + attrs + '>' + inner + '</button>';
         return '<a class="' + cls + '" href="' + esc(it.href) + '"' + attrs + (editable ? ' draggable="true"' : '') + '>' + inner + '</a>';
     }

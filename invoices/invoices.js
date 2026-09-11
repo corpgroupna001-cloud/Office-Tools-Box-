@@ -75,6 +75,7 @@
         ];
     }
     const PRESETS = [
+        ...(cols.full ? [{ key: 'pending', title: 'My pending invoices', values: { responsible: 'me', status: 'outstanding' } }] : []),
         { key: 'open', title: 'Awaiting payment', values: { status: 'outstanding' } },
         { key: 'overdue', title: 'Overdue invoices', values: { status: 'overdue' } },
         { key: 'drafts', title: 'Drafts', values: { status: 'draft' } },
@@ -98,7 +99,7 @@
                 <div class="b24-counters" id="counters"></div>
             </div>
             <div id="body"></div>`;
-        page.filter = WSFilter.mount(view.querySelector('[data-filter]'), { id: 'invoices', fields: filterFields(), presets: PRESETS, defaultPreset: 'all', me: me.id, onChange: () => refreshList() });
+        page.filter = WSFilter.mount(view.querySelector('[data-filter]'), { id: 'invoices', fields: filterFields(), presets: PRESETS, defaultPreset: cols.full ? 'pending' : 'all', me: me.id, onChange: () => refreshList() });
         const create = view.querySelector('[data-create]');
         if (create) create.addEventListener('click', () => openEditor(null, {}));
         view.querySelector('.b24-views').addEventListener('click', e => {
@@ -159,20 +160,29 @@
         if (MANAGE && acts.cancel) items.push('sep', { label: 'Cancel invoice', icon: 'x', danger: true, onClick: () => cancelInvoice(r, refreshList) });
         return items;
     }
+    // "Linked to": the deal (titles fetched once per page), else the customer contact or company.
+    const dealTitles = new Map();
+    function linkedTo(r) {
+        if (r.deal_id) return `${C.icon('deal', 'sm')} <a href="/deals/?id=${esc(r.deal_id)}" data-deal="${esc(r.deal_id)}">${esc(dealTitles.get(r.deal_id) || 'Deal')}</a>${r.bill_to_name ? `<span class="sub">${esc(r.bill_to_name)}</span>` : ''}`;
+        if (r.contact_id) return `${C.icon('user', 'sm')} <a href="/contacts/?id=${esc(r.contact_id)}" data-contact="${esc(r.contact_id)}">${esc(r.bill_to_name || 'Contact')}</a>`;
+        return r.bill_to_name ? `${C.icon('building', 'sm')} ${esc(r.bill_to_name)}` : '';
+    }
     function mountGrid(body) {
         const host = document.createElement('div'); body.appendChild(host);
         page.grid = WSGrid.mount(host, {
             id: 'invoices', sort: { key: 'invoice_date', dir: 'desc' },
             columns: [
-                { key: 'invoice_number', title: 'Invoice', width: 150, render: r => `<a href="/invoices/?id=${esc(r.id)}" data-open>${esc(r.invoice_number)}</a>` },
+                { key: 'invoice_number', title: 'Invoice #', width: 140, render: r => `<a href="/invoices/?id=${esc(r.id)}" data-open>${esc(r.invoice_number)}</a>` },
                 ...(cols.full ? [{ key: 'subject', title: 'Subject', width: 200, render: r => esc(r.subject || '') }] : []),
-                { key: 'bill_to_name', title: 'Customer', width: 220, render: r => r.contact_id ? `<a href="/contacts/?id=${esc(r.contact_id)}" data-contact="${esc(r.contact_id)}">${esc(r.bill_to_name || 'Contact')}</a>` : esc(r.bill_to_name || '') },
                 { key: 'status', title: 'Status', width: 140, render: r => statusBadge(r) },
-                { key: 'invoice_date', title: 'Invoice date', width: 130, render: r => esc(L.fmtDate(r.invoice_date)) },
-                { key: 'due_date', title: 'Due date', width: 130, render: r => { const s = L.invoiceStatus(r); return r.due_date ? `<span class="crm-due ${s === 'overdue' ? 'overdue' : ''}">${esc(L.fmtDate(r.due_date))}</span>` : ''; } },
-                { key: 'total', title: 'Amount', width: 140, align: 'right', render: r => esc(L.money(r.total, r.currency)) },
-                { key: 'balance', title: 'Balance', width: 140, align: 'right', render: r => `<b>${esc(L.money(r.balance, r.currency))}</b>` },
-                ...(cols.full ? [{ key: 'responsible_id', title: 'Responsible', width: 170, render: r => C.personHtml(r.responsible_id, { link: false }) }] : []),
+                { key: 'total', title: 'Total', width: 130, align: 'right', render: r => esc(L.money(r.total, r.currency)) },
+                { key: 'deal_id', title: 'Linked to', width: 230, sortable: false, render: linkedTo },
+                { key: 'due_date', title: 'Pay before', width: 130, render: r => { const s = L.invoiceStatus(r); return r.due_date ? `<span class="crm-due ${s === 'overdue' ? 'overdue' : ''}">${esc(L.fmtDate(r.due_date))}</span>` : ''; } },
+                { key: 'created_at', title: 'Created on', width: 130, render: r => `<span class="muted">${esc(L.fmtDate(r.created_at))}</span>` },
+                ...(cols.full ? [{ key: 'responsible_id', title: 'Responsible person', width: 180, render: r => C.personHtml(r.responsible_id, { link: false }) }] : []),
+                { key: 'bill_to_name', title: 'Customer', width: 200, default: false, render: r => r.contact_id ? `<a href="/contacts/?id=${esc(r.contact_id)}" data-contact="${esc(r.contact_id)}">${esc(r.bill_to_name || 'Contact')}</a>` : esc(r.bill_to_name || '') },
+                { key: 'invoice_date', title: 'Invoice date', width: 130, default: false, render: r => esc(L.fmtDate(r.invoice_date)) },
+                { key: 'balance', title: 'Balance', width: 140, align: 'right', default: false, render: r => `<b>${esc(L.money(r.balance, r.currency))}</b>` },
                 { key: 'amount_paid', title: 'Paid', width: 130, align: 'right', default: false, render: r => esc(L.money(r.amount_paid, r.currency)) },
                 { key: 'currency', title: 'Currency', width: 90, default: false, render: r => esc(r.currency) },
                 { key: 'created_by', title: 'Created by', width: 170, default: false, sortable: false, render: r => C.personHtml(r.created_by, { link: false }) },
@@ -180,14 +190,21 @@
             load: async ({ offset, limit, sort }) => {
                 let b = scoped(sb.from('invoices').select(SELECT));
                 b = sort ? b.order(sort.key, { ascending: sort.dir === 'asc', nullsFirst: false }) : b.order('invoice_date', { ascending: false });
-                return (await C.q(b.order('created_at', { ascending: false }).range(offset, offset + limit - 1))).data || [];
+                const rows = (await C.q(b.order('created_at', { ascending: false }).range(offset, offset + limit - 1))).data || [];
+                const need = [...new Set(rows.map(r => r.deal_id).filter(id => id && !dealTitles.has(id)))];
+                if (need.length) { const d = await sb.from('crm_deals').select('id, title').in('id', need); (d.data || []).forEach(x => dealTitles.set(x.id, x.title)); }
+                return rows;
             },
             count: async () => (await C.q(scoped(sb.from('invoices').select('id', { count: 'exact', head: true })))).count || 0,
             onOpen: r => openInvoice(r.id),
             rowMenu,
             empty: { title: 'No invoices match this filter', sub: CREATE ? 'Raise an invoice for a customer or a won deal.' : 'Change the filter.' },
         });
-        host.addEventListener('click', e => { const a = e.target.closest('[data-contact]'); if (a && !e.metaKey && !e.ctrlKey) { e.preventDefault(); B.openRecord(`/contacts/?id=${a.dataset.contact}`); } });
+        host.addEventListener('click', e => {
+            const a = e.target.closest('[data-contact], [data-deal]'); if (!a || e.metaKey || e.ctrlKey) return;
+            e.preventDefault();
+            B.openRecord(a.dataset.deal ? `/deals/?id=${a.dataset.deal}` : `/contacts/?id=${a.dataset.contact}`);
+        });
     }
     const BOARD = [
         { id: 'draft', name: 'Draft', hex: '#a8adb4' }, { id: 'sent', name: 'Sent', hex: '#2fc6f6' }, { id: 'partially_paid', name: 'Partially paid', hex: '#ffa900' },

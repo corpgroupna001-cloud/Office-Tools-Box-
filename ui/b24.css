@@ -197,12 +197,19 @@ body.ws-b24 .ws-side-item .badge {
     display: inline-flex; align-items: center; justify-content: center;
 }
 body.ws-b24 .ws-side-item .badge.ok { background: var(--b24-counter-ok); }
-body.ws-b24 .ws-side-item .grip { display: none; width: 14px; opacity: 0.5; cursor: grab; }
-body.ws-b24 .ws-side-item .hide-btn { display: none; margin-left: auto; border: 0; background: none; color: inherit; opacity: 0.7; cursor: pointer; font: inherit; font-size: 12px; }
+/* Configure menu: a faint grip to drag by, and a hide / show eye that appears on hover (always on touch screens). */
+body.ws-b24 .ws-side-item .grip { display: none; flex: 0 0 10px; width: 10px; margin-left: -6px; opacity: 0; font-size: 12px; letter-spacing: -2px; cursor: grab; transition: opacity 120ms; }
+body.ws-b24 .ws-side.editing .ws-side-item { position: relative; }
+body.ws-b24 .ws-side-item .hide-btn { display: none; position: absolute; top: 50%; right: 8px; transform: translateY(-50%); align-items: center; justify-content: center; width: 26px; height: 26px; margin: 0; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; opacity: 0; cursor: pointer; transition: opacity 120ms, background 120ms; }
 body.ws-b24 .ws-side.editing .ws-side-item .grip,
 body.ws-b24 .ws-side.editing .ws-side-item .hide-btn { display: inline-flex; }
+body.ws-b24 .ws-side.editing .ws-side-item:hover .grip, body.ws-b24 .ws-side.editing .ws-side-item:focus-within .grip { opacity: 0.55; }
+body.ws-b24 .ws-side.editing .ws-side-item:hover .hide-btn, body.ws-b24 .ws-side.editing .ws-side-item:focus-within .hide-btn,
+body.ws-b24 .ws-side.editing .ws-side-item .hide-btn:focus-visible, body.ws-b24 .ws-side.editing .ws-side-item .hide-btn.is-hidden { opacity: 0.85; }
+body.ws-b24 .ws-side.editing .ws-side-item .hide-btn:hover { background: rgba(255, 255, 255, 0.18); opacity: 1; }
 body.ws-b24 .ws-side.editing .ws-side-item .badge { display: none; }
-body.ws-b24 .ws-side.editing .ws-side-item { outline: 1px dashed rgba(255, 255, 255, 0.28); outline-offset: -2px; }
+body.ws-b24 .ws-side.editing .ws-side-item { cursor: grab; }
+@media (hover: none) { body.ws-b24 .ws-side.editing .ws-side-item .grip { opacity: 0.55; } body.ws-b24 .ws-side.editing .ws-side-item .hide-btn { opacity: 0.85; } }
 body.ws-b24 .ws-side-item.dragging { opacity: 0.4; }
 body.ws-b24 .ws-side-item.drop-before { box-shadow: 0 -2px 0 var(--b24-menu-text); }
 body.ws-b24 .ws-side-sep { height: 1px; margin: 8px 20px; background: rgba(255, 255, 255, 0.16); }
@@ -1340,3 +1347,34 @@ body.ws-b24 .cal-week .col .cal-ev:hover, body.ws-b24 .cal-week .col .cal-ev:foc
     body.ws-b24 .org-search { flex: 1 1 100%; min-width: 0; }
     body.ws-b24.ws-corporate #view .org-toolbar .org-search input[type="search"] { flex: 1; width: auto; min-width: 0; max-width: none; }
 }
+
+/* ---------- 28. Deal stage bar, drive create tiles, publish switch ---------------- */
+.b24-stagebar { display: flex; gap: 2px; height: 10px; width: 100%; max-width: 190px; }
+.b24-stagebar .seg { flex: 1; min-width: 6px; height: 100%; padding: 0; border: 0; border-radius: 2px; background: #e3e7ea; cursor: default; }
+.b24-stagebar .seg.on { background: var(--c); }
+.b24-stagebar .seg[data-deal-seg] { cursor: pointer; }
+.b24-stagebar .seg[data-deal-seg]:hover { background: color-mix(in srgb, var(--c) 55%, #fff); box-shadow: 0 0 0 1px var(--c) inset; }
+.b24-stagebar.lost .seg.on { background: #ff5752; }
+.b24-stagebar.busy { opacity: .5; pointer-events: none; }
+.b24-stagebar-l { display: block; margin-top: 3px; font-size: 11.5px; color: var(--b24-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.dv-create { display: flex; align-items: stretch; gap: 10px; margin: 0 0 12px; overflow-x: auto; padding-bottom: 2px; }
+.dv-create[hidden] { display: none; }
+.dv-tile { position: relative; flex: 0 0 auto; width: 104px; height: 118px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 8px; border: 0; border-radius: 8px; background: var(--b24-surface); color: var(--b24-text); box-shadow: var(--b24-shadow); font: 500 12px Inter, system-ui, sans-serif; text-align: center; cursor: pointer; }
+.dv-tile:hover, .dv-tile:focus-visible { box-shadow: 0 0 0 2px #2fc6f6, var(--b24-shadow); outline: none; }
+.dv-tile .dv-ico.big { width: 46px; height: 56px; font-size: 10px; padding-bottom: 8px; border-radius: 4px 14px 4px 4px; }
+.dv-tile .dv-ico.k-folder.big { width: 52px; height: 40px; margin-top: 8px; }
+.dv-tile .dv-ico.k-board { background: #19a0bd; }
+.dv-tile .dv-ico.k-file { background: #c9d3dc; align-items: center; padding: 0; }
+.dv-tile .dv-ico.k-file .ic { width: 22px; height: 22px; color: #fff; }
+.dv-tile .plus { position: absolute; top: 60px; left: 50%; width: 20px; height: 20px; margin-left: 14px; border-radius: 50%; background: #2067b0; color: #fff; font: 700 15px/20px Inter, sans-serif; box-shadow: 0 0 0 2px var(--b24-surface); }
+.dv-tile.open { background: var(--b24-surface-2); }
+.dv-tile .l { line-height: 1.25; }
+.dv-create-sep { flex: 0 0 1px; margin: 12px 4px; background: var(--b24-glass-2, rgba(255, 255, 255, .35)); }
+
+.dv-switch { position: relative; display: inline-block; vertical-align: middle; width: 32px; height: 18px; margin-right: 8px; padding: 0; border: 0; border-radius: 9px; background: #c9d3dc; cursor: pointer; transition: background 150ms; }
+.dv-switch i { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: left 150ms; }
+.dv-switch.on { background: #2fc6f6; }
+.dv-switch.on i { left: 16px; }
+.dv-switch:disabled { opacity: .5; cursor: not-allowed; }
+.dv-switch-l { font-size: 12px; color: var(--b24-muted); vertical-align: middle; }
