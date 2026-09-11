@@ -13,14 +13,18 @@
    ============================================================================ */
 (async function () {
     'use strict';
-    const C = window.WSCrm, L = C.L, esc = C.esc, h = C.h;
+    const C = window.WSCrm, L = C.L, esc = C.esc, h = C.h, B = window.WSB24;
     const view = document.getElementById('view');
-    const ctx = await C.boot({ active: 'invoices', crumb: 'Invoices' });
+    const ctx = await C.boot({ active: 'invoices', crumb: 'Invoices', layout: 'b24' });
     const sb = ctx.sb, me = ctx.user;
 
     const CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED'];
     const METHODS = ['Bank transfer', 'UPI', 'Cash', 'Cheque', 'Card', 'Other'];
-    const SELECT = 'id, company, invoice_number, contact_id, deal_id, project_id, bill_to_name, bill_to_address, bill_to_email, invoice_date, due_date, status, currency, subtotal, discount_total, tax_total, total, amount_paid, balance, notes, terms, sent_at, paid_at, cancelled_at, created_by, created_at, updated_at';
+    const BASE = 'id, company, invoice_number, contact_id, deal_id, project_id, bill_to_name, bill_to_address, bill_to_email, invoice_date, due_date, status, currency, subtotal, discount_total, tax_total, total, amount_paid, balance, notes, terms, sent_at, paid_at, cancelled_at, created_by, created_at, updated_at';
+    const [cols, invLv] = await Promise.all([B.columns('invoices', BASE + ', responsible_id, subject, company_id', BASE), B.levels('invoice')]);
+    const SELECT = cols.select;
+    // What the access-permissions matrix lets this person do with invoices (managers only before it existed).
+    const MANAGE = invLv.edit !== 'none', CREATE = invLv.add !== 'none';
     const STATUS_ORDER = ['draft', 'sent', 'partially_paid', 'paid', 'overdue', 'cancelled'];
 
     function statusBadge(inv) { const s = L.invoiceStatus(inv); const m = L.INVOICE_STATUS[s]; return C.badge(m.color, m.label); }
@@ -30,163 +34,197 @@
     function route() {
         const id = C.param('id');
         if (id) return showRecord(id, C.param('edit') === '1');
+        if (page.mode === 'list') return refreshList();
         return showList();
     }
     window.addEventListener('popstate', route);
     function go(url) { history.pushState(null, '', url); route(); }
 
-    /* --------------------------------------------------------------- list */
-    const listState = { rows: [], q: '', status: '', range: 'all', from: '', to: '', contact: '' };
-    async function fetchInvoices() {
-        let b = sb.from('invoices').select(SELECT).order('invoice_date', { ascending: false }).order('created_at', { ascending: false }).limit(1000);
-        if (listState.range !== 'all') {
-            const r = L.dateRange(listState.range, new Date(), { from: listState.from, to: listState.to });
-            if (r) b = b.gte('invoice_date', r.from).lte('invoice_date', r.to);
-        }
-        if (listState.contact) b = b.eq('contact_id', listState.contact);
-        const { data } = await C.q(b);
-        return data || [];
+    /* ----------------------------------------------- list (workspace layout) */
+    const page = { mode: null, grid: null, board: null, filter: null, view: 'list' };
+    const openInvoice = id => B.openRecord(`/invoices/?id=${id}`, () => refreshList());
+    function refreshList() {
+        if (page.mode !== 'list') return;
+        loadCounters();
+        if (page.grid) return page.grid.reload();
+        if (page.board) return loadBoard();
     }
-    function filterRows(rows) {
-        const q = listState.q.trim().toLowerCase();
-        return rows.filter(r => {
-            if (listState.status === 'outstanding') { if (!['sent', 'partially_paid', 'overdue'].includes(L.invoiceStatus(r))) return false; }
-            else if (listState.status && L.invoiceStatus(r) !== listState.status) return false;
-            if (!q) return true;
-            return [r.invoice_number, r.bill_to_name, r.bill_to_email].some(v => v && String(v).toLowerCase().includes(q));
-        });
-    }
-    /**
-     * Money KPIs per currency — amounts in different currencies are never added
-     * together. The tiles lead with the currency most invoices use and list the
-     * others underneath. Counts are across every currency.
-     */
-    function kpis(rows) {
+    function statusApply(b, v) {
         const today = L.todayIST();
-        const month = L.dateRange('month');
-        const byCur = new Map();
-        const bucket = cur => { if (!byCur.has(cur)) byCur.set(cur, { count: 0, outstanding: 0, overdue: 0, paidMonth: 0 }); return byCur.get(cur); };
-        const out = { overdueCount: 0, drafts: 0, byCur, cur: 'INR' };
-        rows.forEach(r => {
-            const s = L.invoiceStatus(r, today);
-            const b = bucket(r.currency || 'INR');
-            b.count++;
-            if (s === 'draft') out.drafts++;
-            if (['sent', 'partially_paid', 'overdue'].includes(s)) b.outstanding += Number(r.balance) || 0;
-            if (s === 'overdue') { b.overdue += Number(r.balance) || 0; out.overdueCount++; }
-            if (s === 'paid' && r.paid_at && L.istDate(r.paid_at) >= month.from && L.istDate(r.paid_at) <= month.to) b.paidMonth += Number(r.total) || 0;
-        });
-        let best = null;
-        byCur.forEach((b, cur) => { if (!best || b.count > byCur.get(best).count) best = cur; });
-        out.cur = best || 'INR';
-        const main = byCur.get(out.cur) || { outstanding: 0, overdue: 0, paidMonth: 0 };
-        out.outstanding = main.outstanding; out.overdue = main.overdue; out.paidMonth = main.paidMonth;
-        /** "Also $1,200.00 · €300.00" for the other currencies' value of one field, or ''. */
-        out.also = field => {
-            const parts = [];
-            byCur.forEach((b, cur) => { if (cur !== out.cur && Number(b[field])) parts.push(L.money(b[field], cur)); });
-            return parts.length ? `Also ${parts.join(' · ')}` : '';
-        };
-        return out;
+        switch (v) {
+            case 'outstanding': return b.in('status', ['sent', 'partially_paid']);
+            case 'overdue': return b.in('status', ['sent', 'partially_paid']).lt('due_date', today);
+            case 'sent': return b.eq('status', 'sent').or(`due_date.is.null,due_date.gte.${today}`);
+            case 'partially_paid': return b.eq('status', 'partially_paid').or(`due_date.is.null,due_date.gte.${today}`);
+            default: return b.eq('status', v);
+        }
     }
+    function filterFields() {
+        return [
+            { key: 'status', title: 'Status', type: 'select', apply: statusApply, options: [
+                { value: 'outstanding', label: 'Awaiting payment' }, { value: 'overdue', label: 'Overdue' }, { value: 'draft', label: 'Draft' },
+                { value: 'sent', label: 'Sent' }, { value: 'partially_paid', label: 'Partially paid' }, { value: 'paid', label: 'Paid' }, { value: 'cancelled', label: 'Cancelled' },
+            ] },
+            { key: 'invoice_date', title: 'Invoice date', type: 'date', column: 'invoice_date' },
+            { key: 'due_date', title: 'Due date', type: 'date', column: 'due_date' },
+            { key: 'customer', title: 'Customer', type: 'text', column: 'bill_to_name' },
+            { key: 'total', title: 'Amount', type: 'number', column: 'total', default: false },
+            { key: 'currency', title: 'Currency', type: 'select', options: CURRENCIES, default: false },
+            ...(cols.full ? [{ key: 'responsible', title: 'Responsible', type: 'user', column: 'responsible_id', options: B.peopleOptions(), none: false }] : []),
+            { key: 'creator', title: 'Created by', type: 'user', column: 'created_by', options: B.peopleOptions(), none: false, default: false },
+        ];
+    }
+    const PRESETS = [
+        { key: 'open', title: 'Awaiting payment', values: { status: 'outstanding' } },
+        { key: 'overdue', title: 'Overdue invoices', values: { status: 'overdue' } },
+        { key: 'drafts', title: 'Drafts', values: { status: 'draft' } },
+        { key: 'paid', title: 'Paid invoices', values: { status: 'paid' } },
+        ...(cols.full ? [{ key: 'mine', title: 'My invoices', values: { responsible: 'me' } }] : []),
+        { key: 'all', title: 'All invoices', values: {} },
+    ];
+    const scoped = b => page.filter.apply(b, { searchColumns: ['invoice_number', 'bill_to_name', 'bill_to_email'].concat(cols.full ? ['subject'] : []) });
+
     async function showList() {
+        page.mode = 'list';
         WSShell.setCrumb('Invoices');
         document.title = 'Invoices · WorkSuite';
-        view.innerHTML = `
-            <div class="ws-page-head">
-                <div><p class="ws-eyebrow">Finance</p><h1>Invoices</h1><p>${ctx.isManager ? 'Bill customers, track payments and keep the books straight.' : 'Invoices are administered by managers. Any invoice you created is listed here.'}</p></div>
-                <div class="actions">${ctx.isManager ? `<button type="button" class="ws-btn primary" id="new-btn">${C.icon('plus')}<span>New invoice</span></button>` : ''}</div>
+        view.innerHTML = B.titleBar({ title: 'Invoices', createLabel: CREATE ? 'Create' : '' }) + `
+            ${invLv.legacy && !ctx.isManager ? `<div class="b24-area pad" style="margin-bottom:10px"><div class="crm-info">${C.icon('lock', 'sm')} Creating and editing invoices needs the manager or admin workspace role. Invoices you raised are listed here.</div></div>` : ''}
+            <div class="b24-toolbar">
+                <div class="b24-views" role="tablist" aria-label="View">
+                    <button type="button" role="tab" data-view="list">List</button>
+                    <button type="button" role="tab" data-view="kanban">Kanban</button>
+                </div>
+                <div class="b24-counters" id="counters"></div>
             </div>
-            ${ctx.isManager ? '' : `<div class="crm-info" style="margin-bottom:16px">${C.icon('lock', 'sm')} Creating and editing invoices needs the manager or admin workspace role. Ask an administrator if you need access.</div>`}
-            <div class="crm-kpis" id="kpis"></div>
-            <div class="crm-toolbar">
-                <div class="crm-seg" id="seg" role="tablist"></div>
-                <div class="crm-search grow">${C.icon('search', 'sm')}<input type="search" id="q" placeholder="Search number or customer…" aria-label="Search invoices"></div>
-                <select id="f-range" aria-label="Invoice date"><option value="all">All dates</option><option value="month">This month</option><option value="quarter">This quarter</option><option value="year">This year</option><option value="last30">Last 30 days</option><option value="custom">Custom…</option></select>
-                <span id="custom-range" hidden style="display:inline-flex;gap:6px;align-items:center"><input type="date" id="f-from" aria-label="From"><span class="muted">to</span><input type="date" id="f-to" aria-label="To"></span>
-                <div id="f-contact" style="min-width:200px"></div>
-                <span class="crm-count" id="count"></span>
-            </div>
-            <div class="ws-card flush"><div id="table"></div></div>`;
-        const tableEl = view.querySelector('#table');
-        C.skeletonRows(tableEl, 6);
-        const newBtn = view.querySelector('#new-btn');
-        if (newBtn) newBtn.addEventListener('click', () => openEditor(null, {}));
-        view.querySelector('#f-range').value = listState.range;
-        view.querySelector('#custom-range').hidden = listState.range !== 'custom';
-        view.querySelector('#f-from').value = listState.from; view.querySelector('#f-to').value = listState.to;
-        view.querySelector('#q').value = listState.q;
-        const picker = C.entityPicker('contact', listState.contact || null, { placeholder: 'Any customer', onChange: id => { listState.contact = id || ''; reload(); } });
-        view.querySelector('#f-contact').appendChild(picker.el);
-
-        let tbl = null;
-        function paintSeg(all) {
-            const counts = {}; all.forEach(r => { const s = L.invoiceStatus(r); counts[s] = (counts[s] || 0) + 1; });
-            const seg = view.querySelector('#seg');
-            seg.innerHTML = [['', 'All', all.length], ...STATUS_ORDER.map(s => [s, L.INVOICE_STATUS[s].label, counts[s] || 0])]
-                .map(([k, label, n]) => `<button type="button" role="tab" data-status="${k}" class="${listState.status === k ? 'on' : ''}" aria-selected="${listState.status === k}">${esc(label)}<span class="n">${n}</span></button>`).join('');
-        }
-        function paintKpis(all) {
-            const k = kpis(all);
-            const also = field => { const t = k.also(field); return t ? `<div class="sub">${esc(t)}</div>` : ''; };
-            view.querySelector('#kpis').innerHTML = `
-                <a class="crm-kpi accent" href="#" data-status="outstanding"><div class="lbl">Outstanding</div><div class="val">${esc(L.money(k.outstanding, k.cur))}</div><div class="sub">Sent, not yet paid</div>${also('outstanding')}</a>
-                <a class="crm-kpi ${k.overdueCount ? 'bad' : ''}" href="#" data-status="overdue"><div class="lbl">Overdue</div><div class="val">${esc(L.money(k.overdue, k.cur))}</div><div class="sub ${k.overdueCount ? 'bad' : ''}">${k.overdueCount} invoice${k.overdueCount === 1 ? '' : 's'} past due</div>${also('overdue')}</a>
-                <a class="crm-kpi ok" href="#" data-status="paid"><div class="lbl">Paid this month</div><div class="val">${esc(L.money(k.paidMonth, k.cur))}</div><div class="sub">By payment date</div>${also('paidMonth')}</a>
-                <a class="crm-kpi" href="#" data-status="draft"><div class="lbl">Drafts</div><div class="val">${k.drafts}</div><div class="sub">Not yet sent</div></a>`;
-        }
-        function columns() {
-            return [
-                { key: 'invoice_number', label: 'Invoice', lead: true, render: r => `<span class="primary-text">${esc(r.invoice_number)}</span><span class="sub">${esc(r.bill_to_name || '—')}</span>` },
-                { key: 'bill_to_name', label: 'Customer', hideMobile: true, render: r => r.contact_id ? `<a class="crm-link" href="/contacts/?id=${esc(r.contact_id)}">${esc(r.bill_to_name || 'Contact')}</a>` : esc(r.bill_to_name || '—') },
-                { key: 'invoice_date', label: 'Date', render: r => esc(L.fmtDate(r.invoice_date)) },
-                { key: 'due_date', label: 'Due', render: r => { const s = L.invoiceStatus(r); return r.due_date ? `<span class="crm-due ${s === 'overdue' ? 'overdue' : ''}">${esc(L.fmtDate(r.due_date))}</span>` : '<span class="muted">—</span>'; } },
-                { key: 'status', label: 'Status', value: r => L.invoiceStatus(r), render: r => statusBadge(r) },
-                { key: 'total', label: 'Total', num: true, value: r => Number(r.total), render: r => esc(L.money(r.total, r.currency)) },
-                { key: 'amount_paid', label: 'Paid', num: true, value: r => Number(r.amount_paid), render: r => esc(L.money(r.amount_paid, r.currency)) },
-                { key: 'balance', label: 'Balance', num: true, value: r => Number(r.balance), render: r => `<b>${esc(L.money(r.balance, r.currency))}</b>` },
-                { key: 'actions', label: '', sort: false, cls: 'actions', render: r => `<button type="button" class="ws-btn sm icon" data-menu="${esc(r.id)}" aria-label="Actions">${C.icon('more')}</button>` },
-            ];
-        }
-        function paint() {
-            paintKpis(listState.rows); paintSeg(listState.rows);
-            const rows = filterRows(listState.rows);
-            view.querySelector('#count').textContent = `${rows.length} invoice${rows.length === 1 ? '' : 's'}`;
-            if (!tbl) tbl = C.table(tableEl, {
-                columns: columns(), rows, sort: { key: 'invoice_date', dir: 'desc' }, pageSize: 50, onRow: r => go(`/invoices/?id=${r.id}`),
-                empty: { title: listState.q || listState.status || listState.contact || listState.range !== 'all' ? 'No invoices match' : 'No invoices yet', sub: ctx.isManager && !listState.q ? 'Raise the first invoice for a customer or a won deal.' : 'Try a different filter.', action: ctx.isManager && !listState.q && !listState.status ? `<button type="button" class="ws-btn primary" onclick="document.getElementById('new-btn').click()">${C.icon('plus')}<span>New invoice</span></button>` : '' },
-            }); else tbl.update(rows);
-        }
-        async function reload() { try { listState.rows = await fetchInvoices(); paint(); } catch (e) { C.errorState(tableEl, e, reload); } }
-        view.querySelector('#seg').addEventListener('click', e => { const b = e.target.closest('[data-status]'); if (!b) return; listState.status = b.dataset.status; paint(); });
-        view.querySelector('#kpis').addEventListener('click', e => { const a = e.target.closest('[data-status]'); if (!a) return; e.preventDefault(); listState.status = a.dataset.status; paint(); });
-        view.querySelector('#q').addEventListener('input', C.debounce(() => { listState.q = view.querySelector('#q').value; paint(); }, 200));
-        view.querySelector('#f-range').addEventListener('change', e => { listState.range = e.target.value; view.querySelector('#custom-range').hidden = listState.range !== 'custom'; if (listState.range !== 'custom' || (listState.from && listState.to)) reload(); });
-        ['#f-from', '#f-to'].forEach(sel => view.querySelector(sel).addEventListener('change', () => { listState.from = view.querySelector('#f-from').value; listState.to = view.querySelector('#f-to').value; if (listState.from && listState.to) reload(); }));
-        tableEl.addEventListener('click', e => {
-            const b = e.target.closest('[data-menu]'); if (!b) return;
-            e.stopPropagation();
-            const r = listState.rows.find(x => x.id === b.dataset.menu); if (!r) return;
-            const acts = L.invoiceActions(L.invoiceStatus(r));
-            const items = [{ label: 'Open', icon: 'arrow', onClick: () => go(`/invoices/?id=${r.id}`) }];
-            if (ctx.isManager) {
-                if (acts.edit) items.push({ label: 'Edit draft', icon: 'edit', onClick: () => go(`/invoices/?id=${r.id}&edit=1`) });
-                if (acts.send) items.push({ label: 'Mark sent', icon: 'mail', onClick: () => setStatus(r, 'sent', reload) });
-                if (acts.pay) items.push({ label: 'Record payment', icon: 'salary', onClick: () => recordPayment(r, reload) });
-                if (canEmail(r)) items.push({ label: 'Email invoice', icon: 'mail', onClick: () => openEmailDialog(r) });
-                items.push({ label: 'Duplicate', icon: 'plus', onClick: () => duplicate(r) });
-            }
-            items.push({ label: 'Print', icon: 'doc', onClick: () => { location.href = `/invoices/?id=${r.id}&print=1`; } });
-            if (ctx.isManager && acts.cancel) items.push('sep', { label: 'Cancel invoice', icon: 'x', danger: true, onClick: () => cancelInvoice(r, reload) });
-            C.menu(b, items);
+            <div id="body"></div>`;
+        page.filter = WSFilter.mount(view.querySelector('[data-filter]'), { id: 'invoices', fields: filterFields(), presets: PRESETS, defaultPreset: 'all', me: me.id, onChange: () => refreshList() });
+        const create = view.querySelector('[data-create]');
+        if (create) create.addEventListener('click', () => openEditor(null, {}));
+        view.querySelector('.b24-views').addEventListener('click', e => {
+            const b = e.target.closest('[data-view]'); if (!b) return;
+            try { localStorage.setItem('ws-invoices-view', b.dataset.view); } catch (err) { /* private mode */ }
+            mountView(b.dataset.view);
         });
-        await reload();
+        view.querySelector('#counters').addEventListener('click', e => { const b = e.target.closest('[data-counter]'); if (b) page.filter.set({ status: b.dataset.counter }); });
+        let v0 = 'list'; try { v0 = localStorage.getItem('ws-invoices-view') || 'list'; } catch (e) { /* private mode */ }
+        mountView(C.param('view') === 'kanban' ? 'kanban' : v0);
+        loadCounters();
         if (C.param('new') === '1') {
-            const pre = { contact_id: C.param('contact_id') || null, deal_id: C.param('deal_id') || null, project_id: C.param('project_id') || null };
-            C.setParam('new', null, true); C.setParam('contact_id', null, true); C.setParam('deal_id', null, true); C.setParam('project_id', null, true);
-            if (ctx.isManager) openEditor(null, pre); else C.toast('Only managers can create invoices', 'bad');
+            const pre = { contact_id: C.param('contact_id') || null, deal_id: C.param('deal_id') || null, project_id: C.param('project_id') || null, company_id: C.param('company_id') || null };
+            ['new', 'contact_id', 'deal_id', 'project_id', 'company_id'].forEach(k => C.setParam(k, null, true));
+            if (CREATE) openEditor(null, pre); else C.toast('You do not have permission to create invoices', 'bad');
         }
     }
+    function mountView(kind) {
+        page.view = kind;
+        view.querySelectorAll('[data-view]').forEach(b => { b.classList.toggle('on', b.dataset.view === kind); b.setAttribute('aria-selected', String(b.dataset.view === kind)); });
+        if (page.grid) { page.grid.destroy(); page.grid = null; }
+        if (page.board) { page.board.destroy(); page.board = null; }
+        const body = view.querySelector('#body'); body.innerHTML = '';
+        if (kind === 'kanban') return mountBoard(body);
+        mountGrid(body);
+    }
+    async function loadCounters() {
+        const el = view.querySelector('#counters'); if (!el) return;
+        try {
+            const today = L.todayIST(), month = L.dateRange('month');
+            const [open, draft, paid] = await Promise.all([
+                sb.from('invoices').select('status, due_date, balance, currency').in('status', ['sent', 'partially_paid']).limit(2000),
+                sb.from('invoices').select('id', { count: 'exact', head: true }).eq('status', 'draft'),
+                sb.from('invoices').select('total, currency').eq('status', 'paid').gte('paid_at', `${month.from}T00:00:00+05:30`).limit(2000),
+            ]);
+            const rows = open.data || [];
+            const cur = (rows[0] || (paid.data || [])[0] || {}).currency || 'INR';
+            const sum = (list, k) => list.filter(r => (r.currency || 'INR') === cur).reduce((a, r) => a + Number(r[k] || 0), 0);
+            const overdue = rows.filter(r => r.due_date && r.due_date < today);
+            el.innerHTML = `
+                <button type="button" class="b24-counter" data-counter="outstanding"><span class="n">${rows.length}</span>Awaiting payment · <b>${esc(L.money(sum(rows, 'balance'), cur))}</b></button>
+                <button type="button" class="b24-counter${overdue.length ? ' red' : ''}" data-counter="overdue"><span class="n">${overdue.length}</span>Overdue · <b>${esc(L.money(sum(overdue, 'balance'), cur))}</b></button>
+                <button type="button" class="b24-counter green" data-counter="paid"><span class="n">${(paid.data || []).length}</span>Paid this month · <b>${esc(L.money(sum(paid.data || [], 'total'), cur))}</b></button>
+                <button type="button" class="b24-counter" data-counter="draft"><span class="n">${(!draft.error && draft.count) || 0}</span>Drafts</button>`;
+        } catch (e) { el.innerHTML = ''; }
+    }
+    function rowMenu(r) {
+        const acts = L.invoiceActions(L.invoiceStatus(r));
+        const items = [{ label: 'Open', icon: 'arrow', onClick: () => openInvoice(r.id) }];
+        if (MANAGE) {
+            if (acts.edit) items.push({ label: 'Edit draft', icon: 'edit', onClick: () => B.openRecord(`/invoices/?id=${r.id}&edit=1`, refreshList) });
+            if (acts.send) items.push({ label: 'Mark sent', icon: 'mail', onClick: () => setStatus(r, 'sent', refreshList) });
+            if (acts.pay) items.push({ label: 'Record payment', icon: 'salary', onClick: () => recordPayment(r, refreshList) });
+            if (canEmail(r)) items.push({ label: 'Email invoice', icon: 'mail', onClick: () => openEmailDialog(r) });
+        }
+        if (CREATE) items.push({ label: 'Duplicate', icon: 'plus', onClick: () => duplicate(r) });
+        items.push({ label: 'Print', icon: 'doc', onClick: () => { window.top.location.href = `/invoices/?id=${r.id}&print=1`; } });
+        if (MANAGE && acts.cancel) items.push('sep', { label: 'Cancel invoice', icon: 'x', danger: true, onClick: () => cancelInvoice(r, refreshList) });
+        return items;
+    }
+    function mountGrid(body) {
+        const host = document.createElement('div'); body.appendChild(host);
+        page.grid = WSGrid.mount(host, {
+            id: 'invoices', sort: { key: 'invoice_date', dir: 'desc' },
+            columns: [
+                { key: 'invoice_number', title: 'Invoice', width: 150, render: r => `<a href="/invoices/?id=${esc(r.id)}" data-open>${esc(r.invoice_number)}</a>` },
+                ...(cols.full ? [{ key: 'subject', title: 'Subject', width: 200, render: r => esc(r.subject || '') }] : []),
+                { key: 'bill_to_name', title: 'Customer', width: 220, render: r => r.contact_id ? `<a href="/contacts/?id=${esc(r.contact_id)}" data-contact="${esc(r.contact_id)}">${esc(r.bill_to_name || 'Contact')}</a>` : esc(r.bill_to_name || '') },
+                { key: 'status', title: 'Status', width: 140, render: r => statusBadge(r) },
+                { key: 'invoice_date', title: 'Invoice date', width: 130, render: r => esc(L.fmtDate(r.invoice_date)) },
+                { key: 'due_date', title: 'Due date', width: 130, render: r => { const s = L.invoiceStatus(r); return r.due_date ? `<span class="crm-due ${s === 'overdue' ? 'overdue' : ''}">${esc(L.fmtDate(r.due_date))}</span>` : ''; } },
+                { key: 'total', title: 'Amount', width: 140, align: 'right', render: r => esc(L.money(r.total, r.currency)) },
+                { key: 'balance', title: 'Balance', width: 140, align: 'right', render: r => `<b>${esc(L.money(r.balance, r.currency))}</b>` },
+                ...(cols.full ? [{ key: 'responsible_id', title: 'Responsible', width: 170, render: r => C.personHtml(r.responsible_id, { link: false }) }] : []),
+                { key: 'amount_paid', title: 'Paid', width: 130, align: 'right', default: false, render: r => esc(L.money(r.amount_paid, r.currency)) },
+                { key: 'currency', title: 'Currency', width: 90, default: false, render: r => esc(r.currency) },
+                { key: 'created_by', title: 'Created by', width: 170, default: false, sortable: false, render: r => C.personHtml(r.created_by, { link: false }) },
+            ],
+            load: async ({ offset, limit, sort }) => {
+                let b = scoped(sb.from('invoices').select(SELECT));
+                b = sort ? b.order(sort.key, { ascending: sort.dir === 'asc', nullsFirst: false }) : b.order('invoice_date', { ascending: false });
+                return (await C.q(b.order('created_at', { ascending: false }).range(offset, offset + limit - 1))).data || [];
+            },
+            count: async () => (await C.q(scoped(sb.from('invoices').select('id', { count: 'exact', head: true })))).count || 0,
+            onOpen: r => openInvoice(r.id),
+            rowMenu,
+            empty: { title: 'No invoices match this filter', sub: CREATE ? 'Raise an invoice for a customer or a won deal.' : 'Change the filter.' },
+        });
+        host.addEventListener('click', e => { const a = e.target.closest('[data-contact]'); if (a && !e.metaKey && !e.ctrlKey) { e.preventDefault(); B.openRecord(`/contacts/?id=${a.dataset.contact}`); } });
+    }
+    const BOARD = [
+        { id: 'draft', name: 'Draft', hex: '#a8adb4' }, { id: 'sent', name: 'Sent', hex: '#2fc6f6' }, { id: 'partially_paid', name: 'Partially paid', hex: '#ffa900' },
+        { id: 'overdue', name: 'Overdue', hex: '#ff5752' }, { id: 'paid', name: 'Paid', hex: '#7bd500' }, { id: 'cancelled', name: 'Cancelled', hex: '#6b7480' },
+    ];
+    function mountBoard(body) {
+        body.innerHTML = '<div class="b24-board-area"><div id="kb"></div></div>';
+        page.board = WSKanban.mount(body.querySelector('#kb'), {
+            columns: [], cards: [], emptyText: 'No invoices',
+            renderCard: c => { const r = c.inv; return `<div class="b24-kcard"><a class="t" href="/invoices/?id=${esc(r.id)}" data-open>${esc(r.invoice_number)}</a><div class="org">${esc(r.bill_to_name || '')}</div><div class="amt">${esc(L.money(r.total, r.currency))}</div><div class="meta">${r.due_date ? `<span class="crm-due ${L.invoiceStatus(r) === 'overdue' ? 'overdue' : ''}">Due ${esc(L.fmtDate(r.due_date, { short: true }))}</span>` : ''}${Number(r.balance) && L.invoiceStatus(r) !== 'draft' ? `<span>Balance ${esc(L.money(r.balance, r.currency))}</span>` : ''}</div></div>`; },
+            canDrag: c => MANAGE && L.invoiceStatus(c.inv) === 'draft',
+            onCardClick: (c, e) => { if (e) e.preventDefault(); openInvoice(c.inv.id); },
+            onMove: async ({ card, toColumnId }) => {
+                if (toColumnId !== 'sent') throw new Error('Drafts move to Sent here. Record payments and cancellations from the invoice.');
+                await setStatus(card.inv, 'sent', () => loadBoard());
+            },
+        });
+        loadBoard();
+    }
+    async function loadBoard() {
+        if (!page.board) return;
+        try {
+            const { data } = await C.q(scoped(sb.from('invoices').select(SELECT)).order('invoice_date', { ascending: false }).limit(1000));
+            const rows = data || [];
+            page.board.update({
+                columns: BOARD.map(col => { const inCol = rows.filter(r => L.invoiceStatus(r) === col.id); const cur = (inCol[0] || {}).currency || 'INR'; return { ...col, sum: L.money(inCol.filter(r => (r.currency || 'INR') === cur).reduce((a, r) => a + Number(r.total || 0), 0), cur, { whole: true }) }; }),
+                cards: rows.map((r, i) => ({ id: r.id, columnId: L.invoiceStatus(r), position: i, inv: r })),
+            });
+        } catch (e) { C.errorState(view.querySelector('#kb'), e, loadBoard); }
+    }
+    view.addEventListener('click', e => {
+        const a = e.target.closest('a[data-open]');
+        if (!a || e.metaKey || e.ctrlKey || e.shiftKey || page.mode !== 'list') return;
+        e.preventDefault();
+        const id = new URL(a.href, location.href).searchParams.get('id');
+        if (id) openInvoice(id);
+    });
 
     /* ------------------------------------------------------- status ops */
     async function setStatus(inv, status, after) {
@@ -210,7 +248,7 @@
 
     /* -------------------------------------------------------------- email */
     const EMAILABLE = ['sent', 'partially_paid', 'overdue', 'paid'];
-    function canEmail(inv) { return ctx.isManager && EMAILABLE.includes(L.invoiceStatus(inv)); }
+    function canEmail(inv) { return MANAGE && EMAILABLE.includes(L.invoiceStatus(inv)); }
     /** Where the server will send it: the bill-to snapshot, else the linked contact's email. */
     async function recipientFor(inv) {
         if (inv.bill_to_email) return inv.bill_to_email;
@@ -266,7 +304,7 @@
     }
     async function deleteDraft(inv) {
         if (!await C.confirm({ title: `Delete draft ${inv.invoice_number}?`, message: 'Only drafts can be deleted. The number is not reused.', okText: 'Delete draft', danger: true })) return;
-        try { const { data } = await C.q(sb.from('invoices').delete().eq('id', inv.id).select('id')); if (!data || !data.length) throw new Error('Only a draft you may manage can be deleted.'); C.toast('Draft deleted', 'ok'); go('/invoices/'); }
+        try { const { data } = await C.q(sb.from('invoices').delete().eq('id', inv.id).select('id')); if (!data || !data.length) throw new Error('Only a draft you may manage can be deleted.'); C.toast('Draft deleted', 'ok'); if (WSShell.inSlider) { WSShell.sliderMessage('deleted', { id: inv.id }); WSShell.closeSlider(); } else go('/invoices/'); }
         catch (e) { C.toast(e.message, 'bad'); }
     }
     async function duplicate(inv) {
@@ -317,7 +355,9 @@
         const today = L.todayIST();
 
         const form = C.form([
-            { name: 'contact_id', label: 'Customer (contact)', type: 'entity', entity: 'contact', placeholder: 'Search contacts', full: true, onChange: id => fillFromContact(id) },
+            ...(cols.full ? [{ name: 'subject', label: 'Subject', type: 'text', full: true, placeholder: 'What the invoice is for' }] : []),
+            { name: 'contact_id', label: 'Customer (contact)', type: 'entity', entity: 'contact', placeholder: 'Search contacts', onChange: id => fillFromContact(id) },
+            ...(cols.full ? [{ name: 'company_id', label: 'Customer (company)', type: 'entity', entity: 'company', placeholder: 'Search companies', onChange: id => fillFromCompany(id) }, { name: 'responsible_id', label: 'Responsible', type: 'people', none: null }] : []),
             { name: 'bill_to_name', label: 'Bill to', type: 'text', required: true, placeholder: 'Customer or company name' },
             { name: 'bill_to_email', label: 'Billing email', type: 'email' },
             { name: 'bill_to_address', label: 'Billing address', type: 'textarea', full: true, rows: 2 },
@@ -329,7 +369,7 @@
             { name: 'notes', label: 'Notes to customer', type: 'textarea', full: true, rows: 2 },
             { name: 'terms', label: 'Terms', type: 'textarea', full: true, rows: 2, placeholder: 'Payment terms, bank details…' },
         ], isNew
-            ? { invoice_date: today, due_date: L.addDays(today, 15), currency: 'INR', contact_id: prefill.contact_id || null, deal_id: prefill.deal_id || null, project_id: prefill.project_id || null }
+            ? { invoice_date: today, due_date: L.addDays(today, 15), currency: 'INR', contact_id: prefill.contact_id || null, deal_id: prefill.deal_id || null, project_id: prefill.project_id || null, company_id: prefill.company_id || null, responsible_id: me.id }
             : inv);
 
         // Pull customer details when a contact is picked.
@@ -340,6 +380,15 @@
             const c = r.data;
             const cur = form.get();
             if (!cur.bill_to_name) form.set({ bill_to_name: c.organization || c.full_name });
+            if (!cur.bill_to_email && c.email) form.set({ bill_to_email: c.email });
+            if (!cur.bill_to_address) form.set({ bill_to_address: [c.address, c.city, c.state, c.postal_code, c.country].filter(Boolean).join(', ') });
+        }
+        async function fillFromCompany(id) {
+            if (!id) return;
+            const r = await sb.from('crm_companies').select('title, email, address, city, state, country, postal_code').eq('id', id).maybeSingle();
+            if (!r.data) return;
+            const c = r.data, cur = form.get();
+            if (!cur.bill_to_name) form.set({ bill_to_name: c.title });
             if (!cur.bill_to_email && c.email) form.set({ bill_to_email: c.email });
             if (!cur.bill_to_address) form.set({ bill_to_address: [c.address, c.city, c.state, c.postal_code, c.country].filter(Boolean).join(', ') });
         }
@@ -354,6 +403,7 @@
             if (items.length === 1 && !first.description) { first.description = d.title; first.unit_price = Number(d.value) || 0; first.quantity = 1; renderItems(); }
         }
         if (isNew && prefill.contact_id) fillFromContact(prefill.contact_id);
+        if (isNew && prefill.company_id) fillFromCompany(prefill.company_id);
         if (isNew && prefill.deal_id) fillFromDeal(prefill.deal_id);
 
         // Line items
@@ -430,6 +480,7 @@
                             bill_to_name: v.bill_to_name.trim(), bill_to_email: v.bill_to_email || null, bill_to_address: v.bill_to_address || null,
                             invoice_date: v.invoice_date, due_date: v.due_date || null, currency: v.currency, notes: v.notes || null, terms: v.terms || null,
                         };
+                        if (cols.full) Object.assign(header, { company_id: v.company_id || null, subject: v.subject || null, responsible_id: v.responsible_id || me.id });
                         let id;
                         if (isNew) {
                             const r = await C.q(sb.from('invoices').insert({ ...header, status: 'draft', created_by: me.id }).select('id').single());
@@ -458,7 +509,7 @@
                         api.close();
                         C.toast(isNew ? 'Draft saved' : 'Invoice updated', 'ok');
                         resolve(id);
-                        go(`/invoices/?id=${id}`);
+                        if (page.mode === 'list') { refreshList(); openInvoice(id); } else go(`/invoices/?id=${id}`);
                         // Tell the user if the database disagreed with the preview (it is the authority).
                         setTimeout(async () => {
                             const r = await sb.from('invoices').select('total').eq('id', id).maybeSingle();
@@ -488,7 +539,10 @@
         if (!inv) { view.innerHTML = `<a class="crm-back" href="/invoices/">${C.icon('arrow')}All invoices</a>`; C.empty(view.appendChild(document.createElement('div')), 'Invoice not found', 'It may have been deleted, or you may not have access to it.'); return; }
         const status = L.invoiceStatus(inv);
         const acts = L.invoiceActions(status);
-        const canManage = ctx.isManager;
+        const canManage = MANAGE;
+        page.mode = 'record';
+        if (page.grid) { page.grid.destroy(); page.grid = null; }
+        if (page.board) { page.board.destroy(); page.board = null; }
         document.title = `${inv.invoice_number} · Invoices · WorkSuite`;
         WSShell.setCrumb(inv.invoice_number);
         if (edit && canManage && acts.edit) { C.setParam('edit', null, true); openEditor(inv, {}); }
@@ -498,21 +552,26 @@
         const links = [inv.contact_id ? C.entityChip('contact', inv.contact_id, inv.bill_to_name || 'Contact') : '', inv.deal_id ? C.entityChip('deal', inv.deal_id, 'Deal') : '', inv.project_id ? C.entityChip('project', inv.project_id, 'Project') : ''].filter(Boolean).join(' ');
 
         view.innerHTML = `
-            <a class="crm-back no-print" href="/invoices/" data-nav>${C.icon('arrow')}All invoices</a>
-            <div class="crm-record-head no-print">
-                <div class="titles">
-                    <h1>${esc(inv.invoice_number)}</h1>
-                    <div class="meta">${statusBadge(inv)}<span>${esc(inv.bill_to_name || '')}</span><span>Issued ${esc(L.fmtDate(inv.invoice_date))}</span>${inv.due_date ? `<span>Due ${esc(L.fmtDate(inv.due_date))}</span>` : ''}<span>Created by ${C.personHtml(inv.created_by)}</span></div>
-                </div>
-                <div class="actions">
-                    ${canManage && acts.edit ? `<button type="button" class="ws-btn" id="edit-btn">${C.icon('edit')}<span>Edit</span></button>` : ''}
-                    ${canManage && acts.send ? `<button type="button" class="ws-btn primary" id="send-btn">${C.icon('mail')}<span>Mark sent</span></button>` : ''}
-                    ${canManage && acts.pay ? `<button type="button" class="ws-btn primary" id="pay-btn">${C.icon('salary')}<span>Record payment</span></button>` : ''}
-                    ${canEmail(inv) ? `<button type="button" class="ws-btn" id="email-btn">${C.icon('mail')}<span>Email invoice</span></button>` : ''}
-                    <button type="button" class="ws-btn" id="print-btn">${C.icon('doc')}<span>Print / PDF</span></button>
-                    <button type="button" class="ws-btn icon" id="more-btn" aria-label="More actions">${C.icon('more')}</button>
+            <div class="b24-card-head no-print">
+                <h1 class="b24-card-title"><span class="t">${esc(inv.invoice_number)}</span></h1>
+                <div class="sub">${statusBadge(inv)} ${esc([inv.subject, inv.bill_to_name].filter(Boolean).join(' · '))} · Issued ${esc(L.fmtDate(inv.invoice_date))}${inv.due_date ? ` · Due ${esc(L.fmtDate(inv.due_date))}` : ''}</div>
+                <div class="acts">
+                    ${WSShell.inSlider ? '' : `<a class="b24-btn-card" href="/invoices/" data-nav>${C.icon('arrow')}<span>All invoices</span></a>`}
+                    ${canManage && acts.send ? `<button type="button" class="b24-btn-create" id="send-btn">Mark sent</button>` : ''}
+                    ${canManage && acts.pay ? `<button type="button" class="b24-btn-create" id="pay-btn">Record payment</button>` : ''}
+                    ${canManage && acts.edit ? `<button type="button" class="b24-btn-card" id="edit-btn">${C.icon('edit')}<span>Edit</span></button>` : ''}
+                    ${canEmail(inv) ? `<button type="button" class="b24-btn-card" id="email-btn">${C.icon('mail')}<span>Email</span></button>` : ''}
+                    <button type="button" class="b24-btn-card" id="print-btn">${C.icon('doc')}<span>Print / PDF</span></button>
+                    <button type="button" class="b24-btn-card round" id="more-btn" aria-label="More actions">${C.icon('more')}</button>
                 </div>
             </div>
+            <div class="b24-stages no-print" aria-label="Status">${(() => {
+                const steps = [['draft', 'Draft', '#a8adb4'], ['sent', 'Sent', '#2fc6f6'], ['partially_paid', 'Partially paid', '#ffa900'], ['paid', 'Paid', '#7bd500']];
+                const reached = { draft: 0, sent: 1, overdue: 1, partially_paid: 2, paid: 3, cancelled: -1 }[status];
+                const fin = status === 'overdue' ? ['Overdue', '#ff5752'] : status === 'cancelled' ? ['Cancelled', '#6b7480'] : null;
+                return steps.map(([k, label, hex], i) => `<button type="button" class="st${i <= reached ? ' on' : ''}${k === status ? ' cur' : ''}" style="--c:${hex}" disabled><span>${esc(label)}</span></button>`).join('') +
+                    (fin ? `<button type="button" class="st final on cur" style="--c:${fin[1]}" disabled><span>${esc(fin[0])}</span></button>` : '');
+            })()}</div>
             <div class="crm-detail">
                 <div class="ws-stack">
                     <div class="inv-sheet">
@@ -564,7 +623,8 @@
                 </div>
             </div>`;
 
-        view.querySelector('[data-nav]').addEventListener('click', e => { e.preventDefault(); go('/invoices/'); });
+        const navBtn = view.querySelector('[data-nav]');
+        if (navBtn) navBtn.addEventListener('click', e => { e.preventDefault(); showList(); history.pushState(null, '', '/invoices/'); });
         C.table(view.querySelector('#payments'), {
             rows: payments, sort: { key: 'paid_on', dir: 'desc' },
             columns: [

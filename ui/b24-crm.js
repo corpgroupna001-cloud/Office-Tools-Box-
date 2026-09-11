@@ -104,9 +104,12 @@
         if (levelCache[k]) return levelCache[k];
         levelCache[k] = (async () => {
             const ctx = await C().boot();
-            const actions = ['read', 'add', 'edit', 'delete', 'export', 'import'];
+            const actions = ['read', 'add', 'edit', 'delete', 'export', 'import', 'move_stage', 'automation'];
             const legacy = { read: 'all', add: entity === 'invoice' && !ctx.isManager ? 'none' : 'all', edit: ctx.isManager ? 'all' : 'own',
-                             delete: ctx.isManager ? 'all' : 'none', export: ctx.isManager ? 'all' : 'own', import: ctx.isManager ? 'all' : 'none', legacy: true };
+                             delete: ctx.isManager ? 'all' : 'none', export: ctx.isManager ? 'all' : 'own', import: ctx.isManager ? 'all' : 'none',
+                             move_stage: 'all', automation: ctx.isManager ? 'all' : 'none', legacy: true };
+            // Before the matrix, invoices were manager-only; employees saw only invoices they had raised.
+            if (entity === 'invoice' && !ctx.isManager) Object.assign(legacy, { read: 'own', add: 'none', edit: 'none', delete: 'none', export: 'own', import: 'none' });
             try {
                 const res = await Promise.all(actions.map(a => ctx.sb.rpc('ws_crm_levels', { p_entity: entity, p_action: a })));
                 // Anything but a levels object ({"*": "all", ...}) means the matrix is not there yet.

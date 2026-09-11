@@ -66,6 +66,7 @@
             { key: 'contacts',   title: 'Contacts',           href: '/contacts/',   icon: 'user',    menu: false, section: 'crm' },
             { key: 'companies',  title: 'Companies',          href: '/companies/',  icon: 'building', menu: false, section: 'crm' },
             { key: 'invoices',   title: 'Invoices',           href: '/invoices/',   icon: 'invoice', menu: false, section: 'crm' },
+            { key: 'crm-settings', title: 'CRM settings',     href: '/crm/settings', icon: 'gear',   menu: false, section: 'crm', role: 'manager' },
         ]},
         { label: 'Company', items: [
             { key: 'employees',  title: 'Employees',          href: '/employees/',  icon: 'users' },
@@ -94,6 +95,7 @@
             { key: 'companies', title: 'Companies', href: '/companies/' },
             { key: 'invoices', title: 'Invoices',  href: '/invoices/' },
             { key: 'crm',      title: 'Analytics', href: '/crm/' },
+            { key: 'crm-settings', title: 'Settings', href: '/crm/settings', role: 'manager' },
         ],
         tasks: [
             { key: 'tasks',    title: 'Tasks',     href: '/tasks/' },
@@ -146,6 +148,7 @@
         var p = location.pathname.replace(/\/+$/, '') || '/';
         if (p === '/' || p === '/index.html') return 'home';
         if (p.indexOf('/attendance') === 0) return location.hash === '#leave' || location.hash === '#holidays' ? 'leave' : 'attendance';
+        if (p.indexOf('/crm/settings') === 0) return 'crm-settings';
         var first = p.split('/')[1];
         var map = { chat: 'chat', messenger: 'chat', recordings: 'recordings', signature: 'signature', typingtest: 'typing', mcqquiz: 'quiz',
                     crm: 'crm', contacts: 'contacts', companies: 'companies', leads: 'leads', deals: 'deals', boards: 'boards', projects: 'projects', tasks: 'tasks',
