@@ -70,6 +70,7 @@
         ]},
         { label: 'Company', items: [
             { key: 'employees',  title: 'Employees',          href: '/employees/',  icon: 'users' },
+            { key: 'structure',  title: 'Company structure',  href: '/employees/structure/', icon: 'building', menu: false, section: 'employees' },
             { key: 'attendance', title: 'Time and attendance', href: '/attendance/', icon: 'attend' },
             { key: 'leave',      title: 'Leave and holidays', href: '/attendance/#leave', icon: 'leave', menu: false, section: 'attendance' },
         ]},
@@ -100,6 +101,10 @@
         tasks: [
             { key: 'tasks',    title: 'Tasks',     href: '/tasks/' },
             { key: 'projects', title: 'Projects',  href: '/projects/' },
+        ],
+        employees: [
+            { key: 'employees', title: 'Find employee',     href: '/employees/' },
+            { key: 'structure', title: 'Company structure', href: '/employees/structure/' },
         ],
         attendance: [
             { key: 'attendance', title: 'My attendance',      href: '/attendance/' },
@@ -149,6 +154,7 @@
         if (p === '/' || p === '/index.html') return 'home';
         if (p.indexOf('/attendance') === 0) return location.hash === '#leave' || location.hash === '#holidays' ? 'leave' : 'attendance';
         if (p.indexOf('/crm/settings') === 0) return 'crm-settings';
+        if (p.indexOf('/employees/structure') === 0) return 'structure';
         var first = p.split('/')[1];
         var map = { chat: 'chat', messenger: 'chat', recordings: 'recordings', signature: 'signature', typingtest: 'typing', mcqquiz: 'quiz',
                     crm: 'crm', contacts: 'contacts', companies: 'companies', leads: 'leads', deals: 'deals', boards: 'boards', projects: 'projects', tasks: 'tasks',

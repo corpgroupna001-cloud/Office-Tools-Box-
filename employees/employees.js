@@ -1,15 +1,18 @@
 /* ============================================================================
-   Employees — a directory over the existing `profiles` table (no second
-   employee database) with a profile page that gathers what WorkSuite already
-   knows about a person: employment details, shift, attendance and leave
-   (only for people allowed to see them), tasks, projects, calendar, activity,
-   and a Message button into Messenger.
+   Employees — "Find employee" in the Bitrix24 layout: a filterable list (or
+   tiles) over the existing `profiles` table, with presets for the active
+   team, people who have not signed in yet, who is online now and (for
+   managers) offboarded people. The profile page gathers what WorkSuite
+   already knows about a person: employment details, departments, shift,
+   attendance and leave (only for people allowed to see them), tasks,
+   projects, calendar, activity, and a Message button into Messenger.
 
    URLs:  /employees/            directory     /employees/?id=<uuid>   profile
+          /employees/?view=tiles                /employees/structure/   company structure
    ============================================================================ */
 (async function () {
     'use strict';
-    const C = window.WSCrm, L = C.L, esc = C.esc;
+    const C = window.WSCrm, L = C.L, esc = C.esc, B = window.WSB24;
     const view = document.getElementById('view');
     const ctx = await C.boot({ active: 'employees', crumb: 'Employees' });
     const sb = ctx.sb, me = ctx.user;
@@ -17,8 +20,11 @@
     const FULL = 'id, full_name, email, avatar_url, company, company2, department, job_title, employee_code, phone, joining_date, manager_id, status, is_wfh, shift_id, shift2_id, last_seen_at, app_role';
     const ROLE = { manager: { label: 'Manager', color: 'pending' }, admin: { label: 'Admin', color: 'leave' } };
     const EMP_STATUS = { active: { label: 'Active', color: 'present' }, inactive: { label: 'Offboarded', color: 'weekoff' } };
+    const ONLINE_MS = 2 * 60000;
     const isOnline = iso => window.wsIsOnlineByLastSeen ? window.wsIsOnlineByLastSeen(iso) : (iso && (Date.now() - new Date(iso).getTime()) < 60000);
     const nameOf = p => p.full_name || (p.email || '').split('@')[0] || 'Unknown';
+    const pref = (k, d) => { try { return localStorage.getItem(k) || d; } catch (e) { return d; } };
+    const setPref = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
     let people = ctx.people.slice();
     let shifts = null;
 
@@ -49,104 +55,165 @@
     function onlineDot(p, cls) { return `<span class="emp-online${isOnline(p.last_seen_at) ? ' on' : ''}${cls ? ' ' + cls : ''}" title="${isOnline(p.last_seen_at) ? 'Online' : 'Offline'}"></span>`; }
     function lastSeen(p) {
         if (isOnline(p.last_seen_at)) return 'Online now';
-        return p.last_seen_at ? `Last seen ${L.fmtRelative(p.last_seen_at)}` : 'Never signed in';
+        return p.last_seen_at ? `Last seen ${L.fmtRelative(p.last_seen_at)}` : 'Not signed in yet';
     }
+    const avatar = (p, cls) => `<span class="ws-avatar${cls ? ' ' + cls : ''}" style="position:relative">${p.avatar_url ? `<img src="${esc(p.avatar_url)}" alt="">` : esc(L.initials(nameOf(p)))}${onlineDot(p)}</span>`;
 
     /* ------------------------------------------------------------ routing */
-    function route() { const id = C.param('id'); return id ? showProfile(id) : showDirectory(); }
+    const page = { grid: null, filter: null, mode: 'list' };
+    function route() {
+        if (page.grid) { page.grid.destroy(); page.grid = null; }
+        if (page.filter) { page.filter.destroy(); page.filter = null; }
+        const id = C.param('id');
+        return id ? showProfile(id) : showDirectory();
+    }
     window.addEventListener('popstate', route);
     function go(url) { history.pushState(null, '', url); route(); }
 
     /* ---------------------------------------------------------- directory */
-    const dir = { q: '', company: '', dept: '', status: 'active', wfh: false, mode: (() => { try { return localStorage.getItem('ws-emp-view') || 'grid'; } catch (e) { return 'grid'; } })() };
-    function filtered() {
-        const q = dir.q.trim().toLowerCase();
-        return people.filter(p => {
-            const st = p.status || 'active';
-            if (dir.status && st !== dir.status) return false;
-            if (dir.company && p.company !== dir.company && p.company2 !== dir.company) return false;
-            if (dir.dept && (p.department || '') !== dir.dept) return false;
-            if (dir.wfh && !p.is_wfh) return false;
-            if (q && ![p.full_name, p.email, p.employee_code, p.department, p.job_title, p.company].some(v => v && String(v).toLowerCase().includes(q))) return false;
-            return true;
-        }).sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+    const quote = v => `"${String(v).replace(/["\\]/g, '\\$&')}"`;
+    function scoped(b) {
+        const v = page.filter ? page.filter.get().values : {};
+        // Offboarded people are for managers; everyone else always sees the active team.
+        const st = ctx.isManager ? (v.status || '') : 'active';
+        if (st === 'active') b = b.or('status.is.null,status.eq.active');
+        else if (st) b = b.eq('status', st);
+        return page.filter ? page.filter.apply(b, { searchColumns: ['full_name', 'email', 'employee_code', 'job_title', 'department'] }) : b;
+    }
+    function personMenu(p) {
+        const items = [{ label: 'Open profile', icon: 'user', onClick: () => go(`/employees/?id=${p.id}`) }];
+        if (p.id !== me.id) items.push({ label: 'Message', icon: 'chat', onClick: () => { location.href = `/chat/#thread=${p.id}`; } });
+        items.push({ label: 'Assign a task', icon: 'tasks', onClick: () => C.openTaskEditor({ defaults: { assignee_id: p.id } }) },
+                   { label: 'Schedule a meeting', icon: 'calendar', onClick: () => C.openEventEditor({ defaults: { participants: p.id === me.id ? [] : [p.id], title: p.id === me.id ? '' : `Meeting with ${nameOf(p)}` } }) });
+        if (p.email) items.push({ label: 'Send an email', icon: 'mail', onClick: () => { location.href = `mailto:${p.email}`; } });
+        if (ctx.isAdmin) items.push('sep', { label: 'Edit in the admin console', icon: 'shield', onClick: () => { location.href = '/wsm-admin'; } });
+        return items;
     }
     async function showDirectory() {
         document.title = 'Employees · WorkSuite';
         WSShell.setCrumb('Employees');
-        C.loading(view, 'Loading the team…');
-        await loadPeople();
-        const companies = Array.from(new Set([...(window.WSCompanies ? WSCompanies.companies : []), ...people.map(p => p.company).filter(Boolean)]));
-        const depts = Array.from(new Set(people.map(p => p.department).filter(Boolean))).sort();
-        view.innerHTML = `
-            <div class="ws-page-head">
-                <div><p class="ws-eyebrow">People</p><h1>Employees</h1><p>Everyone across the group, with their team, shift and what they are working on.</p></div>
-                <div class="actions">
-                    <div class="crm-seg" role="group" aria-label="View">
-                        <button type="button" data-mode="grid" class="${dir.mode === 'grid' ? 'on' : ''}">${C.icon('board', 'sm')}<span>Grid</span></button>
-                        <button type="button" data-mode="list" class="${dir.mode === 'list' ? 'on' : ''}">${C.icon('tasks', 'sm')}<span>List</span></button>
-                    </div>
-                    ${ctx.isAdmin ? `<a class="ws-btn" href="/wsm-admin">${C.icon('shield')}<span>Admin console</span></a>` : ''}
-                </div>
+        view.classList.remove('b24-legacy-panel');
+        let mode = pref('ws-emp-view', 'list');
+        if (['list', 'tiles'].includes(C.param('view'))) mode = C.param('view');
+        page.mode = mode === 'tiles' || mode === 'grid' ? 'tiles' : 'list';
+        const companies = Array.from(new Set([...(window.WSCompanies ? WSCompanies.companies : []), ...people.map(p => p.company).filter(Boolean)])).sort();
+        const depts = Array.from(new Set(people.map(p => (p.department || '').trim()).filter(Boolean))).sort();
+        view.innerHTML = B.titleBar({ title: 'Employees', createLabel: ctx.isAdmin ? 'Invite' : '' })
+            + `<div class="b24-toolbar emp-toolbar">
+                <div class="b24-views" role="tablist" aria-label="View"><button type="button" role="tab" data-view="list">List</button><button type="button" role="tab" data-view="tiles">Tiles</button></div>
+                <span class="grow"></span>
+                <button type="button" class="emp-online-chip" data-online title="Show who is online"><i></i><span data-online-n>…</span></button>
+                <span class="crm-count" data-total></span>
             </div>
-            <div class="crm-toolbar">
-                <div class="crm-search grow">${C.icon('search', 'sm')}<input type="search" id="q" placeholder="Search name, email, code, department, title…" aria-label="Search employees"></div>
-                <select id="f-company" aria-label="Company"><option value="">All companies</option>${companies.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>
-                <select id="f-dept" aria-label="Department"><option value="">All departments</option>${depts.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('')}</select>
-                <select id="f-status" aria-label="Status"><option value="active">Active</option>${ctx.isManager ? '<option value="inactive">Offboarded</option><option value="">All</option>' : ''}</select>
-                <label class="crm-check" style="min-height:38px"><input type="checkbox" id="f-wfh"> WFH only</label>
-                <span class="crm-count" id="count"></span>
-            </div>
-            <div id="list"></div>`;
-        view.querySelector('#q').value = dir.q; view.querySelector('#f-company').value = dir.company; view.querySelector('#f-dept').value = dir.dept;
-        view.querySelector('#f-status').value = ctx.isManager ? dir.status : 'active'; view.querySelector('#f-wfh').checked = dir.wfh;
-        const listEl = view.querySelector('#list');
-        let tbl = null;
-        function paint() {
-            const rows = filtered();
-            view.querySelector('#count').textContent = `${rows.length} ${rows.length === 1 ? 'person' : 'people'}`;
-            if (dir.mode === 'grid') {
-                tbl = null;
-                if (!rows.length) return C.empty(listEl, 'No one matches', 'Try a different search or clear the filters.');
-                listEl.innerHTML = `<div class="emp-grid">${rows.map(p => `
-                    <a class="ws-card emp-card" href="/employees/?id=${esc(p.id)}" data-emp="${esc(p.id)}">
-                        <span class="ws-avatar lg">${p.avatar_url ? `<img src="${esc(p.avatar_url)}" alt="">` : esc(L.initials(nameOf(p)))}${onlineDot(p)}</span>
-                        <span class="info"><b>${esc(nameOf(p))}</b><span>${esc([p.job_title, p.department].filter(Boolean).join(' · ') || (p.email || ''))}</span><span>${esc(p.company || 'Company not set')}${p.status === 'inactive' ? ' · Offboarded' : ''}</span></span>
-                    </a>`).join('')}</div>`;
-                listEl.querySelectorAll('[data-emp]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); go(`/employees/?id=${a.dataset.emp}`); }));
-                return;
-            }
-            if (!listEl.querySelector('.ws-card.flush')) { listEl.innerHTML = '<div class="ws-card flush"><div id="table"></div></div>'; tbl = null; }
-            const tableEl = listEl.querySelector('#table');
-            const columns = [
-                { key: 'full_name', label: 'Name', lead: true, value: p => nameOf(p), render: p => `<div class="who"><span class="ws-avatar" style="position:relative">${p.avatar_url ? `<img src="${esc(p.avatar_url)}" alt="">` : esc(L.initials(nameOf(p)))}${onlineDot(p)}</span><div><span class="primary-text">${esc(nameOf(p))}</span><span class="sub">${esc(p.email || '')}</span></div></div>` },
-                { key: 'employee_code', label: 'Code', hideMobile: true, render: p => esc(p.employee_code || '—') },
-                { key: 'department', label: 'Department', render: p => esc(p.department || '—') },
-                { key: 'job_title', label: 'Job title', render: p => esc(p.job_title || '—') },
-                { key: 'company', label: 'Company', render: p => esc(p.company || '—') + (p.company2 ? `<span class="sub">also ${esc(p.company2)}</span>` : '') },
-                { key: 'manager_id', label: 'Manager', value: p => C.personName(p.manager_id, '—'), render: p => p.manager_id ? C.personHtml(p.manager_id, { link: false }) : '<span class="muted">—</span>' },
-                { key: 'status', label: 'Status', render: p => C.statusBadge(EMP_STATUS, p.status || 'active') + (p.is_wfh ? ' ' + C.badge('info', 'WFH') : '') },
-                { key: 'joining_date', label: 'Joined', hideMobile: true, render: p => esc(L.fmtDate(p.joining_date) || '—') },
-                { key: 'last_seen_at', label: 'Online', render: p => isOnline(p.last_seen_at) ? C.badge('present', 'Online') : `<span class="muted">${esc(p.last_seen_at ? L.fmtRelative(p.last_seen_at) : '—')}</span>` },
-            ];
-            if (!tbl) tbl = C.table(tableEl, { columns, rows, sort: { key: 'full_name', dir: 'asc' }, pageSize: 50, onRow: p => go(`/employees/?id=${p.id}`), empty: { title: 'No one matches', sub: 'Try a different search or clear the filters.' } });
-            else tbl.update(rows);
+            <div id="body"></div>`;
+        page.filter = WSFilter.mount(view.querySelector('[data-filter]'), {
+            id: 'employees', me: me.id, defaultPreset: 'active', placeholder: 'Find employee',
+            presets: [
+                { key: 'active', title: 'Employees', values: {} },
+                { key: 'invited', title: 'Not signed in yet', values: { invited: true } },
+                { key: 'online', title: 'Online now', values: { online: true } },
+                { key: 'wfh', title: 'Working from home', values: { wfh: true } },
+                ...(ctx.isManager ? [{ key: 'offboarded', title: 'Offboarded', values: { status: 'inactive' } }] : []),
+            ],
+            fields: [
+                { key: 'company', title: 'Company', type: 'select', options: companies.map(c => ({ value: c, label: c })), apply: (b, v) => b.or(`company.eq.${quote(v)},company2.eq.${quote(v)}`) },
+                { key: 'department', title: 'Department', type: 'select', options: depts.map(d => ({ value: d, label: d })) },
+                { key: 'job_title', title: 'Position', type: 'text' },
+                { key: 'manager', title: 'Reports to', type: 'user', column: 'manager_id', options: B.peopleOptions(), none: false },
+                ...(ctx.isManager ? [{ key: 'status', title: 'Status', type: 'select', options: [{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Offboarded' }], apply: b => b }] : []),
+                { key: 'wfh', title: 'Works from home', type: 'check', column: 'is_wfh' },
+                { key: 'invited', title: 'Not signed in yet', type: 'check', apply: b => b.is('last_seen_at', null) },
+                { key: 'online', title: 'Online now', type: 'check', apply: b => b.gte('last_seen_at', new Date(Date.now() - ONLINE_MS).toISOString()) },
+                { key: 'joined', title: 'Joined', type: 'date', column: 'joining_date' },
+            ],
+            onChange: () => mountBody(),
+        });
+        const inv = view.querySelector('[data-create]');
+        if (inv) inv.addEventListener('click', () => { location.href = '/wsm-admin'; });
+        view.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => { page.mode = b.dataset.view; setPref('ws-emp-view', page.mode); C.setParam('view', null, true); mountBody(); }));
+        view.querySelector('[data-online]').addEventListener('click', () => page.filter.set({ online: true }, 'online'));
+        mountBody();
+        countOnline();
+    }
+    async function countOnline() {
+        const el = view.querySelector('[data-online-n]'); if (!el) return;
+        try {
+            const r = await sb.from('profiles').select('id', { count: 'exact', head: true }).gte('last_seen_at', new Date(Date.now() - ONLINE_MS).toISOString()).or('status.is.null,status.eq.active');
+            el.textContent = `${r.count || 0} online now`;
+        } catch (e) { el.textContent = 'Online now'; }
+    }
+    function mountBody() {
+        const body = view.querySelector('#body'); if (!body) return;
+        if (page.grid) { page.grid.destroy(); page.grid = null; }
+        body.innerHTML = '';
+        view.querySelectorAll('[data-view]').forEach(b => { b.classList.toggle('on', b.dataset.view === page.mode); b.setAttribute('aria-selected', b.dataset.view === page.mode ? 'true' : 'false'); });
+        const host = document.createElement('div'); body.appendChild(host);
+        const total = view.querySelector('[data-total]');
+        C.q(scoped(sb.from('profiles').select('id', { count: 'exact', head: true }))).then(r => { if (total) total.textContent = `${r.count || 0} ${r.count === 1 ? 'person' : 'people'}`; }).catch(() => {});
+        if (page.mode === 'tiles') return mountTiles(host);
+        page.grid = WSGrid.mount(host, {
+            id: 'employees', sort: { key: 'full_name', dir: 'asc' },
+            columns: [
+                { key: 'full_name', title: 'Name', width: 290, render: p => `<span class="b24-who">${avatar(p)}<span><a href="/employees/?id=${esc(p.id)}" data-emp="${esc(p.id)}">${esc(nameOf(p))}</a><span class="sub">${esc(p.email || '')}</span></span></span>` },
+                { key: 'job_title', title: 'Position', width: 170, render: p => esc(p.job_title || '') },
+                { key: 'department', title: 'Department', width: 160, render: p => esc(p.department || '') },
+                { key: 'company', title: 'Company', width: 190, render: p => esc(p.company || '') + (p.company2 ? `<span class="sub">also ${esc(p.company2)}</span>` : '') },
+                { key: 'phone', title: 'Phone', width: 140, default: false, render: p => (p.phone ? `<a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : '') },
+                { key: 'email', title: 'Email', width: 210, default: false, render: p => (p.email ? `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : '') },
+                { key: 'manager_id', title: 'Reports to', width: 180, render: p => (p.manager_id ? C.personHtml(p.manager_id, { link: false }) : '') },
+                { key: 'employee_code', title: 'Code', width: 100, default: false, render: p => esc(p.employee_code || '') },
+                { key: 'status', title: 'Status', width: 140, render: p => C.statusBadge(EMP_STATUS, p.status || 'active') + (p.is_wfh ? ' ' + C.badge('info', 'WFH') : '') },
+                { key: 'joining_date', title: 'Joined', width: 120, default: false, render: p => esc(L.fmtDate(p.joining_date) || '') },
+                { key: 'last_seen_at', title: 'Last seen', width: 150, render: p => (isOnline(p.last_seen_at) ? C.badge('present', 'Online') : `<span class="muted">${esc(p.last_seen_at ? L.fmtRelative(p.last_seen_at) : 'Not signed in yet')}</span>`) },
+            ],
+            load: async ({ offset, limit, sort }) => {
+                let b = scoped(sb.from('profiles').select(FULL));
+                b = sort ? b.order(sort.key, { ascending: sort.dir === 'asc', nullsFirst: false }) : b.order('full_name');
+                return (await C.q(b.range(offset, offset + limit - 1))).data || [];
+            },
+            count: async () => (await C.q(scoped(sb.from('profiles').select('id', { count: 'exact', head: true })))).count || 0,
+            onOpen: p => go(`/employees/?id=${p.id}`),
+            rowMenu: personMenu,
+            empty: { title: 'No one matches', sub: 'Try another name, or clear the filter.' },
+        });
+        host.addEventListener('click', e => {
+            const a = e.target.closest('a[data-emp]'); if (!a || e.metaKey || e.ctrlKey) return;
+            e.preventDefault(); go(`/employees/?id=${a.dataset.emp}`);
+        });
+    }
+    async function mountTiles(host) {
+        const PAGE = 60;
+        let offset = 0, rows = [];
+        host.innerHTML = '<div data-empty hidden></div><div class="b24-tiles emp-tiles" data-cards></div><div class="dv-more" data-more hidden><button type="button" class="ws-btn">Show more</button></div>';
+        const cards = host.querySelector('[data-cards]'), more = host.querySelector('[data-more]'), empty = host.querySelector('[data-empty]');
+        const tile = p => `<article class="b24-tile emp-tile" data-id="${esc(p.id)}">
+                <div class="top">${avatar(p, 'lg')}<div class="t"><a href="/employees/?id=${esc(p.id)}" data-emp="${esc(p.id)}">${esc(nameOf(p))}</a><span>${esc(p.job_title || p.email || '')}</span></div><button type="button" class="g-rowmenu" data-tile-menu aria-label="Actions for ${esc(nameOf(p))}">☰</button></div>
+                <div class="emp-meta"><span>${esc(p.department || '')}</span><span>${esc(p.company || '')}</span></div>
+                <div class="foot">${C.statusBadge(EMP_STATUS, p.status || 'active')}${p.is_wfh ? C.badge('info', 'WFH') : ''}<span class="grow"></span><span class="muted" style="font-size:12px">${esc(lastSeen(p))}</span></div>
+            </article>`;
+        async function next() {
+            const b = scoped(sb.from('profiles').select(FULL)).order('full_name');
+            const data = (await C.q(b.range(offset, offset + PAGE))).data || [];
+            const got = data.slice(0, PAGE); offset += got.length; rows = rows.concat(got);
+            cards.insertAdjacentHTML('beforeend', got.map(tile).join(''));
+            more.hidden = data.length <= PAGE;
+            if (!rows.length) { empty.hidden = false; C.empty(empty, 'No one matches', 'Try another name, or clear the filter.'); }
         }
-        view.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
-            dir.mode = b.dataset.mode; try { localStorage.setItem('ws-emp-view', dir.mode); } catch (e) { /* fine */ }
-            view.querySelectorAll('[data-mode]').forEach(x => x.classList.toggle('on', x === b));
-            listEl.innerHTML = ''; paint();
-        }));
-        view.querySelector('#q').addEventListener('input', C.debounce(e => { dir.q = e.target.value; paint(); }, 150));
-        view.querySelector('#f-company').addEventListener('change', e => { dir.company = e.target.value; paint(); });
-        view.querySelector('#f-dept').addEventListener('change', e => { dir.dept = e.target.value; paint(); });
-        view.querySelector('#f-status').addEventListener('change', e => { dir.status = e.target.value; paint(); });
-        view.querySelector('#f-wfh').addEventListener('change', e => { dir.wfh = e.target.checked; paint(); });
-        paint();
+        try { await next(); } catch (e) { empty.hidden = false; return C.errorState(empty, e, () => mountTiles(host)); }
+        more.querySelector('button').addEventListener('click', () => next().catch(e => C.toast(e.message, 'bad')));
+        cards.addEventListener('click', e => {
+            const t = e.target.closest('.emp-tile'); if (!t) return;
+            const p = rows.find(r => r.id === t.dataset.id); if (!p) return;
+            const m = e.target.closest('[data-tile-menu]');
+            if (m) return C.menu(m, personMenu(p));
+            if (e.target.closest('a') && (e.metaKey || e.ctrlKey)) return;
+            e.preventDefault(); go(`/employees/?id=${p.id}`);
+        });
     }
 
     /* ------------------------------------------------------------ profile */
     async function showProfile(id) {
+        view.classList.add('b24-legacy-panel');
         C.loading(view, 'Loading profile…');
         let p;
         try {
@@ -202,6 +269,7 @@
                                 <div><dt>Employee code</dt><dd>${esc(p.employee_code || '—')}</dd></div>
                                 <div><dt>Company</dt><dd>${esc(p.company || '—')}${p.company2 ? `<br><span class="muted">Secondary: ${esc(p.company2)}</span>` : ''}</dd></div>
                                 <div><dt>Department</dt><dd>${esc(p.department || '—')}</dd></div>
+                                <div id="emp-depts-row" hidden><dt>In the company structure</dt><dd id="emp-depts"></dd></div>
                                 <div><dt>Job title</dt><dd>${esc(p.job_title || '—')}</dd></div>
                                 <div><dt>Reports to</dt><dd>${p.manager_id ? C.personHtml(p.manager_id) : '—'}</dd></div>
                                 <div><dt>Joining date</dt><dd>${esc(L.fmtDate(p.joining_date) || '—')}</dd></div>
@@ -238,6 +306,14 @@
         const lk = await C.lookups();
         const taskStatus = Object.fromEntries(lk.taskStatuses.map(s => [s.key, s]));
 
+        // Departments from the company structure (once supabase-b24-migration.sql is in).
+        (async () => {
+            const r = await sb.from('department_members').select('role, position, department:departments(id, name)').eq('user_id', p.id);
+            const rows = r.error ? [] : (r.data || []).filter(x => x.department);
+            const row = view.querySelector('#emp-depts-row'); if (!row || !rows.length) return;
+            row.hidden = false;
+            view.querySelector('#emp-depts').innerHTML = rows.map(x => `<a href="/employees/structure/?dept=${esc(x.department.id)}">${esc(x.department.name)}</a>${x.role !== 'member' ? ` <span class="muted">(${x.role === 'head' ? 'head' : 'deputy'})</span>` : ''}${x.position ? ` <span class="muted">· ${esc(x.position)}</span>` : ''}`).join('<br>');
+        })();
         // Overview widgets
         (async () => {
             const el = view.querySelector('#ov-tasks');

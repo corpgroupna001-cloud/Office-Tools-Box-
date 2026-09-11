@@ -63,12 +63,14 @@
     }
     const monthStart = d => d.slice(0, 7) + '-01';
     const weekStart = d => L.addDays(d, -(L.isoWeekday(d) - 1));
+    const narrow = () => window.matchMedia('(max-width: 640px)').matches;        // phones: Week shows three days
+    const weekDays = () => (narrow() ? [0, 1, 2].map(i => L.addDays(state.date, i)) : Array.from({ length: 7 }, (_, i) => L.addDays(weekStart(state.date), i)));
     function shiftMonth(d, n) { const [y, m] = d.split('-').map(Number); return new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 10); }
     /** Visible range, inclusive dates. Month includes the leading/trailing days in the grid. */
     function visibleRange() {
         const d = state.date;
         if (state.view === 'month') { const s = weekStart(monthStart(d)); return { from: s, to: L.addDays(s, 41) }; }
-        if (state.view === 'week') { const s = weekStart(d); return { from: s, to: L.addDays(s, 6) }; }
+        if (state.view === 'week') { const w = weekDays(); return { from: w[0], to: w[w.length - 1] }; }
         if (state.view === 'day') return { from: d, to: d };
         return { from: d, to: L.addDays(d, 29) };
     }
@@ -232,7 +234,7 @@
         if (filterState().values.invites && state.view === 'schedule') return 'Invitations';
         if (state.view === 'month') return `${MONTHS[m - 1]} ${y}`;
         if (state.view === 'week') {
-            const s = weekStart(d), e = L.addDays(s, 6);
+            const w = weekDays(), s = w[0], e = w[w.length - 1];
             return s.slice(0, 7) === e.slice(0, 7) ? `${Number(s.slice(8))} – ${L.fmtDate(e)}` : `${L.fmtDate(s, { short: true })} – ${L.fmtDate(e)}`;
         }
         if (state.view === 'day') return `${DAY_NAMES[L.isoWeekday(d) - 1]}, ${L.fmtDate(d)}`;
@@ -329,7 +331,7 @@
     function step(n) {
         if (filterState().values.invites) filter.set({}, 'all');
         if (state.view === 'month') setDate(shiftMonth(state.date, n));
-        else if (state.view === 'week') setDate(L.addDays(state.date, 7 * n));
+        else if (state.view === 'week') setDate(L.addDays(state.date, (narrow() ? 3 : 7) * n));
         else if (state.view === 'day') setDate(L.addDays(state.date, n));
         else setDate(L.addDays(state.date, 30 * n));
     }
@@ -365,7 +367,7 @@
         let html = state.eventsMissing ? C.migrationNoticeHtml() : '';
         if (state.view === 'month') html += renderMonth(items);
         else if (state.view === 'schedule') html += renderSchedule(items);
-        else html += renderWeek(items, state.view === 'day' ? [state.date] : Array.from({ length: 7 }, (_, i) => L.addDays(weekStart(state.date), i)));
+        else html += renderWeek(items, state.view === 'day' ? [state.date] : weekDays());
         body.innerHTML = html;
         const sc = body.querySelector('.cal-scroll');
         if (sc) { fitScroll(); sc.scrollTop = keep != null ? keep : 8 * HOUR_PX - 8; }
@@ -390,7 +392,7 @@
         const el = view.querySelector('[data-mini]'); if (!el) return;
         const first = monthStart(state.mini || state.date), start = weekStart(first), mon = first.slice(0, 7), today = L.todayIST();
         const [y, m] = first.split('-').map(Number);
-        const sel = state.view === 'week' ? { from: weekStart(state.date), to: L.addDays(weekStart(state.date), 6) } : { from: state.date, to: state.date };
+        const sel = state.view === 'week' ? { from: weekDays()[0], to: weekDays()[weekDays().length - 1] } : { from: state.date, to: state.date };
         const busy = new Set();
         state.items.forEach(it => { if (it.kind === 'event' && calOn(it)) for (let d = it.from, i = 0; d <= it.to && i < 42; d = L.addDays(d, 1), i++) busy.add(d); });
         let cells = '';
@@ -443,8 +445,9 @@
             const slots = Array.from({ length: 24 }, (_, hh) => `<div class="hour${hh < WORK_FROM || hh >= WORK_TO || L.isoWeekday(d) === 7 ? ' off' : ''}" data-slot="${d}T${String(hh).padStart(2, '0')}:00"></div>`).join('');
             return `<div class="col" data-date="${d}">${slots}${evs}${d === today ? `<div class="nowline" style="top:${nowMin / 60 * HOUR_PX}px"></div>` : ''}</div>`;
         }).join('');
-        return `<div class="cal-week${days.length === 1 ? ' day' : ''}">${head}${allday}</div>
-            <div class="cal-scroll"><div class="cal-week${days.length === 1 ? ' day' : ''}" style="border-top:0;border-radius:0 0 8px 8px">${gutter}${cols}</div></div>`;
+        const cls = days.length === 1 ? ' day' : days.length === 3 ? ' three' : '';
+        return `<div class="cal-week${cls}">${head}${allday}</div>
+            <div class="cal-scroll"><div class="cal-week${cls}" style="border-top:0;border-radius:0 0 8px 8px">${gutter}${cols}</div></div>`;
     }
     function renderSchedule(items) {
         const today = L.todayIST(), inv = !!filterState().values.invites;
