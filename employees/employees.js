@@ -67,6 +67,7 @@
         if (page.grid) { page.grid.destroy(); page.grid = null; }
         if (page.filter) { page.filter.destroy(); page.filter = null; }
         const id = C.param('id');
+        if (!id && C.param('invite')) return showInvite();
         return id ? showProfile(id) : showDirectory();
     }
     window.addEventListener('popstate', route);
@@ -100,7 +101,7 @@
         page.mode = mode === 'tiles' || mode === 'grid' ? 'tiles' : 'list';
         const companies = Array.from(new Set([...(window.WSCompanies ? WSCompanies.companies : []), ...people.map(p => p.company).filter(Boolean)])).sort();
         const depts = Array.from(new Set(people.map(p => (p.department || '').trim()).filter(Boolean))).sort();
-        view.innerHTML = B.titleBar({ title: 'Employees', createLabel: ctx.isAdmin ? 'Invite' : '' })
+        view.innerHTML = B.titleBar({ title: 'Employees', createLabel: ctx.isManager ? 'Invite' : '' })
             + `<div class="b24-toolbar emp-toolbar">
                 <div class="b24-views" role="tablist" aria-label="View"><button type="button" role="tab" data-view="list">List</button><button type="button" role="tab" data-view="tiles">Tiles</button></div>
                 <span class="grow"></span>
@@ -112,7 +113,7 @@
             id: 'employees', me: me.id, defaultPreset: 'active', placeholder: 'Find employee',
             presets: [
                 { key: 'active', title: 'Employees', values: {} },
-                { key: 'invited', title: 'Not signed in yet', values: { invited: true } },
+                { key: 'invited', title: 'Invited', values: { invited: true } },
                 { key: 'online', title: 'Online now', values: { online: true } },
                 { key: 'wfh', title: 'Working from home', values: { wfh: true } },
                 ...(ctx.isManager ? [{ key: 'offboarded', title: 'Offboarded', values: { status: 'inactive' } }] : []),
@@ -131,7 +132,7 @@
             onChange: () => mountBody(),
         });
         const inv = view.querySelector('[data-create]');
-        if (inv) inv.addEventListener('click', () => { location.href = '/wsm-admin'; });
+        if (inv) inv.addEventListener('click', () => B.openRecord('/employees/?invite=1', () => { if (page.grid) page.grid.reload(); }));
         view.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => { page.mode = b.dataset.view; setPref('ws-emp-view', page.mode); C.setParam('view', null, true); mountBody(); }));
         view.querySelector('[data-online]').addEventListener('click', () => page.filter.set({ online: true }, 'online'));
         mountBody();
@@ -156,17 +157,17 @@
         page.grid = WSGrid.mount(host, {
             id: 'employees', sort: { key: 'full_name', dir: 'asc' },
             columns: [
-                { key: 'full_name', title: 'Name', width: 290, render: p => `<span class="b24-who">${avatar(p)}<span><a href="/employees/?id=${esc(p.id)}" data-emp="${esc(p.id)}">${esc(nameOf(p))}</a><span class="sub">${esc(p.email || '')}</span></span></span>` },
+                { key: 'full_name', title: 'Full name', width: 270, render: p => `<span class="b24-who">${avatar(p)}<span><a href="/employees/?id=${esc(p.id)}" data-emp="${esc(p.id)}">${esc(nameOf(p))}</a><span class="sub">${esc(p.job_title || '')}</span></span></span>` },
+                { key: 'department', title: 'Department', width: 170, render: p => esc(p.department || '') },
+                { key: 'email', title: 'Email', width: 220, render: p => (p.email ? `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : '') },
+                { key: 'phone', title: 'Mobile', width: 140, render: p => (p.phone ? `<a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : '') },
+                { key: 'last_seen_at', title: 'Date last active', width: 160, render: p => (isOnline(p.last_seen_at) ? C.badge('present', 'Online') : `<span class="muted">${esc(p.last_seen_at ? L.fmtRelative(p.last_seen_at) : 'Not signed in yet')}</span>`) },
                 { key: 'job_title', title: 'Position', width: 170, render: p => esc(p.job_title || '') },
-                { key: 'department', title: 'Department', width: 160, render: p => esc(p.department || '') },
                 { key: 'company', title: 'Company', width: 190, render: p => esc(p.company || '') + (p.company2 ? `<span class="sub">also ${esc(p.company2)}</span>` : '') },
-                { key: 'phone', title: 'Phone', width: 140, default: false, render: p => (p.phone ? `<a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : '') },
-                { key: 'email', title: 'Email', width: 210, default: false, render: p => (p.email ? `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : '') },
-                { key: 'manager_id', title: 'Reports to', width: 180, render: p => (p.manager_id ? C.personHtml(p.manager_id, { link: false }) : '') },
+                { key: 'manager_id', title: 'Reports to', width: 180, default: false, render: p => (p.manager_id ? C.personHtml(p.manager_id, { link: false }) : '') },
                 { key: 'employee_code', title: 'Code', width: 100, default: false, render: p => esc(p.employee_code || '') },
-                { key: 'status', title: 'Status', width: 140, render: p => C.statusBadge(EMP_STATUS, p.status || 'active') + (p.is_wfh ? ' ' + C.badge('info', 'WFH') : '') },
+                { key: 'status', title: 'Status', width: 140, default: false, render: p => C.statusBadge(EMP_STATUS, p.status || 'active') + (p.is_wfh ? ' ' + C.badge('info', 'WFH') : '') },
                 { key: 'joining_date', title: 'Joined', width: 120, default: false, render: p => esc(L.fmtDate(p.joining_date) || '') },
-                { key: 'last_seen_at', title: 'Last seen', width: 150, render: p => (isOnline(p.last_seen_at) ? C.badge('present', 'Online') : `<span class="muted">${esc(p.last_seen_at ? L.fmtRelative(p.last_seen_at) : 'Not signed in yet')}</span>`) },
             ],
             load: async ({ offset, limit, sort }) => {
                 let b = scoped(sb.from('profiles').select(FULL));
@@ -211,6 +212,114 @@
             if (e.target.closest('a') && (e.metaKey || e.ctrlKey)) return;
             e.preventDefault(); go(`/employees/?id=${p.id}`);
         });
+    }
+
+    /* ------------------------------------------------------------- invite */
+    // Companies with a mailbox (lib/mailer.js), which are also the ones people
+    // can sign up to. A manager invites to their own; an admin to any.
+    const INVITE_COMPANIES = ['Nova Sportsmart Private Limited', 'Protathlitis Sportsmart LLP', 'Jobways Point LLP', 'Genie Lamp Private Limited'];
+    const INVITE_MAX = 10;                                   // lib/invite-mail.js MAX
+    function showInvite() {
+        document.title = 'Invite people · WorkSuite';
+        WSShell.setCrumb('Invite people');
+        view.classList.remove('b24-legacy-panel');
+        if (!ctx.isManager) return C.empty(view, 'Only managers invite people', 'Ask your manager or an administrator to invite a colleague.');
+        const mine = [me.company, me.company2].filter(Boolean);
+        const companies = INVITE_COMPANIES.filter(c => ctx.isAdmin || mine.includes(c));
+        const modes = [
+            { key: 'link', label: 'Invite via link', icon: 'link' },
+            { key: 'email', label: 'Invite by email', icon: 'mail' },
+            ...(ctx.isAdmin ? [{ key: 'create', label: 'Create user', icon: 'user' }] : []),
+        ];
+        let mode = modes.some(m => m.key === C.param('mode')) ? C.param('mode') : 'link';
+        let company = companies.includes(me.company) ? me.company : (companies[0] || '');
+        const linkFor = c => `${location.origin}/?${new URLSearchParams({ signup: '1', company: c })}`;
+        view.innerHTML = `<div class="b24-new b24-invite">
+                <div class="b24-invite-head"><h1 class="b24-title">Invite people</h1></div>
+                <div class="b24-invite-body">
+                    <nav class="b24-invite-nav" role="tablist" aria-label="How to invite">${modes.map(m => `<button type="button" role="tab" data-mode="${m.key}">${C.icon(m.icon)}<span>${esc(m.label)}</span></button>`).join('')}</nav>
+                    <section class="b24-invite-pane" role="tabpanel" data-pane></section>
+                </div>
+                <div class="b24-new-foot"><button type="button" class="ws-btn" data-close>Close</button></div>
+            </div>`;
+        const root = view.querySelector('.b24-invite');
+        const companyField = () => (companies.length > 1
+            ? `<label class="b24-invite-field"><span>Company</span><select data-company>${companies.map(c => `<option value="${esc(c)}"${c === company ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>`
+            : `<p class="b24-invite-co">Company: <b>${esc(company)}</b></p>`);
+        function paint() {
+            root.querySelectorAll('[data-mode]').forEach(b => { const on = b.dataset.mode === mode; b.classList.toggle('on', on); b.setAttribute('aria-selected', on ? 'true' : 'false'); });
+            const pane = root.querySelector('[data-pane]');
+            if (mode === 'create') {
+                pane.innerHTML = `<h2>Create user</h2>
+                    <p class="b24-invite-sub">Add an employee with their details straight away. They get an email to set their own password, so no password is shared with anyone.</p>
+                    <a class="ws-btn primary" href="/wsm-admin" target="_blank" rel="noopener">${C.icon('user')}<span>Open the admin console</span></a>`;
+                return;
+            }
+            if (!companies.length) return C.empty(pane, 'No company to invite to', 'Invitations work for companies that have email set up. Ask an administrator to invite people.');
+            if (mode === 'link') {
+                pane.innerHTML = `<h2>Invite via link</h2>
+                    <p class="b24-invite-sub">Share this link with colleagues any way you like. It opens the WorkSuite sign-up page for the company below; they choose a password and confirm their email with a code.</p>
+                    ${companyField()}
+                    <div class="b24-invite-link"><input type="text" readonly data-link value="${esc(linkFor(company))}" aria-label="Invitation link"><button type="button" class="ws-btn primary" data-copy>${C.icon('link')}<span>Copy link</span></button></div>
+                    <p class="b24-invite-note">New accounts start as employees. They show under Invited until they first sign in.</p>`;
+            } else {
+                pane.innerHTML = `<h2>Invite by email</h2>
+                    <p class="b24-invite-sub">Each person gets an invitation from <b data-co>${esc(company)}</b> with a sign-up link. People who already have an account are skipped.</p>
+                    ${companyField()}
+                    <label class="b24-invite-field"><span>Email addresses</span><textarea data-emails rows="5" placeholder="name@example.com, another@example.com"></textarea></label>
+                    <p class="b24-invite-note">Up to ${INVITE_MAX} addresses, separated by commas or new lines.</p>
+                    <div class="b24-invite-actions"><button type="button" class="ws-btn primary" data-send>Send invitations</button></div>
+                    <div data-result aria-live="polite"></div>`;
+            }
+        }
+        async function copyLink() {
+            const input = root.querySelector('[data-link]'); if (!input) return;
+            try { await navigator.clipboard.writeText(input.value); }
+            catch (e) {
+                input.select();
+                let ok = false; try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+                if (!ok) return C.toast('Select the link and copy it', 'bad');
+            }
+            C.toast('Link copied');
+        }
+        async function sendInvites(btn) {
+            const box = root.querySelector('[data-emails]'), out = root.querySelector('[data-result]');
+            const emails = box.value.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+            if (!emails.length) { box.focus(); return C.toast('Enter at least one email address', 'bad'); }
+            if (emails.length > INVITE_MAX) return C.toast(`Invite up to ${INVITE_MAX} people at a time`, 'bad');
+            btn.disabled = true; btn.textContent = 'Sending…'; out.innerHTML = '';
+            try {
+                const { data: { session } } = await sb.auth.getSession();
+                if (!session) throw new Error('Your session has expired. Sign in again.');
+                const r = await fetch('/api/mail', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token },
+                    body: JSON.stringify({ action: 'invite', company, emails }),
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(data.error || 'The invitations could not be sent.');
+                const line = (label, list, cls) => (list && list.length ? `<div class="b24-invite-res ${cls}"><b>${label}</b> ${list.map(esc).join(', ')}</div>` : '');
+                out.innerHTML = line('Invitation sent to', data.sent, 'ok') + line('Already have an account:', data.existing, 'muted') + line('Could not send to', data.failed, 'bad');
+                box.value = (data.failed || []).join(', ');
+                if (data.sent && data.sent.length) C.toast(`${data.sent.length} ${data.sent.length === 1 ? 'invitation' : 'invitations'} sent`);
+            } catch (e) {
+                out.innerHTML = `<div class="b24-invite-res bad">${esc(e.message)}</div>`;
+            } finally { btn.disabled = false; btn.textContent = 'Send invitations'; }
+        }
+        root.addEventListener('click', e => {
+            const m = e.target.closest('[data-mode]');
+            if (m) { mode = m.dataset.mode; C.setParam('mode', mode === 'link' ? null : mode, true); return paint(); }
+            if (e.target.closest('[data-close]')) return B.leaveCreate('/employees/');
+            if (e.target.closest('[data-copy]')) return copyLink();
+            const s = e.target.closest('[data-send]'); if (s) return sendInvites(s);
+        });
+        root.addEventListener('change', e => {
+            if (!e.target.matches('[data-company]')) return;
+            company = e.target.value;
+            const l = root.querySelector('[data-link]'); if (l) l.value = linkFor(company);
+            const co = root.querySelector('[data-co]'); if (co) co.textContent = company;
+        });
+        paint();
     }
 
     /* ------------------------------------------------------------ profile */

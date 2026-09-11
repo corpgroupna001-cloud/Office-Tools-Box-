@@ -1463,3 +1463,33 @@ body.ws-b24.ws-corporate #view .b24-tnew-desc textarea { min-height: 88px; borde
 .b24-tnew-chat .info b { display: block; margin-bottom: 6px; color: var(--b24-text); font-size: 14px; }
 .b24-tnew-chat .info li { margin: 4px 0; }
 @media (max-width: 900px) { .b24-tnew-cols { grid-template-columns: minmax(0, 1fr); } .b24-tnew-chat { min-height: 0; } }
+
+/* ---------- 31. Invite people (Employees → Invite) ------------------------------- */
+.b24-invite-head { padding: 18px 22px 6px; }
+.b24-invite-body { flex: 1; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; align-items: start; align-content: start; padding: 12px 22px 22px; }
+.b24-invite-nav { display: flex; flex-direction: column; gap: 2px; padding: 8px; border-radius: var(--b24-radius); background: var(--b24-surface); box-shadow: var(--b24-shadow); }
+.b24-invite-nav button { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--b24-text); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.b24-invite-nav button:hover { background: var(--b24-surface-2); }
+.b24-invite-nav button.on { background: var(--b24-surface-3); color: var(--b24-link); font-weight: 600; }
+.b24-invite-pane { min-height: 320px; padding: 22px 26px; border-radius: var(--b24-radius); background: var(--b24-surface); box-shadow: var(--b24-shadow); }
+.b24-invite-pane h2 { margin: 0 0 8px; color: var(--b24-text); font-size: 18px; font-weight: 600; }
+.b24-invite-sub { max-width: 640px; margin: 0 0 18px; color: var(--b24-text-2); }
+.b24-invite-co { margin: 0 0 14px; }
+.b24-invite-field { display: flex; flex-direction: column; gap: 6px; max-width: 560px; margin-bottom: 14px; }
+.b24-invite-field > span { color: var(--b24-text-2); font-size: 12.5px; }
+.b24-invite-field select, .b24-invite-field textarea { width: 100%; }
+.b24-invite-link { display: flex; gap: 8px; max-width: 720px; }
+.b24-invite-link input { flex: 1; min-width: 0; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; }
+.b24-invite-note { margin: 12px 0 0; color: var(--b24-muted); font-size: 12.5px; }
+.b24-invite-actions { margin-top: 16px; }
+.b24-invite-res { max-width: 640px; margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 13px; word-break: break-word; }
+.b24-invite-res.ok { background: color-mix(in srgb, var(--b24-green) 16%, transparent); }
+.b24-invite-res.muted { background: var(--b24-surface-2); color: var(--b24-text-2); }
+.b24-invite-res.bad { background: color-mix(in srgb, var(--b24-red) 14%, transparent); color: var(--b24-red); }
+@media (max-width: 760px) {
+  .b24-invite-body { grid-template-columns: minmax(0, 1fr); padding-inline: 12px; }
+  .b24-invite-nav { flex-direction: row; overflow-x: auto; }
+  .b24-invite-nav button { white-space: nowrap; }
+  .b24-invite-pane { padding: 18px 16px; }
+  .b24-invite-link { flex-wrap: wrap; }
+}

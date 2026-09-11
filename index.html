@@ -1771,12 +1771,31 @@
             onLoggedOut();
         });
 
+        // An invitation link (Employees → Invite): /?signup=1&company=…&email=…
+        // opens the sign-up form with those filled in. Nothing else changes:
+        // the invitee picks a password and confirms the address with a code.
+        function openInviteSignup() {
+            const q = new URLSearchParams(location.search);
+            if (q.get('signup') !== '1') return;
+            switchAuthTab('signup');
+            const email = (q.get('email') || '').trim();
+            const emailEl = document.getElementById('signup-email');
+            if (emailEl && email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) emailEl.value = email;
+            const sel = document.getElementById('signup-company'), company = q.get('company') || '';
+            if (sel && company && Array.from(sel.options).some(o => o.value === company && !o.disabled)) {
+                sel.value = company;
+                sel.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            const nameEl = document.getElementById('signup-name');
+            if (nameEl) nameEl.focus();
+        }
+
         window.addEventListener('load', async () => {
             const ok = await initRootSupabase();
-            if (!ok) { showAuthModal(); return; }
+            if (!ok) { showAuthModal(); openInviteSignup(); return; }
             const { data: { session } } = await rootSb.auth.getSession();
             if (session) onLoggedIn(session);
-            else onLoggedOut();
+            else { onLoggedOut(); openInviteSignup(); }
         });
     </script>
 </body>

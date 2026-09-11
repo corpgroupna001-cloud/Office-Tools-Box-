@@ -29,6 +29,24 @@ module.exports = async function handler(req, res) {
         return res.status(e.status || 502).json({ error: e.message || 'Could not email the invoice' });
       }
     }
+    // A signed-in manager inviting people to sign up (Employees → Invite).
+    // The text, the link and the sender are built server-side in
+    // lib/invite-mail.js; the request only names the company and addresses.
+    if (parsed && typeof parsed === 'object' && parsed.action === 'invite') {
+      const SUPABASE_URL = process.env.SUPABASE_URL, SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!SUPABASE_URL || !SERVICE_KEY) return res.status(500).json({ error: 'Supabase server config missing' });
+      const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+      const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'http' ? 'http' : 'https';
+      const origin = process.env.APP_URL ? String(process.env.APP_URL).replace(/\/+$/, '') : `${proto}://${host}`;
+      try {
+        const out = await require('../lib/invite-mail').emailInvite(parsed, {
+          url: SUPABASE_URL, key: SERVICE_KEY, token: authz.replace(/^Bearer\s+/i, ''), origin, sendMail, recordMail,
+        });
+        return res.status(200).json(out);
+      } catch (e) {
+        return res.status(e.status || 502).json({ error: e.message || 'Could not send the invitations' });
+      }
+    }
   }
 
   // Shared-secret gate so this endpoint isn't an open relay for the internet.
