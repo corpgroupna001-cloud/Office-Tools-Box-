@@ -626,6 +626,15 @@ are idempotent, and 1–4 now carry fixes found by the real-database tests:
 - Session claims are read safely when they are empty.
 - Calendar changes, conversations and memberships now update live.
 
+**Changed again on 11 Sep 2026, after the first runs.** Re-run migrations 1
+and 2; both are idempotent.
+
+- **Migration 1:** converting a lead now files the new deal in the company's
+  default pipeline. Before, an extra company pipeline such as "Renewals"
+  captured it.
+- **Migration 2:** the `documents` storage bucket now enforces the same file
+  types as the upload dialog, not only the 50 MB limit.
+
 Optional, **development projects only**: `supabase-crm-demo-seed.sql` creates a
 few clearly-labelled sample records (all tagged `demo`) with a removal block
 at the bottom. Never run it on production.
@@ -792,7 +801,39 @@ manager access to attendance and leave, salary privacy, group messages, and
 reminders firing once.
 
 It skips itself if `@electric-sql/pglite` is not installed. No test contacts
-Supabase, SMTP or a push service.
+Supabase, SMTP or a push service. One test walks the spec's section-27
+acceptance scenario end to end:
+
+1. a lead is assigned, worked and converted;
+2. the deal is moved to Won;
+3. a task goes to a colleague and appears on the calendar;
+4. a project gets members, a board and a document;
+5. a meeting is scheduled;
+6. an invoice is raised with correct totals;
+7. the timeline and notifications are checked.
+
+### Browser smoke test (opt-in)
+
+```
+npm run smoke:ui
+```
+
+This opens every page in the installed Chrome, at desktop and phone width,
+signed in as a fictional manager. It serves the repository the way Vercel
+does and answers Supabase from fixture data (`tests/ui-smoke/fixtures.js`),
+so it needs no project and no network apart from the script CDNs.
+
+A page fails on:
+- an uncaught script error
+- a "could not load" state on screen
+- a missing app shell
+- sideways scrolling on a phone
+
+It also opens the new-contact dialog, searches from the command palette, and
+checks that the pipeline, task list, calendar and invoice total render.
+Screenshots land in `tests/ui-smoke/out/`, which git ignores. Set
+`CHROME_PATH` if Chrome is not in the usual place. It uses `puppeteer-core`
+(a dev dependency) and never downloads a browser.
 
 ## 9. Deployment
 
