@@ -14,13 +14,23 @@
     --mx-side-w: 340px;
     display: grid;
     grid-template-columns: var(--mx-side-w) minmax(0, 1fr);
-    height: 100%;
+    /* One row, capped at the box height: a long chat list or thread scrolls
+       inside its panel instead of stretching the page. */
+    grid-template-rows: minmax(0, 1fr);
+    /* chat.js sets --mx-h to the visible screen below the top bar (address
+       bar and on-screen keyboard included); the fallback is the usual layout. */
+    --mx-gap: 18px;
+    height: var(--mx-h, calc(100dvh - 64px - var(--mx-gap)));
     min-height: 0;
     color: var(--ws-text);
     background: var(--ws-surface);
     position: relative;
 }
 :root[data-theme="dark"] .mx { --mx-mine: #285d9f; --mx-mine-link: #cfe0ff; }
+@media (max-width: 640px) { .mx { --mx-gap: 0px; } }
+/* The page behind Messenger never scrolls; only its own lists and thread do.
+   Its height comes from .mx, not from the shell's viewport maths. */
+body.page-chat .ws-page.fill { height: auto !important; min-height: 0; overflow: hidden; }
 .mx [hidden], .mx-overlay[hidden], .mx-menu[hidden], .mx-lightbox[hidden] { display: none !important; }
 .mx button { font: inherit; color: inherit; }
 /* The shared stylesheets give every field a box; these fields sit inside their own pill. */
@@ -31,6 +41,9 @@
 .mx .mx-search input, .mx .mx-searchbar-row input { padding: 0 !important; line-height: 1.3; }
 .mx .mx-input-wrap textarea { padding: 7px 0 !important; }
 
+/* The incoming-call card (calls.js) sits bottom-right, which here is the Send
+   button: lift it above the message box on this page. Phones show it centred. */
+@media (min-width: 769px) { body.page-chat #wsc-root { bottom: 92px !important; } }
 /* push.js pins its "Enable notifications" pill bottom-right, over the Send button here. */
 body.page-chat #ws-push-pill { bottom: 96px !important; right: 24px !important; }
 @media (max-width: 768px) { body.page-chat #ws-push-pill { bottom: calc(84px + env(safe-area-inset-bottom, 0px)) !important; right: 12px !important; } }
@@ -225,8 +238,14 @@ body.page-chat #ws-push-pill { bottom: 96px !important; right: 24px !important; 
 .mx-msgs { display: flex; flex-direction: column; min-width: 0; }
 .mx-thread-empty { margin: auto; padding: 40px 16px; text-align: center; color: var(--ws-text-muted); font-size: 13.5px; }
 .mx-thread-empty b { display: block; color: var(--ws-text); font-size: 15px; margin-bottom: 4px; }
-.mx-day { position: sticky; top: 0; z-index: 3; display: flex; justify-content: center; margin: 12px 0 6px; pointer-events: none; }
-.mx-day span {
+.mx-day { display: flex; justify-content: center; margin: 12px 0 6px; pointer-events: none; }
+/* While you scroll, the date you are in floats at the top of the thread; it
+   fades once you stop, so it never sits over a message you are reading. It is
+   a zero-height sticky strip, so it takes no room in the list. */
+.mx-floatday { position: sticky; top: 8px; z-index: 4; height: 0; display: flex; justify-content: center; pointer-events: none; }
+.mx-floatday span { opacity: 0; transition: opacity .25s ease; box-shadow: 0 2px 8px rgba(16,24,40,.12); }
+.mx-floatday.show span { opacity: 1; }
+.mx-day span, .mx-floatday span {
     padding: 4px 11px; border-radius: 8px; font-size: 11.5px; font-weight: 600; color: var(--ws-text-2);
     background: color-mix(in srgb, var(--ws-surface) 92%, transparent); border: 1px solid var(--ws-border); box-shadow: 0 1px 2px rgba(16,24,40,.05);
 }

@@ -157,8 +157,50 @@
         return q.or(`and(sender_id.eq.${me},recipient_id.eq.${p}),and(sender_id.eq.${p},recipient_id.eq.${me})`);
     }
 
+    // ----------------------------------------------------------------- layout
+    // Messenger is exactly as tall as the visible screen below the top bar,
+    // however many chats there are: the lists and the thread scroll inside it
+    // and the page never does. visualViewport follows a phone's address bar
+    // and on-screen keyboard, so the message box stays within reach, and a
+    // thread that was at its newest message stays there when the box shrinks.
+    function fitToScreen() {
+        const root = $('mx');
+        if (!root) return;
+        const se = document.scrollingElement;
+        if (se && se.scrollTop) se.scrollTop = 0;       // a phone keyboard can push the page up; bring the top bar back
+        const sc = $('mx-scroll');
+        const stick = !!sc && sc.clientHeight > 0 && sc.scrollHeight - sc.scrollTop - sc.clientHeight < 60;
+        const vv = window.visualViewport;
+        const visible = vv ? vv.height : window.innerHeight;
+        const top = Math.max(0, root.getBoundingClientRect().top);
+        const gap = parseFloat(getComputedStyle(root).getPropertyValue('--mx-gap')) || 0;
+        root.style.setProperty('--mx-h', Math.max(320, Math.floor(visible - top - gap)) + 'px');
+        if (stick) sc.scrollTop = sc.scrollHeight;
+    }
+    function watchScreen() {
+        let queued = false;
+        const fit = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; fitToScreen(); }); };
+        fitToScreen();
+        window.addEventListener('resize', fit);
+        window.addEventListener('orientationchange', fit);
+        if (window.visualViewport) window.visualViewport.addEventListener('resize', fit);
+        document.addEventListener('ws-sidebar', fit);
+        const bar = document.querySelector('.ws-top');
+        if (bar && window.ResizeObserver) new ResizeObserver(fit).observe(bar);
+        // Whatever makes a thread taller after it is drawn (photos, link cards,
+        // reactions, "Seen by", a growing message box) keeps you at the newest
+        // message if that is where you were. Scrolled up to read? Nothing moves.
+        if (window.ResizeObserver) {
+            const ro = new ResizeObserver(() => keepBottom());
+            ro.observe($('mx-msgs'));
+            ro.observe($('mx-scroll'));
+        }
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit).catch(() => {});
+    }
+
     // ------------------------------------------------------------------- boot
     async function boot() {
+        watchScreen();
         setConn('connecting');
         let cfg = null;
         try { const r = await fetch('/api/config'); cfg = await r.json(); } catch (e) { /* offline or blocked */ }
@@ -792,6 +834,7 @@
         }
         box.replaceChildren.apply(box, nodes);
         view.ready = true;
+        S.quietScrollUntil = Date.now() + 300;          // the page moving the thread is not "you scrolling"
         if (opt.toBottom || (near && !opt.prepend && !opt.keep)) sc.scrollTop = sc.scrollHeight;
         else if (opt.prepend) sc.scrollTop = prevTop + (sc.scrollHeight - prevH);
         S.stickBottom = isNearBottom();
@@ -927,7 +970,25 @@
             else if (media.paused && !media.currentTime) { media.src = u; release(); }   // never cut off playback
         }).catch(() => { /* keep showing the local copy */ });
     }
-    function keepBottom() { if (S.stickBottom) { const sc = $('mx-scroll'); sc.scrollTop = sc.scrollHeight; } }
+    function keepBottom() { if (S.stickBottom) { const sc = $('mx-scroll'); S.quietScrollUntil = Date.now() + 300; sc.scrollTop = sc.scrollHeight; } }
+    // The floating date: the day of the topmost message you can see, shown while
+    // you scroll and hidden a moment after, or when that day's own separator is
+    // already in view at the top. Jumps made by the page itself stay quiet.
+    function floatDay() {
+        const fd = $('mx-floatday');
+        if (!fd || Date.now() < (S.quietScrollUntil || 0)) return;
+        const sc = $('mx-scroll'), top = sc.getBoundingClientRect().top;
+        let current = null;
+        for (const d of $('mx-msgs').querySelectorAll('.mx-day')) {
+            if (d.getBoundingClientRect().top - top <= 14) current = d; else break;
+        }
+        const natural = current && current.getBoundingClientRect().top - top > -24;
+        clearTimeout(S.floatDayTimer);
+        if (!current || natural) { fd.classList.remove('show'); return; }
+        fd.firstChild.textContent = current.textContent;
+        fd.classList.add('show');
+        S.floatDayTimer = setTimeout(() => fd.classList.remove('show'), 1100);
+    }
     const signed = new Map();
     async function getFileUrl(path, download) {
         const k = path + (download ? '#dl' : '');
@@ -2417,10 +2478,16 @@
 
         // Messages
         const sc = $('mx-scroll');
+        const fd = document.createElement('div');
+        fd.className = 'mx-floatday'; fd.id = 'mx-floatday'; fd.setAttribute('aria-hidden', 'true');
+        fd.appendChild(document.createElement('span'));
+        sc.insertBefore(fd, sc.firstChild);
+        let dayRaf = 0;
         sc.addEventListener('scroll', () => {
             S.stickBottom = isNearBottom();
             if (S.stickBottom && S.view) { S.view.unseen = 0; scheduleMarkRead(); }
             updateNewPill();
+            if (!dayRaf) dayRaf = requestAnimationFrame(() => { dayRaf = 0; floatDay(); });
         }, { passive: true });
         if ('IntersectionObserver' in window) {
             new IntersectionObserver((entries) => { if (entries.some(x => x.isIntersecting)) checkSentinel(); }, { root: sc, rootMargin: '300px 0px 0px 0px' }).observe($('mx-sentinel'));

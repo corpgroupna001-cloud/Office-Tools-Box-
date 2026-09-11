@@ -23,7 +23,7 @@ function session() {
     token_type: 'bearer', expires_in: 3600, expires_at: exp, refresh_token: 'smoke-refresh', user };
 }
 
-function db() {
+function db(opts = {}) {
   const stages = [
     ['S1', 'New Opportunity', 1, 10, false, false, 'pending'], ['S2', 'Qualification', 2, 25, false, false, 'late'],
     ['S3', 'Proposal', 3, 50, false, false, 'leave'], ['S4', 'Negotiation', 4, 75, false, false, 'holiday'],
@@ -32,7 +32,7 @@ function db() {
   const person = (id, full_name, email, extra) => ({ id, full_name, email, avatar_url: null, company: NOVA, company2: null, email_verified: true,
     status: 'active', app_role: 'employee', manager_id: ME, department: 'Sales', job_title: 'Sales Executive', employee_code: null, phone: '+91 90000 0000' + id[0],
     joining_date: ist(-400), is_wfh: false, shift_id: 1, shift2_id: null, last_seen_at: now, created_at: at(-400), ...extra });
-  return {
+  const d = {
     profiles: [
       // A photo, so the home page's one-time "add your profile photo" prompt stays closed.
       person(ME, 'Maya Manager', 'maya@nova.test', { app_role: 'manager', manager_id: null, job_title: 'Sales Manager', employee_code: 'NS001', avatar_url: '/icon-192.png' }),
@@ -135,6 +135,50 @@ function db() {
     conversation_members: [ME, U2, U3].map((u, i) => ({ conversation_id: 'G1', user_id: u, role: i ? 'member' : 'admin', added_by: ME, last_read_at: at(-1), muted: false, created_at: at(-9) })),
     test_results: [], quiz_results: [], wfh_recordings: [], push_subscriptions: [], salaries: [],
   };
+  if (opts.big) addBigData(d);
+  return d;
+}
+
+// SMOKE_BIG=1: far more rows than a screen holds, cloned from the rows above so
+// every shape stays right. The original rows keep their ids for the checks
+// that name them; the extra ones get their own.
+function addBigData(d) {
+  const uid = i => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+  const pick = (arr, i) => arr[i % arr.length];
+  const first = ['Arjun', 'Bhavna', 'Deepa', 'Farhan', 'Gauri', 'Harish', 'Isha', 'Jatin', 'Kavya', 'Lokesh', 'Meera', 'Nikhil', 'Pooja', 'Rahul', 'Sneha', 'Tarun', 'Usha', 'Varun', 'Yamini', 'Zoya'];
+  const last = ['Iyer', 'Shah', 'Nair', 'Reddy', 'Gupta', 'Menon', 'Das', 'Joshi'];
+  const name = i => `${pick(first, i)} ${pick(last, i * 3)}`;
+  for (let i = 1; i <= 40; i++) d.profiles.push({ ...d.profiles[1], id: uid(i), full_name: name(i), email: `p${i}@nova.test`, employee_code: `NS1${String(i).padStart(2, '0')}`, is_wfh: i % 5 === 0, last_seen_at: i % 3 ? at(-2) : now });
+  for (let i = 1; i <= 60; i++) d.crm_contacts.push({ ...d.crm_contacts[1], id: `CX${i}`, first_name: pick(first, i), last_name: pick(last, i), full_name: name(i), email: `c${i}@client.test`, organization: `Client ${i}` });
+  for (let i = 1; i <= 40; i++) d.crm_leads.push({ ...d.crm_leads[1], id: `LX${i}`, name: `Lead ${name(i)}`, email: `l${i}@lead.test` });
+  for (let i = 1; i <= 30; i++) d.crm_deals.push({ ...d.crm_deals[1], id: `DX${i}`, title: `Deal ${i}: kits for ${name(i)}`, stage_id: pick(['S1', 'S2', 'S3', 'S4'], i), value: 10000 * i, position: 1000 + i });
+  for (let i = 1; i <= 60; i++) d.tasks.push({ ...d.tasks[0], id: `TX${i}`, title: `Follow-up task ${i} for ${name(i)}`, due_date: ist((i % 20) - 10), status: pick(['todo', 'in_progress', 'review'], i), position: 3000 + i, project_id: null, board_id: null, board_column_id: null });
+  for (let i = 1; i <= 30; i++) d.notifications.push({ ...d.notifications[0], id: `NX${i}`, title: `Notification ${i}`, body: `Something happened to record ${i}`, created_at: at(-(i % 7), '08:00') });
+  for (let i = 1; i <= 15; i++) d.invoices.push({ ...d.invoices[0], id: `IX${i}`, invoice_number: `INV-2026-${100 + i}` });
+  for (let i = 1; i <= 25; i++) d.documents.push({ ...d.documents[0], id: `DOCX${i}`, name: `Document ${i}.pdf`, original_name: `Document ${i}.pdf`, storage_path: `${ME}/docx${i}.pdf` });
+  for (let i = 1; i <= 20; i++) d.calendar_events.push({ ...d.calendar_events[1], id: `EX${i}`, title: `Meeting ${i}`, starts_at: at((i % 10) - 3, '11:00'), ends_at: at((i % 10) - 3, '11:30') });
+
+  // A long chat with Anil (ids in time order, like the real bigserial), then a
+  // dozen more one-message chats and eight groups, so both lists scroll.
+  const words = 'the kit sizes are in the shared folder and the delivery is booked for Friday afternoon please check'.split(' ');
+  const older = [];
+  for (let i = 0; i < 160; i++) {
+    const mine = i % 3 === 0;
+    older.push({ id: i + 1, sender_id: mine ? ME : U2, recipient_id: mine ? U2 : ME, conversation_id: null, mentions: [],
+      body: `${i + 1}. ${words.slice(0, 3 + (i * 7) % words.length).join(' ')}`,
+      created_at: new Date(Date.now() - 4 * 86400000 + i * 1500000).toISOString(), read_at: at(-1) });
+  }
+  d.messages.forEach(m => { m.id += older.length; });
+  d.messages.unshift(...older);
+  const maxId = Math.max(...d.messages.map(m => m.id));
+  for (let i = 1; i <= 12; i++) {
+    d.messages.push({ id: maxId + i, sender_id: uid(i), recipient_id: ME, conversation_id: null, mentions: [],
+      body: `Hi Maya, quick question number ${i}`, created_at: at(-2, `1${i % 10}:00`), read_at: i % 2 ? null : at(-2) });
+  }
+  for (let i = 1; i <= 8; i++) {
+    d.conversations.push({ ...d.conversations[0], id: `GX${i}`, name: `Project room ${i}`, description: null });
+    [ME, U2, uid(i)].forEach((u, k) => d.conversation_members.push({ conversation_id: `GX${i}`, user_id: u, role: k ? 'member' : 'admin', added_by: ME, last_read_at: at(-1), muted: false, created_at: at(-9) }));
+  }
 }
 
 const RPC = {

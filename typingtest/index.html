@@ -416,6 +416,12 @@
             color: #f1f5f9;
             box-shadow: inset 0 -1px 0 rgba(0,0,0,0.3);
         }
+        /* While a dialog is open the page behind it stays put (no scrolling the
+           test away under your thumb); the dialog card scrolls on its own. */
+        /* Dialogs here keep their flex class and are hidden with .hidden (the
+           sign-in dialog always has flex), so only a dialog on screen counts. */
+        html:has([id$="-modal"].fixed.flex:not(.hidden), #ws-rules-overlay.show) { overflow: hidden; }
+        [id$="-modal"].fixed.flex:not(.hidden) .overflow-y-auto { overscroll-behavior: contain; }
     </style>
     <link rel="stylesheet" href="/ui/corporate.css">
     <link rel="stylesheet" href="/ui/b24.css">

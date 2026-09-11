@@ -840,6 +840,24 @@ A page fails on:
 
 It also opens the new-contact dialog, searches from the command palette, and
 checks that the pipeline, task list, calendar and invoice total render.
+
+It checks scrolling too:
+- **Messenger:** a long chat opens at its newest message, the header and the
+  message box stay on screen, and the page never scrolls behind the chat.
+  Scrolling up loads earlier messages without losing your place, and date
+  labels never cover a message.
+- **Typing test:** its page scrolls again once its dialogs close.
+- **Every page:** audited for content cut off with no way to scroll to it,
+  and for a large scroll area nested inside another (two scrollbars
+  competing). These findings print as notes; `SMOKE_SCROLL=1` makes them fail
+  the run.
+
+`SMOKE_BIG=1 npm run smoke:ui` fills every list with far more rows than fit
+on a screen, which is where scrolling problems show up. That covers people,
+chats, contacts, leads, deals, tasks, documents, meetings and notifications.
+To run only some pages, pass their names:
+`node tests/ui-smoke/smoke.js messenger calendar-week`.
+
 Screenshots land in `tests/ui-smoke/out/`, which git ignores. Set
 `CHROME_PATH` if Chrome is not in the usual place. It uses `puppeteer-core`
 (a dev dependency) and never downloads a browser.

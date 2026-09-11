@@ -35,17 +35,25 @@ const PAGES = [
   ['/projects', 'projects'], ['/projects?id=P1', 'project-record'],
   ['/tasks', 'tasks'], ['/tasks?id=T1', 'task-record'],
   ['/documents', 'documents'], ['/documents?id=DOC1', 'document-record'],
-  ['/calendar', 'calendar'], ['/employees', 'employees'], ['/employees?id=22222222-2222-4222-8222-222222222222', 'employee-record'],
+  ['/calendar', 'calendar'], ['/calendar?view=day', 'calendar-day'], ['/calendar?view=week', 'calendar-week'],
+  ['/calendar?view=month', 'calendar-month'], ['/calendar?view=schedule', 'calendar-schedule'], ['/employees', 'employees'],
+  ['/employees?view=tiles', 'employees-tiles'], ['/employees/structure/', 'org-chart'], ['/employees?id=22222222-2222-4222-8222-222222222222', 'employee-record'],
   ['/invoices', 'invoices'], ['/invoices?id=I1', 'invoice-record'],
   ['/chat', 'messenger'], [`/call?id=${F.CALL}`, 'call'], ['/attendance', 'attendance'],
   ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
 ];
 const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'lead-record', 'deals', 'deal-record', 'boards', 'board', 'projects',
-  'project-record', 'tasks', 'task-record', 'documents', 'document-record', 'calendar', 'employees', 'employee-record', 'invoices', 'invoice-record']);
+  'project-record', 'tasks', 'task-record', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record']);
 const VIEWPORTS = [['desktop', { width: 1366, height: 900 }], ['phone', { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]];
 
+// SMOKE_BIG=1 fills every list with far more rows than fits on screen, so the
+// scroll checks below meet long chats, long tables and long menus.
+// SMOKE_SCROLL=1 makes scroll findings fail the run instead of being notes.
+const BIG = process.env.SMOKE_BIG === '1';
+const SCROLL_STRICT = process.env.SMOKE_SCROLL === '1';
+
 /* -------------------------------------------------------------- server */
-let DB = F.db();
+let DB = F.db({ big: BIG });
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
 const send = (res, status, body, headers = {}) => {
@@ -201,7 +209,7 @@ async function visit(browser, route, name, [vpName, viewport]) {
       localStorage.setItem('ws-rules-seen-chat', '1');      // Messenger's one-time rules dialog, already acknowledged
     } catch (e) { /* ignore */ }
   }, key, JSON.stringify(F.session()));
-  const result = { route, name, viewport: vpName, errors, consoleErrors, problems: [] };
+  const result = { route, name, viewport: vpName, errors, consoleErrors, problems: [], notes: [] };
   try {
     await page.goto(ORIGIN + route, { waitUntil: 'load', timeout: 30000 });
     await new Promise(r => setTimeout(r, 2600));
@@ -233,15 +241,141 @@ async function visit(browser, route, name, [vpName, viewport]) {
     if (vpName === 'phone' && info.overflow > 1) result.problems.push(`horizontal overflow ${info.overflow}px: ${info.offenders.join(', ')}`);
     if (CRM_PAGES.has(name) && info.errorText) result.problems.push(`error state on screen: "${info.errorText.slice(0, 90)}"`);
     if (info.signedOut) result.problems.push('ended on the sign-in screen');
+    // The fixtures keep a call ringing for Maya; outside Messenger and the call
+    // window its card would cover the page being checked and photographed.
+    if (name !== 'messenger' && name !== 'call') await page.evaluate(() => { const r = document.getElementById('wsc-root'); if (r) r.style.display = 'none'; });
+    const sc = await scrollAudit(page);
+    const scrollFindings = [...sc.clipped.map(c => `cut off: ${c}`), ...sc.nested.map(n => `nested scrolling: ${n}`)];
+    if (SCROLL_STRICT) result.problems.push(...scrollFindings); else result.notes.push(...scrollFindings);
     // The picture is of the page as it loads; interactions come after it.
     fs.mkdirSync(OUT, { recursive: true });
     await page.screenshot({ path: path.join(OUT, `${name}-${vpName}.png`) });
+    if (name === 'messenger') await messengerScroll(page, vpName, result);
     if (vpName === 'desktop') await interact(page, name, result);
   } catch (e) {
     result.problems.push(`navigation failed: ${String(e.message || e).split('\n')[0]}`);
   }
   await page.close();
   return result;
+}
+
+// Scrolling: nothing sizeable cut off without a way to scroll to it, the page
+// itself not locked while its content runs past the screen, and no big scroll
+// area inside another (two scrollbars fighting over the same wheel or swipe).
+async function scrollAudit(page) {
+  return page.evaluate(() => {
+    const vh = innerHeight;
+    const label = el => el.tagName.toLowerCase() + (el.id ? '#' + el.id : '')
+      + (typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '');
+    const shown = el => { const cs = getComputedStyle(el); return cs.display !== 'none' && cs.visibility !== 'hidden' && el.getClientRects().length > 0; };
+    const scrollers = [], clipped = [], nested = [];
+    for (const el of document.querySelectorAll('body *')) {
+      if (!shown(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.height < 100 || r.width < 150) continue;
+      const extra = el.scrollHeight - el.clientHeight;
+      if (extra <= 2) continue;
+      const cs = getComputedStyle(el);
+      if (cs.overflowY === 'auto' || cs.overflowY === 'scroll') scrollers.push({ el, name: label(el), h: r.height });
+      else if ((cs.overflowY === 'hidden' || cs.overflowY === 'clip') && extra > 40 && (!cs.webkitLineClamp || cs.webkitLineClamp === 'none')) {
+        clipped.push(`${label(el)} hides ${extra}px`);
+      }
+    }
+    const docExtra = document.scrollingElement.scrollHeight - vh;
+    const locked = ['html', 'body'].some(t => /hidden|clip/.test(getComputedStyle(document.querySelector(t)).overflowY));
+    // A full-screen dialog on top is meant to hold the page still behind it.
+    const dialogOpen = [...document.querySelectorAll('body *')].some(el => {
+      const cs = getComputedStyle(el);
+      if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) return false;
+      const r = el.getBoundingClientRect();
+      return r.width >= innerWidth * 0.9 && r.height >= vh * 0.9;
+    });
+    if (docExtra > 2 && locked && !dialogOpen) clipped.unshift(`the page is ${docExtra}px taller than the screen but cannot scroll`);
+    for (const s of scrollers) {
+      if (s.h < vh * 0.4) continue;
+      let p = s.el.parentElement;
+      for (; p; p = p.parentElement) if (scrollers.some(o => o.el === p && o.h >= vh * 0.4)) break;
+      if (p) nested.push(`${s.name} inside ${label(p)}`);
+      else if (docExtra > 2 && !locked && s.h >= vh * 0.6) nested.push(`${s.name} inside the page, which also scrolls ${docExtra}px`);
+    }
+    return { docExtra, clipped: clipped.slice(0, 5), nested: nested.slice(0, 5) };
+  });
+}
+
+// Messenger: a long chat opens at its newest message with the header and the
+// message box on screen, the page never scrolls behind it, and scrolling up
+// loads earlier messages without jumping away from where you were.
+async function messengerScroll(page, vpName, result) {
+  const expect = async (label, fn) => { try { const ok = await fn(); if (!ok) result.problems.push(`${vpName}: ${label}`); } catch (e) { result.problems.push(`${vpName}: ${label}: ${e.message.split('\n')[0]}`); } };
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const onScreen = sel => page.evaluate(s => {
+    const el = document.querySelector(s); if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return r.height > 20 && r.top >= -1 && r.bottom <= innerHeight + 1 && r.left >= -1 && r.right <= innerWidth + 1;
+  }, sel);
+  const fits = await page.evaluate(() => document.scrollingElement.scrollHeight <= innerHeight + 1);
+  if (!fits) {
+    // Say which box grew: every ancestor of the chat list, with its height and overflow.
+    const chain = await page.evaluate(() => {
+      const out = [];
+      for (let el = document.getElementById('mx-list'); el && el !== document.documentElement; el = el.parentElement) {
+        const cs = getComputedStyle(el);
+        out.push(`${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}.${String(el.className).trim().split(/\s+/).slice(0, 3).join('.')} h=${Math.round(el.getBoundingClientRect().height)} oy=${cs.overflowY} ${cs.display}${cs.gridTemplateRows && cs.display === 'grid' ? ' rows=' + cs.gridTemplateRows.slice(0, 30) : ''}`);
+      }
+      return out.join(' < ');
+    });
+    result.notes.push(`height chain: ${chain}`);
+  }
+  await expect('the Messenger page itself does not scroll, only its lists', async () => fits);
+  const opened = await page.evaluate(() => {
+    const it = [...document.querySelectorAll('.mx-item')].find(e => /Anil Kumar/.test(e.textContent));
+    if (it) it.click();
+    return !!it;
+  });
+  if (!opened) { result.problems.push(`${vpName}: the Anil Kumar chat is not in the list`); return; }
+  await wait(1500);
+  const pos = await page.evaluate(() => {
+    const s = document.getElementById('mx-scroll');
+    return s ? { gap: Math.round(s.scrollHeight - s.scrollTop - s.clientHeight), top: Math.round(s.scrollTop), h: s.clientHeight, sh: s.scrollHeight,
+      n: document.querySelectorAll('#mx-msgs .mx-bubble').length, older: !document.getElementById('mx-older').hidden } : null;
+  });
+  await expect(`a chat opens at its newest message${pos ? ` (${JSON.stringify(pos)})` : ''}`, async () => !!pos && pos.gap < 48);
+  await expect('the conversation header is on screen', () => onScreen('#mx-head-name'));
+  await expect('the message box is on screen', () => onScreen('#mx-compose'));
+  await expect('the page still does not scroll with a chat open', () => page.evaluate(() => document.scrollingElement.scrollHeight <= innerHeight + 1));
+  await page.screenshot({ path: path.join(OUT, `messenger-thread-${vpName}.png`) });
+  if (!BIG) return;
+  const count = () => page.evaluate(() => document.querySelectorAll('#mx-msgs .mx-bubble').length);
+  const before = await count();
+  const anchor = await page.evaluate(() => {
+    const s = document.getElementById('mx-scroll'); s.scrollTop = 0; s.dispatchEvent(new Event('scroll'));
+    const first = document.querySelector('#mx-msgs .mx-bubble'); return first ? first.textContent.slice(0, 40) : '';
+  });
+  await wait(2000);
+  const after = await count();
+  await expect(`scrolling up loads earlier messages (${before} → ${after})`, async () => after > before);
+  await expect('after loading, the message you were reading stays in view', () => page.evaluate(text => {
+    const s = document.getElementById('mx-scroll');
+    const el = [...document.querySelectorAll('#mx-msgs .mx-bubble')].find(b => b.textContent.slice(0, 40) === text);
+    if (!s || !el) return false;
+    const r = el.getBoundingClientRect(), box = s.getBoundingClientRect();
+    return s.scrollTop > 40 && r.bottom > box.top && r.top < box.bottom;
+  }, anchor));
+  await page.screenshot({ path: path.join(OUT, `messenger-older-${vpName}.png`) });
+  await expect('at rest, no date label sits on top of a message', () => page.evaluate(() => {
+    const s = document.getElementById('mx-scroll').getBoundingClientRect();
+    const labels = [...document.querySelectorAll('#mx-msgs .mx-day span, #mx-floatday.show span')]
+      .map(e => e.getBoundingClientRect()).filter(r => r.height && r.bottom > s.top && r.top < s.bottom);
+    const bubbles = [...document.querySelectorAll('#mx-msgs .mx-bubble')].map(e => e.getBoundingClientRect());
+    return !labels.some(d => bubbles.some(b => d.left < b.right && d.right > b.left && d.top < b.bottom && d.bottom > b.top));
+  }));
+  await page.evaluate(() => { const s = document.getElementById('mx-scroll'); s.scrollTop = Math.floor((s.scrollHeight - s.clientHeight) / 2); });
+  await wait(250);
+  await expect('while scrolling, the date floats at the top of the thread', () => page.evaluate(() => {
+    const f = document.getElementById('mx-floatday'); return !!f && f.classList.contains('show') && /\S/.test(f.textContent);
+  }));
+  await wait(1500);
+  await expect('the floating date fades once scrolling stops', () => page.evaluate(() => !document.getElementById('mx-floatday').classList.contains('show')));
 }
 
 // A few interactions that exercise the shared runtime, not just the first paint.
@@ -254,7 +388,15 @@ async function interact(page, name, result) {
     await expect('the list shows the fixture contacts', async () => (await page.$$('.b24-grid-table tbody tr[data-id]')).length >= 2);
   }
   if (name === 'deals') await expect('the pipeline shows one column per stage', async () => (await page.$$('.kb-col')).length >= 5 || (await page.$$('.ws-table tbody tr')).length >= 1);
-  if (name === 'tasks') await expect('My Tasks lists my tasks', async () => (await page.$$('.ws-table tbody tr, .kb-card')).length >= 1);
+  if (name === 'tasks') await expect('My Tasks lists my tasks', async () => (await page.$$('.b24-grid-table tbody tr[data-id], .kb-card')).length >= 1);
+  if (name === 'typing') await expect('with its dialogs closed, the typing test page scrolls again', async () => {
+    await page.evaluate(() => {
+      document.querySelectorAll('#ws-rules-overlay.show').forEach(o => o.classList.remove('show'));
+      document.querySelectorAll('[id$="-modal"].flex').forEach(m => { m.classList.add('hidden'); m.classList.remove('flex'); });
+    });
+    await wait(150);
+    return page.evaluate(() => !['html', 'body'].some(t => /hidden|clip/.test(getComputedStyle(document.querySelector(t)).overflowY)));
+  });
   if (name === 'calendar') await expect('a calendar view renders', async () => !!(await page.$('.cal-month, .cal-week, .cal-agenda')));
   if (name === 'invoice-record') await expect('the invoice sheet shows its total', async () => (await page.evaluate(() => document.body.innerText)).includes('1,680'));
   if (name === 'crm') {
@@ -285,7 +427,7 @@ async function interact(page, name, result) {
   for (const [route, name] of PAGES) {
     if (only && !only.has(name)) continue;
     for (const vp of VIEWPORTS) {
-      DB = F.db();                                  // every page starts from the same data
+      DB = F.db({ big: BIG });                      // every page starts from the same data
       results.push(await visit(browser, route, name, vp));
     }
   }
@@ -298,6 +440,7 @@ async function interact(page, name, result) {
     console.log(`${bad ? 'FAIL' : 'ok  '} ${r.name.padEnd(16)} ${r.viewport.padEnd(7)} ${r.route}`);
     r.errors.forEach(e => console.log(`       script error: ${e}`));
     r.problems.forEach(p => console.log(`       ${p}`));
+    r.notes.forEach(n => console.log(`       note: ${n}`));
     if (process.env.SMOKE_VERBOSE) r.consoleErrors.forEach(e => console.log(`       console: ${e}`));
   }
   fs.mkdirSync(OUT, { recursive: true });
