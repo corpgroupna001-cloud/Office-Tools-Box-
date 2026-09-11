@@ -48,6 +48,7 @@ create table if not exists storage.buckets (
   name            text,
   public          boolean not null default false,
   file_size_limit bigint,
+  allowed_mime_types text[],
   created_at      timestamptz not null default now()
 );
 create table if not exists storage.objects (

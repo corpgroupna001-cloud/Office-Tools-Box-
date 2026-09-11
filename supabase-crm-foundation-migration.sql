@@ -946,9 +946,11 @@ begin
   if p_create_deal then
     v_pipeline := p_pipeline_id;
     if v_pipeline is null then
+      -- The company's default pipeline, then the shared default, then anything else:
+      -- a company's extra pipeline (say "Renewals") must not capture new deals.
       select id into v_pipeline from public.crm_pipelines
        where (company = l.company or company is null)
-       order by (company = l.company) desc nulls last, is_default desc, created_at limit 1;
+       order by is_default desc, (company is not distinct from l.company) desc, created_at limit 1;
     end if;
     if v_pipeline is null then raise exception 'No pipeline configured'; end if;
     v_stage := p_stage_id;

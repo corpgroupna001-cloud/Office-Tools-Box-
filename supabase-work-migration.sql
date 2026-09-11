@@ -941,9 +941,37 @@ end$$;
 -- visible to whoever may see its metadata row (same company). Nothing is
 -- public; the app serves 1-hour signed URLs.
 -- ---------------------------------------------------------------------------
-insert into storage.buckets (id, name, public, file_size_limit)
-values ('documents', 'documents', false, 52428800)   -- 50 MB per file
-on conflict (id) do nothing;
+-- Size and type are also enforced by Storage itself, not only by the page:
+-- the list matches ALLOWED_DOC_TYPES in ui/crm-logic.js (a test keeps them equal).
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('documents', 'documents', false, 52428800,   -- 50 MB per file
+  array[
+    'application/pdf',
+    'image/png',
+    'image/jpeg',
+    'image/gif',
+    'image/webp',
+    'image/svg+xml',
+    'text/plain',
+    'text/csv',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/zip',
+    'application/x-zip-compressed',
+    'application/json',
+    'video/mp4',
+    'audio/mpeg',
+    'audio/wav',
+    'video/webm'
+  ])
+on conflict (id) do update
+  set public = false,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
 
 create or replace function public.ws_document_visible(p_path text)
 returns boolean

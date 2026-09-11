@@ -290,6 +290,61 @@ test('server reminders fire once each, in their windows, and only the service ma
   assert.equal(early.digests, 0, 'the next day’s digest waits until 09:00 IST');
 });
 
+test('acceptance (spec §27): a lead becomes a contact, a won deal, work, a meeting and an invoice — with the timeline and notifications', { skip }, async () => {
+  // Create a lead and assign it to an employee.
+  const lead = await one(M, `insert into crm_leads (name, organization, email, estimated_value) values ('Sunrise Academy', 'Sunrise Trust', 'buy@sunrise.test', 120000) returning id`);
+  await q(M, `update crm_leads set owner_id = $1 where id = $2`, [A, lead.id]);
+  assert.ok((await q(A, `select id from notifications where user_id = $1 and kind = 'lead.assigned' and entity_id = $2`, [A, lead.id])).length, 'the employee is told');
+  // Add activity.
+  await q(A, `select public.crm_log('call.logged', 'lead', $1::uuid, 'Intro call', '{}'::jsonb, null, null, $1::uuid)`, [lead.id]);
+  await q(A, `insert into comments (entity_type, entity_id, body) values ('lead', $1, 'Wants 200 kits before term starts')`, [lead.id]);
+  // Convert it into a contact and a deal.
+  const conv = json((await one(A, `select public.crm_convert_lead($1::uuid, null::uuid, true, 'Sunrise kits', 120000::numeric) r`, [lead.id])).r);
+  assert.equal(conv.existing_contact, false);
+  // The contact shows the linked deal.
+  assert.deepEqual((await q(A, `select id from crm_deals where contact_id = $1`, [conv.contact_id])).map(r => r.id), [conv.deal_id]);
+  // Move the deal through the pipeline.
+  const stages = await q(A, `select id, name from crm_pipeline_stages where pipeline_id = (select pipeline_id from crm_deals where id = $1) and not is_lost order by position`, [conv.deal_id]);
+  for (const s of stages.slice(1)) await q(A, `update crm_deals set stage_id = $1 where id = $2`, [s.id, conv.deal_id]);
+  assert.equal((await one(A, `select status from crm_deals where id = $1`, [conv.deal_id])).status, 'won');
+  // A task on the deal, assigned to another employee, in their My Tasks and on the calendar.
+  const task = await one(A, `insert into tasks (title, deal_id, contact_id, assignee_id, due_date) values ('Deliver kits', $1, $2, $3, ${TODAY} + 3) returning id`, [conv.deal_id, conv.contact_id, C]);
+  assert.ok((await q(C, `select id from tasks where assignee_id = $1 and completed_at is null`, [C])).some(r => r.id === task.id), 'in My Tasks');
+  assert.equal((await q(C, `select id from tasks where id = $1 and due_date between ${TODAY} and ${TODAY} + 30`, [task.id])).length, 1, 'on the calendar');
+  // A project with employees and tasks, shown on its board.
+  const proj = await one(M, `insert into projects (name, deal_id, contact_id, manager_id) values ('Sunrise rollout', $1, $2, $3) returning id`, [conv.deal_id, conv.contact_id, M]);
+  await q(M, `insert into project_members (project_id, user_id, added_by) values ($1, $2, $3), ($1, $4, $3)`, [proj.id, A, M, C]);
+  const board = (await one(M, `select board_id from projects where id = $1`, [proj.id])).board_id;
+  const col = await one(A, `select id from board_columns where board_id = $1 and maps_to_status = 'in_progress'`, [board]);
+  await q(A, `insert into tasks (title, project_id, board_id, board_column_id) values ('Measure sizes', $1, $2, $3)`, [proj.id, board, col.id]);
+  const cards = await q(C, `select t.title, c.name col, t.status from tasks t join board_columns c on c.id = t.board_column_id where t.board_id = $1`, [board]);
+  assert.deepEqual(cards.map(r => [r.title, r.status]), [['Measure sizes', 'in_progress']], 'the board shows the card in its column');
+  // A project document that appears in the project and in Documents.
+  await q(A, `insert into storage.objects (bucket_id, name) values ('documents', $1)`, [`${A}/sunrise-plan.pdf`]);
+  const doc = await one(A, `insert into documents (name, storage_path, mime_type, size_bytes) values ('Sunrise plan.pdf', $1, 'application/pdf', 2048) returning id`, [`${A}/sunrise-plan.pdf`]);
+  await q(A, `insert into document_links (document_id, entity_type, entity_id, created_by) values ($1, 'project', $2, $3)`, [doc.id, proj.id, A]);
+  assert.equal((await q(C, `select document_id from document_links where entity_type = 'project' and entity_id = $1`, [proj.id])).length, 1, 'inside the project');
+  assert.equal((await q(C, `select id from documents where id = $1`, [doc.id])).length, 1, 'in the Documents module');
+  // A deal meeting that appears on the calendar.
+  const meet = await one(A, `insert into calendar_events (title, starts_at, ends_at, owner_id, deal_id, contact_id) values ('Sunrise handover', now() + interval '2 days', now() + interval '2 days 1 hour', $1, $2, $3) returning id`, [A, conv.deal_id, conv.contact_id]);
+  await q(A, `insert into event_participants (event_id, user_id) values ($1, $2)`, [meet.id, C]);
+  assert.equal((await q(C, `select id from calendar_events where id = $1 and starts_at < now() + interval '30 days'`, [meet.id])).length, 1);
+  // An invoice on the contact and deal, with correct totals.
+  const inv = await one(M, `insert into invoices (bill_to_name, contact_id, deal_id, invoice_date, due_date) values ('Sunrise Trust', $1, $2, ${TODAY}, ${TODAY} + 30) returning id`, [conv.contact_id, conv.deal_id]);
+  await q(M, `insert into invoice_items (invoice_id, description, quantity, unit_price, tax_rate) values ($1, 'Training kit', 200, 550, 18)`, [inv.id]);
+  assert.deepEqual(await one(M, `select subtotal::text s, tax_total::text t, total::text g from invoices where id = $1`, [inv.id]), { s: '110000.00', t: '19800.00', g: '129800.00' });
+  // The timeline tells the story.
+  const acts = new Set((await q(A, `select action from crm_activities where lead_id = $1 or deal_id = $2 or contact_id = $3`, [lead.id, conv.deal_id, conv.contact_id])).map(r => r.action));
+  for (const a of ['lead.created', 'lead.assigned', 'call.logged', 'note.added', 'lead.converted', 'contact.created', 'deal.created', 'deal.stage_changed', 'deal.won', 'task.created', 'project.created', 'event.scheduled', 'invoice.created']) {
+    assert.ok(acts.has(a), `timeline has ${a}`);
+  }
+  // The right people were told.
+  const kindsFor = async uid => new Set((await q(uid, `select kind from notifications where user_id = $1`, [uid])).map(r => r.kind));
+  const c = await kindsFor(C), a = await kindsFor(A);
+  for (const k of ['task.assigned', 'project.added', 'event.invited']) assert.ok(c.has(k), `the assignee got ${k}`);
+  for (const k of ['lead.assigned', 'project.added']) assert.ok(a.has(k), `the lead owner got ${k}`);
+});
+
 test('the optional demo seed runs once and marks everything it creates', { skip }, async () => {
   const seed = fs.readFileSync(path.join(__dirname, '..', 'supabase-crm-demo-seed.sql'), 'utf8');
   await db.exec(seed);

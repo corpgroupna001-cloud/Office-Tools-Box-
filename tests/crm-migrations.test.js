@@ -99,6 +99,15 @@ test('the messenger migration keeps direct messages exactly as they were', () =>
     'the DM insert rule is kept, limited to direct messages so nobody posts into a group they are not in');
 });
 
+test('Storage enforces the same document types the upload dialog allows', () => {
+  const sql = read('supabase-work-migration.sql');
+  const block = sql.match(/insert into storage\.buckets[\s\S]*?allowed_mime_types = excluded\.allowed_mime_types;/);
+  assert.ok(block, 'the documents bucket declares allowed_mime_types');
+  const inSql = [...block[0].matchAll(/'([a-z]+\/[^']+)'/g)].map(m => m[1]).sort();
+  const inUi = Object.keys(require('../ui/crm-logic').ALLOWED_DOC_TYPES).sort();
+  assert.deepEqual(inSql, inUi);
+});
+
 test('the documents bucket is private and reads are gated on the metadata row', () => {
   const sql = read('supabase-work-migration.sql');
   assert.match(sql, /values \('documents', 'documents', false/);
