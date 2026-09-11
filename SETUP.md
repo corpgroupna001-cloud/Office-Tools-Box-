@@ -589,3 +589,154 @@ rest.
   fails the console says so rather than assuming the person is locked out.
 - The audit log records the caller's IP from `x-forwarded-for`. There is one
   shared `ADMIN_PASSWORD`, so it identifies the machine, not the person.
+
+---
+
+# CRM & work modules
+
+WorkSuite now carries a full internal office platform on top of the tools
+above: **CRM dashboard, Contacts, Leads, Deals, Messenger, Boards, Projects,
+Tasks, Documents, Calendar, Employees and Invoices**. Everything is the same
+architecture as before — static HTML/CSS/JS pages, Supabase behind Row Level
+Security, and **no new serverless functions** (the deployment stays at 12 of
+12 on the Vercel Hobby plan; both cron slots remain as they were).
+
+## 1. Run the migrations (in this order)
+
+Supabase → **SQL Editor → New query**, paste, **Run**. All four are idempotent
+and only add: no existing table, row, user, message, punch or result is
+changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
+
+| # | File | Adds |
+|---|---|---|
+| 1 | `supabase-crm-foundation-migration.sql` | `profiles.app_role` + a guard trigger, the `ws_*` permission helpers, `crm_activities`, `notifications`, `crm_contacts`, `crm_lead_statuses`, `crm_leads`, `crm_pipelines`, `crm_pipeline_stages`, `crm_deals`, `crm_convert_lead()`, manager read policies on `attendance_logs` and `leave_requests` |
+| 2 | `supabase-work-migration.sql` | `task_statuses`, `boards`, `board_columns`, `projects`, `project_members`, `tasks`, `task_assignees`, `task_watchers`, `comments`, `document_folders`, `documents`, `document_links`, `calendar_events`, `event_participants`, the private **`documents`** storage bucket and its policies |
+| 3 | `supabase-invoices-migration.sql` | `invoices`, `invoice_items`, `invoice_payments`, `invoice_counters`, database-owned totals, `invoice_duplicate()` |
+| 4 | `supabase-messenger-migration.sql` | `conversations`, `conversation_members`, group / reply / edit / pin / mention columns on `messages`, `ws_unread_counts()` |
+
+Optional, **development projects only**: `supabase-crm-demo-seed.sql` creates a
+few clearly-labelled sample records (all tagged `demo`) with a removal block
+at the bottom. Never run it on production.
+
+Until the migrations are applied every new page still loads and shows a
+notice naming the file to run; the existing WorkSuite pages are unaffected.
+
+## 2. Give someone a workspace role
+
+Employees are `employee` by default and can only see their own company's
+CRM/work records and edit what they own, created or are assigned. To finish
+setup, promote at least one person:
+
+Admin console (`/wsm-admin`) → **People → Employees → ✏️** → **Workspace role**:
+
+| Role | Can additionally |
+|---|---|
+| `manager` | edit and delete any record in their company, configure pipelines, administer **Invoices**, read their company's attendance and approved leave (Employees → Attendance tab) |
+| `admin` | the same across **every** company, and sees the Admin console link in the sidebar |
+
+The role lives in `profiles.app_role`. Only the admin console (service key)
+can change it: a database trigger rejects any change made with an employee's
+own session, so it cannot be self-granted through the REST API. Payroll and
+salary stay exactly where they were — visible only in the password-gated
+admin console, to nobody else.
+
+## 3. Routes
+
+| URL | Module |
+|---|---|
+| `/crm/` | CRM dashboard (real counts and values, date / owner / company filters) |
+| `/contacts/` · `/contacts/?id=…` | Contacts list · contact record |
+| `/leads/` · `/leads/?id=…` | Leads · lead record, **Convert lead** |
+| `/deals/` · `/deals/?id=…` | Deals pipeline (kanban / table) · deal record |
+| `/chat/` (also `/messenger`) | Messenger — the existing chat, extended with groups, replies, edits, pins, search and mentions |
+| `/boards/` · `/boards/?id=…` | Kanban boards |
+| `/projects/` · `/projects/?id=…` | Projects |
+| `/tasks/` · `/tasks/?id=…` · `/tasks/?view=mine` | Tasks (My / All / Created by me / Overdue / Due today / Completed, list or kanban) |
+| `/documents/` · `/documents/?id=…` | Documents (private storage, signed URLs) |
+| `/calendar/` | Calendar (month / week / day / agenda) |
+| `/employees/` · `/employees/?id=…` | Employee directory and profiles (existing `profiles`) |
+| `/invoices/` · `/invoices/?id=…` | Invoices (managers/admins) |
+
+Every existing URL keeps working. `/chat/` is unchanged; `/messenger` is a
+rewrite to it in `vercel.json`. `?new=1` on a list page opens the create
+dialog (the command palette uses this).
+
+## 4. Storage
+
+One new **private** bucket, `documents` (50 MB per file), created by
+`supabase-work-migration.sql`. Paths are `{uploader uid}/{uuid}-{safe name}`.
+Uploads are allowed only into the caller's own folder; reads are allowed to
+anyone who may see the matching `documents` row (same company); deletes to
+the uploader or a manager. Files are served with 1-hour signed URLs, never a
+public URL. The browser checks size and type (sniffing the first bytes, so a
+renamed `.exe` is refused) and hashes each file so an identical upload links
+to the existing copy instead of storing it twice. `chat-files`, `selfies` and
+`wfh-recordings` are untouched.
+
+## 5. Row Level Security
+
+Every new table has RLS enabled with no blanket `USING (true)` on business
+data (only the two lookup tables `crm_lead_statuses` and `task_statuses` are
+readable by everyone). The rules, enforced in the database regardless of the
+client:
+
+- **Company isolation** — a record carries `company` (stamped from the
+  creator's profile) and is visible only to people whose `company` or
+  `company2` matches, or to admins.
+- **Edit rights** — owner / creator / assignee / project member, or a
+  manager of that company.
+- **Delete** — managers, and for some records the creator (drafts, own
+  comments). Archiving is the normal path; the UI confirms every deletion.
+- **Calendar** — events marked private are visible to the owner and invitees
+  only.
+- **Invoices** — managers/admins of the company (plus read access for the
+  creator). Line items cannot change once an invoice is sent; money columns
+  are recomputed by triggers and client-sent totals are ignored.
+- **Messenger** — group messages are visible to members only; only the author
+  can edit a message; a member can only change their own read marker.
+- **Notifications** — each person sees only their own.
+- **Existing tables** — two additive policies let managers (and a person's
+  `manager_id`) read `attendance_logs` and `leave_requests` for their people.
+  Nothing an employee could see or do before has changed.
+
+`tests/crm-migrations.test.js` checks these invariants statically (RLS on
+every new table, idempotent DDL, no destructive statements).
+
+## 6. Environment variables
+
+No new variables. The modules use the existing `SUPABASE_URL`,
+`SUPABASE_ANON_KEY` (via `/api/config`) and, for push notifications, the
+existing `VAPID_*` keys behind `/api/push`. The service-role key is still
+used only by the serverless functions.
+
+## 7. Notifications
+
+In-app notifications are rows in `notifications`, written by database
+triggers (task assigned / completed / reopened, lead, deal and contact
+assigned, deal won or lost, project added / status, meeting invited /
+rescheduled / cancelled, group added, mentions). The bell in the top bar
+lists them live; `notifications.js` shows the toast on any page; the acting
+browser also fires the existing Web Push (`/api/push`) as fire-and-forget.
+A notification that fails to deliver never rolls back the change that caused
+it, and repeats of the same kind for the same record within an hour are
+collapsed.
+
+## 8. Testing
+
+```
+npm test
+```
+
+runs the existing suites plus `tests/crm-logic.test.js` (IST dates and
+ranges, invoice arithmetic, pipeline metrics, lead conversion planning,
+duplicate detection, task due states, permissions, upload validation),
+`tests/crm-migrations.test.js` (migration invariants) and
+`tests/crm-roles.test.js` (workspace-role validation in the admin API).
+No test contacts Supabase.
+
+## 9. Deployment
+
+Deploy as before. The function count is unchanged (12), the cron count is
+unchanged (2), and the only `vercel.json` change is the `/messenger` rewrite.
+Apply the four migrations **before** or **after** deploying — the pages
+degrade to a "run the migration" notice until they exist.

@@ -29,9 +29,12 @@ self.addEventListener('notificationclick', (event) => {
     const url = (event.notification.data && event.notification.data.url) || '/chat/';
     event.waitUntil(
         self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-            for (const c of list) {
-                if (c.url.includes('/chat') && 'focus' in c) { c.navigate(url); return c.focus(); }
-            }
+            // Prefer a tab already on the target page, then any WorkSuite tab; open a new one otherwise.
+            const target = new URL(url, self.location.origin);
+            const same = list.find(c => new URL(c.url).pathname === target.pathname && 'focus' in c);
+            const any = list.find(c => 'focus' in c);
+            const win = same || any;
+            if (win) { if (!same && 'navigate' in win) win.navigate(url); return win.focus(); }
             return self.clients.openWindow(url);
         })
     );

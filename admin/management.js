@@ -98,7 +98,8 @@
   }));
   window.addEventListener('admin-refresh',()=>{if(active==='company')loadCompany();if(active==='email'){loadHealth();loadMail();}});
 
-  const fieldSpec=[['email','Login / notification email','email'],['company','Company','company'],['employee_code','Biometric employee code','text'],['department','Department','text'],['job_title','Job title','text'],['phone','Phone','tel'],['joining_date','Joining date','date'],['manager_id','Reports to','manager'],['shift_id','Primary shift','shift'],['company2','Secondary company','company2'],['shift2_id','Secondary shift','shift2']];
+  const ROLE_LABELS={employee:'Employee — own company records, edits what they own or are assigned',manager:'Manager — edit and delete across the company, invoices, team attendance and leave',admin:'Admin — the same across every company'};
+  const fieldSpec=[['email','Login / notification email','email'],['company','Company','company'],['app_role','Workspace role (CRM & work modules)','role'],['employee_code','Biometric employee code','text'],['department','Department','text'],['job_title','Job title','text'],['phone','Phone','tel'],['joining_date','Joining date','date'],['manager_id','Reports to','manager'],['shift_id','Primary shift','shift'],['company2','Secondary company','company2'],['shift2_id','Secondary shift','shift2']];
   window.WSAdminPeople={
     async open(emp) {
       editorEmployee=emp; $('edit-emp-save').disabled=true; $('mg-edit-fields').textContent='Loading account settings…';
@@ -106,6 +107,7 @@
         const data=await api('shift_list');
         const options=(items,selected)=>items.map(([v,label])=>`<option value="${esc(v)}" ${String(v)===String(selected??'')?'selected':''}>${esc(label)}</option>`).join('');
         const orgReady='department' in emp;
+        const roleReady='app_role' in emp;
         $('mg-edit-fields').innerHTML=fieldSpec.map(([key,label,type])=>{
           let input;
           const value=emp[key]??'';
@@ -115,10 +117,11 @@
             input=`<select id="mg-edit-${key}">${options([['',type==='company2'?'No secondary company':'Select company'],...names.map(c=>[c,c])],value)}</select>`;
           } else if(type.startsWith('shift')) input=`<select id="mg-edit-${key}">${options([['',type==='shift'?'Company default':'No secondary shift'],...data.shifts.map(s=>[s.id,`${s.name} · ${range(s)}`])],value)}</select>`;
           else if(type==='manager') input=`<select id="mg-edit-${key}" ${disabled?'disabled':''}>${options([['','No manager assigned'],...data.employees.filter(p=>p.id!==emp.id).map(p=>[p.id,p.full_name || p.email])],value)}</select>`;
+          else if(type==='role') input=`<select id="mg-edit-${key}" ${roleReady?'':'disabled'}>${options(Object.entries(ROLE_LABELS),value || 'employee')}</select>`;
           else input=`<input id="mg-edit-${key}" type="${type}" value="${esc(value)}" ${disabled?'disabled':''}>`;
           return `<label>${label}${input}</label>`;
         }).join('')+['is_wfh','req_mobile','req_laptop','req_tab'].map((key,i)=>`<label class="mg-check"><input id="mg-edit-${key}" type="checkbox" ${emp[key]?'checked':''}>${['Work from home','Require mobile check-in','Require laptop check-in','Require tablet check-in'][i]}</label>`).join('');
-        $('mg-edit-note').textContent=(orgReady?'':'Apply supabase-admin-management-migration.sql to enable employment details. ')+ (emp.status==='inactive'?`This employee is offboarded${emp.exit_date?' as of '+emp.exit_date:''} and cannot sign in; use the ↩️ button in the employee list to bring them back. `:'')+ 'Changing email immediately changes the login address. Leave primary shift on Company default to use the company schedule. Changes apply to future punches; historical punches are not rewritten.';
+        $('mg-edit-note').textContent=(orgReady?'':'Apply supabase-admin-management-migration.sql to enable employment details. ')+ (roleReady?'':'Apply supabase-crm-foundation-migration.sql to enable workspace roles. ')+ (emp.status==='inactive'?`This employee is offboarded${emp.exit_date?' as of '+emp.exit_date:''} and cannot sign in; use the ↩️ button in the employee list to bring them back. `:'')+ 'Changing email immediately changes the login address. Leave primary shift on Company default to use the company schedule. Changes apply to future punches; historical punches are not rewritten.';
         $('edit-emp-save').disabled=false;
       } catch(e) { $('mg-edit-fields').textContent=e.message; }
     },

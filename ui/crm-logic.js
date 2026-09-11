@@ -534,6 +534,8 @@
     'event.scheduled': 'scheduled a meeting', 'event.rescheduled': 'rescheduled a meeting', 'event.cancelled': 'cancelled a meeting',
     'invoice.created': 'created an invoice', 'invoice.status_changed': 'changed invoice status', 'invoice.payment_recorded': 'recorded a payment',
     'note.added': 'added a note', 'call.logged': 'logged a call', 'email.logged': 'logged an email', 'meeting.logged': 'logged a meeting',
+    'lead.follow_up_set': 'set a follow-up', 'invoice.sent': 'sent the invoice', 'invoice.cancelled': 'cancelled the invoice',
+    'board.created': 'created the board', 'board.column_added': 'added a column', 'conversation.created': 'created a group',
   };
   /** A sentence for one activity row, with the meaningful bit of meta. */
   function describeActivity(a) {
