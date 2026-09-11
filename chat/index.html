@@ -1263,6 +1263,7 @@
         document.getElementById('logout-btn').addEventListener('click', async () => {
             if (sb) await sb.auth.signOut();
             if (messageChannel) sb.removeChannel(messageChannel);
+            if (membershipChannel) { try { sb.removeChannel(membershipChannel); } catch (e) {} membershipChannel = null; }
             if (callChannel) sb.removeChannel(callChannel);
             onLoggedOut();
         });
@@ -1281,7 +1282,8 @@
 
         // ---------- Contacts ----------
         async function loadContacts() {
-            const { data, error } = await sb.from('profiles').select('id, email, full_name, avatar_url, last_seen_at, company').order('full_name');
+            let { data, error } = await sb.from('profiles').select('id, email, full_name, avatar_url, last_seen_at, company').order('full_name');
+            if (error && String(error.code) === '42703') ({ data, error } = await sb.from('profiles').select('id, email, full_name, avatar_url, last_seen_at').order('full_name'));
             if (error) {
                 console.error('Load contacts failed:', error);
                 document.getElementById('contacts-list').innerHTML = `<p class="text-center text-rose-300 text-xs font-bold py-8 px-3">Could not load contacts.<br><br>If you're an admin, run <code class="bg-white/10 px-1 rounded">supabase-profiles-fix.sql</code> in your Supabase project.</p>`;
@@ -1997,6 +1999,7 @@
         // ---------- Message actions menu (react / copy / delete) ----------
         let menuFor = null;
         function openMessageMenu(m, mine, x, y) {
+            m = (m && m.id && loadedMsgs.get(m.id)) || m;     // edits/pins replace the stored copy
             menuFor = m;
             const menu = document.getElementById('msg-menu');
             // Hide delete for non-mine or already-deleted messages
@@ -2341,6 +2344,7 @@
                         const m = payload.new;
                         const el = document.querySelector(`[data-msg-id="${m.id}"] .receipt`);
                         if (el && m.read_at) { el.className = 'receipt receipt-read'; el.innerText = '✓✓'; }
+                        if (m && !m.conversation_id && typeof applyMessageUpdate === 'function') applyMessageUpdate(m);   // pins / deletes by the other side
                     })
                 .on('postgres_changes',
                     // Messages I received that got updated (delete, edit, pin) → refresh bubble
@@ -2354,10 +2358,6 @@
                 .on('postgres_changes',
                     { event: 'UPDATE', schema: 'public', table: 'messages' },
                     (payload) => { const m = payload.new; if (m && m.conversation_id) applyMessageUpdate(m); })
-                .on('postgres_changes',
-                    // Added to / removed from a group, or my read marker changed elsewhere
-                    { event: '*', schema: 'public', table: 'conversation_members', filter: `user_id=eq.${currentUser.id}` },
-                    () => { if (messengerReady !== false) loadGroups(); })
                 .on('postgres_changes',
                     // Reactions inserted or removed
                     { event: '*', schema: 'public', table: 'message_reactions' },
@@ -2479,6 +2479,26 @@
         });
 
         // ---------- groups: load + list ----------
+        // Membership changes (added to / removed from a group) arrive on their own channel, created only
+        // once the messenger tables are known to exist, so a missing table can never break the DM channel.
+        let membershipChannel = null;
+        const loadGroupsDebounced = (() => { let t; return () => { clearTimeout(t); t = setTimeout(() => loadGroups(), 400); }; })();
+        function subscribeGroupMembership() {
+            if (membershipChannel || !currentUser) return;
+            membershipChannel = sb.channel('membership:' + currentUser.id)
+                .on('postgres_changes',
+                    { event: '*', schema: 'public', table: 'conversation_members', filter: `user_id=eq.${currentUser.id}` },
+                    (payload) => {
+                        // My own read-marker / mute writes come back here too; only a real membership change reloads.
+                        if (payload.eventType === 'UPDATE') {
+                            const o = payload.old || {}, n = payload.new || {};
+                            const changed = Object.keys(n).filter(k => k !== 'last_read_at' && k !== 'muted' && JSON.stringify(o[k]) !== JSON.stringify(n[k]));
+                            if (o.conversation_id && !changed.length) return;
+                        }
+                        loadGroupsDebounced();
+                    })
+                .subscribe();
+        }
         async function loadGroups() {
             if (messengerReady === false) return;
             try {
@@ -2491,6 +2511,7 @@
                 }
                 messengerReady = true;
                 el('new-group-btn').classList.remove('hidden');
+                subscribeGroupMembership();
                 groups = (data || [])
                     .filter(r => r.conversation && !r.conversation.archived_at)
                     .map(r => ({ ...r.conversation, member: { role: r.role, last_read_at: r.last_read_at, muted: r.muted } }));
@@ -2571,9 +2592,10 @@
             status.className = 'text-xs text-slate-400 font-semibold';
             el('chat-presence-dot').className = 'presence-dot';
             const avatar = el('chat-avatar');
+            const dot = el('chat-presence-dot');            // lives inside the avatar: keep it across the rewrite
             avatar.innerHTML = escapeHtml((activeGroup.name || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase());
             avatar.style.background = 'var(--ws-primary, #2158a0)';
-            avatar.appendChild(el('chat-presence-dot'));
+            if (dot) avatar.appendChild(dot);
         }
         async function selectGroup(id) {
             const g = groups.find(x => x.id === id);
@@ -2774,6 +2796,7 @@
 
         // ---------- search in thread ----------
         function closeSearch() {
+            clearTimeout(searchTimer);
             el('msg-search-bar').classList.add('hidden');
             el('msg-search-btn').classList.remove('on');
             el('msg-search-input').value = '';
@@ -2808,7 +2831,7 @@
             let shown = 0;
             rows.forEach(r => {
                 if (!r.classList.contains('msg-row')) { r.classList.add('msg-hidden'); return; }
-                const m = loadedMsgs.get(r.dataset.rowFor);
+                const m = loadedMsgs.get(Number(r.dataset.rowFor)) || loadedMsgs.get(r.dataset.rowFor);
                 const text = m && typeof m.body === 'string' && !m.body.startsWith('__') ? m.body : '';
                 const hit = text.toLowerCase().includes(lq);
                 r.classList.toggle('msg-hidden', !hit);
@@ -2919,7 +2942,10 @@
         el('msg-input').addEventListener('blur', () => setTimeout(closeMentionMenu, 150));
         function mentionIdsIn(body) {
             const ids = [];
-            mentionCandidates().forEach(c => { if (c.name && body.includes('@' + c.name)) ids.push(c.id); });
+            const escRe = t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            mentionCandidates().slice().sort((a, b) => (b.name || '').length - (a.name || '').length).forEach(c => {
+                if (c.name && new RegExp('@' + escRe(c.name) + '(?![\\w])').test(body)) ids.push(c.id);
+            });
             return ids;
         }
         function highlightMentions(escaped) {
