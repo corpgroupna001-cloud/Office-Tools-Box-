@@ -1028,6 +1028,8 @@
         const fields = [
             { name: 'title', label: 'Title', type: 'text', required: true, full: true },
             { name: 'event_type', label: 'Type', type: 'select', options: Object.entries(L.EVENT_TYPE).map(([k, v]) => ({ value: k, label: v.label })), required: true },
+            // opts.colors: [[hex, name]], offered by the calendar once the colour column exists.
+            ...(opts.colors ? [{ name: 'color', label: 'Colour', type: 'select', options: [{ value: '', label: 'Calendar colour' }, ...opts.colors.map(([value, label]) => ({ value, label }))] }] : []),
             { name: 'all_day', label: 'All day', type: 'check' },
             { name: 'starts_at', label: 'Starts', type: 'datetime', required: true },
             { name: 'ends_at', label: 'Ends', type: 'datetime', required: true },
@@ -1040,8 +1042,8 @@
             { name: 'description', label: 'Notes', type: 'textarea', full: true },
         ];
         const values = isNew
-            ? { title: d.title || '', event_type: d.event_type || 'meeting', all_day: !!d.all_day, starts_at: startDefault, ends_at: endDefault, participants: d.participants || [], visibility: 'company', reminder_minutes: '30' }
-            : { ...ev, participants: opts.participants || [], reminder_minutes: ev.reminder_minutes == null ? '' : String(ev.reminder_minutes) };
+            ? { title: d.title || '', event_type: d.event_type || 'meeting', all_day: !!d.all_day, starts_at: startDefault, ends_at: endDefault, participants: d.participants || [], visibility: 'company', reminder_minutes: '30', color: d.color || '' }
+            : { ...ev, participants: opts.participants || [], reminder_minutes: ev.reminder_minutes == null ? '' : String(ev.reminder_minutes), color: ev.color || '' };
         return formModal({
             title: isNew ? 'Schedule' : 'Edit event', size: 'wide', fields, values, submitLabel: isNew ? 'Schedule' : 'Save',
             onReady: f => {
@@ -1060,6 +1062,7 @@
                     location: v.location || null, meeting_link: v.meeting_link || null, visibility: v.visibility,
                     reminder_minutes: v.reminder_minutes ? Number(v.reminder_minutes) : null,
                 };
+                if (opts.colors) row.color = /^#[0-9a-f]{6}$/i.test(v.color || '') ? v.color : null;
                 ['contact_id', 'lead_id', 'deal_id', 'project_id'].forEach(k => { if (k in v) row[k] = v[k] || null; else if (isNew && d[k]) row[k] = d[k]; });
                 if (isNew) { row.owner_id = state.user.id; row.created_by = state.user.id; }
                 const saved = isNew
