@@ -36,6 +36,7 @@ const CRM = [
   'supabase-messenger-migration.sql',
   'supabase-crm-reminders-migration.sql',
   'supabase-b24-migration.sql',
+  'supabase-messenger-calls-migration.sql',
 ];
 
 function sqlOf(file) {

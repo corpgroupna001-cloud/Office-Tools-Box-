@@ -5,7 +5,8 @@
   "description": "WorkSuite — internal productivity tools (Vercel + Supabase).",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "smoke:ui": "node tests/ui-smoke/smoke.js"
+    "smoke:ui": "node tests/ui-smoke/smoke.js",
+    "test:calls": "node tests/ui-smoke/calls-webrtc.js"
   },
   "dependencies": {
     "nodemailer": "^6.9.16",

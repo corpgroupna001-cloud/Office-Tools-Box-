@@ -21,6 +21,10 @@
       "destination": "/api/verify?fn=check"
     },
     {
+      "source": "/api/ice",
+      "destination": "/api/push?fn=ice"
+    },
+    {
       "source": "/messenger",
       "destination": "/chat/index.html"
     },

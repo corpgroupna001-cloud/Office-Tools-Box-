@@ -264,20 +264,6 @@ body.ws-corporate[data-ws-page="signature"] .container > .glass { padding: 28px;
 body.ws-corporate[data-ws-page="signature"] .section-sub { text-transform: none; letter-spacing: 0; font-weight: 400; }
 /* Chat retains its full-height workspace and mobile conversation switching. */
 body.ws-corporate.page-chat .ws-page.fill { max-width: none; padding: 0; height: calc(100dvh - var(--app-top-h)); }
-body.ws-corporate.page-chat .app-container { padding: 0; gap: 0; }
-body.ws-corporate.page-chat .contacts-panel { width: 320px; border-width: 0 1px 0 0; border-radius: 0; }
-body.ws-corporate.page-chat .chat-panel { border: 0; border-radius: 0; }
-body.ws-corporate.page-chat .contact { border-radius: 6px; margin: 4px 8px; padding: 14px 12px; }
-body.ws-corporate.page-chat .contact-name { font-size: 14px; font-weight: 600; }
-body.ws-corporate.page-chat .contact-preview { font-size: 13px; font-weight: 400; }
-body.ws-corporate.page-chat .contact-time { font-size: 12px; }
-body.ws-corporate.page-chat .contact-avatar { border-radius: 10px; }
-body.ws-corporate.page-chat .msg-sent { background: #2158a0; border-radius: 10px 10px 3px 10px; box-shadow: none; }
-body.ws-corporate.page-chat .msg-recv { background: var(--ws-surface); border-radius: 10px 10px 10px 3px; }
-body.ws-corporate.page-chat #msg-list { background: var(--ws-bg); }
-body.ws-corporate.page-chat :is(#call-audio-btn,#call-video-btn) { background: var(--ws-primary-soft) !important; color: var(--ws-primary) !important; box-shadow: none !important; border: 1px solid var(--ws-border); border-radius: 6px; }
-body.ws-corporate.page-chat #clear-chat-btn { box-shadow: none; border-radius: 6px; color: var(--ws-danger-text) !important; background: var(--ws-surface) !important; border-color: var(--ws-border) !important; }
-body.ws-corporate.page-chat #msg-input { border-radius: 6px; font-size: 16px; }
 body.ws-corporate .ws-field-label { display: block; margin: 16px 0 6px; color: var(--ws-text-2); font-size: 13px; font-weight: 500; text-align: left; }
 body.ws-corporate .ws-field-label + :is(input,select,.password-field) { margin-top: 0 !important; }
 body.ws-corporate[data-ws-page="quiz"] .cat-card { text-align: left; padding: 20px; min-width: 0; color: var(--ws-text); }
@@ -308,12 +294,6 @@ body.ws-corporate[data-ws-page="recordings"] .badge-todo { background: var(--ws-
     body.ws-corporate .ws-top .crumb b { font-size: 14px; }
     body.ws-corporate .ws-side-brand { height: 88px; }
     body.ws-corporate .ws-page { padding: 24px 20px 48px; }
-    body.ws-corporate.page-chat .app-container { grid-template-columns: 280px minmax(0,1fr); }
-    body.ws-corporate.page-chat .contacts-panel { width: auto; }
-}
-@media (max-width: 768px) {
-    body.ws-corporate.page-chat .app-container { grid-template-columns: minmax(0,1fr); }
-    body.ws-corporate.page-chat .contacts-panel { width: 100%; border: 0; }
 }
 @media (max-width: 640px) {
     :root { --app-top-h: 60px; }
@@ -347,7 +327,6 @@ body.ws-corporate[data-ws-page="recordings"] .badge-todo { background: var(--ws-
     body.ws-corporate.page-tool .view h1 { font-size: 26px; }
     body.ws-corporate.page-tool .view > .glass-strong { padding: 20px; }
     body.ws-corporate[data-ws-page="signature"] .container { grid-template-columns: minmax(0,1fr); }
-    body.ws-corporate.page-chat .contacts-panel { width: 100%; border: 0; }
     body.ws-corporate .ws-table td, body.ws-corporate .ws-table th { padding: 12px; }
     body.ws-corporate .ws-launcher { grid-template-columns: 1fr; }
 }

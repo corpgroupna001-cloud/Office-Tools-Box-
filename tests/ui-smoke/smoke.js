@@ -27,7 +27,7 @@ const CHROME = process.env.CHROME_PATH || [
 if (!CHROME) { console.error('No Chrome found. Set CHROME_PATH.'); process.exit(2); }
 
 const PAGES = [
-  ['/', 'home'], ['/crm', 'crm'],
+  ['/', 'home'], ['/crm', 'crm'], ['/crm/settings', 'crm-settings'], ['/companies', 'companies'],
   ['/contacts', 'contacts'], ['/contacts?id=C1', 'contact-record'],
   ['/leads', 'leads'], ['/leads?id=L1', 'lead-record'],
   ['/deals', 'deals'], ['/deals?id=D1', 'deal-record'],
@@ -37,10 +37,10 @@ const PAGES = [
   ['/documents', 'documents'], ['/documents?id=DOC1', 'document-record'],
   ['/calendar', 'calendar'], ['/employees', 'employees'], ['/employees?id=22222222-2222-4222-8222-222222222222', 'employee-record'],
   ['/invoices', 'invoices'], ['/invoices?id=I1', 'invoice-record'],
-  ['/chat', 'messenger'], ['/attendance', 'attendance'],
+  ['/chat', 'messenger'], [`/call?id=${F.CALL}`, 'call'], ['/attendance', 'attendance'],
   ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
 ];
-const CRM_PAGES = new Set(['crm', 'contacts', 'contact-record', 'leads', 'lead-record', 'deals', 'deal-record', 'boards', 'board', 'projects',
+const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'lead-record', 'deals', 'deal-record', 'boards', 'board', 'projects',
   'project-record', 'tasks', 'task-record', 'documents', 'document-record', 'calendar', 'employees', 'employee-record', 'invoices', 'invoice-record']);
 const VIEWPORTS = [['desktop', { width: 1366, height: 900 }], ['phone', { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]];
 
@@ -80,7 +80,7 @@ function filterFn(col, expr) {
 }
 const SKIP_PARAMS = new Set(['select', 'order', 'limit', 'offset', 'on_conflict', 'columns', 'or', 'and']);
 const FK_OF = { calendar_events: 'event_id', documents: 'document_id', invoices: 'invoice_id', projects: 'project_id', tasks: 'task_id',
-  conversations: 'conversation_id', crm_deals: 'deal_id', crm_contacts: 'contact_id', boards: 'board_id' };
+  conversations: 'conversation_id', crm_deals: 'deal_id', crm_contacts: 'contact_id', boards: 'board_id', calls: 'call_id' };
 function embed(row, select, table) {
   if (!select || !select.includes('(')) return row;
   const out = { ...row };
@@ -116,7 +116,11 @@ async function supabase(req, res, url) {
   if (p.startsWith('/storage/v1/object/sign/')) return send(res, 200, { signedURL: '/object/public/placeholder.png' });
   if (p.startsWith('/storage/v1/object/public/')) { res.writeHead(200, { 'Content-Type': 'image/png' }); return fs.createReadStream(path.join(ROOT, 'icon-192.png')).pipe(res); }
   if (p.startsWith('/storage/v1/')) return send(res, 200, { Key: 'documents/smoke' });
-  if (p.startsWith('/rest/v1/rpc/')) { const fn = p.slice('/rest/v1/rpc/'.length); return send(res, 200, F.RPC[fn] ? F.RPC[fn](body) : null); }
+  if (p.startsWith('/rest/v1/rpc/')) {
+    const fn = p.slice('/rest/v1/rpc/'.length);
+    try { return send(res, 200, F.RPC[fn] ? F.RPC[fn](body || {}, DB) : null); }
+    catch (e) { return send(res, 400, { code: 'P0001', message: String(e.message || e) }); }
+  }
   if (!p.startsWith('/rest/v1/')) return send(res, 404, { message: 'not mocked' });
 
   const table = decodeURIComponent(p.slice('/rest/v1/'.length));
@@ -137,7 +141,9 @@ async function supabase(req, res, url) {
     return send(res, 200, outRows, headers);
   }
   if (method === 'POST') {
-    const items = (Array.isArray(body) ? body : [body || {}]).map(b => ({ id: randomUUID(), created_at: stamp, updated_at: stamp, ...b }));
+    // Messages have bigserial ids in the real table (threads page by id); everything else a uuid.
+    const nextId = rows.reduce((n, r) => Math.max(n, Number(r.id) || 0), 0) + 1;
+    const items = (Array.isArray(body) ? body : [body || {}]).map((b, i) => ({ id: table === 'messages' ? nextId + i : randomUUID(), created_at: stamp, updated_at: stamp, ...b }));
     rows.push(...items);
     return send(res, 201, single ? items[0] : items);
   }
@@ -223,7 +229,7 @@ async function visit(browser, route, name, [vpName, viewport]) {
         title: document.title,
       };
     });
-    if (!info.shell && name !== 'home') result.problems.push('app shell did not mount');
+    if (!info.shell && name !== 'home' && name !== 'call') result.problems.push('app shell did not mount');   // the call window is full-screen, no shell
     if (vpName === 'phone' && info.overflow > 1) result.problems.push(`horizontal overflow ${info.overflow}px: ${info.offenders.join(', ')}`);
     if (CRM_PAGES.has(name) && info.errorText) result.problems.push(`error state on screen: "${info.errorText.slice(0, 90)}"`);
     if (info.signedOut) result.problems.push('ended on the sign-in screen');
@@ -243,9 +249,9 @@ async function interact(page, name, result) {
   const expect = async (label, fn) => { try { const ok = await fn(); if (!ok) result.problems.push(`interaction failed: ${label}`); } catch (e) { result.problems.push(`interaction threw: ${label}: ${e.message.split('\n')[0]}`); } };
   const wait = ms => new Promise(r => setTimeout(r, ms));
   if (name === 'contacts') {
-    await expect('New contact opens a dialog', async () => { await page.click('#new-btn'); await wait(300); return !!(await page.$('.crm-modal .crm-form')); });
+    await expect('Create opens the new-contact dialog', async () => { await page.click('[data-create]'); await wait(300); return !!(await page.$('.crm-modal .crm-form')); });
     await expect('Escape closes the dialog', async () => { await page.keyboard.press('Escape'); await wait(200); return !(await page.$('.crm-modal')); });
-    await expect('the list shows the fixture contacts', async () => (await page.$$('.ws-table tbody tr')).length >= 2);
+    await expect('the list shows the fixture contacts', async () => (await page.$$('.b24-grid-table tbody tr[data-id]')).length >= 2);
   }
   if (name === 'deals') await expect('the pipeline shows one column per stage', async () => (await page.$$('.kb-col')).length >= 5 || (await page.$$('.ws-table tbody tr')).length >= 1);
   if (name === 'tasks') await expect('My Tasks lists my tasks', async () => (await page.$$('.ws-table tbody tr, .kb-card')).length >= 1);
@@ -262,7 +268,7 @@ async function interact(page, name, result) {
     });
   }
   if (name === 'contact-record') await expect('the Deals tab lists the linked deal', async () => {
-    const tab = await page.$('.crm-tab[data-tab="deals"]'); if (!tab) return false; await tab.click(); await wait(400);
+    const tab = await page.$('.b24-card-tabs [data-tab="deals"]'); if (!tab) return false; await tab.click(); await wait(400);
     return (await page.evaluate(() => document.body.innerText)).includes('Acme academy kit supply');
   });
 }
@@ -271,7 +277,9 @@ async function interact(page, name, result) {
 (async () => {
   await new Promise(r => server.listen(0, 'localhost', r));
   ORIGIN = `http://localhost:${server.address().port}`;
-  const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ['--no-first-run', '--no-default-browser-check'] });
+  const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ['--no-first-run', '--no-default-browser-check',
+    // A fake camera and microphone, already allowed, so the call page renders as it would for a person.
+    '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   const results = [];
   const only = process.argv[2] ? new Set(process.argv.slice(2)) : null;
   for (const [route, name] of PAGES) {

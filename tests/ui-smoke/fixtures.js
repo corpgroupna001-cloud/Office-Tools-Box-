@@ -6,6 +6,7 @@ const NOVA = 'Nova Sportsmart Private Limited';
 const ME = '11111111-1111-4111-8111-111111111111';
 const U2 = '22222222-2222-4222-8222-222222222222';
 const U3 = '33333333-3333-4333-8333-333333333333';
+const CALL = '77777777-7777-4777-8777-777777777777';     // Anil is ringing Maya (video)
 
 const ist = n => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' })
   .format(new Date(Date.now() + n * 86400000));
@@ -109,11 +110,27 @@ function db() {
     ],
     comments: [{ id: 'CM1', company: NOVA, entity_type: 'contact', entity_id: 'C1', author_id: U2, body: 'Spoke to @Maya Manager about the discount.', mentions: [ME], created_at: at(-1), updated_at: at(-1) }],
     messages: [
-      { id: 1, sender_id: U2, recipient_id: ME, conversation_id: null, body: 'Measurements are in the shared folder.', created_at: at(0, '09:40'), read_at: null },
-      { id: 2, sender_id: ME, recipient_id: U2, conversation_id: null, body: 'Thanks, reviewing now.', created_at: at(0, '09:45'), read_at: at(0, '09:46') },
-      { id: 3, sender_id: U3, recipient_id: null, conversation_id: 'G1', body: 'Fabric ordered for the Acme kits.', created_at: at(0, '10:00'), read_at: null, mentions: [] },
+      { id: 1, sender_id: U3, recipient_id: ME, conversation_id: null, body: '__CALL__::audio::missed::0', created_at: at(-1, '17:31'), read_at: null, mentions: [] },
+      { id: 2, sender_id: ME, recipient_id: U2, conversation_id: null, body: '__CALL__::audio::completed::242', created_at: at(0, '09:14'), read_at: at(0, '09:14'), mentions: [] },
+      { id: 3, sender_id: U2, recipient_id: ME, conversation_id: null, body: 'Measurements are in the shared folder.', created_at: at(0, '09:40'), read_at: null, mentions: [] },
+      { id: 4, sender_id: U2, recipient_id: ME, conversation_id: null, body: `__FILE__::${U2}/1757571000000-ab12cd-kit-sizes.png::image/png::48213::kit-sizes.png`, created_at: at(0, '09:41'), read_at: null, mentions: [] },
+      { id: 5, sender_id: ME, recipient_id: U2, conversation_id: null, body: 'Thanks, reviewing now. https://example.test/acme-kit', created_at: at(0, '09:45'), read_at: at(0, '09:46'), mentions: [] },
+      { id: 6, sender_id: U3, recipient_id: null, conversation_id: 'G1', body: 'Fabric ordered for the Acme kits.', created_at: at(0, '10:00'), read_at: null, mentions: [] },
     ],
     message_reactions: [],
+    calls: [
+      { id: CALL, company: NOVA, created_by: U2, conversation_id: null, media: 'video', status: 'ringing', created_at: now, answered_at: null, ended_at: null, end_reason: null },
+      { id: '88888888-8888-4888-8888-888888888888', company: NOVA, created_by: ME, conversation_id: null, media: 'audio', status: 'ended', created_at: at(0, '09:10'), answered_at: at(0, '09:10'), ended_at: at(0, '09:14'), end_reason: 'hangup' },
+      { id: '99999999-9999-4999-8999-999999999999', company: NOVA, created_by: U3, conversation_id: null, media: 'audio', status: 'missed', created_at: at(-1, '17:30'), answered_at: null, ended_at: at(-1, '17:31'), end_reason: 'no_answer' },
+    ],
+    call_participants: [
+      { call_id: CALL, user_id: U2, role: 'caller', state: 'joined', device_id: 'smoke-u2', invited_at: now, joined_at: now, left_at: null, last_seen_at: now },
+      { call_id: CALL, user_id: ME, role: 'callee', state: 'ringing', device_id: null, invited_at: now, joined_at: null, left_at: null, last_seen_at: null },
+      { call_id: '88888888-8888-4888-8888-888888888888', user_id: ME, role: 'caller', state: 'left', invited_at: at(0, '09:10'), joined_at: at(0, '09:10'), left_at: at(0, '09:14') },
+      { call_id: '88888888-8888-4888-8888-888888888888', user_id: U2, role: 'callee', state: 'left', invited_at: at(0, '09:10'), joined_at: at(0, '09:10'), left_at: at(0, '09:14') },
+      { call_id: '99999999-9999-4999-8999-999999999999', user_id: U3, role: 'caller', state: 'left', invited_at: at(-1, '17:30'), joined_at: at(-1, '17:30'), left_at: at(-1, '17:31') },
+      { call_id: '99999999-9999-4999-8999-999999999999', user_id: ME, role: 'callee', state: 'missed', invited_at: at(-1, '17:30'), joined_at: null, left_at: null },
+    ],
     conversations: [{ id: 'G1', company: NOVA, name: 'Acme delivery team', description: 'Kit delivery chatter', kind: 'group', project_id: null, created_by: ME, archived_at: null, ...base }],
     conversation_members: [ME, U2, U3].map((u, i) => ({ conversation_id: 'G1', user_id: u, role: i ? 'member' : 'admin', added_by: ME, last_read_at: at(-1), muted: false, created_at: at(-9) })),
     test_results: [], quiz_results: [], wfh_recordings: [], push_subscriptions: [], salaries: [],
@@ -125,6 +142,57 @@ const RPC = {
   crm_log: () => null,
   crm_convert_lead: () => ({ contact_id: 'C1', deal_id: 'D1', existing_contact: true }),
   invoice_duplicate: () => 'I1',
+  // Messenger & calls v2. Stubs get (body, DB) and throw to answer an error.
+  ws_chat_inbox: (_body, DB) => inbox(DB),
+  ws_call_live: (_body, DB) => (DB.call_participants || [])
+    .filter(p => p.user_id === ME && ['invited', 'ringing', 'joined'].includes(p.state))
+    .map(p => callState(DB, p.call_id)).filter(c => c && ['ringing', 'active'].includes(c.status)),
+  ws_call_get: (body, DB) => callState(DB, body.p_call),
+  ws_call_start: () => CALL,
+  ws_call_action: (body, DB) => {
+    const call = (DB.calls || []).find(c => c.id === body.p_call);
+    const me = (DB.call_participants || []).find(p => p.call_id === body.p_call && p.user_id === ME);
+    if (!call || !me) throw new Error('Call not found');
+    const stamp = new Date().toISOString();
+    if (body.p_action === 'ringing' && me.state === 'invited') me.state = 'ringing';
+    if (body.p_action === 'join') {
+      if (!['ringing', 'active'].includes(call.status)) throw new Error('This call has ended');
+      Object.assign(me, { state: 'joined', joined_at: me.joined_at || stamp, device_id: body.p_device || null, last_seen_at: stamp });
+      Object.assign(call, { status: 'active', answered_at: call.answered_at || stamp });
+    }
+    if (body.p_action === 'decline' && ['invited', 'ringing'].includes(me.state)) { me.state = 'declined'; Object.assign(call, { status: 'declined', ended_at: stamp, end_reason: 'declined' }); }
+    if (body.p_action === 'leave') { me.state = me.state === 'joined' ? 'left' : 'declined'; Object.assign(call, { status: call.answered_at ? 'ended' : 'missed', ended_at: stamp }); }
+    return callState(DB, call.id);
+  },
 };
 
-module.exports = { ME, NOVA, session, db, RPC };
+function callState(DB, id) {
+  const c = (DB.calls || []).find(x => x.id === id);
+  if (!c) throw new Error('Call not found');
+  return { ...c, now: new Date().toISOString(), participants: (DB.call_participants || []).filter(p => p.call_id === id) };
+}
+
+// The same rows ws_chat_inbox() answers, computed from the fixture messages.
+function inbox(DB) {
+  const out = [];
+  const lastDm = new Map();
+  for (const m of DB.messages || []) {
+    if (m.conversation_id || (m.sender_id !== ME && m.recipient_id !== ME)) continue;
+    const peer = m.sender_id === ME ? m.recipient_id : m.sender_id;
+    if (!lastDm.has(peer) || Number(m.id) > Number(lastDm.get(peer).id)) lastDm.set(peer, m);
+  }
+  for (const [peer, m] of lastDm) {
+    out.push({ kind: 'dm', peer_id: peer, conversation_id: null, last_id: m.id, last_sender: m.sender_id, last_body: m.body, last_at: m.created_at,
+      unread: (DB.messages || []).filter(x => !x.conversation_id && x.recipient_id === ME && x.sender_id === peer && !x.read_at).length });
+  }
+  for (const mem of (DB.conversation_members || []).filter(x => x.user_id === ME)) {
+    const msgs = (DB.messages || []).filter(x => x.conversation_id === mem.conversation_id).sort((a, b) => Number(b.id) - Number(a.id));
+    const last = msgs[0] || null;
+    out.push({ kind: 'group', peer_id: null, conversation_id: mem.conversation_id, last_id: last ? last.id : null,
+      last_sender: last ? last.sender_id : null, last_body: last ? last.body : null, last_at: last ? last.created_at : null,
+      unread: msgs.filter(x => x.sender_id !== ME && (!mem.last_read_at || x.created_at > mem.last_read_at)).length });
+  }
+  return out;
+}
+
+module.exports = { ME, NOVA, CALL, session, db, RPC };

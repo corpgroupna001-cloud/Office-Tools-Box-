@@ -614,6 +614,7 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 3 | `supabase-invoices-migration.sql` | `invoices`, `invoice_items`, `invoice_payments`, `invoice_counters`, database-owned totals, `invoice_duplicate()` |
 | 4 | `supabase-messenger-migration.sql` | `conversations`, `conversation_members`, group / reply / edit / pin / mention columns on `messages`, `ws_unread_counts()` |
 | 5 | `supabase-crm-reminders-migration.sql` | `crm_reminder_log`, `notifications.pushed_at`, `crm_run_reminders()` and a pg_cron schedule every 5 minutes (skipped with a notice where pg_cron is unavailable) |
+| 7 | `supabase-messenger-calls-migration.sql` | Messenger & calls v2: `messages.client_id`, `ws_chat_inbox()`, `calls`, `call_participants` and the `ws_call_*` functions — see [10. Messenger & calls](#10-messenger--calls) |
 
 **Already ran 1–4 before 11 Sep 2026?** Run all five again, in order. They
 are idempotent, and 1–4 now carry fixes found by the real-database tests:
@@ -669,7 +670,8 @@ admin console, to nobody else.
 | `/contacts/` · `/contacts/?id=…` | Contacts list · contact record |
 | `/leads/` · `/leads/?id=…` | Leads · lead record, **Convert lead** |
 | `/deals/` · `/deals/?id=…` | Deals pipeline (kanban / table) · deal record |
-| `/chat/` (also `/messenger`) | Messenger — the existing chat, extended with groups, replies, edits, pins, search and mentions |
+| `/chat/` (also `/messenger`) | Messenger — direct and group chat, voice notes, files, replies, edits, pins, search, mentions and call history. Deep links `#thread=<userId>`, `#group=<id>`, `#call=<callId>` |
+| `/call/?id=…` | The call window (voice, video, screen share), opened by Messenger or an incoming-call banner |
 | `/boards/` · `/boards/?id=…` | Kanban boards |
 | `/projects/` · `/projects/?id=…` | Projects |
 | `/tasks/` · `/tasks/?id=…` · `/tasks/?view=mine` | Tasks (My / All / Created by me / Overdue / Due today / Completed, list or kanban) |
@@ -678,8 +680,8 @@ admin console, to nobody else.
 | `/employees/` · `/employees/?id=…` | Employee directory and profiles (existing `profiles`) |
 | `/invoices/` · `/invoices/?id=…` | Invoices (managers/admins) |
 
-Every existing URL keeps working. `/chat/` is unchanged; `/messenger` is a
-rewrite to it in `vercel.json`. `?new=1` on a list page opens the create
+Every existing URL keeps working. `/chat/` keeps its address and its deep
+links; `/messenger` is a rewrite to it in `vercel.json`. `?new=1` on a list page opens the create
 dialog (the command palette uses this).
 
 ## 4. Storage
@@ -725,10 +727,12 @@ every new table, idempotent DDL, no destructive statements).
 
 ## 6. Environment variables
 
-No new variables. The modules use the existing `SUPABASE_URL`,
+No new required variables. The modules use the existing `SUPABASE_URL`,
 `SUPABASE_ANON_KEY` (via `/api/config`) and, for push notifications, the
 existing `VAPID_*` keys behind `/api/push`. The service-role key is still
-used only by the serverless functions.
+used only by the serverless functions. Calls work without anything new; a
+free TURN relay for strict firewalls is optional — see
+[10. Messenger & calls](#10-messenger--calls).
 
 ## 7. Notifications
 
@@ -838,6 +842,136 @@ Screenshots land in `tests/ui-smoke/out/`, which git ignores. Set
 ## 9. Deployment
 
 Deploy as before. The function count is unchanged (12), the cron count is
-unchanged (2), and the only `vercel.json` change is the `/messenger` rewrite.
-Apply the four migrations **before** or **after** deploying — the pages
+unchanged (2), and the only `vercel.json` changes are the `/messenger`
+rewrite and `/api/ice` (a rewrite to the existing `/api/push`, not a new
+function). `.vercelignore` keeps `tests/` off the site.
+Apply the migrations **before** or **after** deploying — the pages
 degrade to a "run the migration" notice until they exist.
+
+# 10. Messenger & calls
+
+Messenger (`/chat/`) and calling were rebuilt in September 2026. Chat keeps
+every existing message, group, reaction and file; nothing is migrated or
+lost. Calls are new: the old version sent every call's connection details to
+every open WorkSuite page and dropped most calls that crossed a firewall.
+
+## Run the migration
+
+Supabase → **SQL Editor** → paste `supabase-messenger-calls-migration.sql` →
+**Run**. Run it seventh, after `supabase-b24-migration.sql`. It is
+idempotent and only adds:
+
+- `messages.client_id`, which lets a message be retried after a dropped
+  connection without being sent twice;
+- `ws_chat_inbox()`, which loads the conversation list in one call;
+- `calls` and `call_participants` (read-only from the browser, with every
+  change made by the `ws_call_*` functions);
+- live updates for both call tables;
+- **private chat attachments**. The old `chat-files` policy let any signed-in
+  user read or list every file in the bucket. A file is now readable only by
+  the person who uploaded it and by people who can see the message it was
+  sent in. Clearing a chat or deleting a message for everyone also removes
+  access to its file.
+
+Until it runs, Messenger still works on the older queries. The call buttons
+say "Calls are not set up yet" and name this file.
+
+## How calls work
+
+- **Voice and video calls, 1:1 or in a group of up to 8.** You can also share
+  your screen, switch camera, microphone or speaker, and turn video on or off
+  during the call. Group calls add every member, and anyone in the group can
+  join while the call is live.
+- **Ringing.** Every WorkSuite page you have open rings, and so does every
+  device with notifications on (Web Push, using the existing `VAPID_*` keys),
+  even with the browser closed. Answering on one device stops the others. The
+  call opens in its own window, so you can keep working in WorkSuite during it.
+- **The database is the source of truth.** An unanswered call rings for 45
+  seconds. A browser that disappears (closed tab, laptop asleep) drops out of
+  the call after 40 seconds. When a call ends, the database writes it into the
+  conversation once. People who missed it get a bell notification. Someone
+  already on a call is shown as busy and their phone doesn't ring.
+- **Privacy.** Audio and video go straight from browser to browser, encrypted
+  (WebRTC, DTLS-SRTP), and are never recorded. Supabase only stores who
+  called whom, when, and for how long. The connection details for each call
+  travel on a channel named after that call's id, and only the people in the
+  call can read that id.
+
+## Calls behind strict firewalls: a free TURN relay (optional)
+
+On most home and office networks two browsers connect directly using public
+STUN servers, with no setup. Some corporate firewalls and mobile carriers
+block that direct path, and those calls need a **TURN relay**. Configure one
+of these; all three can be used for free. Set the variables in **Vercel →
+Settings → Environment Variables** and redeploy. The first one configured is
+used.
+
+| Option | How to get it | Variables |
+|---|---|---|
+| **Cloudflare Realtime TURN** (free monthly allowance) | Cloudflare dashboard → **Realtime** → **TURN Server** → *Create* → copy the *Turn Token ID* and the *API Token* | `CLOUDFLARE_TURN_KEY_ID`, `CLOUDFLARE_TURN_API_TOKEN` |
+| **Metered / Open Relay** (free plan) | Sign up at metered.ca → create an app → **TURN Server** → copy the API key; the domain is `<your-app>.metered.live` | `METERED_TURN_DOMAIN`, `METERED_TURN_API_KEY` |
+| **Your own coturn** (free software) | Run coturn with `use-auth-secret` and a `static-auth-secret` | `TURN_URLS` (e.g. `turn:turn.example.com:3478,turns:turn.example.com:5349`), `TURN_SECRET` — or static `TURN_USERNAME` + `TURN_CREDENTIAL` |
+
+Optional: `TURN_TTL_SECONDS` sets how long relay credentials last. The
+default is 12 hours, and values are capped between 10 minutes and 48 hours.
+
+Browsers get short-lived credentials from `GET /api/ice`, and only with their
+own session token. The secrets stay in Vercel. To check the setup, open any
+call. A connection that goes through the relay shows "via relay" in the
+call's connection details. You can also call the endpoint directly with a
+session token:
+
+```
+curl -H "Authorization: Bearer <access_token>" https://<your-site>/api/ice
+```
+
+It should answer with `"relay": true` and the provider's name. If a provider
+fails, it falls back to STUN: calls on open networks still connect.
+
+## Messenger
+
+Everything from before is still there:
+
+- direct and group chats, with group admin, mute, leave and archive;
+- replies, edits, delete for everyone, pins, search and @mentions;
+- reactions, files and photos (private `chat-files` bucket), link previews;
+- read receipts, typing indicators and online status;
+- WFH / leave chips next to names.
+
+Also fixed or new:
+
+- Threads open on the **newest** messages. Older ones load as you scroll up.
+  Before, only the first 200 messages ever sent were loaded.
+- Messages you send appear on your other devices. After sleep, a dropped
+  connection or going offline, the open conversation and the list re-sync.
+  Anything you sent while offline is sent when you're back, never twice.
+- Sending shows each message's state: sending, sent, read, or failed (with
+  retry).
+- New: multi-line messages, paste or drag-and-drop files with upload
+  progress, voice messages, an emoji picker, "Seen by" in groups, and a
+  **Calls** tab with your call history.
+- Push notifications for messages and calls are written by the server from
+  the database (`/api/push` `message` / `call` / `call-end`), so a browser
+  can't send a notification in someone else's name. A message notification
+  and the page's own notification share a tag, so only one shows.
+
+## Tests
+
+`npm test` includes:
+
+- `tests/messenger-calls-database.test.js`, which runs every call rule on a
+  real Postgres: visibility, ringing, answering, declining, cancelling,
+  time-outs, busy, device takeover, group calls, the single call-log line and
+  the missed-call bell;
+- `tests/push-api.test.js` and `tests/comms-push.test.js`, which check who
+  may push what to whom;
+- `tests/ice-servers.test.js`, which checks TURN provider selection and
+  fallbacks;
+- `tests/chat-logic.test.js`, which covers message formats, previews and
+  grouping.
+
+`npm run test:calls` (Chrome required, like `smoke:ui`) connects two, then
+three, real WebRTC peers in one browser with a fake camera and microphone.
+It checks every connection, camera on and off, ICE restart, recovery from a
+lost offer, and late joiners. `npm run smoke:ui` now also opens the call
+window.

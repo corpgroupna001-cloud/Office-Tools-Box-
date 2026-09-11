@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Call mesh harness</title>
+<!--
+  Test page for call/mesh.js, driven by tests/ui-smoke/calls-webrtc.js.
+  Several WSCallMesh instances live in this one page and talk through an
+  in-memory "bus" instead of Supabase, with Chrome's fake camera and
+  microphone. Real RTCPeerConnections, real ICE, real media: only the
+  signalling transport is simulated. The bus can drop messages to prove
+  the engine recovers.
+-->
+<script src="/call/mesh.js"></script>
+</head>
+<body>
+<pre id="out"></pre>
+<script>
+'use strict';
+const wait = ms => new Promise(r => setTimeout(r, ms));
+async function until(fn, ms, label) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) { try { if (await fn()) return true; } catch (e) { /* keep polling */ } await wait(100); }
+    throw new Error(`timed out after ${ms} ms: ${label}`);
+}
+
+// ---- in-memory signalling bus ------------------------------------------------
+const bus = {
+    nodes: new Map(),        // userId -> { mesh, sid }
+    log: [],                 // { from, to, type, data }
+    drop: null,              // (msg) => true to drop
+    send(fromId, fromSid, to, type, data) {
+        const msg = { from: { userId: fromId, sid: fromSid }, to, type, data: JSON.parse(JSON.stringify(data || {})) };
+        this.log.push(msg);
+        if (this.drop && this.drop(msg)) { msg.dropped = true; return; }
+        const node = this.nodes.get(to.userId);
+        if (!node || node.sid !== to.sid) return;
+        setTimeout(() => node.mesh.handleSignal(msg.from, type, msg.data), 5 + Math.random() * 15);
+    },
+    count(type, fromId) { return this.log.filter(m => m.type === type && !m.dropped && (!fromId || m.from.userId === fromId)).length; },
+};
+
+const nodes = {};
+async function makeNode(id, sid) {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { width: 320, height: 240 } });
+    const states = new Map(), streams = new Map();
+    const mesh = new WSCallMesh({
+        selfId: id, sid, localStream: stream,
+        iceServers: [],   // loopback: host candidates are enough
+        send: (to, type, data) => bus.send(id, sid, to, type, data),
+    });
+    mesh.on('state', (u, s) => states.set(u, s));
+    mesh.on('stream', (u, s) => streams.set(u, s));
+    const node = { id, sid, mesh, stream, states, streams };
+    bus.nodes.set(id, { mesh, sid });
+    nodes[id] = node;
+    return node;
+}
+function link(a, b) {
+    a.mesh.addPeer({ userId: b.id, sid: b.sid, name: b.id });
+    b.mesh.addPeer({ userId: a.id, sid: a.sid, name: a.id });
+}
+const connected = (a, b) => a.states.get(b.id) === 'connected' && b.states.get(a.id) === 'connected';
+async function inbound(node, peerId) {
+    const pc = node.mesh.connectionOf(peerId);
+    const out = { audioBytes: 0, frames: 0 };
+    if (!pc) return out;
+    (await pc.getStats()).forEach(r => {
+        if (r.type !== 'inbound-rtp') return;
+        if (r.kind === 'audio') out.audioBytes += r.bytesReceived || 0;
+        if (r.kind === 'video') out.frames += r.framesDecoded || 0;
+    });
+    return out;
+}
+function ufrag(sdp) { const m = /a=ice-ufrag:(\S+)/.exec(sdp || ''); return m ? m[1] : null; }
+
+// ---- tests ---------------------------------------------------------------------
+const results = [];
+async function check(name, fn) {
+    const t0 = Date.now();
+    try { await fn(); results.push({ name, ok: true, ms: Date.now() - t0 }); }
+    catch (e) { results.push({ name, ok: false, ms: Date.now() - t0, error: String(e && e.message || e) }); }
+}
+
+window.runAll = async function () {
+    const A = await makeNode('user-a', 'sid-a');
+    const B = await makeNode('user-b', 'sid-b');
+
+    await check('two peers connect', async () => {
+        link(A, B);
+        await until(() => connected(A, B), 15000, 'A<->B connected');
+    });
+
+    await check('each side receives the other’s audio and video', async () => {
+        await until(() => [[A, B], [B, A]].every(([x, y]) => { const s = x.streams.get(y.id); return s && s.getAudioTracks().length === 1 && s.getVideoTracks().length === 1; }), 5000, 'remote tracks');
+        await until(async () => { const a = await inbound(A, B.id), b = await inbound(B, A.id); return a.audioBytes > 0 && a.frames > 5 && b.audioBytes > 0 && b.frames > 5; }, 10000, 'media flowing both ways');
+    });
+
+    await check('camera off and on is replaceTrack only (no renegotiation)', async () => {
+        const offers = bus.count('offer');
+        const cam = A.stream.getVideoTracks()[0];
+        await A.mesh.setLocalTrack('video', null);
+        cam.stop();
+        await wait(1500);
+        if (!connected(A, B)) throw new Error('dropped when the camera went off');
+        const before = (await inbound(B, A.id)).frames;
+        const fresh = (await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } })).getVideoTracks()[0];
+        await A.mesh.setLocalTrack('video', fresh);
+        await until(async () => (await inbound(B, A.id)).frames > before + 10, 8000, 'video resumes');
+        if (bus.count('offer') !== offers) throw new Error(`renegotiated: ${bus.count('offer') - offers} new offer(s)`);
+        if (!connected(A, B)) throw new Error('not connected after camera on');
+    });
+
+    await check('forced ICE restart recovers', async () => {
+        const offerer = A.sid < B.sid ? A : B, other = offerer === A ? B : A;
+        const prev = bus.log.filter(m => m.type === 'offer' && m.from.userId === offerer.id).pop();
+        const offers = bus.count('offer', offerer.id);
+        other.mesh.restartIce(offerer.id);          // the answerer asks; the offerer restarts
+        await until(() => bus.count('offer', offerer.id) > offers, 5000, 'restart offer sent');
+        const next = bus.log.filter(m => m.type === 'offer' && m.from.userId === offerer.id).pop();
+        if (ufrag(next.data.sdp.sdp) === ufrag(prev.data.sdp.sdp)) throw new Error('ICE credentials did not change');
+        await wait(500);
+        await until(() => connected(A, B), 10000, 'connected after restart');
+        const before = (await inbound(B, A.id)).frames;
+        await until(async () => (await inbound(B, A.id)).frames > before + 5, 8000, 'media after restart');
+    });
+
+    const offerer = A.sid < B.sid ? A : B, answerer = offerer === A ? B : A;
+    const offersFrom = (node, since) => bus.log.filter(m => m.type === 'offer' && m.from.userId === node.id && !m.dropped).slice(since);
+    const offerCount = node => bus.log.filter(m => m.type === 'offer' && m.from.userId === node.id && !m.dropped).length;
+    const descriptionsMatch = () => {
+        const o = offerer.mesh.connectionOf(answerer.id), a = answerer.mesh.connectionOf(offerer.id);
+        return o && a && o.signalingState === 'stable' && a.signalingState === 'stable'
+            && ufrag(o.localDescription.sdp) === ufrag(a.remoteDescription.sdp)
+            && ufrag(o.remoteDescription.sdp) === ufrag(a.localDescription.sdp);
+    };
+    const mediaFlows = async (x, y) => { const f = (await inbound(x, y.id)).frames; await until(async () => (await inbound(x, y.id)).frames > f + 5, 6000, `media ${y.id} -> ${x.id}`); };
+
+    await check('connection and ICE state both report "failed": one ICE restart, and it recovers', async () => {
+        const pc = offerer.mesh.connectionOf(answerer.id);
+        const since = offerCount(offerer);
+        // Both events fire for one real failure; the old code restarted twice and mismatched offer and answer.
+        Object.defineProperty(pc, 'connectionState', { get: () => 'failed', configurable: true });
+        Object.defineProperty(pc, 'iceConnectionState', { get: () => 'failed', configurable: true });
+        pc.dispatchEvent(new Event('connectionstatechange'));
+        pc.dispatchEvent(new Event('iceconnectionstatechange'));
+        await until(() => offerer.states.get(answerer.id) === 'reconnecting', 2000, 'reconnecting reported');
+        await until(() => offersFrom(offerer, since).length >= 1 && descriptionsMatch(), 4000, 'restart offer answered');
+        await wait(800);
+        const seqs = new Set(offersFrom(offerer, since).map(m => m.data.seq));
+        if (seqs.size !== 1) throw new Error(`${seqs.size} different restart offers`);
+        delete pc.connectionState; delete pc.iceConnectionState;
+        pc.dispatchEvent(new Event('connectionstatechange'));     // the browser reports the link is back
+        await until(() => connected(A, B) && descriptionsMatch(), 4000, 'connected again');
+        await mediaFlows(answerer, offerer);
+        await mediaFlows(offerer, answerer);
+    });
+
+    await check('the answerer’s restart request crossing the offerer’s own restart: one restart, recovers', async () => {
+        const since = offerCount(offerer);
+        offerer.mesh.restartIce(answerer.id);
+        answerer.mesh.restartIce(offerer.id);          // its 'restart' request crosses the offer on the wire
+        await until(() => offersFrom(offerer, since).length >= 1 && descriptionsMatch(), 4000, 'restart offer answered');
+        await wait(1500);
+        const seqs = new Set(offersFrom(offerer, since).map(m => m.data.seq));
+        if (seqs.size !== 1) throw new Error(`${seqs.size} different restart offers`);
+        if (!descriptionsMatch()) throw new Error('offer and answer do not match');
+        await until(() => connected(A, B), 3000, 'connected');
+        await mediaFlows(answerer, offerer);
+    });
+
+    await check('a peer rebuilt on one side (a database blip) reconnects both ways', async () => {
+        // [side that rebuilds, the other one, send reset?]: the answerer, then the offerer, then with a reset.
+        for (const [x, y, notify] of [[answerer, offerer, false], [offerer, answerer, false], [answerer, offerer, true]]) {
+            const oldPc = x.mesh.connectionOf(y.id);
+            x.mesh.removePeer(y.id, 'db blip', { notify });
+            x.mesh.addPeer({ userId: y.id, sid: y.sid, name: y.id });
+            await until(() => connected(A, B) && x.mesh.connectionOf(y.id) !== oldPc && descriptionsMatch(), 16000, `reconnected after ${x.id} rebuilt${notify ? ' (reset)' : ''}`);
+            await mediaFlows(x, y);
+            await mediaFlows(y, x);
+        }
+    });
+
+    const C = await makeNode('user-c', 'sid-c');
+    await check('a third person joining late connects to both', async () => {
+        link(A, C); link(B, C);
+        await until(() => connected(A, C) && connected(B, C) && connected(A, B), 15000, 'full mesh of 3');
+        await until(async () => (await inbound(C, A.id)).frames > 5 && (await inbound(C, B.id)).frames > 5 && (await inbound(A, C.id)).frames > 5, 10000, 'media in the mesh');
+    });
+
+    await check('removePeer closes that connection only', async () => {
+        const pc = A.mesh.connectionOf(C.id);
+        A.mesh.removePeer(C.id, 'left');
+        if (A.states.get(C.id) !== 'closed') throw new Error('no closed state');
+        if (pc.signalingState !== 'closed') throw new Error('pc not closed');
+        if (A.mesh.peerCount !== 1) throw new Error('peer count ' + A.mesh.peerCount);
+        await wait(500);
+        if (!connected(A, B)) throw new Error('A-B affected');
+    });
+
+    await check('close() says bye and the others drop the peer', async () => {
+        C.mesh.close();
+        C.stream.getTracks().forEach(t => t.stop());
+        await until(() => B.states.get(C.id) === 'closed' && !B.mesh.connectionOf(C.id), 3000, 'B drops C');
+        if (!connected(A, B)) throw new Error('A-B affected');
+    });
+
+    await check('signals from a departed session are ignored', async () => {
+        const count = A.mesh.peerCount;
+        A.mesh.handleSignal({ userId: C.id, sid: C.sid }, 'ready', { gen: 0 });
+        await wait(200);
+        if (A.mesh.peerCount !== count) throw new Error('a retired session was re-added');
+    });
+
+    const D = await makeNode('user-d', 'sid-d');
+    const E = await makeNode('user-e', 'sid-e');
+    await check('a lost first offer still connects (ready / resend)', async () => {
+        let dropped = false;
+        bus.drop = (m) => { if (!dropped && m.type === 'offer' && (m.from.userId === D.id || m.from.userId === E.id)) { dropped = true; return true; } return false; };
+        link(D, E);
+        await until(() => connected(D, E), 15000, 'D<->E connected');
+        bus.drop = null;
+        if (!dropped) throw new Error('nothing was dropped');
+        if (!bus.log.some(m => m.type === 'ready' && (m.from.userId === D.id || m.from.userId === E.id))) throw new Error('no ready was sent');
+    });
+
+    await check('lost ICE candidates: recovered by the resent offer', async () => {
+        const F = await makeNode('user-f', 'sid-f');
+        const G = await makeNode('user-g', 'sid-g');
+        // Drop the first offer AND every candidate batch for 2 s: only the resent offer (with its gathered candidates) can save it.
+        const t0 = Date.now();
+        let droppedOffer = false;
+        bus.drop = (m) => {
+            const mine = [F.id, G.id].includes(m.from.userId);
+            if (!mine) return false;
+            if (m.type === 'offer' && !droppedOffer) { droppedOffer = true; return true; }
+            return m.type === 'ice' && Date.now() - t0 < 2000;
+        };
+        link(F, G);
+        await until(() => connected(F, G), 20000, 'F<->G connected');
+        bus.drop = null;
+    });
+
+    await check('a lost answer is repaired by a new connection generation', async () => {
+        const H = await makeNode('user-h', 'sid-h');
+        const I = await makeNode('user-i', 'sid-i');
+        let droppedAnswer = false;
+        bus.drop = (m) => {
+            if (!droppedAnswer && m.type === 'answer' && [H.id, I.id].includes(m.from.userId)) { droppedAnswer = true; return true; }
+            return false;
+        };
+        link(H, I);
+        await until(() => connected(H, I), 25000, 'H<->I connected');
+        bus.drop = null;
+        if (!droppedAnswer) throw new Error('nothing was dropped');
+        const gens = new Set(bus.log.filter(m => m.type === 'offer' && [H.id, I.id].includes(m.from.userId)).map(m => m.data.gen));
+        if (gens.size < 2) throw new Error('no second generation: ' + [...gens].join(','));
+    });
+
+    [A, B, D, E].forEach(n => { n.mesh.close(); n.stream.getTracks().forEach(t => t.stop()); });
+    Object.values(nodes).forEach(n => { try { n.mesh.close(); n.stream.getTracks().forEach(t => t.stop()); } catch (e) { /* done */ } });
+    document.getElementById('out').textContent = JSON.stringify(results, null, 2);
+    return results;
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+# Test suites, fixtures and browser harnesses are for `npm test` and
+# `npm run smoke:ui` on a developer machine; they are never served.
+tests/

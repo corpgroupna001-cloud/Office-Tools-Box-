@@ -12,6 +12,7 @@ const FILES = [
   'supabase-messenger-migration.sql',
   'supabase-crm-reminders-migration.sql',
   'supabase-b24-migration.sql',
+  'supabase-messenger-calls-migration.sql',
 ];
 const read = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 const stripComments = sql => sql.replace(/--[^\n]*/g, '');

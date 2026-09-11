@@ -93,18 +93,25 @@
         },
 
         async notify(sb, payload) {
-            // Fire-and-forget — never block or break the caller's flow.
+            return this.send(sb, { action: 'notify', ...payload });
+        },
+
+        // Any /api/push action with the session token: { action: 'message', message_id },
+        // { action: 'call', call_id }, { action: 'call-end', call_id }. The server builds the
+        // notification text from the database. Fire-and-forget — never block or break the caller.
+        async send(sb, payload) {
             try {
-                if (!sb) return;
+                if (!sb || !payload || !payload.action) return;
                 const { data: { session } } = await sb.auth.getSession();
                 if (!session) return;
                 fetch('/api/push', {
                     method: 'POST',
+                    keepalive: true,
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': 'Bearer ' + session.access_token
                     },
-                    body: JSON.stringify({ action: 'notify', ...payload })
+                    body: JSON.stringify(payload)
                 }).catch(() => {});
             } catch {}
         }
