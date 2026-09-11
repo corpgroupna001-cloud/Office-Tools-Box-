@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="referrer" content="no-referrer">
+    <title>Shared document · WorkSuite</title>
+    <link rel="icon" href="/icon-192.png">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root { color-scheme: light; }
+        body { margin: 0; background: #eef2f4; font: 14px/1.5 Inter, system-ui, -apple-system, Arial, sans-serif; color: #1f2a36; }
+        .pub-top { position: sticky; top: 0; z-index: 2; background: #fff; border-bottom: 1px solid #dfe3e8; padding: 10px 20px; display: flex; align-items: center; gap: 14px; }
+        .pub-brand { font-weight: 800; color: #2067b0; letter-spacing: -.01em; }
+        .pub-name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .pub-btn { display: inline-flex; align-items: center; height: 34px; padding: 0 16px; border-radius: 17px; background: #2067b0; color: #fff; font-weight: 600; font-size: 13px; text-decoration: none; }
+        .pub-btn:hover { background: #1b5a9c; }
+        .pub-btn[hidden] { display: none; }
+        main { max-width: 920px; margin: 24px auto; padding: 0 16px; }
+        .pub-card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0, 0, 0, .08); padding: 48px 56px; }
+        .pub-card.k-spreadsheet { padding: 16px; }
+        .pub-card.k-presentation { background: none; box-shadow: none; padding: 0; }
+        .pub-card.flush { padding: 0; overflow: hidden; }
+        .pub-file img { max-width: 100%; display: block; margin: 0 auto; }
+        .pub-file iframe { display: block; width: 100%; height: 80vh; border: 0; }
+        .pub-msg { text-align: center; padding: 64px 20px; color: #525c69; }
+        .pub-msg b { display: block; font-size: 16px; color: #1f2a36; margin-bottom: 6px; }
+        .pub-foot { text-align: center; color: #828b95; font-size: 12px; margin: 24px 16px; }
+        @media (max-width: 640px) { .pub-card { padding: 22px 16px; } .pub-top { padding: 10px 16px; } }
+    </style>
+</head>
+<body>
+    <header class="pub-top"><span class="pub-brand">WorkSuite</span><span class="pub-name" id="name"></span><a class="pub-btn" id="dl" hidden rel="noopener">Download</a></header>
+    <main id="main" aria-live="polite"><div class="pub-msg">Loading…</div></main>
+    <p class="pub-foot">Shared from WorkSuite with a public link. View only.</p>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/documents/drive-logic.js"></script>
+    <script src="/documents/public.js"></script>
+</body>
+</html>

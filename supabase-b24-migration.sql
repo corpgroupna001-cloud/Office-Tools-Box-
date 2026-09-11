@@ -1692,6 +1692,10 @@ alter table public.documents add constraint documents_drive_ck check (
   and (doc_kind <> 'file' or storage_path is not null)
   and (content is null or pg_column_size(content) < 5000000));
 create unique index if not exists documents_published_token_uidx on public.documents (published_token) where published_token is not null;
+-- updated_at moves on every change, so an editor can tell that someone else saved first.
+drop trigger if exists documents_touch on public.documents;
+create trigger documents_touch before update on public.documents
+  for each row execute procedure public.ws_touch_updated_at();
 
 create table if not exists public.document_shares (
   document_id uuid not null references public.documents(id) on delete cascade,
@@ -1809,7 +1813,7 @@ alter table public.calendar_events add column if not exists color text;
 do $$
 declare t text;
 begin
-  foreach t in array array['crm_leads', 'crm_companies', 'feed_posts', 'feed_comments', 'whiteboards', 'project_join_requests'] loop
+  foreach t in array array['crm_leads', 'crm_companies', 'feed_posts', 'feed_comments', 'whiteboards', 'project_join_requests', 'documents'] loop
     if not exists (select 1 from pg_publication_tables
                     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
       execute format('alter publication supabase_realtime add table public.%I', t);

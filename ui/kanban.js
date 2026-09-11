@@ -191,13 +191,37 @@
             if (el && opts.onCardClick && !st.drag) { const c = card(el.dataset.card); if (c) opts.onCardClick(c, e); }
         });
 
+        /* ---- size: in the Bitrix24 layout the board takes the rest of the screen and only the
+               columns scroll (no second scrollbar on the page); on phones the columns grow and
+               only the page scrolls ---- */
+        let fitTimer = null;
+        function fit() {
+            if (!document.body.classList.contains('ws-b24') || !container.isConnected) return;
+            if (window.matchMedia('(max-width: 640px)').matches) { container.classList.remove('kb-fit'); container.style.height = ''; return; }
+            const scrollers = [document.scrollingElement];
+            for (let p = container.parentElement; p && p !== document.body; p = p.parentElement) { const oy = getComputedStyle(p).overflowY; if (oy === 'auto' || oy === 'scroll') scrollers.push(p); }
+            container.classList.add('kb-fit');
+            container.style.height = window.innerHeight + 'px';
+            for (let i = 0; i < 4; i++) {
+                const extra = Math.max(...scrollers.map(s => s.scrollHeight - s.clientHeight));
+                if (extra <= 1) break;
+                const next = Math.max(320, container.offsetHeight - extra);
+                if (next === container.offsetHeight) break;
+                container.style.height = next + 'px';
+            }
+        }
+        const onResize = () => { clearTimeout(fitTimer); fitTimer = setTimeout(fit, 150); };
+        window.addEventListener('resize', onResize);
+
         const api = {
-            update(next) { if (next.columns) st.columns = next.columns; if (next.cards) st.cards = next.cards; st.kb = null; render(); },
+            update(next) { if (next.columns) st.columns = next.columns; if (next.cards) st.cards = next.cards; st.kb = null; render(); fit(); },
             toggleCollapse(colId) { if (st.collapsed.has(colId)) st.collapsed.delete(colId); else st.collapsed.add(colId); render(); },
             cards: () => st.cards, columns: () => st.columns,
-            destroy() { container.innerHTML = ''; container.classList.remove('kb-board'); },
+            destroy() { window.removeEventListener('resize', onResize); clearTimeout(fitTimer); container.style.height = ''; container.classList.remove('kb-fit'); container.innerHTML = ''; container.classList.remove('kb-board'); },
         };
         render();
+        fit();
+        requestAnimationFrame(fit);                 // again once fonts and the rest of the page have laid out
         return api;
     }
 

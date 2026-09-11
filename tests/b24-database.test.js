@@ -283,6 +283,9 @@ test('whiteboards and drive documents: private, shared, and published links', { 
   assert.equal((await q(C, `update documents set name = 'x' where id = $1 returning id`, [doc.id])).length, 0, 'read-only share');
   assert.equal((await q(M, `delete from documents where id = $1 returning id`, [doc.id])).length, 0, 'a manager cannot delete a private file they cannot see');
   await assert.rejects(q(A, `insert into documents (name, doc_kind, mime_type, size_bytes) values ('Lost', 'file', 'application/pdf', 1)`), /documents_drive_ck/);
+  const stamp = (await one(A, `select updated_at from documents where id = $1`, [doc.id])).updated_at;
+  const moved = await one(A, `update documents set description = 'Meeting notes' where id = $1 returning updated_at > $2::timestamptz as moved`, [doc.id, stamp]);
+  assert.equal(moved.moved, true, 'every save moves updated_at, so editors can spot a newer version');
 
   const token = 'a'.repeat(32);
   await q(A, `update documents set published_token = $1, published_at = now() where id = $2`, [token, doc.id]);
