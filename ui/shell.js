@@ -60,12 +60,12 @@
             { key: 'projects',   title: 'Projects',           href: '/projects/',   icon: 'folder', menu: false, section: 'tasks' },
         ]},
         { label: 'CRM', items: [
-            { key: 'crm',        title: 'CRM',                href: '/deals/',      icon: 'deal' },
-            { key: 'deals',      title: 'Deals',              href: '/deals/',      icon: 'deal',    menu: false, section: 'crm' },
-            { key: 'leads',      title: 'Leads',              href: '/leads/',      icon: 'target',  menu: false, section: 'crm' },
-            { key: 'contacts',   title: 'Contacts',           href: '/contacts/',   icon: 'user',    menu: false, section: 'crm' },
+            { key: 'crm',        title: 'CRM',                href: '/crm/',        icon: 'chart' },
+            { key: 'deals',      title: 'Deals',              href: '/deals/',      icon: 'deal',    section: 'crm' },
+            { key: 'leads',      title: 'Leads',              href: '/leads/',      icon: 'target',  section: 'crm' },
+            { key: 'contacts',   title: 'Contacts',           href: '/contacts/',   icon: 'user',    section: 'crm' },
+            { key: 'invoices',   title: 'Invoices',           href: '/invoices/',   icon: 'invoice', section: 'crm' },
             { key: 'companies',  title: 'Companies',          href: '/companies/',  icon: 'building', menu: false, section: 'crm' },
-            { key: 'invoices',   title: 'Invoices',           href: '/invoices/',   icon: 'invoice', menu: false, section: 'crm' },
             { key: 'crm-settings', title: 'CRM settings',     href: '/crm/settings', icon: 'gear',   menu: false, section: 'crm', role: 'manager' },
         ]},
         { label: 'Company', items: [

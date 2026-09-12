@@ -72,7 +72,7 @@
         const shut = collapsed.has(d.id) && ks.length > 0 && !query;
         const color = LEVEL_COLORS[Math.min(depth, 1)] && depth < 2 ? LEVEL_COLORS[depth] : LEVEL_COLORS[2 + ((depth - 2) % 4)];
         const total = totalIn(d.id), others = mem.filter(m => m.role !== 'head');
-        return `<li><div class="org-node${depth === 0 ? ' root' : ''}" data-dept="${esc(d.id)}" style="--c:${color}" tabindex="0" role="button" aria-label="${esc(d.name)}: ${total} ${total === 1 ? 'person' : 'people'}">
+        return `<li><div class="org-node${depth === 0 ? ' root' : ''}" data-dept="${esc(d.id)}"${canManage(d) && d.parent_id ? ' draggable="true"' : ''} style="--c:${color}" tabindex="0" role="button" aria-label="${esc(d.name)}: ${total} ${total === 1 ? 'person' : 'people'}">
                 <div class="hd"><b class="nm">${esc(d.name)}</b>${canManage(d) ? '<button type="button" class="g-rowmenu" data-dept-menu aria-label="Department actions">☰</button>' : ''}</div>
                 <div class="head">${hp ? `${avatar(hp)}<span><b>${esc(nameOf(hp))}</b><span>${esc(head.position || 'Head of department')}</span></span>` : `<span class="muted">${depth === 0 ? (d.company ? '' : 'The whole group') : 'No head chosen'}</span>`}</div>
                 <div class="ft"><span class="avs">${others.slice(0, 5).map(m => avatar(person(m.user_id))).join('')}${others.length > 5 ? `<span class="more">+${others.length - 5}</span>` : ''}</span><span class="n">${total === mem.length ? `${total} ${total === 1 ? 'person' : 'people'}` : mem.length ? `${mem.length} here · ${total} in all` : `${total} in all`}</span></div>
@@ -257,6 +257,97 @@
             if (mb) C.menu(mb, memberMenu(d, mb.dataset.member).map(it => (it === 'sep' ? it : { ...it, onClick: () => { if (m && m.close) m.close(); it.onClick(); } })));
         });
     }
+    /* Bring the chart up to date with what the app already knows: a node per
+       company, a node per department named on profiles, and everyone who is
+       not placed yet put where their profile says. People and departments
+       arranged by hand are left exactly as they are. */
+    async function syncFromProfiles() {
+        const companies = [...new Set(people.map(p => p.company).filter(Boolean))].sort()
+            .filter(c => ctx.isAdmin || myCompanies.includes(c));
+        if (!companies.length) return C.alert({ title: 'Nothing to bring in', message: 'No one has a company on their profile yet.' });
+        if (!await C.confirm({
+            title: 'Update from employee data?',
+            message: 'Adds a department for every company and every department named on a profile, and puts people who are not in a department into theirs. Nothing you arranged by hand is moved.',
+            okText: 'Update',
+        })) return;
+        let newDepts = 0, placed = 0;
+        try {
+            let root = depts.find(d => !d.parent_id && !d.company);
+            if (!root) root = (await C.q(sb.from('departments').insert({ name: 'Corporate Group', company: null, sort: 0, created_by: me.id }).select('*').single())).data;
+            for (const c of companies) {
+                let co = depts.find(d => d.company === c && (d.parent_id === root.id || !d.parent_id));
+                if (!co) { co = (await C.q(sb.from('departments').insert({ name: c, parent_id: root.id, company: c, created_by: me.id }).select('*').single())).data; depts.push(co); newDepts++; }
+                const inCo = people.filter(p => p.company === c || p.company2 === c);
+                const names = [...new Set(inCo.map(p => (p.department || '').trim()).filter(Boolean))].sort();
+                const byName = {};
+                for (const n of names) {
+                    let d = depts.find(x => x.company === c && x.name.toLowerCase() === n.toLowerCase() && x.id !== co.id);
+                    if (!d) { d = (await C.q(sb.from('departments').insert({ name: n, parent_id: co.id, company: c, created_by: me.id }).select('*').single())).data; depts.push(d); newDepts++; }
+                    byName[n.toLowerCase()] = d.id;
+                }
+                // Only people who are in no department of this company at all.
+                const coIds = new Set(depts.filter(x => x.company === c).map(x => x.id));
+                const placedHere = new Set(members.filter(m => coIds.has(m.department_id)).map(m => m.user_id));
+                const rows = inCo.filter(p => !placedHere.has(p.id))
+                    .map(p => ({ department_id: byName[(p.department || '').trim().toLowerCase()] || co.id, user_id: p.id, role: 'member' }));
+                for (let i = 0; i < rows.length; i += 200) {
+                    await C.q(sb.from('department_members').upsert(rows.slice(i, i + 200), { onConflict: 'department_id,user_id', ignoreDuplicates: true }));
+                }
+                placed += rows.length;
+            }
+            C.toast(`${newDepts ? newDepts + ' department' + (newDepts === 1 ? '' : 's') + ' added' : 'No new departments'}${placed ? `, ${placed} ${placed === 1 ? 'person' : 'people'} placed` : ''}`, 'ok');
+            await refresh(); fitZoom();
+        } catch (e) { C.toast(e.message, 'bad'); refresh(); }
+    }
+    /** Drag a department onto another to put it inside it. */
+    function wireDrag(wrapEl) {
+        let dragId = null;
+        wrapEl.addEventListener('dragstart', e => {
+            const node = e.target.closest('.org-node[data-dept]');
+            if (!node) return;
+            const d = depts.find(x => x.id === node.dataset.dept);
+            if (!d || !d.parent_id || !canManage(d)) return e.preventDefault();
+            dragId = d.id;
+            node.classList.add('dragging');
+            if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', d.id); }
+        });
+        wrapEl.addEventListener('dragend', () => {
+            dragId = null;
+            wrapEl.querySelectorAll('.dragging, .drop-target').forEach(el => el.classList.remove('dragging', 'drop-target'));
+        });
+        const target = e => {
+            if (!dragId) return null;
+            const node = e.target.closest('.org-node[data-dept]');
+            if (!node || node.dataset.dept === dragId) return null;
+            const d = depts.find(x => x.id === node.dataset.dept);
+            if (!d || subtreeIds(dragId).includes(d.id)) return null;           // never inside itself
+            const moving = depts.find(x => x.id === dragId);
+            const ok = ctx.isAdmin || (d.company && d.company === moving.company && canManage(d));
+            return ok ? node : null;
+        };
+        wrapEl.addEventListener('dragover', e => {
+            const node = target(e);
+            if (!node) return;
+            e.preventDefault();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+            wrapEl.querySelectorAll('.drop-target').forEach(el => { if (el !== node) el.classList.remove('drop-target'); });
+            node.classList.add('drop-target');
+        });
+        wrapEl.addEventListener('drop', async e => {
+            const node = target(e);
+            if (!node) return;
+            e.preventDefault();
+            const moving = depts.find(x => x.id === dragId), onto = depts.find(x => x.id === node.dataset.dept);
+            dragId = null;
+            wrapEl.querySelectorAll('.dragging, .drop-target').forEach(el => el.classList.remove('dragging', 'drop-target'));
+            if (!moving || !onto) return;
+            try {
+                await C.q(sb.from('departments').update({ parent_id: onto.id, company: onto.company || moving.company }).eq('id', moving.id));
+                C.toast(`${moving.name} moved into ${onto.name}`, 'ok');
+                await refresh();
+            } catch (err) { C.toast(err.message, 'bad'); refresh(); }
+        });
+    }
     async function seedFromProfiles() {
         if (!await C.confirm({ title: 'Set up the company structure?', message: 'WorkSuite creates the group, one department per company and one per department named on profiles, and puts everyone in theirs. You can change all of it afterwards.', okText: 'Set it up' })) return;
         try {
@@ -287,12 +378,14 @@
     C.loading(view, 'Loading the company structure…');
     try { await load(); } catch (e) { return C.errorState(view, C.friendly(e), () => location.reload()); }
     const canAddTop = mode === 'live' && (ctx.isAdmin || (ctx.isManager && myCompanies.length));
+    const canSync = canAddTop;                           // same people may bring the chart up to date
     view.innerHTML = B.titleBar({ title: 'Company structure', createLabel: canAddTop ? 'Add department' : '' })
         + `<div class="b24-toolbar org-toolbar">
             <label class="org-search">${C.icon('search', 'sm')}<input type="search" data-q placeholder="Find a person or department" aria-label="Find a person or department"></label>
             <span class="org-hits" data-hits aria-live="polite"></span>
             <span class="grow"></span>
             <button type="button" class="emp-online-chip" data-unassigned hidden>Not in a department: <b>0</b></button>
+            ${canSync ? `<button type="button" class="ws-btn sm" data-sync>${C.icon('refresh')}<span>Update from employee data</span></button>` : ''}
             <div class="org-zoom" role="group" aria-label="Zoom"><button type="button" data-zoom="-1" aria-label="Zoom out">−</button><span data-zoom-v>100%</span><button type="button" data-zoom="1" aria-label="Zoom in">+</button><button type="button" data-zoom="0" title="Fit to the screen" aria-label="Fit to the screen">⤢</button></div>
         </div>
         ${mode === 'legacy' ? `<div class="crm-notice org-note">${C.icon('lock')}<div><b>This chart is drawn from the company and department on each profile.</b><br>To edit departments, heads and who is in them, an administrator needs to run <code>supabase-b24-migration.sql</code> in Supabase → SQL Editor.</div></div>` : ''}
@@ -309,6 +402,8 @@
         addDept(ctx.isAdmin ? null : (top[0] || null));
     });
     const seed = view.querySelector('[data-seed]'); if (seed) seed.addEventListener('click', seedFromProfiles);
+    const syncBtn = view.querySelector('[data-sync]'); if (syncBtn) syncBtn.addEventListener('click', syncFromProfiles);
+    wireDrag(view.querySelector('[data-wrap]'));
     view.querySelector('[data-unassigned]').addEventListener('click', showUnassigned);
     view.querySelector('[data-q]').addEventListener('input', C.debounce(e => { query = e.target.value.trim(); render(); }, 250));
     view.querySelector('.org-zoom').addEventListener('click', e => {

@@ -46,8 +46,9 @@
         groups: new Map(), members: new Map(),
         threads: new Map(), activeKey: null, view: null, cache: new Map(), drafts: new Map(), parents: new Map(),
         reactions: new Map(), reactionMsg: new Map(), counted: new Set(),
+        flags: new Map(), selected: new Set(), selectTap: null,
         outbox: [], flushing: false, retryTimer: null, retryStep: 0, unsent: new Map(), currentJob: null, uploadXhr: null, recStarting: false,
-        features: { inbox: null, clientId: null, groups: null, calls: null, pins: null },
+        features: { inbox: null, clientId: null, groups: null, calls: null, pins: null, flags: null },
         typing: new Map(), typingTimer: null, lastTypingSent: 0,
         replyTo: null, editing: null, mention: null, emojiFor: null, menuPick: null, suppressClick: false,
         pins: [], searchQ: '', searchSeq: 0, searchTimer: null,
@@ -226,6 +227,7 @@
         subscribePresence();
         S.lastSync = Date.now();
         handleHash();
+        loadFlags();                                  // Favourites and "read later"; quietly off without its table
         loadTeamStatus();
         setInterval(loadTeamStatus, 15 * 60 * 1000);   // leave and holidays change rarely
         setInterval(pollLastSeen, 60 * 1000);
@@ -1860,10 +1862,13 @@
         if (m._state === 'failed') items.push(['retry', '↻', 'Retry sending'], ['discard', '🗑️', 'Delete', true]);
         if (m._state === 'uploading' && m._job) items.push(['cancel', '✕', 'Cancel upload', true]);
         if (stored && !deleted) items.push(['reply', '↩️', 'Reply']);
-        if (sp.kind === 'text') items.push(['copy', '📋', 'Copy text']);
+        if (sp.kind === 'text') items.push(['copy', '📋', 'Copy']);
+        if (stored && !deleted) items.push(['forward', '↪️', 'Forward']);
         if (stored && sp.kind === 'file') items.push(['download', '⬇️', 'Download']);
+        if (stored && !deleted) items.push(['task', '☑️', 'Create task']);
         if (stored && mine && sp.kind === 'text') items.push(['edit', '✏️', 'Edit']);
-        if (stored && !deleted && S.features.pins !== false) items.push(['pin', '📌', m.pinned_at ? 'Unpin' : 'Pin for everyone']);
+        if (stored && !deleted) items.push(['other', '⋯', 'Other']);
+        if (stored && !deleted) items.push(['select', '⊙', 'Select']);
         if (stored && mine && !deleted) items.push(['delete', '🗑️', 'Delete for everyone', true]);
         if (!quick && !items.length) return;
         openMenu(quick + menuItems(items), x, y, (act, btn) => {
@@ -1881,7 +1886,219 @@
             else if (act === 'edit') startEdit(m);
             else if (act === 'pin') togglePin(m);
             else if (act === 'delete') deleteMessage(m);
+            else if (act === 'forward') forwardMessages([m]);
+            else if (act === 'task') taskFromMessage(m);
+            else if (act === 'select') startSelecting(m);
+            else if (act === 'other') openOtherMenu(m, x, y);
+            else if (act === 'link') copyMessageLink(m);
+            else if (act === 'favorite') toggleFlag(m, 'favorite');
+            else if (act === 'later') toggleFlag(m, 'later');
         });
+    }
+
+    /* ---- the second level of the message menu, as "Other" ---- */
+    function openOtherMenu(m, x, y) {
+        const items = [];
+        if (S.features.pins !== false) items.push(['pin', '📌', m.pinned_at ? 'Unpin' : 'Pin for everyone']);
+        items.push(['link', '🔗', 'Copy link']);
+        if (S.features.flags !== false) {
+            items.push(['later', '🕘', hasFlag(m, 'later') ? 'Clear "read later"' : 'Mark to read later']);
+            items.push(['favorite', '⭐', hasFlag(m, 'favorite') ? 'Remove from Favourites' : 'Add to Favourites']);
+        }
+        openMenu(menuItems(items), x, y, act => {
+            if (act === 'pin') togglePin(m);
+            else if (act === 'link') copyMessageLink(m);
+            else if (act === 'favorite') toggleFlag(m, 'favorite');
+            else if (act === 'later') toggleFlag(m, 'later');
+        });
+    }
+
+    /* ---- a link straight to one message ---- */
+    function messageLink(m) {
+        const t = activeThread();
+        if (!t || m.id == null) return '';
+        const where = t.kind === 'group' ? `group=${encodeURIComponent(t.id)}` : `thread=${encodeURIComponent(t.id === S.me.id ? m.sender_id : t.id)}`;
+        return `${location.origin}/chat/#${where}&m=${encodeURIComponent(sid(m.id))}`;
+    }
+    function copyMessageLink(m) {
+        const url = messageLink(m);
+        if (!url) return;
+        (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
+            .then(() => toast('Link copied.', 'ok'))
+            .catch(() => toast('Copy is not available here.', 'bad'));
+    }
+
+    /* ---- forward: the same text, sent again to the people you pick ---- */
+    function forwardMessages(list) {
+        const msgs = list.filter(m => m && m.id != null);
+        if (!msgs.length) return;
+        openModal(`<h3>Forward${msgs.length > 1 ? ` ${msgs.length} messages` : ''}<button type="button" class="mx-icon-btn sm" data-close aria-label="Close" data-icon="x"></button></h3>
+            <label class="f" for="fw-q">Send to</label><input id="fw-q" type="search" placeholder="Search colleagues" autocomplete="off">
+            <div class="mx-pick" id="fw-pick">${pickHtml([], '')}</div>
+            <p class="mx-err" id="fw-err"></p>
+            <div class="mx-actions"><button type="button" class="mx-btn" data-close>Cancel</button><button type="button" class="mx-btn primary" id="fw-go">Forward</button></div>`);
+        const picked = wirePicker('fw-pick', 'fw-q', []);
+        $('fw-go').addEventListener('click', () => {
+            const ids = [...picked];
+            if (!ids.length) { $('fw-err').textContent = 'Choose at least one person.'; return; }
+            let sent = 0;
+            ids.forEach(id => {
+                const t = threadFor('dm:' + id);
+                msgs.forEach(src => {
+                    const sp = L.parseSpecial(src.body);
+                    if (sp.kind === 'deleted') return;
+                    const body = sp.kind === 'text' ? sp.text : src.body;   // a file keeps its own payload
+                    const local = newLocalMessage(t, body);
+                    addLocal(t, local);
+                    enqueue({ m: local, key: t.key });
+                    sent++;
+                });
+            });
+            closeModal();
+            exitSelecting();
+            toast(sent ? `Forwarded to ${ids.length === 1 ? firstName(ids[0]) : ids.length + ' people'}.` : 'Nothing to forward.', sent ? 'ok' : 'bad');
+        });
+    }
+
+    /* ---- a task out of what someone wrote ---- */
+    async function taskFromMessage(m) {
+        const sp = L.parseSpecial(m.body);
+        const text = (sp.kind === 'text' ? sp.text : '').trim() || 'Follow up on a message';
+        const title = text.length > 120 ? text.slice(0, 117) + '…' : text;
+        const link = messageLink(m);
+        const row = {
+            title,
+            description: `From ${nameOf(m.sender_id)} in Messenger${link ? `\n${link}` : ''}${text && text !== title ? `\n\n${text}` : ''}`,
+            assignee_id: S.me.id, created_by: S.me.id, status: 'todo', priority: 'normal',
+        };
+        const r = await S.sb.from('tasks').insert(row).select('id').single();
+        if (r.error) return toast(friendly(r.error), 'bad');
+        toast('Task created — open Tasks to plan it.', 'ok');
+    }
+
+    /* ---- Favourites and "read later": private marks, one table ---- */
+    function hasFlag(m, kind) { const s = S.flags.get(sid(m.id)); return !!(s && s.has(kind)); }
+    async function loadFlags() {
+        if (S.features.flags === false || !S.me) return;
+        const r = await S.sb.from('message_flags').select('message_id, kind').eq('user_id', S.me.id).limit(1000);
+        if (r.error) { if (isSchemaMissing(r.error)) S.features.flags = false; return; }
+        S.features.flags = true;
+        S.flags = new Map();
+        (r.data || []).forEach(f => {
+            const k = sid(f.message_id);
+            if (!S.flags.has(k)) S.flags.set(k, new Set());
+            S.flags.get(k).add(f.kind);
+        });
+    }
+    async function toggleFlag(m, kind) {
+        if (m.id == null) return;
+        const k = sid(m.id), on = hasFlag(m, kind);
+        const q = on
+            ? S.sb.from('message_flags').delete().eq('user_id', S.me.id).eq('message_id', m.id).eq('kind', kind)
+            : S.sb.from('message_flags').insert({ user_id: S.me.id, message_id: m.id, kind });
+        const { error } = await q;
+        if (error) {
+            if (isSchemaMissing(error)) { S.features.flags = false; return toast('This needs the messenger flags migration.', 'bad'); }
+            return toast(friendly(error), 'bad');
+        }
+        if (!S.flags.has(k)) S.flags.set(k, new Set());
+        if (on) S.flags.get(k).delete(kind); else S.flags.get(k).add(kind);
+        const said = kind === 'favorite' ? (on ? 'Removed from Favourites.' : 'Added to Favourites.') : (on ? 'Cleared.' : 'Marked to read later.');
+        toast(said, 'ok');
+    }
+    /** The header menu's "Saved messages": what this person marked, newest first. */
+    async function openSaved() {
+        await loadFlags();
+        if (S.features.flags === false) return toast('Saved messages need the messenger flags migration.', 'bad');
+        const ids = [...S.flags.entries()].filter(([, kinds]) => kinds.size).map(([id]) => id);
+        if (!ids.length) return openModal(`<h3>Saved messages<button type="button" class="mx-icon-btn sm" data-close aria-label="Close" data-icon="x"></button></h3>
+            <p class="mx-note">Nothing saved yet. A message's menu has "Add to Favourites" and "Mark to read later".</p>
+            <div class="mx-actions"><button type="button" class="mx-btn" data-close>Close</button></div>`);
+        const r = await S.sb.from('messages').select('id, sender_id, recipient_id, conversation_id, body, created_at').in('id', ids).order('created_at', { ascending: false }).limit(200);
+        const rows = (r.data || []).filter(x => L.parseSpecial(x.body).kind !== 'deleted');
+        openModal(`<h3>Saved messages<button type="button" class="mx-icon-btn sm" data-close aria-label="Close" data-icon="x"></button></h3>
+            <div class="mx-saved" id="sv-list">${rows.map(x => {
+                const kinds = S.flags.get(sid(x.id)) || new Set();
+                return `<button type="button" class="mx-saved-row" data-go="${esc(sid(x.id))}" data-peer="${esc(x.conversation_id ? 'g:' + x.conversation_id : 'dm:' + (x.sender_id === S.me.id ? x.recipient_id : x.sender_id))}">
+                    <span class="who">${esc(firstName(x.sender_id))}</span>
+                    <span class="txt">${esc(L.previewText(x.body))}</span>
+                    <span class="tag">${kinds.has('favorite') ? '⭐' : ''}${kinds.has('later') ? '🕘' : ''}</span>
+                </button>`;
+            }).join('') || '<div class="mx-list-empty">Those messages are no longer available.</div>'}</div>
+            <div class="mx-actions"><button type="button" class="mx-btn" data-close>Close</button></div>`);
+        $('sv-list').addEventListener('click', async e => {
+            const b = e.target.closest('[data-go]');
+            if (!b) return;
+            closeModal();
+            await openThread(b.dataset.peer);
+            jumpTo(b.dataset.go);
+        });
+    }
+
+    /* ---- Select: work with several messages at once ---- */
+    function startSelecting(m) {
+        S.selected = new Set([sid(m.id)]);
+        $('mx').classList.add('selecting');
+        paintSelection();
+        if (!$('mx-selbar')) {
+            const bar = document.createElement('div');
+            bar.className = 'mx-selbar';
+            bar.id = 'mx-selbar';
+            bar.innerHTML = '<span id="mx-seln"></span><span class="grow"></span>' +
+                '<button type="button" class="mx-btn sm" data-sel="copy">Copy</button>' +
+                '<button type="button" class="mx-btn sm primary" data-sel="forward">Forward</button>' +
+                '<button type="button" class="mx-btn sm" data-sel="done">Cancel</button>';
+            $('mx-thread').appendChild(bar);
+            bar.addEventListener('click', e => {
+                const b = e.target.closest('[data-sel]');
+                if (!b) return;
+                if (b.dataset.sel === 'done') return exitSelecting();
+                const msgs = selectedMessages();
+                if (b.dataset.sel === 'copy') {
+                    const text = msgs.map(x => `${nameOf(x.sender_id)}: ${L.parseSpecial(x.body).text || ''}`).join('\n');
+                    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+                        .then(() => { toast('Copied.', 'ok'); exitSelecting(); })
+                        .catch(() => toast('Copy is not available here.', 'bad'));
+                } else forwardMessages(msgs);
+            });
+        }
+        $('mx-selbar').hidden = false;
+        // While selecting, a tap picks a message instead of opening anything.
+        if (!S.selectTap) {
+            S.selectTap = e => {
+                if (!$('mx').classList.contains('selecting')) return;
+                const row = e.target.closest('.mx-msg');
+                if (!row) return;
+                e.preventDefault(); e.stopPropagation();
+                const m2 = messageForRow(row);
+                if (!m2 || m2.id == null) return;
+                const k = sid(m2.id);
+                if (S.selected.has(k)) S.selected.delete(k); else S.selected.add(k);
+                paintSelection();
+            };
+            $('mx-msgs').addEventListener('click', S.selectTap, true);
+        }
+    }
+    function selectedMessages() {
+        const view = S.view;
+        if (!view) return [];
+        return [...S.selected].map(k => view.byId.get(k)).filter(Boolean);
+    }
+    function paintSelection() {
+        $('mx-msgs').querySelectorAll('.mx-msg').forEach(row => {
+            const m = messageForRow(row);
+            row.classList.toggle('sel', !!(m && m.id != null && S.selected.has(sid(m.id))));
+        });
+        const n = S.selected.size;
+        const label = $('mx-seln');
+        if (label) label.textContent = `${n} selected`;
+    }
+    function exitSelecting() {
+        S.selected = new Set();
+        $('mx').classList.remove('selecting');
+        const bar = $('mx-selbar');
+        if (bar) bar.hidden = true;
+        $('mx-msgs').querySelectorAll('.mx-msg.sel').forEach(r => r.classList.remove('sel'));
     }
     function messageForRow(row) {
         if (!row || !S.view) return null;
@@ -2223,6 +2440,7 @@
             items.push(['info', '👥', 'Group info'], ['mute', g && g.member.muted ? '🔔' : '🔕', g && g.member.muted ? 'Unmute' : 'Mute notifications']);
         }
         if (S.pins.length) items.push(['pins', '📌', 'Pinned messages']);
+        if (S.features.flags !== false) items.push(['saved', '⭐', 'Saved messages']);
         const r = anchor.getBoundingClientRect();
         openMenu(menuItems(items), r.right - 220, r.bottom + 6, async (act) => {
             if (act === 'search') openSearch();
@@ -2230,6 +2448,7 @@
             else if (act === 'clear') clearChat();
             else if (act === 'info') openGroupInfo();
             else if (act === 'pins') openPins();
+            else if (act === 'saved') openSaved();
             else if (act === 'mute') {
                 const g = groupOf(t);
                 if (!g) return;
@@ -2424,12 +2643,14 @@
         if (!S.me) return;
         const h = new URLSearchParams((location.hash || '').replace(/^#/, ''));
         const dm = h.get('thread') || h.get('answer'), group = h.get('group'), call = h.get('call');
+        const at = h.get('m');                     // a link to one message (Copy link)
         if (!dm && !group && !call) return;
         history.replaceState(null, '', location.pathname + location.search);
-        if (dm && dm !== S.me.id) openThread('dm:' + dm);
+        const land = p => { if (at) Promise.resolve(p).then(() => jumpTo(at)); };
+        if (dm && dm !== S.me.id) land(openThread('dm:' + dm));
         else if (group) {
-            if (S.groups.has(group)) openThread('g:' + group);
-            else loadGroups().then(() => { if (S.groups.has(group)) openThread('g:' + group); else toast('That group is not available to you.', 'bad'); });
+            if (S.groups.has(group)) land(openThread('g:' + group));
+            else loadGroups().then(() => { if (S.groups.has(group)) land(openThread('g:' + group)); else toast('That group is not available to you.', 'bad'); });
         }
         if (call) {
             // Opening the call window needs a click (pop-up blockers), so ask first.

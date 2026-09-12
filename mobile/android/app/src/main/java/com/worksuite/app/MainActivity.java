@@ -11,12 +11,17 @@ package com.worksuite.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.KeyEvent;
+import android.webkit.JavascriptInterface;
 import android.webkit.GeolocationPermissions;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -31,6 +36,19 @@ public class MainActivity extends Activity {
 
     private static final int REQ_FILE = 1001;
     private static final int REQ_PERMS = 1002;
+    private static final int REQ_NOTIFY = 1003;
+    private static final String CHANNEL = "worksuite";
+
+    /* A WebView has no Notification API of its own, so the page's notifications
+       would go nowhere. This hands them to Android instead; the polyfill below
+       makes `new Notification(...)` on the page arrive here unchanged. */
+    private static final String NOTIFY_SHIM =
+        "(function(){if(!window.WorkSuiteNotify||window.Notification&&window.Notification.__ws)return;" +
+        "function N(t,o){o=o||{};try{WorkSuiteNotify.show(String(t||''),String(o.body||''),String(o.tag||''));}catch(e){}" +
+        "this.close=function(){};}" +
+        "N.__ws=true;N.permission='granted';N.requestPermission=function(cb){" +
+        "var p=Promise.resolve('granted');if(cb)cb('granted');return p;};" +
+        "window.Notification=N;})();";
 
     private WebView web;
     private ValueCallback<Uri[]> pendingFiles;
@@ -59,7 +77,16 @@ public class MainActivity extends Activity {
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
 
+        web.addJavascriptInterface(new NotifyBridge(), "WorkSuiteNotify");
+        createChannel();
+        askToNotify();
+
         web.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                view.evaluateJavascript(NOTIFY_SHIM, null);
+            }
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri url = request.getUrl();
@@ -99,6 +126,45 @@ public class MainActivity extends Activity {
 
         if (state != null) web.restoreState(state);
         else web.loadUrl(BuildConfig.SITE_URL);
+    }
+
+    /** What the page calls to raise a real Android notification. */
+    private class NotifyBridge {
+        @JavascriptInterface
+        public void show(String title, String body, String tag) {
+            if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return;
+            Intent open = new Intent(MainActivity.this, MainActivity.class);
+            open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            PendingIntent tap = PendingIntent.getActivity(MainActivity.this, 0, open,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            Notification.Builder b = Build.VERSION.SDK_INT >= 26
+                ? new Notification.Builder(MainActivity.this, CHANNEL)
+                : new Notification.Builder(MainActivity.this);
+            b.setContentTitle(title == null || title.isEmpty() ? "WorkSuite" : title)
+             .setContentText(body == null ? "" : body)
+             .setSmallIcon(android.R.drawable.stat_notify_chat)
+             .setAutoCancel(true)
+             .setContentIntent(tap);
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm != null) nm.notify((tag == null || tag.isEmpty() ? "ws" : tag).hashCode(), b.build());
+        }
+    }
+
+    private void createChannel() {
+        if (Build.VERSION.SDK_INT < 26) return;
+        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        NotificationChannel c = new NotificationChannel(CHANNEL, "WorkSuite", NotificationManager.IMPORTANCE_DEFAULT);
+        c.setDescription("Messages, tasks and reminders");
+        nm.createNotificationChannel(c);
+    }
+
+    private void askToNotify() {
+        if (Build.VERSION.SDK_INT >= 33
+            && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{ Manifest.permission.POST_NOTIFICATIONS }, REQ_NOTIFY);
+        }
     }
 
     private boolean isOurs(Uri url) {

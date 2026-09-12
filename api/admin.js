@@ -632,6 +632,106 @@ module.exports = async function handler(req, res) {
     // The list of everyone the fingerprint reader knows, and which WorkSuite
     // account each maps to. Reads device_enrolments (kept fresh by the punch
     // webhook) rather than deriving from raw punches, so it survives a wipe.
+    // ================= CRM IMPORT =================
+    // Deals and leads from a spreadsheet. The browser parses the CSV and
+    // sends rows; everything that reaches the database is built here, so a
+    // stray column cannot write a field it should not.
+    if (action === 'import_crm') {
+      const RH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
+      const rest = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...RH, ...(opts.headers || {}) } });
+
+      const kind = body.kind === 'leads' ? 'leads' : body.kind === 'deals' ? 'deals' : null;
+      const rows = Array.isArray(body.rows) ? body.rows : [];
+      if (!kind) return res.status(400).json({ error: 'kind must be "deals" or "leads"' });
+      if (!rows.length) return res.status(400).json({ error: 'There is nothing to import' });
+      if (rows.length > 500) return res.status(400).json({ error: 'Import up to 500 rows at a time' });
+
+      const text = v => { const s = String(v == null ? '' : v).trim(); return s ? s.slice(0, 500) : null; };
+      const num = v => { const s = String(v == null ? '' : v).replace(/[^0-9.-]/g, ''); const n = Number(s); return s && isFinite(n) ? n : null; };
+      const day = v => { const s = text(v); if (!s) return null; const d = new Date(s); return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10); };
+      const pick = (r, ...names) => { for (const n of names) { const v = text(r[n]); if (v) return v; } return null; };
+
+      // A CSV can name the person who owns the record; match them by email.
+      const pr = await rest('profiles?select=id,email,company&limit=3000');
+      const profiles = pr.ok ? await pr.json() : [];
+      const byEmail = new Map(profiles.filter(p => p.email).map(p => [String(p.email).toLowerCase(), p]));
+      const ownerOf = r => byEmail.get(String(pick(r, 'owner_email', 'owner', 'responsible', 'assigned_to') || '').toLowerCase()) || null;
+
+      const skipped = [];
+      const prepared = [];
+
+      if (kind === 'leads') {
+        const st = await rest('crm_lead_statuses?select=key&limit=100');
+        const statuses = st.ok ? (await st.json()).map(s => s.key) : [];
+        rows.forEach((r, i) => {
+          const name = pick(r, 'name', 'lead', 'full_name', 'title', 'contact');
+          if (!name) return skipped.push({ row: i + 2, why: 'no name' });
+          const wanted = pick(r, 'status', 'stage');
+          const owner = ownerOf(r);
+          prepared.push({
+            name,
+            organization: pick(r, 'organization', 'company_name', 'account'),
+            email: pick(r, 'email'), phone: pick(r, 'phone', 'mobile'),
+            source: pick(r, 'source'), source_detail: pick(r, 'source_detail', 'campaign'),
+            status: wanted && statuses.includes(wanted) ? wanted : (statuses.includes('new') ? 'new' : statuses[0] || 'new'),
+            estimated_value: num(r.estimated_value != null ? r.estimated_value : r.value),
+            currency: pick(r, 'currency') || 'INR',
+            notes: pick(r, 'notes', 'comment'),
+            company: pick(r, 'company') || (owner && owner.company) || null,
+            owner_id: owner ? owner.id : null,
+          });
+        });
+      } else {
+        // A deal has to land in a pipeline stage: the one named in the row, or
+        // the default pipeline's first stage.
+        const pl = await rest('crm_pipelines?select=*&limit=100');
+        const pipelines = pl.ok ? await pl.json() : [];
+        if (!pipelines.length) return res.status(400).json({ error: 'No CRM pipeline exists yet — create one in CRM settings first' });
+        pipelines.sort((a, b) => (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0));
+        const sg = await rest('crm_pipeline_stages?select=*&limit=500');
+        const allStages = sg.ok ? await sg.json() : [];
+        const order = s => Number(s.sort != null ? s.sort : (s.position != null ? s.position : 0)) || 0;
+        rows.forEach((r, i) => {
+          const title = pick(r, 'title', 'deal', 'name', 'opportunity');
+          if (!title) return skipped.push({ row: i + 2, why: 'no title' });
+          const pipeName = pick(r, 'pipeline', 'funnel');
+          const pipe = (pipeName && pipelines.find(p => p.name && p.name.toLowerCase() === pipeName.toLowerCase())) || pipelines[0];
+          const inPipe = allStages.filter(s => s.pipeline_id === pipe.id).sort((a, b) => order(a) - order(b));
+          if (!inPipe.length) return skipped.push({ row: i + 2, why: `pipeline "${pipe.name}" has no stages` });
+          const stageName = pick(r, 'stage', 'status');
+          const stage = (stageName && inPipe.find(s => s.name && s.name.toLowerCase() === stageName.toLowerCase())) || inPipe[0];
+          const owner = ownerOf(r);
+          prepared.push({
+            title,
+            organization: pick(r, 'organization', 'company_name', 'account'),
+            value: num(r.value != null ? r.value : r.amount) || 0,
+            currency: pick(r, 'currency') || 'INR',
+            pipeline_id: pipe.id, stage_id: stage.id,
+            expected_close_date: day(r.expected_close_date != null ? r.expected_close_date : r.close_date),
+            source: pick(r, 'source'),
+            description: pick(r, 'description', 'notes', 'comment'),
+            company: pick(r, 'company') || (owner && owner.company) || null,
+            owner_id: owner ? owner.id : null,
+          });
+        });
+      }
+
+      if (!prepared.length) return res.status(200).json({ inserted: 0, skipped });
+      const table = kind === 'leads' ? 'crm_leads' : 'crm_deals';
+      let inserted = 0;
+      for (let i = 0; i < prepared.length; i += 100) {
+        const r = await rest(table, {
+          method: 'POST', headers: { Prefer: 'return=representation' },
+          body: JSON.stringify(prepared.slice(i, i + 100)),
+        });
+        if (!r.ok) {
+          return res.status(502).json({ error: 'The import stopped part way', detail: (await r.text()).slice(0, 300), inserted, skipped });
+        }
+        inserted += (await r.json()).length;
+      }
+      return res.status(200).json({ inserted, skipped });
+    }
+
     if (String(action).startsWith('roster_')) {
       const RH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
       const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...RH, ...(opts.headers || {}) } });

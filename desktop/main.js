@@ -60,6 +60,25 @@ function createWindow() {
     if (isMainFrame && code !== -3) setTimeout(() => win.loadURL(APP_URL), 2500);
   });
 
+  // Unread messages and notifications on the dock / taskbar icon. The counts
+  // come from the badges the workspace already shows in its header.
+  const READ_BADGES = `(() => {
+    let n = 0;
+    document.querySelectorAll('#ws-bell-count, [data-ws-badge="unread"]').forEach(el => {
+      if (el.hidden || el.offsetParent === null) return;
+      const v = parseInt((el.textContent || '').replace(/[^0-9]/g, ''), 10);
+      if (isFinite(v)) n += v;
+    });
+    return n;
+  })()`;
+  const badgeTimer = setInterval(() => {
+    if (win.isDestroyed()) return clearInterval(badgeTimer);
+    win.webContents.executeJavaScript(READ_BADGES)
+      .then(n => { if (app.setBadgeCount) app.setBadgeCount(Math.max(0, Number(n) || 0)); })
+      .catch(() => {});                       // page still loading, or navigated away
+  }, 15000);
+  win.on('closed', () => clearInterval(badgeTimer));
+
   return win;
 }
 

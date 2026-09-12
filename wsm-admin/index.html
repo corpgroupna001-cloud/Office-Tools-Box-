@@ -954,6 +954,44 @@
 
             <!-- ================= BITRIX24 ================= -->
             <!-- ================= BIOMETRIC ROSTER ================= -->
+            <!-- CRM import: deals and leads from a spreadsheet. The browser reads the
+                 CSV; api/admin.js builds every row that reaches the database. -->
+            <div id="crmimport-panel" class="hidden">
+                <div style="max-width:900px">
+                    <h2 style="margin:0 0 6px;font-size:20px;font-weight:800">Import deals and leads</h2>
+                    <p style="margin:0 0 18px;color:var(--ws-text-muted,#94a3b8);font-size:14px">
+                        Export from your spreadsheet as CSV, choose what it holds, and check the preview before importing.
+                        Up to 500 rows at a time.
+                    </p>
+
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+                        <label style="font-weight:700;font-size:13px">This file holds
+                            <select id="ci-kind" style="margin-left:6px;padding:6px 10px;border-radius:8px">
+                                <option value="deals">Deals</option>
+                                <option value="leads">Leads</option>
+                            </select>
+                        </label>
+                        <input type="file" id="ci-file" accept=".csv,text/csv" style="font-size:13px">
+                        <button type="button" class="ws-btn sm" id="ci-sample">Download a sample CSV</button>
+                    </div>
+
+                    <details style="margin-bottom:14px">
+                        <summary style="cursor:pointer;font-weight:700;font-size:13px">Which columns are recognised?</summary>
+                        <div style="font-size:13px;line-height:1.6;margin-top:8px">
+                            <b>Deals:</b> title (required), value, currency, pipeline, stage, organization, company,
+                            owner_email, source, expected_close_date, description.<br>
+                            <b>Leads:</b> name (required), email, phone, organization, company, status, source,
+                            estimated_value, currency, owner_email, notes.<br>
+                            Anything else in the file is ignored. A row without the required column is skipped and reported.
+                        </div>
+                    </details>
+
+                    <div id="ci-preview" style="margin-bottom:14px"></div>
+                    <button type="button" class="ws-btn primary" id="ci-import" disabled>Import</button>
+                    <div id="ci-result" style="margin-top:14px"></div>
+                </div>
+            </div>
+
             <div id="roster-panel" class="hidden">
                 <div class="section-head mb-3"><h3><span class="ic ic-fingerprint"></span>Biometric roster</h3><span class="sub">Everyone the fingerprint reader knows &mdash; bind each to a WorkSuite account</span></div>
                 <div id="rost-summary" class="glass rounded-2xl p-4 mb-4"></div>
@@ -1214,6 +1252,7 @@
                     { key: 'holidays',   title: 'Holidays',      icon: 'party',       tab: 'holidays' },
                     { key: 'salary',     title: 'Salary',        icon: 'salary',      tab: 'salary' },
                     { key: 'import', title: 'Bulk import', icon: 'users', tab: 'import' },
+                    { key: 'crmimport', title: 'CRM import', icon: 'deal', tab: 'crmimport' },
                 ]},
                 { label: 'Attendance', items: [
                     { key: 'attendance', title: 'Attendance',    icon: 'attend',      tab: 'attendance' },
@@ -1729,16 +1768,10 @@
                 document.querySelectorAll('.admin-tab').forEach(b => {
                     b.classList.toggle('active', b.dataset.tab === currentTab);
                 });
-                document.getElementById('overview-panel').classList.toggle('hidden',  currentTab !== 'overview');
-                document.getElementById('results-panel').classList.toggle('hidden',   currentTab !== 'results');
-                document.getElementById('quizzes-panel').classList.toggle('hidden',   currentTab !== 'quizzes');
-                document.getElementById('employees-panel').classList.toggle('hidden', currentTab !== 'employees');
-                document.getElementById('wfh-panel').classList.toggle('hidden',       currentTab !== 'wfh');
-                document.getElementById('friday-panel').classList.toggle('hidden',    currentTab !== 'friday');
-                document.getElementById('attendance-panel').classList.toggle('hidden', currentTab !== 'attendance');
-                document.getElementById('shifts-panel').classList.toggle('hidden',     currentTab !== 'shifts');
-                document.getElementById('selfies-panel').classList.toggle('hidden',    currentTab !== 'selfies');
-                document.getElementById('leave-panel').classList.toggle('hidden',      currentTab !== 'leave');
+                // Every panel is named after its tab, so a new tab needs no line here.
+                document.querySelectorAll('[id$="-panel"]').forEach(p => {
+                    p.classList.toggle('hidden', p.id !== currentTab + '-panel');
+                });
                 if (currentTab === 'employees' && allEmployees.length === 0) loadEmployees();
                 if (currentTab === 'quizzes'   && allQuizzes.length === 0)   loadQuizzes();
                 if (currentTab === 'wfh'       && allWfh.length === 0)       loadWfh();
@@ -1748,6 +1781,116 @@
                 if (currentTab === 'selfies'    && !selfieData)              loadSelfies();
                 if (currentTab === 'leave'      && !leaveData)               loadLeave();
             });
+        });
+
+        // ---------- CRM import (deals and leads) ----------
+        let ciRows = [];
+
+        /** A CSV as rows of fields, quotes and embedded newlines included. */
+        function parseCsv(text) {
+            const rows = [];
+            let row = [], field = '', quoted = false;
+            for (let i = 0; i < text.length; i++) {
+                const c = text[i];
+                if (quoted) {
+                    if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+                    else if (c === '"') quoted = false;
+                    else field += c;
+                    continue;
+                }
+                if (c === '"') quoted = true;
+                else if (c === ',') { row.push(field); field = ''; }
+                else if (c === '\n' || c === '\r') {
+                    if (c === '\r' && text[i + 1] === '\n') i++;
+                    row.push(field); field = '';
+                    if (row.some(v => v.trim() !== '')) rows.push(row);
+                    row = [];
+                } else field += c;
+            }
+            row.push(field);
+            if (row.some(v => v.trim() !== '')) rows.push(row);
+            return rows;
+        }
+
+        function ciRender(headers, sample, total) {
+            const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+            document.getElementById('ci-preview').innerHTML = `
+                <div style="font-weight:700;font-size:13px;margin-bottom:6px">${total} row${total === 1 ? '' : 's'} found — first ${sample.length} shown</div>
+                <div style="overflow:auto;border:1px solid var(--ws-border,#334155);border-radius:10px">
+                    <table style="border-collapse:collapse;font-size:12.5px;white-space:nowrap">
+                        <thead><tr>${headers.map(h => `<th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--ws-border,#334155)">${esc(h)}</th>`).join('')}</tr></thead>
+                        <tbody>${sample.map(r => `<tr>${headers.map(h => `<td style="padding:6px 10px;border-bottom:1px solid rgba(255,255,255,.06)">${esc(r[h])}</td>`).join('')}</tr>`).join('')}</tbody>
+                    </table>
+                </div>`;
+        }
+
+        function ciLoad(text) {
+            const table = parseCsv(text);
+            const result = document.getElementById('ci-result');
+            result.innerHTML = '';
+            if (table.length < 2) {
+                ciRows = [];
+                document.getElementById('ci-import').disabled = true;
+                document.getElementById('ci-preview').innerHTML = '<div style="font-size:13px;color:#fca5a5;font-weight:700">That file has no rows under its header.</div>';
+                return;
+            }
+            const headers = table[0].map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
+            ciRows = table.slice(1).map(cells => {
+                const o = {};
+                headers.forEach((h, i) => { if (h) o[h] = (cells[i] == null ? '' : cells[i]).trim(); });
+                return o;
+            });
+            ciRender(headers.filter(Boolean), ciRows.slice(0, 5), ciRows.length);
+            document.getElementById('ci-import').disabled = ciRows.length === 0;
+        }
+
+        document.getElementById('ci-file').addEventListener('change', e => {
+            const f = e.target.files && e.target.files[0];
+            if (!f) return;
+            const reader = new FileReader();
+            reader.onload = () => ciLoad(String(reader.result || ''));
+            reader.onerror = () => { document.getElementById('ci-preview').innerHTML = '<div style="font-size:13px;color:#fca5a5;font-weight:700">That file could not be read.</div>'; };
+            reader.readAsText(f);
+        });
+
+        document.getElementById('ci-sample').addEventListener('click', () => {
+            const deals = 'title,value,currency,pipeline,stage,organization,owner_email,expected_close_date,source,description\n' +
+                'Gym kit for Acme,90000,INR,Sales,New Opportunity,Acme Academy,manager@example.com,2026-10-15,Referral,Ten sets\n';
+            const leads = 'name,email,phone,organization,status,source,estimated_value,currency,owner_email,notes\n' +
+                'Priya Nair,priya@example.com,+91 90000 00000,Bluewave Fitness,new,Website,50000,INR,manager@example.com,Asked for a quote\n';
+            const kind = document.getElementById('ci-kind').value;
+            const blob = new Blob([kind === 'leads' ? leads : deals], { type: 'text/csv' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `worksuite-${kind}-sample.csv`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        });
+
+        document.getElementById('ci-import').addEventListener('click', async () => {
+            if (!adminAuthenticated || !ciRows.length) return;
+            const btn = document.getElementById('ci-import'), result = document.getElementById('ci-result');
+            const kind = document.getElementById('ci-kind').value;
+            btn.disabled = true; btn.innerText = 'Importing…';
+            result.innerHTML = '';
+            try {
+                const r = await adminFetch({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'import_crm', kind, rows: ciRows }),
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(data.error || 'The import failed.');
+                const skipped = data.skipped || [];
+                result.innerHTML = `<div style="font-size:13.5px;font-weight:700;color:#86efac">${data.inserted} ${kind} imported.</div>` +
+                    (skipped.length ? `<div style="font-size:13px;margin-top:6px">${skipped.length} row${skipped.length === 1 ? '' : 's'} skipped: ` +
+                        skipped.slice(0, 10).map(s => `row ${s.row} (${s.why})`).join(', ') + (skipped.length > 10 ? '…' : '') + '</div>' : '');
+                ciRows = [];
+                document.getElementById('ci-file').value = '';
+                document.getElementById('ci-preview').innerHTML = '';
+            } catch (e) {
+                result.innerHTML = `<div style="font-size:13.5px;font-weight:700;color:#fca5a5">${String(e.message || e)}</div>`;
+            } finally { btn.disabled = false; btn.innerText = 'Import'; }
         });
 
         // ---------- Employees ----------

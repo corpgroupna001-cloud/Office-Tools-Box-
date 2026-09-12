@@ -1649,3 +1649,8 @@ body.ws-b24 .b24-titlebar.emp-bar { margin-bottom: 10px; }
 .sec-code { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 6px; }
 .sec-code span { color: var(--b24-text-2); font-size: 12.5px; }
 .sec-code input { width: 170px; text-align: center; font-size: 20px; font-weight: 700; letter-spacing: .35em; font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+/* Company structure: drag a department onto another to put it inside it. */
+.org-node[draggable="true"] { cursor: grab; }
+.org-node.dragging { opacity: .45; }
+.org-node.drop-target { outline: 2px dashed var(--b24-blue-2); outline-offset: 3px; }
