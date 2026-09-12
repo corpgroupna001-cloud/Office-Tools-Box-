@@ -975,14 +975,27 @@
                         <button type="button" class="ws-btn sm" id="ci-sample">Download a sample CSV</button>
                     </div>
 
+                    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:14px;font-size:13px">
+                        <label><input type="checkbox" id="ci-create-missing" checked> Create pipelines and stages the file names</label>
+                        <label><input type="checkbox" id="ci-link-contacts" checked> Create and link the contacts on each row</label>
+                    </div>
+
                     <details style="margin-bottom:14px">
                         <summary style="cursor:pointer;font-weight:700;font-size:13px">Which columns are recognised?</summary>
                         <div style="font-size:13px;line-height:1.6;margin-top:8px">
-                            <b>Deals:</b> title (required), value, currency, pipeline, stage, organization, company,
-                            owner_email, source, expected_close_date, description.<br>
+                            A Bitrix24 export works as it comes — comma, semicolon or tab separated, quotes and
+                            line breaks inside cells included. Its own column names are understood:
+                            <b>Deal Name</b>, Pipeline, Stage, Income, Currency ("US Dollar"), Responsible
+                            (an employee code, email or name), Assumed close date (12.09.2026), Type, Source,
+                            Comment, Company, and the <b>Contact:</b> columns (first name, last name, mobile,
+                            work e-mail, position).<br>
+                            Plainer headers work too — <b>Deals:</b> title (required), value, currency, pipeline,
+                            stage, organization, company, owner_email, source, expected_close_date, description.
                             <b>Leads:</b> name (required), email, phone, organization, company, status, source,
                             estimated_value, currency, owner_email, notes.<br>
-                            Anything else in the file is ignored. A row without the required column is skipped and reported.
+                            Anything else is ignored. A row without the required column is skipped and reported.
+                            Rows that carry an ID are remembered, so importing the same file again updates those
+                            records instead of making second copies.
                         </div>
                     </details>
 
@@ -1786,8 +1799,23 @@
         // ---------- CRM import (deals and leads) ----------
         let ciRows = [];
 
+        /** Comma, semicolon or tab — whichever the header really uses. */
+        function sniffDelimiter(text) {
+            const counts = { ';': 0, ',': 0, '\t': 0 };
+            let quoted = false;
+            for (const c of text.slice(0, 8000)) {
+                if (c === '"') { quoted = !quoted; continue; }
+                if (quoted) continue;
+                if (c === '\n') break;                       // the header line is enough
+                if (c in counts) counts[c]++;
+            }
+            const best = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+            return counts[best] ? best : ',';
+        }
+
         /** A CSV as rows of fields, quotes and embedded newlines included. */
-        function parseCsv(text) {
+        function parseCsv(text, delim) {
+            const sep = delim || ',';
             const rows = [];
             let row = [], field = '', quoted = false;
             for (let i = 0; i < text.length; i++) {
@@ -1799,7 +1827,7 @@
                     continue;
                 }
                 if (c === '"') quoted = true;
-                else if (c === ',') { row.push(field); field = ''; }
+                else if (c === sep) { row.push(field); field = ''; }
                 else if (c === '\n' || c === '\r') {
                     if (c === '\r' && text[i + 1] === '\n') i++;
                     row.push(field); field = '';
@@ -1824,8 +1852,9 @@
                 </div>`;
         }
 
-        function ciLoad(text) {
-            const table = parseCsv(text);
+        function ciLoad(raw) {
+            const text = String(raw || '').replace(/^﻿/, '');     // exports often start with a byte-order mark
+            const table = parseCsv(text, sniffDelimiter(text));
             const result = document.getElementById('ci-result');
             result.innerHTML = '';
             if (table.length < 2) {
@@ -1871,18 +1900,46 @@
             if (!adminAuthenticated || !ciRows.length) return;
             const btn = document.getElementById('ci-import'), result = document.getElementById('ci-result');
             const kind = document.getElementById('ci-kind').value;
-            btn.disabled = true; btn.innerText = 'Importing…';
+            const createMissing = document.getElementById('ci-create-missing').checked;
+            const linkContacts = document.getElementById('ci-link-contacts').checked;
+            const BATCH = 250;                       // the endpoint takes 500 at most; keep each request quick
+            const total = ciRows.length;
+            const sum = { inserted: 0, updated: 0, contacts: 0, pipelines: 0, stages: 0 };
+            const skipped = [], warnings = new Set();
+            btn.disabled = true;
             result.innerHTML = '';
             try {
-                const r = await adminFetch({
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'import_crm', kind, rows: ciRows }),
-                });
-                const data = await r.json().catch(() => ({}));
-                if (!r.ok) throw new Error(data.error || 'The import failed.');
-                const skipped = data.skipped || [];
-                result.innerHTML = `<div style="font-size:13.5px;font-weight:700;color:#86efac">${data.inserted} ${kind} imported.</div>` +
+                for (let at = 0; at < total; at += BATCH) {
+                    const slice = ciRows.slice(at, at + BATCH);
+                    btn.innerText = `Importing ${Math.min(at + slice.length, total)} of ${total}…`;
+                    const r = await adminFetch({
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            action: 'import_crm', kind, rows: slice,
+                            create_missing: createMissing, link_contacts: linkContacts,
+                            row_offset: at,
+                        }),
+                    });
+                    const data = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error((data.error || 'The import failed.') + (sum.inserted || sum.updated ? ` ${sum.inserted} added and ${sum.updated} updated before it stopped.` : ''));
+                    sum.inserted += data.inserted || 0;
+                    sum.updated += data.matched || 0;       // matched by source id: added or updated
+                    sum.contacts += data.contacts_created || 0;
+                    sum.pipelines += data.pipelines_created || 0;
+                    sum.stages += data.stages_created || 0;
+                    (data.skipped || []).forEach(s => skipped.push(s));
+                    (data.warnings || []).forEach(w => warnings.add(w));
+                }
+                const made = [
+                    `${sum.inserted} ${kind} added`,
+                    sum.updated ? `${sum.updated} added or updated by id` : '',
+                    sum.contacts ? `${sum.contacts} contact${sum.contacts === 1 ? '' : 's'} created` : '',
+                    sum.pipelines ? `${sum.pipelines} pipeline${sum.pipelines === 1 ? '' : 's'} created` : '',
+                    sum.stages ? `${sum.stages} stage${sum.stages === 1 ? '' : 's'} created` : '',
+                ].filter(Boolean).join(', ');
+                result.innerHTML = `<div style="font-size:13.5px;font-weight:700;color:#86efac">${made}.</div>` +
+                    (warnings.size ? `<div style="font-size:13px;margin-top:6px">${[...warnings].map(w => `• ${w}`).join('<br>')}</div>` : '') +
                     (skipped.length ? `<div style="font-size:13px;margin-top:6px">${skipped.length} row${skipped.length === 1 ? '' : 's'} skipped: ` +
                         skipped.slice(0, 10).map(s => `row ${s.row} (${s.why})`).join(', ') + (skipped.length > 10 ? '…' : '') + '</div>' : '');
                 ciRows = [];

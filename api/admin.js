@@ -646,90 +646,137 @@ module.exports = async function handler(req, res) {
       if (!rows.length) return res.status(400).json({ error: 'There is nothing to import' });
       if (rows.length > 500) return res.status(400).json({ error: 'Import up to 500 rows at a time' });
 
-      const text = v => { const s = String(v == null ? '' : v).trim(); return s ? s.slice(0, 500) : null; };
-      const num = v => { const s = String(v == null ? '' : v).replace(/[^0-9.-]/g, ''); const n = Number(s); return s && isFinite(n) ? n : null; };
-      const day = v => { const s = text(v); if (!s) return null; const d = new Date(s); return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10); };
-      const pick = (r, ...names) => { for (const n of names) { const v = text(r[n]); if (v) return v; } return null; };
+      const CI = require('../lib/crm-import');
+      const createMissing = body.create_missing !== false;
+      const linkContacts = body.link_contacts !== false;
+      const offset = Number(body.row_offset) || 0;        // so a skipped row names its line in the whole file
 
-      // A CSV can name the person who owns the record; match them by email.
-      const pr = await rest('profiles?select=id,email,company&limit=3000');
+      // Who the file points at: an employee code, an email address or a name.
+      const pr = await rest('profiles?select=id,email,full_name,employee_code,company&limit=5000');
       const profiles = pr.ok ? await pr.json() : [];
-      const byEmail = new Map(profiles.filter(p => p.email).map(p => [String(p.email).toLowerCase(), p]));
-      const ownerOf = r => byEmail.get(String(pick(r, 'owner_email', 'owner', 'responsible', 'assigned_to') || '').toLowerCase()) || null;
 
-      const skipped = [];
-      const prepared = [];
+      const report = { inserted: 0, matched: 0, skipped: [], warnings: [], contacts_created: 0, pipelines_created: 0, stages_created: 0 };
+      const table = kind === 'leads' ? 'crm_leads' : 'crm_deals';
+      let mapped;
 
       if (kind === 'leads') {
         const st = await rest('crm_lead_statuses?select=key&limit=100');
         const statuses = st.ok ? (await st.json()).map(s => s.key) : [];
-        rows.forEach((r, i) => {
-          const name = pick(r, 'name', 'lead', 'full_name', 'title', 'contact');
-          if (!name) return skipped.push({ row: i + 2, why: 'no name' });
-          const wanted = pick(r, 'status', 'stage');
-          const owner = ownerOf(r);
-          prepared.push({
-            name,
-            organization: pick(r, 'organization', 'company_name', 'account'),
-            email: pick(r, 'email'), phone: pick(r, 'phone', 'mobile'),
-            source: pick(r, 'source'), source_detail: pick(r, 'source_detail', 'campaign'),
-            status: wanted && statuses.includes(wanted) ? wanted : (statuses.includes('new') ? 'new' : statuses[0] || 'new'),
-            estimated_value: num(r.estimated_value != null ? r.estimated_value : r.value),
-            currency: pick(r, 'currency') || 'INR',
-            notes: pick(r, 'notes', 'comment'),
-            company: pick(r, 'company') || (owner && owner.company) || null,
-            owner_id: owner ? owner.id : null,
-          });
-        });
+        mapped = CI.mapLeads(rows, { statuses, profiles, source: 'bitrix' });
       } else {
-        // A deal has to land in a pipeline stage: the one named in the row, or
-        // the default pipeline's first stage.
-        const pl = await rest('crm_pipelines?select=*&limit=100');
+        const pl = await rest('crm_pipelines?select=*&limit=200');
+        const sg = await rest('crm_pipeline_stages?select=*&limit=1000');
         const pipelines = pl.ok ? await pl.json() : [];
+        const stages = sg.ok ? await sg.json() : [];
+
+        // The funnels and stages the file names, so imported deals keep their shape.
+        if (createMissing) {
+          for (const want of CI.scanDeals(rows)) {
+            if (!want.name) continue;
+            let pipe = pipelines.find(p => CI.norm(p.name) === CI.norm(want.name));
+            if (!pipe) {
+              const r = await rest('crm_pipelines', {
+                method: 'POST', headers: { Prefer: 'return=representation' },
+                body: JSON.stringify({ name: want.name, is_default: pipelines.length === 0 }),
+              });
+              if (!r.ok) return res.status(502).json({ error: `Could not create the pipeline "${want.name}"`, detail: (await r.text()).slice(0, 200) });
+              pipe = (await r.json())[0];
+              pipelines.push(pipe);
+              report.pipelines_created++;
+            }
+            const have = stages.filter(s => s.pipeline_id === pipe.id);
+            let pos = have.reduce((m, s) => Math.max(m, s.position || 0), 0);
+            const add = want.stages
+              .filter(name => !have.some(s => CI.norm(s.name) === CI.norm(name)))
+              .map(name => {
+                const o = CI.wonLost(name);
+                return { pipeline_id: pipe.id, name, position: ++pos, probability: o.is_won ? 100 : 0, is_won: o.is_won, is_lost: o.is_lost };
+              });
+            if (add.length) {
+              const r = await rest('crm_pipeline_stages', {
+                method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify(add),
+              });
+              if (!r.ok) return res.status(502).json({ error: `Could not create stages in "${pipe.name}"`, detail: (await r.text()).slice(0, 200) });
+              (await r.json()).forEach(s => stages.push(s));
+              report.stages_created += add.length;
+            }
+          }
+        }
         if (!pipelines.length) return res.status(400).json({ error: 'No CRM pipeline exists yet — create one in CRM settings first' });
-        pipelines.sort((a, b) => (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0));
-        const sg = await rest('crm_pipeline_stages?select=*&limit=500');
-        const allStages = sg.ok ? await sg.json() : [];
-        const order = s => Number(s.sort != null ? s.sort : (s.position != null ? s.position : 0)) || 0;
-        rows.forEach((r, i) => {
-          const title = pick(r, 'title', 'deal', 'name', 'opportunity');
-          if (!title) return skipped.push({ row: i + 2, why: 'no title' });
-          const pipeName = pick(r, 'pipeline', 'funnel');
-          const pipe = (pipeName && pipelines.find(p => p.name && p.name.toLowerCase() === pipeName.toLowerCase())) || pipelines[0];
-          const inPipe = allStages.filter(s => s.pipeline_id === pipe.id).sort((a, b) => order(a) - order(b));
-          if (!inPipe.length) return skipped.push({ row: i + 2, why: `pipeline "${pipe.name}" has no stages` });
-          const stageName = pick(r, 'stage', 'status');
-          const stage = (stageName && inPipe.find(s => s.name && s.name.toLowerCase() === stageName.toLowerCase())) || inPipe[0];
-          const owner = ownerOf(r);
-          prepared.push({
-            title,
-            organization: pick(r, 'organization', 'company_name', 'account'),
-            value: num(r.value != null ? r.value : r.amount) || 0,
-            currency: pick(r, 'currency') || 'INR',
-            pipeline_id: pipe.id, stage_id: stage.id,
-            expected_close_date: day(r.expected_close_date != null ? r.expected_close_date : r.close_date),
-            source: pick(r, 'source'),
-            description: pick(r, 'description', 'notes', 'comment'),
-            company: pick(r, 'company') || (owner && owner.company) || null,
-            owner_id: owner ? owner.id : null,
-          });
-        });
+        mapped = CI.mapDeals(rows, { pipelines, stages, profiles, source: 'bitrix' });
       }
 
-      if (!prepared.length) return res.status(200).json({ inserted: 0, skipped });
-      const table = kind === 'leads' ? 'crm_leads' : 'crm_deals';
-      let inserted = 0;
-      for (let i = 0; i < prepared.length; i += 100) {
-        const r = await rest(table, {
-          method: 'POST', headers: { Prefer: 'return=representation' },
-          body: JSON.stringify(prepared.slice(i, i + 100)),
-        });
-        if (!r.ok) {
-          return res.status(502).json({ error: 'The import stopped part way', detail: (await r.text()).slice(0, 300), inserted, skipped });
+      mapped.skipped.forEach(s => report.skipped.push({ row: s.row + offset, why: s.why }));
+      mapped.warnings.forEach(w => report.warnings.push(w));
+      if (!mapped.rows.length) return res.status(200).json(report);
+
+      // The contact named on a deal row: match one we already hold, else make it.
+      if (kind === 'deals' && linkContacts && mapped.contacts.length) {
+        const ex = await rest('crm_contacts?select=id,email,phone,full_name&limit=5000');
+        const existing = ex.ok ? await ex.json() : [];
+        const digits = v => String(v == null ? '' : v).replace(/[^0-9]/g, '').slice(-10);
+        const byEmail = new Map(), byPhone = new Map(), byName = new Map();
+        const remember = c => {
+          if (c.email) byEmail.set(CI.norm(c.email), c.id);
+          if (digits(c.phone)) byPhone.set(digits(c.phone), c.id);
+          if (c.full_name) byName.set(CI.norm(c.full_name), c.id);
+        };
+        existing.forEach(remember);
+        const whole = c => [c.first_name, c.last_name].filter(Boolean).join(' ');
+        const found = c => (c.email && byEmail.get(CI.norm(c.email))) || (digits(c.phone) && byPhone.get(digits(c.phone))) || byName.get(CI.norm(whole(c))) || null;
+        const keyOf = c => (c.email && 'e:' + CI.norm(c.email)) || (digits(c.phone) && 'p:' + digits(c.phone)) || 'n:' + CI.norm(whole(c));
+
+        const make = new Map();
+        mapped.rows.forEach(d => { if (d._contact && !found(d._contact)) { const k = keyOf(d._contact); if (!make.has(k)) make.set(k, d._contact); } });
+        const list = [...make.values()].map(c => ({
+          first_name: c.first_name, last_name: c.last_name, email: c.email, phone: c.phone,
+          job_title: c.job_title, organization: c.organization, source: c.source,
+          owner_id: c.owner_id, company: c.company,
+        }));
+        for (let i = 0; i < list.length; i += 100) {
+          const r = await rest('crm_contacts', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify(list.slice(i, i + 100)) });
+          if (!r.ok) { report.warnings.push('Some contacts could not be created; their deals came in without one.'); break; }
+          (await r.json()).forEach(c => { report.contacts_created++; remember(c); });
         }
-        inserted += (await r.json()).length;
+        mapped.rows.forEach(d => { if (d._contact) d.contact_id = found(d._contact) || null; });
       }
-      return res.status(200).json({ inserted, skipped });
+
+      // A row that carries its source id is matched on it, so importing the
+      // same file again updates that record instead of making a second copy.
+      const payload = mapped.rows.map(d => { const o = { ...d }; delete o._contact; delete o._row; return o; });
+      const withRef = payload.filter(p => p.external_ref);
+      const plain = payload.filter(p => !p.external_ref);
+      let failure = null, refUnsupported = false;
+
+      const write = async (list, byRef) => {
+        for (let i = 0; i < list.length && !failure && !refUnsupported; i += 100) {
+          const chunk = list.slice(i, i + 100);
+          const r = await rest(byRef ? `${table}?on_conflict=external_ref` : table, {
+            method: 'POST',
+            headers: { Prefer: byRef ? 'return=representation,resolution=merge-duplicates' : 'return=representation' },
+            body: JSON.stringify(chunk),
+          });
+          if (!r.ok) {
+            const detail = (await r.text()).slice(0, 300);
+            if (byRef && /external_ref/.test(detail)) { refUnsupported = true; return; }   // migration not run yet
+            failure = { error: 'The import stopped part way', detail };
+            return;
+          }
+          const back = await r.json();
+          if (byRef) report.matched += back.length; else report.inserted += back.length;
+        }
+      };
+
+      if (withRef.length) {
+        await write(withRef, true);
+        if (refUnsupported) {
+          report.warnings.push('Source ids were ignored — run supabase-crm-import-migration.sql so that importing the same file again updates records instead of duplicating them.');
+          await write(withRef.map(p => { const o = { ...p }; delete o.external_ref; return o; }), false);
+        }
+      }
+      if (!failure && plain.length) await write(plain, false);
+      if (failure) return res.status(502).json({ ...failure, ...report });
+      return res.status(200).json(report);
     }
 
     if (String(action).startsWith('roster_')) {
