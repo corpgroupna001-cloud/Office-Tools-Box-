@@ -53,6 +53,13 @@
             }
             const { data: { session } } = await sb.auth.getSession();
             if (!session) return toLogin();
+            // Two-step verification still owed: the home page asks for the code.
+            try {
+                if (sb.auth.mfa && sb.auth.mfa.getAuthenticatorAssuranceLevel) {
+                    const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+                    if (aal && aal.nextLevel === 'aal2' && aal.currentLevel !== 'aal2') return toLogin();
+                }
+            } catch { /* older client or offline check — the sign-in page asks again */ }
             // Signed in — also bounce anyone who never finished email verification
             // (unless their company's email is still "coming soon").
             try {

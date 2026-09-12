@@ -388,15 +388,27 @@
         userMenu.id = 'ws-menu';
         userMenu.setAttribute('role', 'menu');
         userMenu.hidden = true;
+        userMenu.className = 'ws-menu ws-profile-pop';
         userMenu.innerHTML =
-            '<div class="head"><b id="ws-menu-name">Not signed in</b><span id="ws-menu-email"></span></div>' +
-            '<button type="button" role="menuitem" id="ws-menu-profile"><span class="ic ic-user"></span>Profile &amp; settings</button>' +
-            '<a role="menuitem" href="/attendance/"><span class="ic ic-attend"></span>My attendance</a>' +
-            '<a role="menuitem" href="/attendance/#leave"><span class="ic ic-leave"></span>Apply for leave</a>' +
-            '<a role="menuitem" href="/tasks/?view=mine"><span class="ic ic-tasks"></span>My tasks</a>' +
-            '<button type="button" role="menuitem" data-act="themes"><span class="ic ic-sun"></span>Themes</button>' +
-            '<button type="button" role="menuitem" data-act="menu"><span class="ic ic-edit"></span>Configure menu</button>' +
-            '<button type="button" role="menuitem" class="danger" id="ws-menu-out"><span class="ic ic-logout"></span>Sign out</button>';
+            '<button type="button" class="who" id="ws-menu-profile">' +
+                '<span class="ws-avatar" id="ws-menu-avatar">?</span>' +
+                '<span class="t"><b id="ws-menu-name">Not signed in</b><span id="ws-menu-email"></span>' +
+                    '<span class="role" id="ws-menu-role" hidden></span></span>' +
+                '<span class="ic ic-chevron go" aria-hidden="true"></span></button>' +
+            '<div class="tiles">' +
+                '<button type="button" role="menuitem" data-act="security"><span class="ic ic-shield"></span><span>Security</span></button>' +
+                '<button type="button" role="menuitem" data-act="themes"><span class="ic ic-sun"></span><span>Visual theme</span></button>' +
+            '</div>' +
+            '<div class="rows">' +
+                '<a role="menuitem" href="/attendance/"><span class="ic ic-attend"></span><span>My attendance</span><span class="ic ic-chevron go"></span></a>' +
+                '<a role="menuitem" href="/attendance/#leave"><span class="ic ic-leave"></span><span>Apply for leave</span><span class="ic ic-chevron go"></span></a>' +
+                '<a role="menuitem" href="/tasks/?view=mine"><span class="ic ic-tasks"></span><span>My tasks</span><span class="ic ic-chevron go"></span></a>' +
+            '</div>' +
+            '<div class="rows">' +
+                '<button type="button" role="menuitem" data-act="menu"><span class="ic ic-edit"></span><span>Configure menu</span><span class="ic ic-chevron go"></span></button>' +
+                '<a role="menuitem" href="/wsm-admin" data-ws-role="admin" hidden><span class="ic ic-shield"></span><span>Admin console</span><span class="ic ic-chevron go"></span></a>' +
+            '</div>' +
+            '<div class="foot"><button type="button" role="menuitem" class="danger" id="ws-menu-out">Log out</button></div>';
 
         var notif = document.createElement('div');
         notif.className = 'ws-notif' + (showRail ? '' : ' no-rail');
@@ -483,6 +495,7 @@
             notif: notif, notifList: notif.querySelector('#ws-notif-list'), notifMsgs: notif.querySelector('#ws-notif-msgs'),
             topAvatar: top.querySelector('#ws-top-avatar'), topName: top.querySelector('#ws-top-name'), company: top.querySelector('#ws-company'),
             menuName: userMenu.querySelector('#ws-menu-name'), menuEmail: userMenu.querySelector('#ws-menu-email'),
+            menuRole: userMenu.querySelector('#ws-menu-role'), menuAvatar: userMenu.querySelector('#ws-menu-avatar'),
             clock: top.querySelector('#ws-clock'), clockTime: top.querySelector('#ws-clock-time'), clockState: top.querySelector('#ws-clock-state'),
             burger: side.querySelector('#ws-burger'), menuMain: side.querySelector('#ws-menu-main'), menuHidden: side.querySelector('#ws-menu-hidden'),
             menuMore: side.querySelector('#ws-menu-more'), host: host, page: page,
@@ -575,8 +588,10 @@
         state.syncInert = syncInert;
     }
     function runAct(act) {
+        toggleMenu(false);
         if (act === 'themes') openThemes();
         else if (act === 'menu') configureMenu();
+        else if (act === 'security') location.href = '/security';
         else if (act === 'print') window.print();
     }
     function openSearch() { closePop(); if (window.wsCmdK && window.wsCmdK.open) window.wsCmdK.open(); }
@@ -941,6 +956,7 @@
         refs.menuName.textContent = u ? u.name : 'Not signed in';
         refs.menuEmail.textContent = u ? u.email : '';
         refs.company.textContent = u ? (u.company || '') : '';
+        if (refs.menuAvatar) refs.menuAvatar.innerHTML = u && u.avatar ? '<img src="' + esc(u.avatar) + '" alt="">' : esc(initialOf(u && (u.name || u.email)));
     }
     function setCrumb(text) { if (refs.crumb) refs.crumb.textContent = text; }
     function setRole(role) {
@@ -951,6 +967,12 @@
             root.querySelectorAll('[data-ws-role]').forEach(function (el) { el.hidden = (rank[el.dataset.wsRole] || 0) > mine; });
         });
         if (refs.side) refs.side.querySelectorAll('[data-ws-role-group]').forEach(function (g) { g.hidden = !g.querySelector('.ws-side-item:not([hidden])'); });
+        if (refs.menuRole) {
+            var label = { admin: 'Administrator', manager: 'Manager', employee: 'Employee' }[state.role] || 'Employee';
+            refs.menuRole.textContent = label;
+            refs.menuRole.hidden = false;
+            refs.menuRole.className = 'role ' + state.role;
+        }
         document.dispatchEvent(new CustomEvent('ws-role', { detail: { role: state.role } }));
     }
     function whenSupabase(cb) {

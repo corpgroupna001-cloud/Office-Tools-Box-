@@ -863,3 +863,18 @@ body.ws-app.page-chat select, body.ws-app.page-chat input, body.ws-app.page-chat
 /* A long page title in the top bar ends in an ellipsis instead of being cut mid-word. */
 .ws-top .crumb { min-width: 0; overflow: hidden; white-space: nowrap; }
 .ws-top .crumb b { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+
+/* Profile panel: layout for pages that do not use the workspace theme. */
+.ws-menu.ws-profile-pop { width: 320px; padding: 0; }
+.ws-profile-pop .who { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
+.ws-profile-pop .who .ws-avatar { width: 44px; height: 44px; flex: 0 0 auto; }
+.ws-profile-pop .who .t { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.ws-profile-pop .who b { font-size: 15px; }
+.ws-profile-pop .who .t > span { color: var(--ws-text-muted); font-size: 12px; }
+.ws-profile-pop .role { align-self: flex-start; margin-top: 4px; padding: 1px 8px; border-radius: 10px; background: var(--ws-surface-2); font-size: 11.5px; font-weight: 600; }
+.ws-profile-pop .go { width: 16px; height: 16px; opacity: .45; transform: rotate(180deg); }
+.ws-profile-pop .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 12px 12px; }
+.ws-profile-pop .tiles button { flex-direction: column; gap: 6px; padding: 14px 8px; border: 1px solid var(--ws-border); border-radius: 12px; }
+.ws-profile-pop .rows { padding: 6px; border-top: 1px solid var(--ws-border); }
+.ws-profile-pop .foot { padding: 6px; border-top: 1px solid var(--ws-border); }
+.ws-profile-pop .foot button { width: 100%; justify-content: center; color: var(--ws-danger); font-weight: 600; }

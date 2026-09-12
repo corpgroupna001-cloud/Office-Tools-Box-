@@ -520,6 +520,7 @@
         });
     </script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/mfa.js"></script>
     <script src="/presence.js"></script>
     <script src="/notifications.js"></script>
     <script>
@@ -615,7 +616,10 @@
         //   opts.onSuccess  — called after onVerify returns ok
         //   opts.onCancel   — called if the user backs out (optional)
         //   opts.successTitle / successMessage — final dialog copy
-        function showOtpModal({ email, onVerify, onResend, onSuccess, onCancel, successTitle, successMessage }) {
+        // The 6-digit code dialog. Used for the sign-up / sign-in email code and,
+        // with its own wording, for the code from an authenticator app.
+        const OTP_DEFAULT_SUB = 'We sent a 6-digit code to <b id="vc-email"></b>. It can take <b>up to 2–3 minutes</b> to arrive — also check Spam. The code stays valid for 15 minutes.<br><span class="text-slate-400 text-xs">Your account is created only after you enter this code.</span>';
+        function showOtpModal({ email, onVerify, onResend, onSuccess, onCancel, successTitle, successMessage, title, icon, subHtml, submitLabel }) {
             let host = document.getElementById('verify-code-modal');
             if (!host) {
                 host = document.createElement('div');
@@ -624,9 +628,9 @@
                 host.style.cssText = 'background: rgba(11,17,32,0.85); backdrop-filter: blur(12px);';
                 host.innerHTML = `
                     <div class="w-full max-w-md rounded-3xl p-8 text-center" style="background: rgba(17,24,39,0.95); border: 1px solid rgba(255,255,255,0.10); box-shadow: 0 30px 70px rgba(0,0,0,0.5);">
-                        <div class="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-3xl" style="background: linear-gradient(135deg,#3b82f6,#8b5cf6); box-shadow: 0 12px 30px rgba(99,102,241,0.5);">📧</div>
-                        <h3 class="text-2xl font-black text-white mb-1">Check your email</h3>
-                        <p id="vc-sub" class="text-slate-300 text-sm mb-4">We sent a 6-digit code to <b id="vc-email"></b>. It can take <b>up to 2–3 minutes</b> to arrive — also check Spam. The code stays valid for 15 minutes.<br><span class="text-slate-400 text-xs">Your account is created only after you enter this code.</span></p>
+                        <div id="vc-icon" class="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-3xl" style="background: linear-gradient(135deg,#3b82f6,#8b5cf6); box-shadow: 0 12px 30px rgba(99,102,241,0.5);">📧</div>
+                        <h3 id="vc-title" class="text-2xl font-black text-white mb-1">Check your email</h3>
+                        <p id="vc-sub" class="text-slate-300 text-sm mb-4"></p>
                         <input id="vc-input" type="text" inputmode="numeric" pattern="\\d{6}" maxlength="6" autocomplete="one-time-code" placeholder="••••••" class="w-full text-center tracking-[.6em] text-2xl font-black py-4 px-4 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-400/30 text-white placeholder-slate-500" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.15); font-family: 'JetBrains Mono', ui-monospace, monospace;">
                         <p id="vc-error" class="text-rose-300 text-sm font-bold mt-3 hidden"></p>
                         <button id="vc-submit" type="button" class="w-full mt-4 text-white font-black py-4 rounded-2xl text-lg" data-ws="primary">Verify & Continue</button>
@@ -637,19 +641,25 @@
                     </div>`;
                 document.body.appendChild(host);
             }
-            document.getElementById('vc-email').innerText = email;
+            document.getElementById('vc-title').innerText = title || 'Check your email';
+            document.getElementById('vc-icon').innerText = icon || '📧';
+            document.getElementById('vc-sub').innerHTML = subHtml || OTP_DEFAULT_SUB;   // our own copy, never user input
+            const emailEl = document.getElementById('vc-email');
+            if (emailEl) emailEl.innerText = email || '';
             const input  = document.getElementById('vc-input');
             const errEl  = document.getElementById('vc-error');
             const submit = document.getElementById('vc-submit');
             const resend = document.getElementById('vc-resend');
             const cancel = document.getElementById('vc-cancel');
             input.value = ''; errEl.classList.add('hidden');
+            resend.classList.toggle('hidden', !onResend);          // nothing to resend for an authenticator app
 
             host.classList.remove('hidden'); host.classList.add('flex');
             setTimeout(() => input.focus(), 60);
 
             const close = () => { host.classList.add('hidden'); host.classList.remove('flex'); };
-            const setBusy = (b, txt) => { submit.disabled = b; submit.innerText = txt || 'Verify & Continue'; };
+            const setBusy = (b, txt) => { submit.disabled = b; submit.innerText = txt || submitLabel || 'Verify & Continue'; };
+            submit.innerText = submitLabel || 'Verify & Continue';
 
             input.oninput = () => { input.value = input.value.replace(/\D/g, '').slice(0, 6); };
             input.onkeydown = (e) => { if (e.key === 'Enter') submit.click(); };
@@ -687,6 +697,26 @@
             };
 
             cancel.onclick = () => { close(); if (typeof onCancel === 'function') onCancel(); };
+        }
+
+        // Two-step verification: the code comes from the person's authenticator
+        // app and is checked by Supabase Auth, not by us. Cancelling signs the
+        // half-finished session out again.
+        function showMfaCodeDialog({ factorId, onSuccess }) {
+            showOtpModal({
+                title: 'Two-step verification',
+                icon: '🔐',
+                subHtml: 'Open your authenticator app and enter the 6-digit code it shows for WorkSuite.<br><span class="text-slate-400 text-xs">The code changes every 30 seconds.</span>',
+                submitLabel: 'Verify & Sign in',
+                successTitle: 'Verified ✅',
+                successMessage: 'Welcome back.',
+                onSuccess,
+                onVerify: async (code) => window.WSMfa.submitCode(rootSb, factorId, code),
+                onCancel: async () => {
+                    try { await rootSb.auth.signOut(); } catch {}
+                    showToast('Sign-in cancelled.', 'info');
+                },
+            });
         }
 
         // Legacy wrapper — used at login for accounts created under the old flow
@@ -1405,6 +1435,18 @@
                         }
                     });
                     return;
+                }
+                // Two-step verification, when this account has an authenticator set up.
+                if (window.WSMfa) {
+                    const mfa = await window.WSMfa.status(rootSb);
+                    if (mfa.needs) {
+                        const factor = mfa.factors[0] || {};
+                        showMfaCodeDialog({
+                            factorId: factor.id,
+                            onSuccess: () => { showToast('Signed in — welcome back!', 'success'); onLoggedIn(data.session); },
+                        });
+                        return;
+                    }
                 }
                 showToast('Signed in — welcome back!', 'success');
                 onLoggedIn(data.session);

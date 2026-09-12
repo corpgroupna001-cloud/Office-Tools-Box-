@@ -140,11 +140,30 @@
             perms.splice(0, perms.length, ...(p.data || [])); assigns.splice(0, assigns.length, ...(a.data || [])); roles.splice(0, roles.length, ...(r.data || []));
             render();
         }
+        /* One cell. The page keeps its own copy in step with the database, so a
+           change costs one request instead of re-reading every role. */
         async function setLevel(entity, pipeline, action, value) {
             const existing = permOf(roleId, entity, pipeline || null, action);
-            if (!value) { if (existing) await C.q(sb.from('crm_role_permissions').delete().eq('id', existing.id)); }
-            else if (existing) await C.q(sb.from('crm_role_permissions').update({ level: value }).eq('id', existing.id));
-            else await C.q(sb.from('crm_role_permissions').insert({ role_id: roleId, entity, pipeline_id: pipeline || null, action, level: value }));
+            if (!value) {
+                if (existing) { await C.q(sb.from('crm_role_permissions').delete().eq('id', existing.id)); perms.splice(perms.indexOf(existing), 1); }
+                return;
+            }
+            if (existing) { await C.q(sb.from('crm_role_permissions').update({ level: value }).eq('id', existing.id)); existing.level = value; return; }
+            const { data } = await C.q(sb.from('crm_role_permissions').insert({ role_id: roleId, entity, pipeline_id: pipeline || null, action, level: value }).select('id').single());
+            perms.push({ id: data.id, role_id: roleId, entity, pipeline_id: pipeline || null, action, level: value, extra: {} });
+        }
+        /* "Move to stage" carries a list of allowed stages; keep its link in step. */
+        function paintStageLink(row, entity, pipeline) {
+            if (!row) return;
+            const sel = row.querySelector('[data-perm$="|move_stage"]');
+            if (!sel) return;
+            const td = sel.parentElement, link = td.querySelector('[data-stages]');
+            const p = permOf(roleId, entity, pipeline || null, 'move_stage');
+            if (!p || p.level === 'none') { if (link) link.remove(); return; }
+            const n = (p.extra && p.extra.stages && p.extra.stages.length) || 0;
+            const label = n ? `${n} stage${n === 1 ? '' : 's'} only` : 'All stages';
+            if (link) link.textContent = label;
+            else td.insertAdjacentHTML('beforeend', `<button type="button" class="b24-link" data-stages="${esc(entity)}|${esc(pipeline || '')}">${esc(label)}</button>`);
         }
         body.addEventListener('change', async e => {
             const rs = e.target.closest('[data-perm-row]');
@@ -152,19 +171,26 @@
                 if (rs.value === '__') return;
                 const [entity, pipeline] = rs.dataset.permRow.split('|');
                 const ent = ENTITIES.find(x => x.key === entity);
-                try { for (const action of ent.actions) await setLevel(entity, pipeline, action, rs.value); C.toast(`${ent.title}: every action updated`, 'ok'); }
-                catch (err) { C.toast(err.message, 'bad'); }
-                return reloadData();
+                const value = rs.value, row = rs.closest('tr');
+                rs.disabled = true;
+                try {
+                    await Promise.all(ent.actions.map(action => setLevel(entity, pipeline, action, value)));
+                    row.querySelectorAll('[data-perm]').forEach(sel => { sel.value = value; });
+                    paintStageLink(row, entity, pipeline);
+                    C.toast(`${ent.title}: every action updated`, 'ok');
+                } catch (err) { C.toast(err.message, 'bad'); await reloadData(); return; }
+                finally { rs.disabled = false; rs.value = '__'; }
+                return;
             }
             const s = e.target.closest('[data-perm]'); if (!s) return;
             const [entity, pipeline, action] = s.dataset.perm.split('|');
-            const existing = permOf(roleId, entity, pipeline || null, action);
+            s.disabled = true;
             try {
-                if (!s.value) { if (existing) await C.q(sb.from('crm_role_permissions').delete().eq('id', existing.id)); }
-                else if (existing) await C.q(sb.from('crm_role_permissions').update({ level: s.value }).eq('id', existing.id));
-                else await C.q(sb.from('crm_role_permissions').insert({ role_id: roleId, entity, pipeline_id: pipeline || null, action, level: s.value }));
-                C.toast('Saved', 'ok'); await reloadData();
-            } catch (err) { C.toast(err.message, 'bad'); reloadData(); }
+                await setLevel(entity, pipeline, action, s.value);
+                paintStageLink(s.closest('tr'), entity, pipeline);
+                C.toast('Saved', 'ok');
+            } catch (err) { C.toast(err.message, 'bad'); await reloadData(); }
+            finally { s.disabled = false; }
         });
         body.addEventListener('click', async e => {
             const r = e.target.closest('[data-role]'); if (r) { roleId = r.dataset.role; return render(); }

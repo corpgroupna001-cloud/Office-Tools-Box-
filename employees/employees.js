@@ -325,7 +325,7 @@
     /* ------------------------------------------------------------ profile */
     async function showProfile(id) {
         const mySeq = navSeq;
-        view.classList.add('b24-legacy-panel');
+        view.classList.remove('b24-legacy-panel');
         C.loading(view, 'Loading profile…');
         let p;
         try {
@@ -346,58 +346,75 @@
         const shift =window.WSCompanies ? WSCompanies.resolveShift(p, shifts) : shifts.find(s => String(s.id) === String(p.shift_id));
         const shift2 = p.shift2_id ? shifts.find(s => String(s.id) === String(p.shift2_id)) : null;
 
+        const online = isOnline(p.last_seen_at);
+        const roleChip = p.app_role && ROLE[p.app_role] ? ROLE[p.app_role].label : 'Employee';
+        const editHref = self ? '/#profile' : (ctx.isAdmin ? '/wsm-admin' : '');
+        const field = (label, value) => `<div class="f"><dt>${esc(label)}</dt><dd>${value || '<span class="empty">field is empty</span>'}</dd></div>`;
         view.innerHTML = `
-            <a class="crm-back" href="/employees/" data-nav>${C.icon('arrow')}All employees</a>
-            <div class="crm-record-head">
-                <span class="ws-avatar xl" style="position:relative">${p.avatar_url ? `<img src="${esc(p.avatar_url)}" alt="">` : esc(L.initials(name))}${onlineDot(p)}</span>
-                <div class="titles">
-                    <h1>${esc(name)}</h1>
-                    <div class="meta">
-                        ${p.job_title || p.department ? `<span>${esc([p.job_title, p.department].filter(Boolean).join(' · '))}</span>` : ''}
-                        ${p.company ? C.badge('info', p.company) : ''}${p.company2 ? ' ' + C.badge('info', p.company2) : ''}
-                        ${C.statusBadge(EMP_STATUS, p.status || 'active')}
-                        ${p.is_wfh ? C.badge('leave', 'Work from home') : ''}
-                        ${p.app_role && ROLE[p.app_role] ? C.statusBadge(ROLE, p.app_role) : ''}
-                        <span class="muted">${esc(lastSeen(p))}</span>
-                    </div>
-                </div>
-                <div class="actions">
-                    ${self ? `<a class="ws-btn" href="/#profile">${C.icon('edit')}<span>Edit profile</span></a>` : `<a class="ws-btn primary" href="/chat/#thread=${esc(p.id)}">${C.icon('chat')}<span>Message</span></a>`}
-                    ${p.email ? `<a class="ws-btn" href="mailto:${esc(p.email)}">${C.icon('mail')}<span>Email</span></a>` : ''}
-                    ${p.phone ? `<a class="ws-btn" href="tel:${esc(p.phone)}">${C.icon('phone')}<span>Call</span></a>` : ''}
-                    <button type="button" class="ws-btn" id="task-btn">${C.icon('tasks')}<span>Assign task</span></button>
-                    <button type="button" class="ws-btn" id="meet-btn">${C.icon('calendar')}<span>Meeting</span></button>
-                    ${ctx.isAdmin ? `<a class="ws-btn icon" href="/wsm-admin" title="Admin console" aria-label="Admin console">${C.icon('shield')}</a>` : ''}
-                </div>
+            <div class="b24-titlebar emp-bar">
+                <a class="b24-btn-glass" href="/employees/" data-nav>${C.icon('arrow')}<span>Employees</span></a>
+                <h1 class="b24-title">${esc(name)}</h1>
+                <span class="grow"></span>
+                ${self ? `<a class="b24-btn-glass" href="/#profile">${C.icon('edit')}<span>Edit profile</span></a>`
+                       : `<a class="b24-btn-glass" href="/chat/#thread=${esc(p.id)}">${C.icon('chat')}<span>Message</span></a>`}
+                ${ctx.isAdmin ? `<a class="b24-btn-glass round" href="/wsm-admin" title="Admin console" aria-label="Admin console">${C.icon('shield')}</a>` : ''}
             </div>
-            <div id="tabs"></div>
+            <div class="emp-tabs" id="tabs"></div>
             <section class="crm-tabpanel" data-panel="overview">
-                <div class="crm-detail">
-                    <div class="ws-stack">
-                        <div class="ws-card">
-                            <div class="crm-section-title"><h3>Employment</h3></div>
-                            <dl class="crm-props">
-                                <div><dt>Email</dt><dd>${p.email ? `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : '—'}</dd></div>
-                                <div><dt>Phone</dt><dd>${p.phone ? `<a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : '—'}</dd></div>
-                                <div><dt>Employee code</dt><dd>${esc(p.employee_code || '—')}</dd></div>
-                                <div><dt>Company</dt><dd>${esc(p.company || '—')}${p.company2 ? `<br><span class="muted">Secondary: ${esc(p.company2)}</span>` : ''}</dd></div>
-                                <div><dt>Department</dt><dd>${esc(p.department || '—')}</dd></div>
-                                <div id="emp-depts-row" hidden><dt>In the company structure</dt><dd id="emp-depts"></dd></div>
-                                <div><dt>Job title</dt><dd>${esc(p.job_title || '—')}</dd></div>
-                                <div><dt>Reports to</dt><dd>${p.manager_id ? C.personHtml(p.manager_id) : '—'}</dd></div>
-                                <div><dt>Joining date</dt><dd>${esc(L.fmtDate(p.joining_date) || '—')}</dd></div>
-                                <div><dt>Employment status</dt><dd>${C.statusBadge(EMP_STATUS, p.status || 'active')}</dd></div>
-                                <div><dt>Work location</dt><dd>${p.is_wfh ? 'Work from home' : 'Office'}</dd></div>
-                                <div><dt>Shift</dt><dd>${esc(describeShift(shift))}${shift && shift.company_default ? '<br><span class="muted">Company default</span>' : ''}</dd></div>
-                                ${shift2 ? `<div><dt>Second shift</dt><dd>${esc(describeShift(shift2))}${p.company2 ? `<br><span class="muted">for ${esc(p.company2)}</span>` : ''}</dd></div>` : ''}
+                <div class="emp-prof">
+                    <aside class="emp-side">
+                        <div class="emp-pcard emp-photo">
+                            <div class="tags">
+                                <span class="role ${esc(p.app_role || 'employee')}">${esc(roleChip)}</span>
+                                <span class="pres${online ? ' on' : ''}"><i></i>${esc(online ? 'Online' : 'Offline')}</span>
+                            </div>
+                            <div class="shot">${p.avatar_url ? `<img src="${esc(p.avatar_url)}" alt="${esc(name)}">` : `<span class="mono">${esc(L.initials(name))}</span>`}</div>
+                            <b>${esc(name)}</b>
+                            <span>${esc([p.job_title, p.department].filter(Boolean).join(' · ') || p.email || '')}</span>
+                            <span class="seen">${esc(lastSeen(p))}</span>
+                        </div>
+                        <div class="emp-pcard emp-do">
+                            ${self ? '' : `<a class="ws-btn primary" href="/chat/#thread=${esc(p.id)}">${C.icon('chat')}<span>Message</span></a>`}
+                            ${p.email ? `<a class="ws-btn" href="mailto:${esc(p.email)}">${C.icon('mail')}<span>Email</span></a>` : ''}
+                            ${p.phone ? `<a class="ws-btn" href="tel:${esc(p.phone)}">${C.icon('phone')}<span>Call</span></a>` : ''}
+                            <button type="button" class="ws-btn" id="task-btn">${C.icon('tasks')}<span>Assign task</span></button>
+                            <button type="button" class="ws-btn" id="meet-btn">${C.icon('calendar')}<span>Meeting</span></button>
+                        </div>
+                        ${reports.length ? `<div class="emp-pcard">
+                            <div class="emp-pcard-head"><h2>Direct reports</h2><span class="n">${reports.length}</span></div>
+                            <ul class="crm-list compact">${reports.map(r => `<li>${C.avatarHtml(r)}<div class="main"><b><a href="/employees/?id=${esc(r.id)}" data-nav>${esc(nameOf(r))}</a></b><span>${esc([r.job_title, r.department].filter(Boolean).join(' · ') || r.email || '')}</span></div></li>`).join('')}</ul>
+                        </div>` : ''}
+                    </aside>
+                    <div class="emp-main">
+                        <div class="emp-pcard">
+                            <div class="emp-pcard-head"><h2>Contact information</h2>${editHref ? `<a class="b24-link" href="${esc(editHref)}">edit</a>` : ''}</div>
+                            <dl class="emp-fields">
+                                ${field('Full name', esc(name))}
+                                ${field('Email', p.email ? `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : '')}
+                                ${field('Mobile', p.phone ? `<a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : '')}
+                                ${field('Position', esc(p.job_title || ''))}
+                                ${field('Department', esc(p.department || ''))}
+                                <div class="f" id="emp-depts-row" hidden><dt>In the company structure</dt><dd id="emp-depts"></dd></div>
+                                ${field('Company', esc(p.company || '') + (p.company2 ? `<br><span class="muted">also ${esc(p.company2)}</span>` : ''))}
+                                ${field('Reports to', p.manager_id ? C.personHtml(p.manager_id) : '')}
+                            </dl>
+                        </div>
+                        <div class="emp-pcard">
+                            <div class="emp-pcard-head"><h2>Employment</h2></div>
+                            <dl class="emp-fields">
+                                ${field('Employee code', esc(p.employee_code || ''))}
+                                ${field('Status', C.statusBadge(EMP_STATUS, p.status || 'active'))}
+                                ${field('Joining date', esc(L.fmtDate(p.joining_date) || ''))}
+                                ${field('Work location', p.is_wfh ? 'Work from home' : 'Office')}
+                                ${field('Shift', esc(describeShift(shift)) + (shift && shift.company_default ? '<br><span class="muted">Company default</span>' : ''))}
+                                ${shift2 ? field('Second shift', esc(describeShift(shift2)) + (p.company2 ? `<br><span class="muted">for ${esc(p.company2)}</span>` : '')) : ''}
                             </dl>
                             ${ctx.isAdmin ? `<p class="muted" style="font-size:12.5px;margin:14px 0 0">Payroll, salary and offboarding are managed in the <a class="crm-link" href="/wsm-admin">Admin console</a>.</p>` : ''}
                         </div>
-                        ${reports.length ? `<div class="ws-card"><div class="crm-section-title"><h3>Direct reports</h3><span class="crm-count">${reports.length}</span></div><ul class="crm-list compact">${reports.map(r => `<li>${C.avatarHtml(r)}<div class="main"><b><a href="/employees/?id=${esc(r.id)}" data-nav>${esc(nameOf(r))}</a></b><span>${esc([r.job_title, r.department].filter(Boolean).join(' · ') || r.email || '')}</span></div></li>`).join('')}</ul></div>` : ''}
-                    </div>
-                    <div class="ws-stack">
-                        <div class="ws-card"><div class="crm-section-title"><h3>Open tasks</h3></div><div id="ov-tasks"></div></div>
-                        <div class="ws-card"><div class="crm-section-title"><h3>Next 7 days</h3></div><div id="ov-events"></div></div>
+                        <div class="emp-two">
+                            <div class="emp-pcard"><div class="emp-pcard-head"><h2>Open tasks</h2></div><div id="ov-tasks"></div></div>
+                            <div class="emp-pcard"><div class="emp-pcard-head"><h2>Next 7 days</h2></div><div id="ov-events"></div></div>
+                        </div>
                     </div>
                 </div>
             </section>
