@@ -392,6 +392,19 @@ async function interact(page, name, result) {
     await expect('Escape closes the slider', async () => { await page.keyboard.press('Escape'); await wait(400); return !(await page.$('.ws-slider')); });
     await expect('the list shows the fixture contacts', async () => (await page.$$('.b24-grid-table tbody tr[data-id]')).length >= 2);
   }
+  if (name === 'messenger') {
+    // A message's chevron is the page's own button: it must open the message
+    // menu and leave the workspace menu alone.
+    await expect('the message chevron leaves the workspace menu alone', async () => {
+      const more = await page.$('.mx-more');
+      if (!more) return true;                        // no messages in this fixture
+      await more.click();
+      await wait(250);
+      // The button carries data-act="menu" for Messenger's own menu; the shell
+      // used to catch it and open Configure menu over the whole workspace.
+      return page.evaluate(() => !document.querySelector('.ws-side.editing'));
+    });
+  }
   if (name === 'deals') await expect('the pipeline shows one column per stage', async () => (await page.$$('.kb-col')).length >= 5 || (await page.$$('.ws-table tbody tr')).length >= 1);
   if (name === 'tasks') await expect('My Tasks lists my tasks', async () => (await page.$$('.b24-grid-table tbody tr[data-id], .kb-card')).length >= 1);
   if (name === 'typing') await expect('with its dialogs closed, the typing test page scrolls again', async () => {

@@ -1,0 +1,109 @@
+# Packages WorkSuite as apps people can install: macOS, Windows and Android.
+#
+# The apps are thin shells around the deployed site, so a build is only
+# needed when the shell itself changes — not on every commit. Run it from
+# the Actions tab (Run workflow), or push a tag like v1.0.0 to get a
+# release with the files attached.
+#
+# Free: this repository is public, so GitHub-hosted runners cost nothing.
+name: Apps
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: The site the apps should open
+        required: false
+        default: https://work-suite-mauve.vercel.app
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macOS
+          - os: windows-latest
+            label: Windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install the desktop shell's build tools
+        working-directory: desktop
+        run: npm install --no-audit --no-fund
+
+      - name: Build the app
+        working-directory: desktop
+        env:
+          WORKSUITE_URL: ${{ inputs.url || 'https://work-suite-mauve.vercel.app' }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'    # unsigned build; see README
+        run: npx electron-builder --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worksuite-${{ matrix.label }}
+          path: |
+            desktop/dist/*.dmg
+            desktop/dist/*.zip
+            desktop/dist/*.exe
+          if-no-files-found: error
+
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build the APK
+        working-directory: mobile/android
+        run: gradle assembleDebug -PworksuiteUrl="${{ inputs.url || 'https://work-suite-mauve.vercel.app' }}" --no-daemon
+
+      - name: Name it for people, not for Gradle
+        working-directory: mobile/android
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/debug/app-debug.apk out/WorkSuite.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worksuite-Android
+          path: mobile/android/out/WorkSuite.apk
+          if-no-files-found: error
+
+  release:
+    name: Attach to the release
+    needs: [desktop, android]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: files
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: files/**/*
+          generate_release_notes: true

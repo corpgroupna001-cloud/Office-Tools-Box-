@@ -542,8 +542,11 @@
             if (!refs.menu.hidden && !refs.menu.contains(e.target) && !refs.userbtn.contains(e.target)) toggleMenu(false);
             if (!refs.notif.hidden && !refs.notif.contains(e.target) && !refs.bell.contains(e.target) && !(refs.railBell && refs.railBell.contains(e.target))) toggleNotif(false);
             if (openPop && !openPop.el.contains(e.target) && !openPop.anchor.contains(e.target)) closePop();
+            // Only the shell's own chrome: pages use data-act for their own
+            // buttons (a message's actions, a call's Accept), and those must
+            // never reach the workspace menu.
             var act = e.target.closest('[data-act]');
-            if (act && !act.closest('.ws-pop')) runAct(act.dataset.act);
+            if (act && !act.closest('.ws-pop') && act.closest('.ws-menu, .ws-top, .ws-footer, .ws-side')) runAct(act.dataset.act);
             // Links marked data-slider open as a slide-over (plain clicks only).
             var sl = e.target.closest('a[data-slider]');
             if (sl && !e.defaultPrevented && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0) {
