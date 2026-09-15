@@ -95,7 +95,8 @@
   // it always exports the table as it stands right now.
   function addExportButtons() {
     document.querySelectorAll('.admin-main > div[id$="-panel"], .admin-main > section[id$="-panel"]').forEach(p => {
-      if (p.querySelector('[data-csv-export]') || !p.querySelector('table')) return;
+      // data-no-export: the table is not the panel's data (the CRM import preview).
+      if (p.hasAttribute('data-no-export') || p.querySelector('[data-csv-export]') || !p.querySelector('table')) return;
       const btn = document.createElement('button');
       btn.type = 'button'; btn.dataset.csvExport = '1';
       btn.className = 'glass px-4 py-2 rounded-xl text-sm font-bold ws-export';

@@ -956,12 +956,13 @@
             <!-- ================= BIOMETRIC ROSTER ================= -->
             <!-- CRM import: deals and leads from a spreadsheet. The browser reads the
                  CSV; api/admin.js builds every row that reaches the database. -->
-            <div id="crmimport-panel" class="hidden">
+            <div id="crmimport-panel" class="hidden" data-no-export>
                 <div style="max-width:900px">
                     <h2 style="margin:0 0 6px;font-size:20px;font-weight:800">Import deals and leads</h2>
                     <p style="margin:0 0 18px;color:var(--ws-text-muted,#94a3b8);font-size:14px">
                         Export from your spreadsheet as CSV, choose what it holds, and check the preview before importing.
-                        Up to 500 rows at a time.
+                        A Bitrix24 export imports as it comes, every column kept; large files are sent in batches.
+                        See the result under CRM → Deals and Leads.
                     </p>
 
                     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
@@ -1265,7 +1266,11 @@
                     { key: 'holidays',   title: 'Holidays',      icon: 'party',       tab: 'holidays' },
                     { key: 'salary',     title: 'Salary',        icon: 'salary',      tab: 'salary' },
                     { key: 'import', title: 'Bulk import', icon: 'users', tab: 'import' },
-                    { key: 'crmimport', title: 'CRM import', icon: 'deal', tab: 'crmimport' },
+                ]},
+                { label: 'CRM', items: [
+                    { key: 'deals',      title: 'Deals',         icon: 'deal',        tab: 'deals' },
+                    { key: 'leads',      title: 'Leads',         icon: 'users',       tab: 'leads' },
+                    { key: 'crmimport',  title: 'CRM import',    icon: 'deal',        tab: 'crmimport' },
                 ]},
                 { label: 'Attendance', items: [
                     { key: 'attendance', title: 'Attendance',    icon: 'attend',      tab: 'attendance' },
@@ -1797,7 +1802,7 @@
         });
 
         // ---------- CRM import (deals and leads) ----------
-        let ciRows = [];
+        let ciRows = [], ciHeaders = [];
 
         /** Comma, semicolon or tab — whichever the header really uses. */
         function sniffDelimiter(text) {
@@ -1863,13 +1868,18 @@
                 document.getElementById('ci-preview').innerHTML = '<div style="font-size:13px;color:#fca5a5;font-weight:700">That file has no rows under its header.</div>';
                 return;
             }
-            const headers = table[0].map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
+            // The file's own column names go to the server as they are, so every
+            // record keeps its whole row and Deals and Leads can show it in this format.
+            ciHeaders = table[0].map(h => h.replace(/^\uFEFF/, '').trim());
             ciRows = table.slice(1).map(cells => {
                 const o = {};
-                headers.forEach((h, i) => { if (h) o[h] = (cells[i] == null ? '' : cells[i]).trim(); });
+                ciHeaders.forEach((h, i) => {
+                    const v = cells[i] == null ? '' : cells[i];
+                    if (h && v.trim()) o[h] = v;           // as written; empty cells stay home: a 335-column export is mostly blanks
+                });
                 return o;
             });
-            ciRender(headers.filter(Boolean), ciRows.slice(0, 5), ciRows.length);
+            ciRender(ciHeaders.filter(Boolean), ciRows.slice(0, 5), ciRows.length);
             document.getElementById('ci-import').disabled = ciRows.length === 0;
         }
 
@@ -1916,13 +1926,15 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            action: 'import_crm', kind, rows: slice,
+                            action: 'import_crm', kind, rows: slice, headers: ciHeaders,
                             create_missing: createMissing, link_contacts: linkContacts,
                             row_offset: at,
                         }),
                     });
                     const data = await r.json().catch(() => ({}));
-                    if (!r.ok) throw new Error((data.error || 'The import failed.') + (sum.inserted || sum.updated ? ` ${sum.inserted} added and ${sum.updated} updated before it stopped.` : ''));
+                    if (!r.ok) throw new Error((data.error || `The import failed (HTTP ${r.status}).`) +
+                        (data.detail ? ` Database said: ${data.detail}` : '') +
+                        (sum.inserted || sum.updated ? ` ${sum.inserted} added and ${sum.updated} added or updated by id before it stopped.` : ''));
                     sum.inserted += data.inserted || 0;
                     sum.updated += data.matched || 0;       // matched by source id: added or updated
                     sum.contacts += data.contacts_created || 0;
@@ -1944,7 +1956,8 @@
                     (warnings.size ? `<div style="font-size:13px;margin-top:6px">${[...warnings].map(w => `• ${w}`).join('<br>')}</div>` : '') +
                     (skipped.length ? `<div style="font-size:13px;margin-top:6px">${skipped.length} row${skipped.length === 1 ? '' : 's'} skipped: ` +
                         skipped.slice(0, 10).map(s => `row ${s.row} (${s.why})`).join(', ') + (skipped.length > 10 ? '…' : '') + '</div>' : '');
-                ciRows = [];
+                ciRows = []; ciHeaders = [];
+                window.dispatchEvent(new CustomEvent('crm-imported', { detail: { kind } }));
                 document.getElementById('ci-file').value = '';
                 document.getElementById('ci-preview').innerHTML = '';
             } catch (e) {
@@ -3424,5 +3437,6 @@
     <script src="/admin/overview.js"></script>
     <script src="/admin/management.js"></script>
     <script src="/admin/console.js"></script>
+    <script src="/admin/crm-records.js"></script>
 </body>
 </html>

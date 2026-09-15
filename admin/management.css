@@ -34,3 +34,30 @@
 #add-emp-modal.flex, #exit-emp-modal.flex { display:flex; }
 #add-emp-modal .mg-toolbar, #exit-emp-modal .mg-toolbar { margin-bottom:0; justify-content:flex-end; }
 #import-panel textarea { margin-bottom:4px; }
+
+/* CRM: Deals and Leads in the columns of their import file. */
+.crm-records .crm-find { flex: 1 1 220px; }
+.crm-records .crm-find input { width: 100%; }
+.crm-records .mg-toolbar label { max-width: 100%; }
+.crm-records .mg-toolbar select { max-width: 100%; text-overflow: ellipsis; }
+.crm-records .mg-toolbar > button { align-self: end; }
+.crm-records .crm-pager { align-items: center; margin-top: 14px; }
+.crm-records .crm-per { flex-direction: row; align-items: center; margin-left: auto; }
+.crm-scroll { max-height: 68vh; }
+.crm-table th { position: sticky; top: 0; z-index: 1; }
+.crm-table td { white-space: nowrap; }
+.crm-table tbody tr { cursor: pointer; }
+.crm-table tbody tr:hover td, .crm-table tbody tr:focus-visible td { background: var(--ws-surface-2, #f1f5f9); }
+.crm-table tbody tr:focus-visible { outline: 2px solid var(--ws-accent, #2563eb); outline-offset: -2px; }
+.crm-cols { border: 1px solid #dbe3ee; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+.crm-cols-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; font-size: 12px; }
+.crm-cols-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 14px; max-height: 280px; overflow: auto; }
+.crm-cols-grid .mg-check { flex-direction: row; align-items: center; font-weight: 500; }
+#crm-record-modal.flex { display: flex; }
+.crm-record-head { display: flex; gap: 12px; align-items: start; justify-content: space-between; }
+.crm-record-head h1 { overflow-wrap: anywhere; }
+.crm-record-fields { display: grid; grid-template-columns: minmax(140px, 32%) 1fr; margin: 0; font-size: 13px; }
+.crm-record-fields dt, .crm-record-fields dd { padding: 8px 10px; border-bottom: 1px solid #dbe3ee; margin: 0; }
+.crm-record-fields dt { font-weight: 650; color: var(--ws-muted, #64748b); }
+.crm-record-fields dd { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .crm-record-fields { grid-template-columns: 1fr; } .crm-record-fields dd { padding-top: 0; } }

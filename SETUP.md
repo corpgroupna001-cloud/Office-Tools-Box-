@@ -560,6 +560,8 @@ which file to run.
 | **People → Employees → 🚪** | Offboards someone: blocks the login, records a last working day, and drops them out of the live schedule. Their history is kept — this is not the 🗑️ delete button, which cascades their records away. ↩️ brings them back. |
 | **People → Bulk import** | Paste or upload a CSV to create and update employees in bulk. Rows are matched on **email**. Always previews first and writes nothing until confirmed. |
 | **Tools → Email monitoring** | Every outgoing message, its SMTP result, and whether each company's mailbox is configured. |
+| **CRM → Deals / Leads** | Every deal and lead in the columns of the Bitrix24 file it was imported from, filtered by pipeline, stage, status and responsible person, a page at a time. **Columns** picks what the table shows; a click opens the whole record. **Export CSV** downloads every matching record in the export's own format (quoted cells, semicolons, byte-order mark), so it reads back into Bitrix24 or CRM import. A deal moved or edited in WorkSuite exports as it is now. Needs migration 8. |
+| **CRM → CRM import** | Deals or leads from a Bitrix24 export, as it comes. Every column is kept. Pipelines, stages and lead stages the file names are created; rows with an ID update the same record when imported again. |
 | **Tools → Audit log** | Every change made from the console — what changed, on whom, and whether it worked. Reads are not logged, and no passwords, codes or webhook URLs are recorded. |
 | **Export CSV** (all tabs) | Downloads the rows currently on screen, with whatever filters are applied. |
 
@@ -616,6 +618,12 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 5 | `supabase-crm-reminders-migration.sql` | `crm_reminder_log`, `notifications.pushed_at`, `crm_run_reminders()` and a pg_cron schedule every 5 minutes (skipped with a notice where pg_cron is unavailable) |
 | 6 | `supabase-b24-migration.sql` | The Bitrix24-style workspace: company structure, CRM access roles, customer companies, custom fields, products, automation, project privacy, task views, whiteboards, document sharing and public links, calendar colours, per-person list settings — see [11. The Bitrix24-style workspace](#11-the-bitrix24-style-workspace) |
 | 7 | `supabase-messenger-calls-migration.sql` | Messenger & calls v2: `messages.client_id`, `ws_chat_inbox()`, `calls`, `call_participants` and the `ws_call_*` functions — see [10. Messenger & calls](#10-messenger--calls) |
+| 8 | `supabase-crm-import-migration.sql` | CRM import: `external_ref` (the Bitrix24 id, so importing a file again updates instead of duplicating), `source_row` (every filled-in cell of the record's row) on `crm_deals` and `crm_leads`, and `crm_import_layouts` (the file's columns, in order) — behind **Admin → CRM → Deals / Leads** |
+
+**Ran migration 8 before 15 Sep 2026?** Run it again. Its first version made
+`external_ref`'s unique index partial, which `ON CONFLICT` cannot use, so every
+import batch failed with *"there is no unique or exclusion constraint matching
+the ON CONFLICT specification"* (shown as "The import stopped part way").
 
 **Already ran 1–4 before 11 Sep 2026?** Run all five again, in order. They
 are idempotent, and 1–4 now carry fixes found by the real-database tests:

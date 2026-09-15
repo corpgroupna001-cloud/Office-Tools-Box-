@@ -199,18 +199,21 @@ test('a lead status this workspace does not have falls back to new', () => {
 
 /* ======================= as the admin page sends it ======================= */
 
-/** The page lower-cases headers and joins words with _, so "Deal Name" arrives as deal_name. */
+/** Headers as an earlier admin page sent them: lower-cased, words joined with _ ("deal_name"). */
 const asPage = row => Object.fromEntries(Object.entries(row).map(([k, v]) => [k.trim().toLowerCase().replace(/\s+/g, '_'), v]));
 
-test('headers as the admin page sends them map the same as the export\'s own', () => {
+test('deal_name, deal name and Deal Name are the same column', () => {
+  // source_row keeps whatever the headers were called, so it is left out of the comparison.
+  const bare = out => out.rows.map(r => { const o = { ...r }; delete o.source_row; return o; });
   const raw = I.mapDeals([dealRow()], ctx());
   const sent = I.mapDeals([asPage(dealRow())], ctx());
   assert.equal(sent.skipped.length, 0, 'deal_name is Deal Name');
-  assert.deepEqual(sent.rows, raw.rows);
+  assert.deepEqual(bare(sent), bare(raw));
 
   const lead = { 'ID': '2951', 'Stage': 'Good Lead', 'Lead Name': 'GL-EBS-USA-BGC-20260911001', 'Responsible': 'GL-PIS-CSM-IC-001', 'Total': '400.00', 'Currency': 'US Dollar' };
   const statuses = [{ key: 'new', label: 'New' }, { key: 'good_lead', label: 'Good Lead' }];
-  assert.deepEqual(I.mapLeads([asPage(lead)], { statuses, profiles: PROFILES }).rows, I.mapLeads([lead], { statuses, profiles: PROFILES }).rows);
+  const leadsOf = rows => bare(I.mapLeads(rows, { statuses, profiles: PROFILES }));
+  assert.deepEqual(leadsOf([asPage(lead)]), leadsOf([lead]));
 });
 
 test('a Bitrix lead keeps its value, referrer and the person\'s details', () => {
@@ -247,15 +250,17 @@ test('the endpoint creates missing lead stages and finds contacts past the first
   const db = {
     profiles: PROFILES,
     crm_lead_statuses: [{ key: 'new', label: 'New', sort_order: 1 }, { key: 'unqualified', label: 'Unqualified', sort_order: 2 }],
-    crm_pipelines: [], crm_pipeline_stages: [], crm_deals: [], crm_leads: [],
+    crm_pipelines: [], crm_pipeline_stages: [], crm_deals: [], crm_leads: [], crm_import_layouts: [],
     crm_contacts: Array.from({ length: 1500 }, (_, i) => ({ id: 'c' + i, email: `c${i}@example.test`, phone: null, full_name: 'C ' + i })),
   };
   let n = 0;
   const fakeFetch = async (url, opts = {}) => {
     const u = new URL(url), rows = db[u.pathname.split('/').pop()], h = opts.headers || {};
     if (!opts.method) {                              // reads stop at 1,000 rows, as Supabase's do
+      const eq = [...u.searchParams].filter(([k, v]) => /^eq\./.test(v)).map(([k, v]) => [k, v.slice(3)]);
+      const found = rows.filter(r => eq.every(([k, v]) => String(r[k]) === v));
       const [from, to] = (h.Range || '0-999').split('-').map(Number);
-      return new Response(JSON.stringify(rows.slice(from, Math.min(to, from + 999) + 1)), { status: 200 });
+      return new Response(JSON.stringify(found.slice(from, Math.min(to, from + 999) + 1)), { status: 200, headers: { 'content-range': `${from}-${to}/${found.length}` } });
     }
     const key = u.searchParams.get('on_conflict');
     const back = [];
@@ -293,9 +298,86 @@ test('the endpoint creates missing lead stages and finds contacts past the first
   assert.deepEqual(db.crm_leads.map(l => l.status), ['good_lead', 'unqualified', 'long_hold']);
   assert.equal(db.crm_lead_statuses.find(s => s.key === 'long_hold').label, 'Long Hold');
 
-  const deal = asPage(dealRow({ 'Contact: Work E-mail': 'c1400@example.test' }));
+  const deal = dealRow({ 'Contact: Work E-mail': 'c1400@example.test' });
   const r = await call({ action: 'import_crm', kind: 'deals', rows: [deal] }, cookie);
   assert.equal(r.code, 200, JSON.stringify(r.body));
   assert.equal(r.body.contacts_created, 0, 'contact 1,400 is found, not made again');
   assert.equal(db.crm_deals[0].contact_id, 'c1400');
+  assert.equal(db.crm_deals[0].source_row['Contact: Work E-mail'], 'c1400@example.test', 'the row as the file had it');
+
+  // The file's columns are kept once, in order, however many batches repeat them.
+  const cols = ['ID', 'Pipeline', 'Stage', 'Deal Name', 'Weekday'];
+  await call({ action: 'import_crm', kind: 'deals', rows: [deal], headers: cols }, cookie);
+  await call({ action: 'import_crm', kind: 'deals', rows: [deal], headers: cols.concat('Duration') }, cookie);
+  assert.deepEqual(db.crm_import_layouts, [{ id: db.crm_import_layouts[0].id, entity: 'deal', headers: cols.concat('Duration'), updated_at: db.crm_import_layouts[0].updated_at }]);
+
+  // And the console reads the deal back in those columns.
+  const list = await call({ action: 'crm_records', kind: 'deals', lookups: true }, cookie);
+  assert.equal(list.code, 200);
+  assert.deepEqual(list.body.headers, cols.concat('Duration'));
+  assert.deepEqual(list.body.rows[0].cells, ['17639', 'Proxy Interview Supports', 'Semi Deal', 'JW-RMS-IS-202609011001', '', '']);
+  assert.equal(list.body.total, 1);
+  assert.ok(list.body.lookups.stages.some(x => x.name === 'Semi Deal'));
+});
+
+/* ======================= back out, in the file's format ======================= */
+
+const exportCtx = () => ({
+  pipelines: new Map([PIPE_A, PIPE_D].map(p => [p.id, p])),
+  stages: new Map(STAGES.map(s => [s.id, s])),
+  statuses: new Map([['new', { key: 'new', label: 'New' }], ['good_lead', { key: 'good_lead', label: 'Good Lead' }]]),
+  people: new Map(PROFILES.map(p => [p.id, p])),
+});
+const HEADERS = ['ID', 'Pipeline', 'Stage', 'Responsible', 'Deal Name', 'Income', 'Currency', 'Probability', 'Created', 'Assumed close date', 'Comment', 'Contact: Mobile', 'Weekday'];
+
+test('an imported deal exports exactly as its row was written', () => {
+  const row = dealRow({ Weekday: 'Monday' });
+  const d = I.mapDeals([row], ctx()).rows[0];
+  const record = { ...d, id: 'uuid-1', created_at: '2026-09-11T21:41:57+00:00' };
+  const [cells] = I.exportCells('deals', [record], HEADERS, exportCtx());
+  assert.deepEqual(cells, HEADERS.map(h => row[h] || ''), 'blank stays blank: no probability or comment is invented');
+});
+
+test('a deal changed in WorkSuite exports as it is now', () => {
+  const d = I.mapDeals([dealRow()], ctx()).rows[0];
+  const moved = { ...d, id: 'uuid-1', stage_id: 's-won', value: 250, owner_id: 'u-ic', title: 'Renamed', expected_close_date: '2026-10-01', currency: 'INR' };
+  const [cells] = I.exportCells('deals', [moved], HEADERS, exportCtx());
+  const at = h => cells[HEADERS.indexOf(h)];
+  assert.deepEqual([at('Stage'), at('Income'), at('Responsible'), at('Deal Name'), at('Assumed close date'), at('Currency')],
+    ['Deal won', '250.00', 'GL-PIS-CSM-IC-001', 'Renamed', '01.10.2026', 'Indian Rupee']);
+  assert.equal(at('Contact: Mobile'), '+13144719534', 'the rest of the row is untouched');
+});
+
+test('a deal made in WorkSuite fills the export\'s columns from its own fields', () => {
+  const native = { id: 'uuid-2', title: 'Gym kit', pipeline_id: 'p-acc', stage_id: 'a-adv', value: 90000, currency: 'INR', owner_id: 'u-om',
+    probability: 20, created_at: '2026-09-15T04:48:00Z', expected_close_date: null, description: 'Ten sets', source_row: null };
+  const [cells] = I.exportCells('deals', [native], HEADERS, exportCtx());
+  assert.deepEqual(cells, ['uuid-2', 'Accounts', 'Receive Advance Payments', 'JW-RMS-OM-OM-001', 'Gym kit', '90000.00', 'Indian Rupee', '20',
+    '15.09.2026 10:18:00 am', '', 'Ten sets', '', '']);
+});
+
+test('a lead exports with its stage label and the file\'s own cells', () => {
+  const row = { 'ID': '2951', 'Stage': 'Good Lead', 'Lead Name': 'GL-EBS-USA-BGC-20260911001', 'Created': '12.09.2026 12:41:48 am', 'Total': '400.00', 'Currency': 'US Dollar', 'Referrer': 'Sandeep Velocity', 'Comment': '[p]\n// He is looking for USA BGC\n[/p]' };
+  const l = I.mapLeads([row], { statuses: [...exportCtx().statuses.values()], profiles: [] }).rows[0];
+  const headers = ['ID', 'Stage', 'Lead Name', 'Created', 'Total', 'Currency', 'Comment', 'Referrer', 'Gender'];
+  const [cells] = I.exportCells('leads', [{ ...l, id: 'uuid-3' }], headers, exportCtx());
+  assert.deepEqual(cells, headers.map(h => row[h] || ''));
+  const [moved] = I.exportCells('leads', [{ ...l, id: 'uuid-3', status: 'new' }], headers, exportCtx());
+  assert.equal(moved[1], 'New');
+});
+
+test('export dates read like the file: day first, India time, am/pm', () => {
+  assert.equal(I.isoDateTime('12.09.2026 12:41:48 am'), '2026-09-12T00:41:48+05:30');
+  assert.equal(I.isoDateTime('10.09.2026 08:59:34 pm'), '2026-09-10T20:59:34+05:30');
+  assert.equal(I.isoDateTime('12.09.2026'), '2026-09-12T00:00:00+05:30');
+  assert.equal(I.isoDateTime('31.02.2026 13:00:00 pm'), null);
+  assert.equal(I.exportDateTime('2026-09-11T19:11:48+00:00'), '12.09.2026 12:41:48 am');
+  assert.equal(I.exportDateTime(I.isoDateTime('10.09.2026 12:05:00 pm')), '10.09.2026 12:05:00 pm');
+  assert.equal(I.exportDate('2026-09-19'), '19.09.2026');
+});
+
+test('columns are merged in file order, each once', () => {
+  assert.deepEqual(I.mergeHeaders(['ID', 'Stage'], ['\uFEFFID', 'Stage', 'Expert ', 'stage', '']), ['ID', 'Stage', 'Expert']);
+  assert.deepEqual(I.sourceRow({ ' ID ': '1', Blank: '  ', Note: ' spaced ' }), { ID: '1', Note: ' spaced ' });
+  assert.equal(I.sourceRow({ A: '' }), null);
 });

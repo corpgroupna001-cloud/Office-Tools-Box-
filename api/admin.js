@@ -737,6 +737,26 @@ module.exports = async function handler(req, res) {
 
       mapped.skipped.forEach(s => report.skipped.push({ row: s.row + offset, why: s.why }));
       mapped.warnings.forEach(w => report.warnings.push(w));
+
+      // The file's columns, in its order, so the console can show and export
+      // these records in the format they came in.
+      const headers = Array.isArray(body.headers) ? body.headers.slice(0, 2000).map(String) : [];
+      if (headers.length) {
+        const entity = kind === 'leads' ? 'lead' : 'deal';
+        const lr = await rest(`crm_import_layouts?entity=eq.${entity}&select=headers`);
+        if (lr.ok) {
+          const known = ((await lr.json())[0] || {}).headers || [];
+          const merged = CI.mergeHeaders(known, headers);
+          if (merged.length !== known.length) {
+            await rest('crm_import_layouts?on_conflict=entity', {
+              method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' },
+              body: JSON.stringify({ entity, headers: merged, updated_at: new Date().toISOString() }),
+            });
+          }
+        } else {
+          report.warnings.push('The file\'s own columns were not kept — run supabase-crm-import-migration.sql, then import the file again.');
+        }
+      }
       if (!mapped.rows.length) return res.status(200).json(report);
 
       // The contact named on a deal row: match one we already hold, else make it.
@@ -772,12 +792,23 @@ module.exports = async function handler(req, res) {
       // A row that carries its source id is matched on it, so importing the
       // same file again updates that record instead of making a second copy.
       const payload = mapped.rows.map(d => { const o = { ...d }; delete o._contact; delete o._row; return o; });
+      // Columns the import migration adds: when this database lacks one, the
+      // records still come in without it and the report says what to run.
+      const MIGRATION = 'run supabase-crm-import-migration.sql in the Supabase SQL Editor, then import the file again';
+      for (const col of ['external_ref', 'source_row']) {
+        const probe = await rest(`${table}?select=${col}&limit=0`);
+        if (probe.ok) continue;
+        payload.forEach(p => { delete p[col]; });
+        report.warnings.push(col === 'external_ref'
+          ? `Source ids were ignored, so importing this file again will duplicate it — ${MIGRATION}.`
+          : `The file's other columns were not kept — ${MIGRATION}.`);
+      }
       const withRef = payload.filter(p => p.external_ref);
       const plain = payload.filter(p => !p.external_ref);
-      let failure = null, refUnsupported = false;
+      let failure = null;
 
       const write = async (list, byRef) => {
-        for (let i = 0; i < list.length && !failure && !refUnsupported; i += 100) {
+        for (let i = 0; i < list.length && !failure; i += 100) {
           const chunk = list.slice(i, i + 100);
           const r = await rest(byRef ? `${table}?on_conflict=external_ref` : table, {
             method: 'POST',
@@ -786,8 +817,11 @@ module.exports = async function handler(req, res) {
           });
           if (!r.ok) {
             const detail = (await r.text()).slice(0, 300);
-            if (byRef && /external_ref/.test(detail)) { refUnsupported = true; return; }   // migration not run yet
-            failure = { error: 'The import stopped part way', detail };
+            // The first version of the migration made external_ref's index partial,
+            // which ON CONFLICT cannot use, so every batch failed with this.
+            failure = /42P10|ON CONFLICT specification/i.test(detail)
+              ? { error: `Records cannot be matched on their source id yet — ${MIGRATION}.`, detail }
+              : { error: 'The import stopped part way', detail };
             return;
           }
           const back = await r.json();
@@ -795,16 +829,95 @@ module.exports = async function handler(req, res) {
         }
       };
 
-      if (withRef.length) {
-        await write(withRef, true);
-        if (refUnsupported) {
-          report.warnings.push('Source ids were ignored — run supabase-crm-import-migration.sql so that importing the same file again updates records instead of duplicating them.');
-          await write(withRef.map(p => { const o = { ...p }; delete o.external_ref; return o; }), false);
-        }
-      }
+      if (withRef.length) await write(withRef, true);
       if (!failure && plain.length) await write(plain, false);
       if (failure) return res.status(502).json({ ...failure, ...report });
       return res.status(200).json(report);
+    }
+
+    // ================= CRM RECORDS =================
+    // Deals and leads for the console, a page at a time, each row already in
+    // the columns of the file they were imported from (crm_import_layouts), so
+    // the table and its CSV read exactly like that export.
+    if (action === 'crm_records') {
+      const RH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
+      const rest = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...RH, ...(opts.headers || {}) } });
+      const readAll = async path => {
+        const all = [];
+        for (let from = 0; ; from += 1000) {
+          const r = await rest(path, { headers: { Range: `${from}-${from + 999}` } });
+          if (!r.ok) return all;
+          const page = await r.json();
+          all.push(...page);
+          if (page.length < 1000) return all;
+        }
+      };
+      const CI = require('../lib/crm-import');
+      const kind = body.kind === 'leads' ? 'leads' : 'deals';
+      const per = Math.min(Math.max(Number(body.per) || 50, 1), 1000);
+      const page = Math.max(Number(body.page) || 0, 0);
+      const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      const [pl, sg, st, lay] = await Promise.all([
+        rest('crm_pipelines?select=id,name,is_default&order=created_at.asc&limit=200'),
+        rest('crm_pipeline_stages?select=id,pipeline_id,name,position,is_won,is_lost&order=position.asc&limit=2000'),
+        rest('crm_lead_statuses?select=key,label,sort_order,is_closed&order=sort_order.asc&limit=200'),
+        rest(`crm_import_layouts?entity=eq.${kind === 'leads' ? 'lead' : 'deal'}&select=headers`),
+      ]);
+      const pipelines = pl.ok ? await pl.json() : [];
+      const stages = sg.ok ? await sg.json() : [];
+      const statuses = st.ok ? await st.json() : [];
+      const layout = lay.ok ? ((await lay.json())[0] || {}).headers || [] : [];
+      const people = await readAll('profiles?select=id,full_name,email,employee_code&order=full_name.asc');
+      const headers = layout.length ? layout : CI.DEFAULT_HEADERS[kind];
+
+      const q = String(body.q || '').replace(/[,()*"\\]/g, ' ').trim().slice(0, 100);
+      const filters = ['archived_at=is.null'];
+      if (kind === 'deals') {
+        if (UUID.test(body.pipeline_id || '')) filters.push(`pipeline_id=eq.${body.pipeline_id}`);
+        if (UUID.test(body.stage_id || '')) filters.push(`stage_id=eq.${body.stage_id}`);
+        if (['open', 'won', 'lost'].includes(body.status)) filters.push(`status=eq.${body.status}`);
+        if (q) filters.push(`or=(${encodeURIComponent(`title.ilike.*${q}*,organization.ilike.*${q}*,external_ref.eq.bitrix:deal:${q}`)})`);
+      } else {
+        if (/^[a-z0-9_]{1,40}$/.test(body.status || '')) filters.push(`status=eq.${body.status}`);
+        if (q) filters.push(`or=(${encodeURIComponent(`name.ilike.*${q}*,email.ilike.*${q}*,phone.ilike.*${q}*,organization.ilike.*${q}*,external_ref.eq.bitrix:lead:${q}`)})`);
+      }
+      if (body.owner_id === 'none') filters.push('owner_id=is.null');
+      else if (UUID.test(body.owner_id || '')) filters.push(`owner_id=eq.${body.owner_id}`);
+
+      const base = kind === 'deals'
+        ? 'id,title,value,currency,status,pipeline_id,stage_id,owner_id,expected_close_date,probability,source,description,organization,created_at,contact:crm_contacts(full_name)'
+        : 'id,name,status,estimated_value,currency,owner_id,source,source_detail,email,phone,organization,notes,created_at';
+      const table = kind === 'deals' ? 'crm_deals' : 'crm_leads';
+      const fetchPage = select => rest(`${table}?select=${select}&${filters.join('&')}&order=created_at.desc,id.desc`, {
+        headers: { Prefer: 'count=exact', Range: `${page * per}-${page * per + per - 1}` },
+      });
+      let r = await fetchPage(base + ',external_ref,source_row');
+      let migrated = true;
+      if (!r.ok) { migrated = false; r = await fetchPage(base); }     // the import migration has not run yet
+      if (!r.ok && r.status !== 416) return res.status(502).json({ error: `Could not read ${kind}`, detail: (await r.text()).slice(0, 300) });
+      const records = r.ok ? await r.json() : [];
+      const total = Number(String(r.headers.get('content-range') || '').split('/')[1]) || (r.ok ? records.length : 0);
+
+      const cells = CI.exportCells(kind, records, headers, {
+        pipelines: new Map(pipelines.map(p => [p.id, p])),
+        stages: new Map(stages.map(s => [s.id, s])),
+        statuses: new Map(statuses.map(s => [s.key, s])),
+        people: new Map(people.map(p => [p.id, p])),
+      });
+      const out = {
+        kind, headers, total, page, per, migrated,
+        rows: records.map((rec, i) => ({ id: rec.id, cells: cells[i] })),
+      };
+      if (body.lookups) {
+        out.lookups = {
+          pipelines: pipelines.map(p => ({ id: p.id, name: p.name })),
+          stages: stages.map(s => ({ id: s.id, pipeline_id: s.pipeline_id, name: s.name })),
+          statuses: statuses.map(s => ({ key: s.key, label: s.label })),
+          people: people.map(p => ({ id: p.id, name: p.full_name || p.email || p.employee_code, code: p.employee_code || '' })),
+        };
+      }
+      return res.status(200).json(out);
     }
 
     if (String(action).startsWith('roster_')) {
