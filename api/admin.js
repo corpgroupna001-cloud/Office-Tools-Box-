@@ -975,6 +975,97 @@ module.exports = async function handler(req, res) {
           await json(r, 'give the role');
           return res.status(200).json({ success: true });
         }
+        if (op === 'batch') {
+          // Everything the matrix collected before Save, in dependency order:
+          // new roles first (their temporary ids are swapped for real ones), then
+          // names, deletions, levels, stage limits and who holds each role.
+          const tmpIds = new Map();
+          const roleOf = v => tmpIds.get(String(v)) || id(v);
+          const setPerm = async (rid, entity, pipeline, act, level) => {
+            const base = `crm_role_permissions?role_id=eq.${rid}&entity=eq.${entity}&pipeline_id=${pipeline ? `eq.${pipeline}` : 'is.null'}&action=eq.${act}`;
+            const [have] = await json(await rest(`${base}&select=id`), 'read the permission');
+            if (!level) { if (have) await json(await rest(`crm_role_permissions?id=eq.${have.id}`, { method: 'DELETE' }), 'remove the permission'); return; }
+            if (have) await json(await rest(`crm_role_permissions?id=eq.${have.id}`, { method: 'PATCH', body: JSON.stringify({ level }) }), 'save the permission');
+            else await json(await rest('crm_role_permissions', { method: 'POST', body: JSON.stringify({ role_id: rid, entity, pipeline_id: pipeline, action: act, level }) }), 'save the permission');
+          };
+          const list = k => (Array.isArray(body[k]) ? body[k] : []).slice(0, 2000);
+          const bad = msg => res.status(400).json({ error: msg });
+
+          // Check every entry before writing anything, so a bad one cannot leave half a save behind.
+          const tmps = new Set(list('new_roles').map(r => String(r.tmp)));
+          const roleOk = v => tmps.has(String(v)) || !!id(v);
+          for (const r of list('new_roles')) { const n = String(r.name || '').trim(); if (!n || n === 'Role name') return bad('Give each new role a name'); }
+          for (const r of list('renames')) if (!id(r.id) || !String(r.name || '').trim()) return bad('Give the role a name');
+          for (const c of list('levels')) {
+            const level = c.level == null ? '' : String(c.level);
+            if (!roleOk(c.role_id) || !ENTITIES.includes(String(c.entity || '')) || (c.pipeline_id && !id(c.pipeline_id)) || !ACTIONS.includes(String(c.action || ''))
+                || (level && !LEVELS.includes(level)) || (!level && !c.pipeline_id)) return bad('Invalid permission');
+          }
+          for (const c of list('stages')) if (!roleOk(c.role_id) || !ENTITIES.includes(String(c.entity || '')) || (c.pipeline_id && !id(c.pipeline_id))) return bad('Invalid stage limit');
+          for (const a of list('assign_add')) {
+            const t = String(a.principal_type || '');
+            if (!roleOk(a.role_id)) return bad('Invalid assignment');
+            if ((t === 'user' || t === 'department') ? !id(a.principal_id) : t === 'app_role' ? !['employee', 'manager'].includes(a.principal_key) : t !== 'all') return bad('Invalid assignment');
+          }
+          for (const v of list('deletes')) {
+            const rid = id(v); if (!rid) return bad('Invalid role');
+            const [role] = await json(await rest(`crm_roles?id=eq.${rid}&select=is_system`), 'read the role');
+            if (role && role.is_system) return bad('Built-in roles cannot be deleted');
+          }
+
+          for (const r of list('new_roles')) {
+            const name = String(r.name || '').trim().slice(0, 100);
+            if (!name || name === 'Role name') return bad('Give each new role a name');
+            const [role] = await json(await rest('crm_roles', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ name }) }), 'create the role');
+            tmpIds.set(String(r.tmp), role.id);
+          }
+          for (const r of list('renames')) {
+            const rid = id(r.id), name = String(r.name || '').trim().slice(0, 100);
+            if (!rid || !name) return bad('Give the role a name');
+            await json(await rest(`crm_roles?id=eq.${rid}`, { method: 'PATCH', body: JSON.stringify({ name }) }), 'rename the role');
+          }
+          for (const v of list('deletes')) {
+            const rid = id(v); if (!rid) continue;
+            const [role] = await json(await rest(`crm_roles?id=eq.${rid}&select=is_system`), 'read the role');
+            if (role && role.is_system) return bad('Built-in roles cannot be deleted');
+            if (role) await json(await rest(`crm_roles?id=eq.${rid}`, { method: 'DELETE' }), 'delete the role');
+          }
+          const deleted = new Set(list('deletes').map(String));
+          for (const c of list('levels')) {
+            const rid = roleOf(c.role_id), entity = String(c.entity || ''), pipeline = c.pipeline_id ? id(c.pipeline_id) : null;
+            const act = String(c.action || ''), level = c.level == null ? '' : String(c.level);
+            if (deleted.has(String(c.role_id))) continue;
+            if (!rid || !ENTITIES.includes(entity) || (c.pipeline_id && !pipeline) || !ACTIONS.includes(act) || (level && !LEVELS.includes(level)) || (!level && !pipeline)) {
+              return bad('Invalid permission');
+            }
+            await setPerm(rid, entity, pipeline, act, level);
+          }
+          for (const c of list('stages')) {
+            const rid = roleOf(c.role_id), entity = String(c.entity || ''), pipeline = c.pipeline_id ? id(c.pipeline_id) : null;
+            if (deleted.has(String(c.role_id))) continue;
+            if (!rid || !ENTITIES.includes(entity)) return bad('Invalid stage limit');
+            const stages = (Array.isArray(c.stages) ? c.stages : []).map(String).filter(x => x.length <= 64).slice(0, 200);
+            const base = `crm_role_permissions?role_id=eq.${rid}&entity=eq.${entity}&pipeline_id=${pipeline ? `eq.${pipeline}` : 'is.null'}&action=eq.move_stage`;
+            let [p] = await json(await rest(`${base}&select=id,extra,level`), 'read the permission');
+            if (!p && stages.length) { await setPerm(rid, entity, pipeline, 'move_stage', 'all'); [p] = await json(await rest(`${base}&select=id,extra,level`), 'read the permission'); }
+            if (p) await json(await rest(`crm_role_permissions?id=eq.${p.id}`, { method: 'PATCH', body: JSON.stringify({ extra: { ...(p.extra || {}), stages } }) }), 'save the stages');
+          }
+          for (const v of list('assign_remove')) {
+            const aid = id(v); if (aid) await json(await rest(`crm_role_assignments?id=eq.${aid}`, { method: 'DELETE' }), 'remove the role');
+          }
+          for (const a of list('assign_add')) {
+            const rid = roleOf(a.role_id), type = String(a.principal_type || '');
+            if (!rid || deleted.has(String(a.role_id))) continue;
+            const row = { role_id: rid, principal_type: type };
+            if (type === 'user' || type === 'department') { row.principal_id = id(a.principal_id); if (!row.principal_id) return bad('Invalid assignment'); }
+            else if (type === 'app_role') { if (!['employee', 'manager'].includes(a.principal_key)) return bad('Invalid workspace role'); row.principal_key = a.principal_key; }
+            else if (type !== 'all') return bad('Invalid assignment');
+            const r = await rest('crm_role_assignments', { method: 'POST', body: JSON.stringify(row) });
+            if (!r.ok && /23505/.test(await r.clone().text())) continue;          // already had it
+            await json(r, 'give the role');
+          }
+          return res.status(200).json({ success: true, created: Object.fromEntries(tmpIds) });
+        }
         if (op === 'assign_remove') {
           const aid = id(body.id);
           if (!aid) return res.status(400).json({ error: 'Invalid assignment' });

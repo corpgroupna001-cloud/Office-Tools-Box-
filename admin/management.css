@@ -64,31 +64,6 @@
 .crm-record-fields dd { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .crm-record-fields { grid-template-columns: 1fr; } .crm-record-fields dd { padding-top: 0; } }
 
-/* CRM permissions: roles on the left, the matrix and assignments on the right. */
-.crm-perms .cp-layout { display: grid; grid-template-columns: minmax(180px, 230px) minmax(0, 1fr); gap: 18px; align-items: start; }
-@media (max-width: 900px) { .crm-perms .cp-layout { grid-template-columns: minmax(0, 1fr); } }
-.cp-roles { display: flex; flex-direction: column; gap: 6px; }
-.cp-roles > button { text-align: left; display: flex; flex-direction: column; gap: 2px; }
-.cp-roles > button.on { border-color: var(--ws-primary, #2563eb); box-shadow: inset 3px 0 0 var(--ws-primary, #2563eb); }
-.cp-roles small { color: var(--ws-muted, #64748b); font-weight: 500; }
-.cp-add { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-.cp-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 14px; }
-.cp-head .grow { flex: 1 1 220px; }
-.cp-head .grow input { width: 100%; }
-.cp-head button.danger, .ws-management button.danger { color: #b91c1c; border-color: #fca5a5; }
-.cp-matrix-wrap { max-height: min(70vh, 640px); }
-.cp-matrix th, .cp-matrix td { padding: 8px 10px; white-space: nowrap; }
-.cp-matrix thead th { position: sticky; top: 0; z-index: 2; }
-.cp-matrix tbody th { position: sticky; left: 0; z-index: 1; background: var(--ws-surface, #fff); text-align: left; }
-.cp-matrix tr.sub th { font-weight: 500; padding-left: 20px; }
-.cp-matrix select { padding: 5px 8px; max-width: 190px; }
-.cp-matrix td.na { color: var(--ws-muted, #94a3b8); text-align: center; }
-.cp-link { display: block; margin-top: 4px; padding: 0 !important; border: 0 !important; background: none !important; color: var(--ws-primary, #2563eb); font-size: 11.5px; font-weight: 600; text-decoration: underline; }
-.cp-sub { font-size: 1rem; font-weight: 750; margin: 18px 0 8px; }
-.cp-assign { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.cp-assign li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; border: 1px solid #dbe3ee; border-radius: 10px; }
-.cp-assign button { padding: 4px 10px; font-size: 12px; }
-.cp-give { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
-.cp-stages { margin-top: 16px; padding: 14px; border: 1px solid #dbe3ee; border-radius: 12px; }
-.cp-stage-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 14px; }
-.cp-stage-grid .mg-check { flex-direction: row; align-items: center; font-weight: 500; }
+/* CRM permissions: the Bitrix24-style matrix (ui/crm-perms.css) on the console's page. */
+.crm-perms-panel .cp-root { padding: 4px 0 20px; }
+.crm-perms-panel .cp-top h1 { color: var(--ws-text, #172b4d); }

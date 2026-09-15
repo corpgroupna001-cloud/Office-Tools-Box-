@@ -78,192 +78,68 @@
     }
 
     /* ======================================================= permissions */
+    // The Bitrix24-style matrix (ui/crm-perms.js); a workspace admin saves it
+    // straight to the role tables, which only admins may write.
     async function showPermissions(body) {
         if (!hasMatrix) { body.innerHTML = migrationNotice('Access permissions'); return; }
-        const [roles, perms, assigns, depts] = await Promise.all([
-            C.q(sb.from('crm_roles').select('*').order('is_system', { ascending: false }).order('name')),
-            C.q(sb.from('crm_role_permissions').select('*')),
-            C.q(sb.from('crm_role_assignments').select('*').order('created_at')),
-            sb.from('departments').select('id, name, company, parent_id').order('name'),
-        ]).then(r => r.map(x => (x && x.data) || []));
-        const canEdit = ctx.isAdmin;
-        let roleId = (roles[0] || {}).id;
-        const deptName = id => (depts.find(d => d.id === id) || {}).name || 'Department';
-        const permOf = (rid, entity, pipeline, action) => perms.find(p => p.role_id === rid && p.entity === entity && (p.pipeline_id || null) === (pipeline || null) && p.action === action);
-
-        function assignLabel(a) {
-            if (a.principal_type === 'all') return 'All employees';
-            if (a.principal_type === 'app_role') return a.principal_key === 'manager' ? 'Workspace managers' : 'Workspace employees';
-            if (a.principal_type === 'department') return `Department: ${deptName(a.principal_id)} (and sub-departments)`;
-            return C.personText(a.principal_id);
-        }
-        function cell(rid, entity, pipeline, action) {
-            const p = permOf(rid, entity, pipeline, action);
-            const val = p ? p.level : (pipeline ? '' : 'none');
-            const opts = (pipeline ? [{ value: '', label: 'As for all pipelines' }] : []).concat(LEVELS);
-            const sel = `<select data-perm="${esc(entity)}|${esc(pipeline || '')}|${esc(action)}"${canEdit ? '' : ' disabled'} aria-label="${esc(ACTIONS[action])}">${opts.map(o => `<option value="${o.value}"${o.value === val ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`;
-            const limit = action === 'move_stage' && p && p.level !== 'none'
-                ? `<button type="button" class="b24-link" data-stages="${esc(entity)}|${esc(pipeline || '')}">${(p.extra && p.extra.stages && p.extra.stages.length) ? `${p.extra.stages.length} stage${p.extra.stages.length === 1 ? '' : 's'} only` : 'All stages'}</button>` : '';
-            return `<td>${sel}${limit}</td>`;
-        }
-        function render() {
-            const role = roles.find(r => r.id === roleId);
-            const allActions = Object.keys(ACTIONS);
-            body.innerHTML = `
-                <div class="b24-area pad">
-                    <p class="b24-hint">Roles decide what people see and change in the CRM. A person's rights are the strongest of all their roles; workspace admins always have full access. Changes apply at once, everywhere, including to direct API calls.</p>
-                    ${canEdit ? '' : '<div class="crm-info" style="margin-bottom:12px">Only workspace admins can change roles. You can see how they are set up.</div>'}
-                    <div class="b24-roles">
-                        <div class="list">${roles.map(r => { const n = assigns.filter(a => a.role_id === r.id).length; return `<button type="button" data-role="${esc(r.id)}" class="${r.id === roleId ? 'on' : ''}">${esc(r.name)}${r.is_system ? ' <small>built in</small>' : ''}<small class="n">${n ? `${n} assignment${n === 1 ? '' : 's'}` : 'not assigned'}</small></button>`; }).join('')}
-                            ${canEdit ? `<button type="button" class="add" data-add-role>${C.icon('plus')} Add role</button>` : ''}</div>
-                        ${role ? `<div class="role">
-                            <div class="head"><h2>${esc(role.name)}</h2>${role.description ? `<p>${esc(role.description)}</p>` : ''}
-                                ${canEdit ? `<span class="grow"></span><button type="button" class="ws-btn sm" data-rename-role>${C.icon('edit')}<span>Rename</span></button><button type="button" class="ws-btn sm" data-copy-role>${C.icon('plus')}<span>Copy</span></button>${role.is_system ? '' : `<button type="button" class="ws-btn sm danger" data-del-role>${C.icon('trash')}<span>Delete</span></button>`}` : ''}</div>
-                            <div class="b24-matrix-wrap"><table class="b24-matrix">
-                                <thead><tr><th>Entity</th>${canEdit ? '<th>Every action</th>' : ''}${allActions.map(a => `<th>${esc(ACTIONS[a])}</th>`).join('')}</tr></thead>
-                                <tbody>${ENTITIES.map(ent => {
-                                    // "Every action": set one level for the whole row in one go.
-                                    const rowAll = pipeline => canEdit ? `<td><select data-perm-row="${esc(ent.key)}|${esc(pipeline || '')}" aria-label="Every action for ${esc(ent.title)}"><option value="__">Set all…</option>${(pipeline ? [{ value: '', label: 'As for all pipelines' }] : []).concat(LEVELS).map(o => `<option value="${o.value}">${esc(o.label)}</option>`).join('')}</select></td>` : '';
-                                    const row = (pipeline, label) => `<tr${pipeline ? ' class="sub"' : ''}><th>${esc(label)}</th>${rowAll(pipeline)}${allActions.map(a => ent.actions.includes(a) ? cell(role.id, ent.key, pipeline, a) : '<td class="na">—</td>').join('')}</tr>`;
-                                    return row(null, ent.title) + (ent.pipelines ? lk.pipelines.map(p => row(p.id, `↳ ${p.name}`)).join('') : '');
-                                }).join('')}</tbody>
-                            </table></div>
-                            <h3>Who has this role</h3>
-                            <ul class="b24-assign">${assigns.filter(a => a.role_id === role.id).map(a => `<li>${a.principal_type === 'user' ? C.avatarHtml(a.principal_id, 'sm') : C.icon(a.principal_type === 'department' ? 'users' : 'shield')}<span>${esc(assignLabel(a))}</span>${canEdit ? `<button type="button" class="g-rowmenu" data-unassign="${esc(a.id)}" aria-label="Remove">×</button>` : ''}</li>`).join('') || '<li class="muted">Nobody yet.</li>'}</ul>
-                            ${canEdit ? `<button type="button" class="ws-btn sm" data-assign>${C.icon('plus')}<span>Give this role to…</span></button>` : ''}
-                        </div>` : '<div class="role"><div class="ws-empty">No roles yet.</div></div>'}
-                    </div>
-                </div>`;
-        }
-        async function reloadData() {
-            const [p, a, r] = await Promise.all([C.q(sb.from('crm_role_permissions').select('*')), C.q(sb.from('crm_role_assignments').select('*').order('created_at')), C.q(sb.from('crm_roles').select('*').order('is_system', { ascending: false }).order('name'))]);
-            perms.splice(0, perms.length, ...(p.data || [])); assigns.splice(0, assigns.length, ...(a.data || [])); roles.splice(0, roles.length, ...(r.data || []));
-            render();
-        }
-        /* One cell. The page keeps its own copy in step with the database, so a
-           change costs one request instead of re-reading every role. */
-        async function setLevel(entity, pipeline, action, value) {
-            const existing = permOf(roleId, entity, pipeline || null, action);
-            if (!value) {
-                if (existing) { await C.q(sb.from('crm_role_permissions').delete().eq('id', existing.id)); perms.splice(perms.indexOf(existing), 1); }
-                return;
-            }
-            if (existing) { await C.q(sb.from('crm_role_permissions').update({ level: value }).eq('id', existing.id)); existing.level = value; return; }
-            const { data } = await C.q(sb.from('crm_role_permissions').insert({ role_id: roleId, entity, pipeline_id: pipeline || null, action, level: value }).select('id').single());
-            perms.push({ id: data.id, role_id: roleId, entity, pipeline_id: pipeline || null, action, level: value, extra: {} });
-        }
-        /* "Move to stage" carries a list of allowed stages; keep its link in step. */
-        function paintStageLink(row, entity, pipeline) {
-            if (!row) return;
-            const sel = row.querySelector('[data-perm$="|move_stage"]');
-            if (!sel) return;
-            const td = sel.parentElement, link = td.querySelector('[data-stages]');
-            const p = permOf(roleId, entity, pipeline || null, 'move_stage');
-            if (!p || p.level === 'none') { if (link) link.remove(); return; }
-            const n = (p.extra && p.extra.stages && p.extra.stages.length) || 0;
-            const label = n ? `${n} stage${n === 1 ? '' : 's'} only` : 'All stages';
-            if (link) link.textContent = label;
-            else td.insertAdjacentHTML('beforeend', `<button type="button" class="b24-link" data-stages="${esc(entity)}|${esc(pipeline || '')}">${esc(label)}</button>`);
-        }
-        body.addEventListener('change', async e => {
-            const rs = e.target.closest('[data-perm-row]');
-            if (rs) {
-                if (rs.value === '__') return;
-                const [entity, pipeline] = rs.dataset.permRow.split('|');
-                const ent = ENTITIES.find(x => x.key === entity);
-                const value = rs.value, row = rs.closest('tr');
-                rs.disabled = true;
-                try {
-                    await Promise.all(ent.actions.map(action => setLevel(entity, pipeline, action, value)));
-                    row.querySelectorAll('[data-perm]').forEach(sel => { sel.value = value; });
-                    paintStageLink(row, entity, pipeline);
-                    C.toast(`${ent.title}: every action updated`, 'ok');
-                } catch (err) { C.toast(err.message, 'bad'); await reloadData(); return; }
-                finally { rs.disabled = false; rs.value = '__'; }
-                return;
-            }
-            const s = e.target.closest('[data-perm]'); if (!s) return;
-            const [entity, pipeline, action] = s.dataset.perm.split('|');
-            s.disabled = true;
-            try {
-                await setLevel(entity, pipeline, action, s.value);
-                paintStageLink(s.closest('tr'), entity, pipeline);
-                C.toast('Saved', 'ok');
-            } catch (err) { C.toast(err.message, 'bad'); await reloadData(); }
-            finally { s.disabled = false; }
+        body.innerHTML = '<div class="cp-root"></div>';
+        const all = async q => (await C.q(q)).data || [];
+        WSCrmPerms.mount(body.firstElementChild, {
+            canEdit: ctx.isAdmin,
+            title: false,                                    // the settings page names the section already
+            load: async () => {
+                lk = await C.lookups(true);
+                const [roles, permissions, assignments, depts] = await Promise.all([
+                    all(sb.from('crm_roles').select('*').order('is_system', { ascending: false }).order('name')),
+                    all(sb.from('crm_role_permissions').select('*')),
+                    all(sb.from('crm_role_assignments').select('*').order('created_at')),
+                    sb.from('departments').select('id, name, company, parent_id').order('name').then(r => r.data || []),
+                ]);
+                return {
+                    roles, permissions, assignments, departments: depts,
+                    pipelines: lk.pipelines, stages: lk.stages, statuses: lk.leadStatuses.map(x => ({ key: x.key, label: x.label })),
+                    people: C.activePeople().map(p => ({ id: p.id, name: p.name, employee_id: p.employee_id || '', avatar_url: p.avatar_url || '' })),
+                };
+            },
+            save: async batch => {
+                const ids = new Map();
+                const roleOf = v => ids.get(v) || v;
+                const deleted = new Set(batch.deletes);
+                for (const r of batch.new_roles) {
+                    if (!r.name || r.name === 'Role name') throw new Error('Give each new role a name.');
+                    const { data } = await C.q(sb.from('crm_roles').insert({ name: r.name.trim() }).select('id').single());
+                    ids.set(r.tmp, data.id);
+                }
+                for (const r of batch.renames) await C.q(sb.from('crm_roles').update({ name: r.name.trim() }).eq('id', r.id));
+                for (const id of batch.deletes) await C.q(sb.from('crm_roles').delete().eq('id', id));
+                const find = (rid, c, action) => {
+                    let q = sb.from('crm_role_permissions').select('id, extra').eq('role_id', rid).eq('entity', c.entity).eq('action', action);
+                    return (c.pipeline_id ? q.eq('pipeline_id', c.pipeline_id) : q.is('pipeline_id', null)).maybeSingle();
+                };
+                for (const c of batch.levels) {
+                    if (deleted.has(c.role_id)) continue;
+                    const rid = roleOf(c.role_id);
+                    const { data: have } = await C.q(find(rid, c, c.action));
+                    if (!c.level) { if (have) await C.q(sb.from('crm_role_permissions').delete().eq('id', have.id)); continue; }
+                    if (have) await C.q(sb.from('crm_role_permissions').update({ level: c.level }).eq('id', have.id));
+                    else await C.q(sb.from('crm_role_permissions').insert({ role_id: rid, entity: c.entity, pipeline_id: c.pipeline_id, action: c.action, level: c.level }));
+                }
+                for (const c of batch.stages) {
+                    if (deleted.has(c.role_id)) continue;
+                    const rid = roleOf(c.role_id);
+                    let { data: p } = await C.q(find(rid, c, 'move_stage'));
+                    if (!p && c.stages.length) { await C.q(sb.from('crm_role_permissions').insert({ role_id: rid, entity: c.entity, pipeline_id: c.pipeline_id, action: 'move_stage', level: 'all' })); ({ data: p } = await C.q(find(rid, c, 'move_stage'))); }
+                    if (p) await C.q(sb.from('crm_role_permissions').update({ extra: { ...(p.extra || {}), stages: c.stages } }).eq('id', p.id));
+                }
+                for (const id of batch.assign_remove) await C.q(sb.from('crm_role_assignments').delete().eq('id', id));
+                for (const a of batch.assign_add) {
+                    if (deleted.has(a.role_id)) continue;
+                    const r = await sb.from('crm_role_assignments').insert({ ...a, role_id: roleOf(a.role_id) });
+                    if (r.error && String(r.error.code) !== '23505') throw r.error;
+                }
+                C.toast('Access permissions saved', 'ok');
+            },
         });
-        body.addEventListener('click', async e => {
-            const r = e.target.closest('[data-role]'); if (r) { roleId = r.dataset.role; return render(); }
-            if (e.target.closest('[data-add-role]')) {
-                await C.formModal({ title: 'New role', fields: [{ name: 'name', label: 'Name', type: 'text', required: true, full: true }, { name: 'description', label: 'Description', type: 'textarea', full: true }], submitLabel: 'Create', onSubmit: async v => {
-                    const { data } = await C.q(sb.from('crm_roles').insert({ name: v.name.trim(), description: v.description || null }).select('id').single());
-                    roleId = data.id; await reloadData();
-                } });
-                return;
-            }
-            if (e.target.closest('[data-rename-role]')) {
-                const role = roles.find(x => x.id === roleId);
-                await C.formModal({ title: 'Rename role', fields: [{ name: 'name', label: 'Name', type: 'text', required: true, full: true }, { name: 'description', label: 'Description', type: 'textarea', full: true }], values: role, onSubmit: async v => { await C.q(sb.from('crm_roles').update({ name: v.name.trim(), description: v.description || null }).eq('id', roleId)); await reloadData(); } });
-                return;
-            }
-            if (e.target.closest('[data-copy-role]')) {
-                const src = roles.find(x => x.id === roleId);
-                await C.formModal({ title: `Copy ${src.name}`, submitLabel: 'Create copy', fields: [{ name: 'name', label: 'Name of the new role', type: 'text', required: true, full: true }], values: { name: `Copy of ${src.name}` }, onSubmit: async v => {
-                    const { data } = await C.q(sb.from('crm_roles').insert({ name: v.name.trim(), description: src.description || null }).select('id').single());
-                    const rows = perms.filter(p => p.role_id === src.id).map(p => ({ role_id: data.id, entity: p.entity, pipeline_id: p.pipeline_id || null, action: p.action, level: p.level, extra: p.extra || {} }));
-                    if (rows.length) await C.q(sb.from('crm_role_permissions').insert(rows));
-                    C.toast('Role copied: give it to people with "Give this role to…"', 'ok');
-                    roleId = data.id; await reloadData();
-                } });
-                return;
-            }
-            if (e.target.closest('[data-del-role]')) {
-                if (!await C.confirm({ title: 'Delete this role?', message: 'People who only had this role lose the rights it gave them.', okText: 'Delete', danger: true })) return;
-                try { await C.q(sb.from('crm_roles').delete().eq('id', roleId)); roleId = null; await reloadData(); roleId = (roles[0] || {}).id; render(); } catch (err) { C.toast(err.message, 'bad'); }
-                return;
-            }
-            const un = e.target.closest('[data-unassign]');
-            if (un) { try { await C.q(sb.from('crm_role_assignments').delete().eq('id', un.dataset.unassign)); await reloadData(); } catch (err) { C.toast(err.message, 'bad'); } return; }
-            if (e.target.closest('[data-assign]')) {
-                await C.formModal({
-                    title: 'Give this role to…', submitLabel: 'Add',
-                    fields: [
-                        { name: 'type', label: 'Who', type: 'select', required: true, full: true, options: [{ value: 'user', label: 'A person' }, { value: 'department', label: 'A department (and its sub-departments)' }, { value: 'all', label: 'All employees' }, { value: 'manager', label: 'Workspace managers' }, { value: 'employee', label: 'Workspace employees' }] },
-                        { name: 'user', label: 'Person', type: 'people', none: 'Choose…', full: true },
-                        { name: 'department', label: 'Department', type: 'select', full: true, options: [{ value: '', label: 'Choose…' }].concat(depts.map(d => ({ value: d.id, label: d.name + (d.company ? ` · ${d.company}` : '') }))) },
-                    ],
-                    values: { type: 'user' },
-                    onReady: f => { const sync = () => { const t = f.field('type').get(); f.field('user').wrap.hidden = t !== 'user'; f.field('department').wrap.hidden = t !== 'department'; }; f.field('type').el.addEventListener('change', sync); sync(); },
-                    onSubmit: async v => {
-                        const row = { role_id: roleId };
-                        if (v.type === 'user') { if (!v.user) throw new Error('Choose a person.'); Object.assign(row, { principal_type: 'user', principal_id: v.user }); }
-                        else if (v.type === 'department') { if (!v.department) throw new Error('Choose a department.'); Object.assign(row, { principal_type: 'department', principal_id: v.department }); }
-                        else if (v.type === 'all') row.principal_type = 'all';
-                        else Object.assign(row, { principal_type: 'app_role', principal_key: v.type });
-                        await C.q(sb.from('crm_role_assignments').insert(row));
-                        await reloadData();
-                    },
-                });
-                return;
-            }
-            const st = e.target.closest('[data-stages]');
-            if (st) {
-                const [entity, pipeline] = st.dataset.stages.split('|');
-                const p = permOf(roleId, entity, pipeline || null, 'move_stage'); if (!p) return;
-                const options = entity === 'lead' ? lk.leadStatuses.map(s => ({ value: s.key, label: s.label }))
-                    : L.stagesOf(lk.stages, pipeline || (lk.defaultPipeline && lk.defaultPipeline.id)).map(s => ({ value: s.id, label: s.name }));
-                const chosen = new Set((p.extra && p.extra.stages) || []);
-                const bodyEl = document.createElement('div');
-                bodyEl.innerHTML = `<p style="margin:0 0 10px">Tick the stages this role may move ${entity === 'lead' ? 'leads' : 'deals'} into. Leave everything unticked to allow every stage.</p>` +
-                    options.map(o => `<label class="crm-check" style="display:flex;margin:4px 0"><input type="checkbox" value="${esc(o.value)}"${chosen.has(o.value) ? ' checked' : ''}> ${esc(o.label)}</label>`).join('');
-                C.modal({ title: 'Stages this role may use', body: bodyEl, actions: [{ label: 'Cancel', close: true }, { label: 'Save', primary: true, onClick: async api => {
-                    const stages = Array.from(bodyEl.querySelectorAll('input:checked')).map(i => i.value);
-                    await C.q(sb.from('crm_role_permissions').update({ extra: { ...(p.extra || {}), stages } }).eq('id', p.id));
-                    api.close(); await reloadData();
-                } }] });
-            }
-        });
-        render();
     }
 
     /* ===================================================== custom fields */

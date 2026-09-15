@@ -16,7 +16,7 @@ function backend() {
   const db = {
     crm_roles: [{ id: R1, name: 'Employee', is_system: true }, { id: R2, name: 'Sales', is_system: false }],
     crm_role_permissions: [{ id: 'p1', role_id: R1, entity: 'deal', pipeline_id: null, action: 'read', level: 'all', extra: {} }],
-    crm_role_assignments: [{ id: 'a1', role_id: R1, principal_type: 'all', principal_id: null, principal_key: null }],
+    crm_role_assignments: [{ id: '55555555-5555-4555-8555-555555555555', role_id: R1, principal_type: 'all', principal_id: null, principal_key: null }],
     crm_pipelines: [{ id: P1, name: 'Accounts' }], crm_pipeline_stages: [], crm_lead_statuses: [], departments: [],
     profiles: [{ id: U1, full_name: 'Kemi Ade', employee_id: 'GL-PIS-CSM-IC-001' }],
   };
@@ -113,4 +113,41 @@ test('roles are created, copied, renamed and given; built-in roles stay', async 
   assert.equal((await save('assign_remove', { id: given.id })).code, 200);
   assert.equal(db.crm_role_assignments.some(a => a.principal_id === U1), false);
   assert.equal((await save('assign_remove', { id: 'not-an-id' })).code, 400);
+});
+
+test('Save sends the whole matrix at once: a new role, its levels, stages and people', async () => {
+  const { db, call } = backend();
+  const cookie = (await call({ action: 'login', password: 'pw' })).headers['Set-Cookie'].split(';')[0];
+  const out = await call({
+    action: 'crm_perm_save', op: 'batch',
+    new_roles: [{ tmp: 'new-1', name: 'Payroll Specialist' }],
+    renames: [{ id: R2, name: 'Sales team' }],
+    levels: [
+      { role_id: 'new-1', entity: 'lead', pipeline_id: null, action: 'read', level: 'all' },
+      { role_id: 'new-1', entity: 'deal', pipeline_id: P1, action: 'read', level: 'none' },
+      { role_id: R1, entity: 'deal', pipeline_id: null, action: 'read', level: 'own' },
+    ],
+    stages: [{ role_id: 'new-1', entity: 'deal', pipeline_id: P1, stages: ['s-1', 's-2'] }],
+    assign_add: [{ role_id: 'new-1', principal_type: 'user', principal_id: U1 }, { role_id: 'new-1', principal_type: 'app_role', principal_key: 'manager' }],
+    assign_remove: ['55555555-5555-4555-8555-555555555555'],
+  }, cookie);
+  assert.equal(out.code, 200, JSON.stringify(out.body));
+  const made = db.crm_roles.find(r => r.name === 'Payroll Specialist');
+  assert.ok(made);
+  assert.equal(out.body.created['new-1'], made.id);
+  const mine = db.crm_role_permissions.filter(p => p.role_id === made.id).map(p => `${p.entity}:${p.pipeline_id ? 'P1' : '*'}:${p.action}:${p.level}:${(p.extra.stages || []).join('+')}`).sort();
+  assert.deepEqual(mine, ['deal:P1:move_stage:all:s-1+s-2', 'deal:P1:read:none:', 'lead:*:read:all:']);
+  assert.equal(db.crm_role_permissions.find(p => p.id === 'p1').level, 'own');
+  assert.equal(db.crm_roles.find(r => r.id === R2).name, 'Sales team');
+  assert.deepEqual(db.crm_role_assignments.filter(a => a.role_id === made.id).map(a => a.principal_type).sort(), ['app_role', 'user']);
+  assert.equal(db.crm_role_assignments.some(a => a.id === '55555555-5555-4555-8555-555555555555'), false);
+
+  // Nothing is written when any entry is wrong: the new role below is not created.
+  const before = db.crm_roles.length;
+  assert.equal((await call({ action: 'crm_perm_save', op: 'batch', new_roles: [{ tmp: 'new-3', name: 'Half' }],
+    assign_add: [{ role_id: 'new-3', principal_type: 'user', principal_id: 'not-a-person' }] }, cookie)).code, 400);
+  assert.equal(db.crm_roles.length, before);
+  // A new role left as "Role name", or a built-in role deleted, refuses the save.
+  assert.equal((await call({ action: 'crm_perm_save', op: 'batch', new_roles: [{ tmp: 'new-2', name: 'Role name' }] }, cookie)).code, 400);
+  assert.equal((await call({ action: 'crm_perm_save', op: 'batch', deletes: [R1] }, cookie)).code, 400);
 });
