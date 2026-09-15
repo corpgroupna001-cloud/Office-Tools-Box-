@@ -976,7 +976,7 @@
                     </div>
 
                     <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:14px;font-size:13px">
-                        <label><input type="checkbox" id="ci-create-missing" checked> Create pipelines and stages the file names</label>
+                        <label><input type="checkbox" id="ci-create-missing" checked> Create pipelines, stages and lead stages the file names</label>
                         <label><input type="checkbox" id="ci-link-contacts" checked> Create and link the contacts on each row</label>
                     </div>
 
@@ -1904,7 +1904,7 @@
             const linkContacts = document.getElementById('ci-link-contacts').checked;
             const BATCH = 250;                       // the endpoint takes 500 at most; keep each request quick
             const total = ciRows.length;
-            const sum = { inserted: 0, updated: 0, contacts: 0, pipelines: 0, stages: 0 };
+            const sum = { inserted: 0, updated: 0, contacts: 0, pipelines: 0, stages: 0, statuses: 0 };
             const skipped = [], warnings = new Set();
             btn.disabled = true;
             result.innerHTML = '';
@@ -1928,6 +1928,7 @@
                     sum.contacts += data.contacts_created || 0;
                     sum.pipelines += data.pipelines_created || 0;
                     sum.stages += data.stages_created || 0;
+                    sum.statuses += data.statuses_created || 0;
                     (data.skipped || []).forEach(s => skipped.push(s));
                     (data.warnings || []).forEach(w => warnings.add(w));
                 }
@@ -1937,6 +1938,7 @@
                     sum.contacts ? `${sum.contacts} contact${sum.contacts === 1 ? '' : 's'} created` : '',
                     sum.pipelines ? `${sum.pipelines} pipeline${sum.pipelines === 1 ? '' : 's'} created` : '',
                     sum.stages ? `${sum.stages} stage${sum.stages === 1 ? '' : 's'} created` : '',
+                    sum.statuses ? `${sum.statuses} lead stage${sum.statuses === 1 ? '' : 's'} created` : '',
                 ].filter(Boolean).join(', ');
                 result.innerHTML = `<div style="font-size:13.5px;font-weight:700;color:#86efac">${made}.</div>` +
                     (warnings.size ? `<div style="font-size:13px;margin-top:6px">${[...warnings].map(w => `• ${w}`).join('<br>')}</div>` : '') +

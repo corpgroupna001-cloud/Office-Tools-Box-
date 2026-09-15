@@ -639,6 +639,17 @@ module.exports = async function handler(req, res) {
     if (action === 'import_crm') {
       const RH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
       const rest = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...RH, ...(opts.headers || {}) } });
+      // Supabase hands back at most 1,000 rows a request, so a whole table is read page by page.
+      const readAll = async path => {
+        const all = [];
+        for (let from = 0; ; from += 1000) {
+          const r = await rest(path, { headers: { Range: `${from}-${from + 999}` } });
+          if (!r.ok) return all;
+          const page = await r.json();
+          all.push(...page);
+          if (page.length < 1000) return all;
+        }
+      };
 
       const kind = body.kind === 'leads' ? 'leads' : body.kind === 'deals' ? 'deals' : null;
       const rows = Array.isArray(body.rows) ? body.rows : [];
@@ -652,16 +663,34 @@ module.exports = async function handler(req, res) {
       const offset = Number(body.row_offset) || 0;        // so a skipped row names its line in the whole file
 
       // Who the file points at: an employee code, an email address or a name.
-      const pr = await rest('profiles?select=id,email,full_name,employee_code,company&limit=5000');
-      const profiles = pr.ok ? await pr.json() : [];
+      const profiles = await readAll('profiles?select=id,email,full_name,employee_code,company&order=id');
 
-      const report = { inserted: 0, matched: 0, skipped: [], warnings: [], contacts_created: 0, pipelines_created: 0, stages_created: 0 };
+      const report = { inserted: 0, matched: 0, skipped: [], warnings: [], contacts_created: 0, pipelines_created: 0, stages_created: 0, statuses_created: 0 };
       const table = kind === 'leads' ? 'crm_leads' : 'crm_deals';
       let mapped;
 
       if (kind === 'leads') {
-        const st = await rest('crm_lead_statuses?select=key&limit=100');
-        const statuses = st.ok ? (await st.json()).map(s => s.key) : [];
+        const st = await rest('crm_lead_statuses?select=key,label,sort_order&limit=200');
+        const statuses = st.ok ? await st.json() : [];
+        // The lead stages the file names, like the funnels for deals. A stage we
+        // already know by name or synonym ("Junk" → Unqualified) is not made twice.
+        if (createMissing) {
+          let order = statuses.reduce((m, s) => Math.max(m, s.sort_order || 0), 0);
+          const add = [];
+          CI.scanLeads(rows).forEach(name => {
+            const key = CI.statusKey(name);
+            if (!key || CI.leadStatusFor(name, statuses.concat(add))) return;
+            add.push({ key, label: name, sort_order: ++order, is_closed: CI.wonLost(name).is_lost, is_converted: false, color: 'pending' });
+          });
+          if (add.length) {
+            const r = await rest('crm_lead_statuses?on_conflict=key', {
+              method: 'POST', headers: { Prefer: 'return=representation,resolution=ignore-duplicates' }, body: JSON.stringify(add),
+            });
+            if (!r.ok) return res.status(502).json({ error: 'Could not create the lead stages', detail: (await r.text()).slice(0, 200) });
+            report.statuses_created += (await r.json()).length;
+            statuses.push(...add);
+          }
+        }
         mapped = CI.mapLeads(rows, { statuses, profiles, source: 'bitrix' });
       } else {
         const pl = await rest('crm_pipelines?select=*&limit=200');
@@ -712,8 +741,7 @@ module.exports = async function handler(req, res) {
 
       // The contact named on a deal row: match one we already hold, else make it.
       if (kind === 'deals' && linkContacts && mapped.contacts.length) {
-        const ex = await rest('crm_contacts?select=id,email,phone,full_name&limit=5000');
-        const existing = ex.ok ? await ex.json() : [];
+        const existing = await readAll('crm_contacts?select=id,email,phone,full_name&order=id');
         const digits = v => String(v == null ? '' : v).replace(/[^0-9]/g, '').slice(-10);
         const byEmail = new Map(), byPhone = new Map(), byName = new Map();
         const remember = c => {

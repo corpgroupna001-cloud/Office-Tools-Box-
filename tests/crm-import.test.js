@@ -196,3 +196,106 @@ test('a lead status this workspace does not have falls back to new', () => {
   assert.equal(out.rows[0].status, 'new');
   assert.match(out.warnings.join(' '), /Some Custom Stage/);
 });
+
+/* ======================= as the admin page sends it ======================= */
+
+/** The page lower-cases headers and joins words with _, so "Deal Name" arrives as deal_name. */
+const asPage = row => Object.fromEntries(Object.entries(row).map(([k, v]) => [k.trim().toLowerCase().replace(/\s+/g, '_'), v]));
+
+test('headers as the admin page sends them map the same as the export\'s own', () => {
+  const raw = I.mapDeals([dealRow()], ctx());
+  const sent = I.mapDeals([asPage(dealRow())], ctx());
+  assert.equal(sent.skipped.length, 0, 'deal_name is Deal Name');
+  assert.deepEqual(sent.rows, raw.rows);
+
+  const lead = { 'ID': '2951', 'Stage': 'Good Lead', 'Lead Name': 'GL-EBS-USA-BGC-20260911001', 'Responsible': 'GL-PIS-CSM-IC-001', 'Total': '400.00', 'Currency': 'US Dollar' };
+  const statuses = [{ key: 'new', label: 'New' }, { key: 'good_lead', label: 'Good Lead' }];
+  assert.deepEqual(I.mapLeads([asPage(lead)], { statuses, profiles: PROFILES }).rows, I.mapLeads([lead], { statuses, profiles: PROFILES }).rows);
+});
+
+test('a Bitrix lead keeps its value, referrer and the person\'s details', () => {
+  const row = asPage({
+    'ID': '2937', 'Stage': 'Good Lead', 'Lead Name': 'GL-PIS-IS-20260903008', 'Source': 'Referral',
+    'Total': '50.00', 'Currency': 'US Dollar', 'Referrer': 'Abdu School', 'Position': 'Share Point Developer',
+    'First Name': 'Robel', 'Last Name': 'Geleta', 'Work Experience': '7.5', 'VISA': 'US Citizen',
+    'Commnuication Skills': '6-8', 'Gender': 'Male', 'Comment': '[p]\n// looking for interview support\n[/p]',
+  });
+  const l = I.mapLeads([row], { statuses: [{ key: 'new', label: 'New' }, { key: 'good_lead', label: 'Good Lead' }], profiles: [] }).rows[0];
+  assert.equal(l.estimated_value, 50, 'from Total');
+  assert.equal(l.source_detail, 'Abdu School');
+  assert.equal(l.status, 'good_lead');
+  assert.equal(l.notes, '// looking for interview support\n\nName: Robel Geleta\nPosition: Share Point Developer\nWork experience: 7.5\nVisa: US Citizen\nCommunication skills: 6-8');
+});
+
+test('lead stages: ours by key, label or synonym, and the rest named for creation', () => {
+  const statuses = [{ key: 'new', label: 'New' }, { key: 'unqualified', label: 'Unqualified' }, { key: 'need_to_explain', label: 'Explain' }];
+  assert.equal(I.leadStatusFor('Junk Lead', statuses), 'unqualified');
+  assert.equal(I.leadStatusFor('Need to Explain', statuses), 'need_to_explain');
+  assert.equal(I.leadStatusFor('new', statuses), 'new');
+  assert.equal(I.leadStatusFor('Long Hold', statuses), null);
+  assert.equal(I.leadStatusFor('In process', statuses), null, 'a synonym for a status this workspace lacks');
+  assert.equal(I.statusKey('Follow Up '), 'follow_up');
+  assert.deepEqual(I.scanLeads([{ Stage: 'Good Lead' }, { stage: 'good lead' }, { Stage: 'Hold' }, { Stage: '' }]), ['Good Lead', 'Hold']);
+});
+
+/* ======================= the endpoint ======================= */
+
+test('the endpoint creates missing lead stages and finds contacts past the first 1,000', async () => {
+  const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+  const sessions = require('../lib/admin-session');
+  const env = { ADMIN_PASSWORD: 'pw', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_URL: 'https://db.example.test' };
+  const db = {
+    profiles: PROFILES,
+    crm_lead_statuses: [{ key: 'new', label: 'New', sort_order: 1 }, { key: 'unqualified', label: 'Unqualified', sort_order: 2 }],
+    crm_pipelines: [], crm_pipeline_stages: [], crm_deals: [], crm_leads: [],
+    crm_contacts: Array.from({ length: 1500 }, (_, i) => ({ id: 'c' + i, email: `c${i}@example.test`, phone: null, full_name: 'C ' + i })),
+  };
+  let n = 0;
+  const fakeFetch = async (url, opts = {}) => {
+    const u = new URL(url), rows = db[u.pathname.split('/').pop()], h = opts.headers || {};
+    if (!opts.method) {                              // reads stop at 1,000 rows, as Supabase's do
+      const [from, to] = (h.Range || '0-999').split('-').map(Number);
+      return new Response(JSON.stringify(rows.slice(from, Math.min(to, from + 999) + 1)), { status: 200 });
+    }
+    const key = u.searchParams.get('on_conflict');
+    const back = [];
+    [].concat(JSON.parse(opts.body)).forEach(b => {
+      const had = key && rows.find(r => r[key] != null && r[key] === b[key]);
+      if (had) { if (!/ignore-duplicates/.test(h.Prefer)) back.push(Object.assign(had, b)); return; }
+      const row = { id: 'n' + n++, ...b };
+      rows.push(row); back.push(row);
+    });
+    return new Response(JSON.stringify(back), { status: 201 });
+  };
+  const mod = { exports: {} };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../api/admin.js'), 'utf8'), {
+    module: mod, process: { env }, console, URL, Date, setTimeout: cb => cb(), fetch: fakeFetch,
+    require(name) {
+      if (name === '../lib/admin-session') return sessions;
+      if (name === '../lib/admin-audit') return { auditWrap: r => r };
+      if (name === '../lib/crm-import' || name === '../company-config') return require(name);
+      return {};
+    },
+  });
+  const call = async (body, cookie = '') => {
+    const res = { code: 200, headers: {}, setHeader(k, v) { this.headers[k] = v; }, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } };
+    await mod.exports({ method: 'POST', headers: { host: 'x.example.test', cookie }, body }, res);
+    return res;
+  };
+  const cookie = (await call({ action: 'login', password: 'pw' })).headers['Set-Cookie'].split(';')[0];
+
+  const leads = [{ ID: '1', Stage: 'Good Lead', 'Lead Name': 'A' }, { ID: '2', Stage: 'Junk Lead', 'Lead Name': 'B' }, { ID: '3', Stage: 'Long Hold', 'Lead Name': 'C' }].map(asPage);
+  for (let i = 0; i < 2; i++) {
+    const r = await call({ action: 'import_crm', kind: 'leads', rows: leads }, cookie);
+    assert.equal(r.code, 200);
+    assert.equal(r.body.statuses_created, i === 0 ? 2 : 0, 'Good Lead and Long Hold; Junk Lead is Unqualified');
+  }
+  assert.deepEqual(db.crm_leads.map(l => l.status), ['good_lead', 'unqualified', 'long_hold']);
+  assert.equal(db.crm_lead_statuses.find(s => s.key === 'long_hold').label, 'Long Hold');
+
+  const deal = asPage(dealRow({ 'Contact: Work E-mail': 'c1400@example.test' }));
+  const r = await call({ action: 'import_crm', kind: 'deals', rows: [deal] }, cookie);
+  assert.equal(r.code, 200, JSON.stringify(r.body));
+  assert.equal(r.body.contacts_created, 0, 'contact 1,400 is found, not made again');
+  assert.equal(db.crm_deals[0].contact_id, 'c1400');
+});
