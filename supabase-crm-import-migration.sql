@@ -58,7 +58,12 @@ alter table public.crm_import_layouts drop constraint if exists crm_import_layou
 alter table public.crm_import_layouts add constraint crm_import_layouts_entity_ck
   check (entity in ('deal', 'lead'));
 
--- Written and read only by the admin console, which uses the service role.
--- Row level security with no policies keeps it out of every browser session.
+-- Written only by the admin console (service role). Signed-in people may read
+-- it — it is only column names — so the CRM lists can offer every column of
+-- the export; nobody but the console can change it.
 alter table public.crm_import_layouts enable row level security;
 revoke all on public.crm_import_layouts from anon, authenticated;
+grant select on public.crm_import_layouts to authenticated;
+drop policy if exists crm_import_layouts_read on public.crm_import_layouts;
+create policy crm_import_layouts_read on public.crm_import_layouts for select to authenticated
+  using (auth.uid() is not null);

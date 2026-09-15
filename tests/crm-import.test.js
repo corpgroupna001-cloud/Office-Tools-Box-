@@ -406,3 +406,53 @@ test('columns are merged in file order, each once', () => {
   assert.deepEqual(I.sourceRow({ ' ID ': '1', Blank: '  ', Note: ' spaced ' }), { ID: '1', Note: ' spaced ' });
   assert.equal(I.sourceRow({ A: '' }), null);
 });
+
+test('a record whose responsible person is unknown takes the company chosen for the import', () => {
+  const unknown = dealRow({ Responsible: 'NOBODY-001' });
+  const known = dealRow({ ID: '2', Responsible: 'JW-RMS-OM-OM-001' });
+  const out = I.mapDeals([unknown, known], { ...ctx(), company: 'Genie Lamp Private Limited' });
+  assert.deepEqual(out.rows.map(r => r.company), ['Genie Lamp Private Limited', 'Jobways Point LLP'], "the responsible employee's company wins");
+  assert.equal(out.contacts[0].company, 'Genie Lamp Private Limited');
+  const lead = I.mapLeads([{ 'Lead Name': 'X', Responsible: 'NOBODY-001' }], { profiles: PROFILES, company: 'Jobways Point LLP' }).rows[0];
+  assert.equal(lead.company, 'Jobways Point LLP');
+});
+
+test('the console counts CRM records nobody can see and gives them to a company', async () => {
+  const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+  const sessions = require('../lib/admin-session');
+  const env = { ADMIN_PASSWORD: 'pw', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_URL: 'https://db.example.test' };
+  const db = {
+    crm_deals: [{ id: 'd1', company: null }, { id: 'd2', company: 'Jobways Point LLP' }, { id: 'd3', company: null }],
+    crm_leads: [{ id: 'l1', company: null }],
+    crm_contacts: [{ id: 'c1', company: 'Jobways Point LLP' }],
+  };
+  const fakeFetch = async (url, opts = {}) => {
+    const u = new URL(url), rows = db[u.pathname.split('/').pop()];
+    const hit = rows.filter(r => u.searchParams.get('company') !== 'is.null' || r.company == null);
+    if (opts.method === 'PATCH') hit.forEach(r => Object.assign(r, JSON.parse(opts.body)));
+    return new Response('[]', { status: 200, headers: { 'content-range': `0-0/${hit.length}` } });
+  };
+  const mod = { exports: {} };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../api/admin.js'), 'utf8'), {
+    module: mod, process: { env }, console, URL, Date, setTimeout: cb => cb(), fetch: fakeFetch,
+    require(name) {
+      if (name === '../lib/admin-session') return sessions;
+      if (name === '../lib/admin-audit') return { auditWrap: r => r };
+      if (name === '../lib/crm-import' || name === '../company-config') return require(name);
+      return {};
+    },
+  });
+  const call = async (body, cookie = '') => {
+    const res = { code: 200, headers: {}, setHeader(k, v) { this.headers[k] = v; }, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } };
+    await mod.exports({ method: 'POST', headers: { host: 'x.example.test', cookie }, body }, res);
+    return res;
+  };
+  const cookie = (await call({ action: 'login', password: 'pw' })).headers['Set-Cookie'].split(';')[0];
+
+  assert.deepEqual(JSON.parse(JSON.stringify((await call({ action: 'crm_unowned' }, cookie)).body)), { deals: 2, leads: 1, contacts: 0 });
+  assert.equal((await call({ action: 'crm_fill_company', company: 'Made Up Ltd' }, cookie)).code, 400);
+  const done = await call({ action: 'crm_fill_company', company: 'Genie Lamp Private Limited' }, cookie);
+  assert.equal(done.code, 200);
+  assert.deepEqual(JSON.parse(JSON.stringify(done.body.updated)), { deals: 2, leads: 1, contacts: 0 });
+  assert.deepEqual(db.crm_deals.map(d => d.company), ['Genie Lamp Private Limited', 'Jobways Point LLP', 'Genie Lamp Private Limited'], 'records that had a company keep it');
+});

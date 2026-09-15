@@ -684,6 +684,9 @@ module.exports = async function handler(req, res) {
 
       const CI = require('../lib/crm-import');
       const createMissing = body.create_missing !== false;
+      // The company for records whose responsible person is not (yet) an employee here.
+      const { companies: COMPANIES } = require('../company-config');
+      const fallbackCompany = COMPANIES.includes(body.company) ? body.company : null;
       const linkContacts = body.link_contacts !== false;
       const offset = Number(body.row_offset) || 0;        // so a skipped row names its line in the whole file
 
@@ -718,7 +721,7 @@ module.exports = async function handler(req, res) {
             statuses.push(...add);
           }
         }
-        mapped = CI.mapLeads(rows, { statuses, profiles, source: 'bitrix' });
+        mapped = CI.mapLeads(rows, { statuses, profiles, source: 'bitrix', company: fallbackCompany });
       } else {
         const pl = await rest('crm_pipelines?select=*&limit=200');
         const sg = await rest('crm_pipeline_stages?select=*&limit=1000');
@@ -759,7 +762,7 @@ module.exports = async function handler(req, res) {
           }
         }
         if (!pipelines.length) return res.status(400).json({ error: 'No CRM pipeline exists yet — create one in CRM settings first' });
-        mapped = CI.mapDeals(rows, { pipelines, stages, profiles, source: 'bitrix' });
+        mapped = CI.mapDeals(rows, { pipelines, stages, profiles, source: 'bitrix', company: fallbackCompany });
       }
 
       mapped.skipped.forEach(s => report.skipped.push({ row: s.row + offset, why: s.why }));
@@ -865,6 +868,155 @@ module.exports = async function handler(req, res) {
       if (!failure && plain.length) await write(plain, false);
       if (failure) return res.status(502).json({ ...failure, ...report });
       return res.status(200).json(report);
+    }
+
+    // ================= CRM ACCESS PERMISSIONS =================
+    // The roles matrix from CRM settings, for the console. The console is not a
+    // signed-in user, so it works through the service role here, with the same
+    // rules the tables enforce (entity / action / level lists, built-in roles).
+    if (action === 'crm_perm_load' || action === 'crm_perm_save') {
+      const RH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
+      const rest = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...RH, ...(opts.headers || {}) } });
+      const json = async (r, what) => {
+        if (r.ok) { const text = await r.text(); return text ? JSON.parse(text) : null; }   // return=minimal writes send no body
+        const detail = (await r.text()).slice(0, 300);
+        const e = new Error(/42P01|PGRST205/.test(detail) ? 'CRM roles need supabase-b24-migration.sql' : `Could not ${what}`);
+        e.detail = detail; throw e;
+      };
+      const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const ENTITIES = ['contact', 'company', 'lead', 'deal', 'invoice', 'settings'];
+      const ACTIONS = ['read', 'add', 'edit', 'delete', 'export', 'import', 'move_stage', 'view_amounts', 'custom_form', 'automation'];
+      const LEVELS = ['none', 'own', 'department', 'subdepartments', 'all'];
+      const id = v => (UUID.test(String(v || '')) ? String(v) : null);
+      try {
+        if (action === 'crm_perm_load') {
+          const get = (path, what) => rest(path).then(r => json(r, what));
+          const soft = path => rest(path).then(r => (r.ok ? r.json() : []));
+          let people = await soft('profiles?select=id,full_name,email,employee_id,status&order=full_name.asc&limit=2000');
+          if (!people.length) people = await soft('profiles?select=id,full_name,email,status&order=full_name.asc&limit=2000');
+          const [roles, permissions, assignments, pipelines, stages, statuses, departments] = await Promise.all([
+            get('crm_roles?select=*&order=is_system.desc,name.asc', 'read the roles'),
+            get('crm_role_permissions?select=*&limit=10000', 'read the permissions'),
+            get('crm_role_assignments?select=*&order=created_at.asc', 'read who has each role'),
+            soft('crm_pipelines?select=id,name&order=created_at.asc'),
+            soft('crm_pipeline_stages?select=id,pipeline_id,name,position&order=position.asc&limit=2000'),
+            soft('crm_lead_statuses?select=key,label,sort_order&order=sort_order.asc'),
+            soft('departments?select=id,name,company,parent_id&order=name.asc&limit=2000'),
+          ]);
+          return res.status(200).json({ roles, permissions, assignments, pipelines, stages, statuses, departments, people });
+        }
+
+        const op = String(body.op || '');
+        if (op === 'role_create') {
+          const name = String(body.name || '').trim().slice(0, 100);
+          if (!name) return res.status(400).json({ error: 'Give the role a name' });
+          const [role] = await json(await rest('crm_roles', { method: 'POST', headers: { Prefer: 'return=representation' },
+            body: JSON.stringify({ name, description: String(body.description || '').trim().slice(0, 500) || null }) }), 'create the role');
+          const from = id(body.copy_from);
+          if (from) {
+            const src = await json(await rest(`crm_role_permissions?role_id=eq.${from}&select=entity,pipeline_id,action,level,extra`), 'read the role to copy');
+            if (src.length) await json(await rest('crm_role_permissions', { method: 'POST', body: JSON.stringify(src.map(p => ({ ...p, role_id: role.id }))) }), 'copy the permissions');
+          }
+          return res.status(200).json({ role });
+        }
+        if (op === 'role_update') {
+          const rid = id(body.id), name = String(body.name || '').trim().slice(0, 100);
+          if (!rid || !name) return res.status(400).json({ error: 'Give the role a name' });
+          await json(await rest(`crm_roles?id=eq.${rid}`, { method: 'PATCH', body: JSON.stringify({ name, description: String(body.description || '').trim().slice(0, 500) || null }) }), 'rename the role');
+          return res.status(200).json({ success: true });
+        }
+        if (op === 'role_delete') {
+          const rid = id(body.id);
+          if (!rid) return res.status(400).json({ error: 'Invalid role' });
+          const [role] = await json(await rest(`crm_roles?id=eq.${rid}&select=is_system`), 'read the role');
+          if (!role) return res.status(404).json({ error: 'Role not found' });
+          if (role.is_system) return res.status(400).json({ error: 'Built-in roles cannot be deleted' });
+          await json(await rest(`crm_roles?id=eq.${rid}`, { method: 'DELETE' }), 'delete the role');
+          return res.status(200).json({ success: true });
+        }
+        if (op === 'perm_set') {
+          // One cell, or a whole row with actions: [...]. level '' removes a pipeline's own entry.
+          const rid = id(body.role_id), entity = String(body.entity || ''), pipeline = body.pipeline_id ? id(body.pipeline_id) : null;
+          // actions, not action: body.action is the console's own action name.
+          const actions = (Array.isArray(body.actions) ? body.actions : [body.perm_action]).map(String);
+          const level = body.level == null ? '' : String(body.level);
+          if (!rid || !ENTITIES.includes(entity) || (body.pipeline_id && !pipeline) || !actions.length || actions.some(a => !ACTIONS.includes(a))
+              || (level && !LEVELS.includes(level)) || (!level && !pipeline)) {
+            return res.status(400).json({ error: 'Invalid permission' });
+          }
+          const base = `crm_role_permissions?role_id=eq.${rid}&entity=eq.${entity}&pipeline_id=${pipeline ? `eq.${pipeline}` : 'is.null'}`;
+          for (const act of actions) {
+            const [have] = await json(await rest(`${base}&action=eq.${act}&select=id`), 'read the permission');
+            if (!level) { if (have) await json(await rest(`crm_role_permissions?id=eq.${have.id}`, { method: 'DELETE' }), 'remove the permission'); continue; }
+            if (have) await json(await rest(`crm_role_permissions?id=eq.${have.id}`, { method: 'PATCH', body: JSON.stringify({ level }) }), 'save the permission');
+            else await json(await rest('crm_role_permissions', { method: 'POST', body: JSON.stringify({ role_id: rid, entity, pipeline_id: pipeline, action: act, level }) }), 'save the permission');
+          }
+          const permissions = await json(await rest(`crm_role_permissions?role_id=eq.${rid}&select=*`), 'read the permissions');
+          return res.status(200).json({ permissions });
+        }
+        if (op === 'perm_stages') {
+          const pid = id(body.id);
+          const stages = (Array.isArray(body.stages) ? body.stages : []).map(String).filter(x => x.length <= 64).slice(0, 200);
+          if (!pid) return res.status(400).json({ error: 'Invalid permission' });
+          const [p] = await json(await rest(`crm_role_permissions?id=eq.${pid}&select=extra`), 'read the permission');
+          if (!p) return res.status(404).json({ error: 'Permission not found' });
+          await json(await rest(`crm_role_permissions?id=eq.${pid}`, { method: 'PATCH', body: JSON.stringify({ extra: { ...(p.extra || {}), stages } }) }), 'save the stages');
+          return res.status(200).json({ success: true });
+        }
+        if (op === 'assign_add') {
+          const rid = id(body.role_id), type = String(body.principal_type || '');
+          const row = { role_id: rid, principal_type: type };
+          if (!rid) return res.status(400).json({ error: 'Invalid role' });
+          if (type === 'user' || type === 'department') { row.principal_id = id(body.principal_id); if (!row.principal_id) return res.status(400).json({ error: type === 'user' ? 'Choose a person' : 'Choose a department' }); }
+          else if (type === 'app_role') { if (!['employee', 'manager'].includes(body.principal_key)) return res.status(400).json({ error: 'Invalid workspace role' }); row.principal_key = body.principal_key; }
+          else if (type !== 'all') return res.status(400).json({ error: 'Invalid assignment' });
+          const r = await rest('crm_role_assignments', { method: 'POST', body: JSON.stringify(row) });
+          if (!r.ok && /23505/.test(await r.clone().text())) return res.status(409).json({ error: 'They already have this role' });
+          await json(r, 'give the role');
+          return res.status(200).json({ success: true });
+        }
+        if (op === 'assign_remove') {
+          const aid = id(body.id);
+          if (!aid) return res.status(400).json({ error: 'Invalid assignment' });
+          await json(await rest(`crm_role_assignments?id=eq.${aid}`, { method: 'DELETE' }), 'remove the role');
+          return res.status(200).json({ success: true });
+        }
+        return res.status(400).json({ error: 'Unknown permissions operation' });
+      } catch (e) {
+        return res.status(502).json({ error: e.message, detail: e.detail });
+      }
+    }
+
+    // ================= CRM: RECORDS WITHOUT A COMPANY =================
+    // CRM rows are seen only inside their company (ws_crm_row_ok), so a deal,
+    // lead or contact with no company is invisible to everyone but workspace
+    // admins. Imports made before the company choice left rows like that; this
+    // counts them and, when asked, gives them to one company.
+    if (action === 'crm_unowned' || action === 'crm_fill_company') {
+      const RH = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
+      const rest = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...RH, ...(opts.headers || {}) } });
+      const TABLES = { deals: 'crm_deals', leads: 'crm_leads', contacts: 'crm_contacts' };
+      const count = async table => {
+        const r = await rest(`${table}?select=id&company=is.null`, { headers: { Prefer: 'count=exact', Range: '0-0' } });
+        if (!r.ok && r.status !== 416) return null;
+        return Number(String(r.headers.get('content-range') || '').split('/')[1]) || 0;
+      };
+      if (action === 'crm_unowned') {
+        const out = {};
+        for (const [k, t] of Object.entries(TABLES)) out[k] = await count(t);
+        return res.status(200).json(out);
+      }
+      const { companies: COMPANIES } = require('../company-config');
+      if (!COMPANIES.includes(body.company)) return res.status(400).json({ error: 'Choose one of the companies' });
+      const out = {};
+      for (const [k, t] of Object.entries(TABLES)) {
+        const r = await rest(`${t}?company=is.null`, {
+          method: 'PATCH', headers: { Prefer: 'return=minimal,count=exact' }, body: JSON.stringify({ company: body.company }),
+        });
+        if (!r.ok) return res.status(502).json({ error: `Could not update ${k}`, detail: (await r.text()).slice(0, 300), ...out });
+        out[k] = Number(String(r.headers.get('content-range') || '').split('/')[1]) || 0;
+      }
+      return res.status(200).json({ company: body.company, updated: out });
     }
 
     // ================= CRM RECORDS =================

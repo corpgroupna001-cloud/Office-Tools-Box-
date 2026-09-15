@@ -968,6 +968,17 @@
                         See the result under CRM → Deals and Leads.
                     </p>
 
+                    <!-- CRM records are seen only inside their company; one with none is seen by nobody but admins. -->
+                    <div id="ci-unowned" hidden style="margin:0 0 18px;padding:14px 16px;border-radius:12px;border:1px solid #f59e0b;background:rgba(245,158,11,.08)">
+                        <div style="font-weight:800;font-size:14px;margin-bottom:4px">Records employees cannot see</div>
+                        <p id="ci-unowned-text" style="margin:0 0 10px;font-size:13px"></p>
+                        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                            <select id="ci-unowned-company" style="padding:6px 10px;border-radius:8px" aria-label="Company"></select>
+                            <button type="button" class="ws-btn primary sm" id="ci-unowned-apply">Give them to this company</button>
+                            <span id="ci-unowned-msg" style="font-size:13px"></span>
+                        </div>
+                    </div>
+
                     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
                         <label style="font-weight:700;font-size:13px">This file holds
                             <select id="ci-kind" style="margin-left:6px;padding:6px 10px;border-radius:8px">
@@ -982,6 +993,12 @@
                     <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:14px;font-size:13px">
                         <label><input type="checkbox" id="ci-create-missing" checked> Create pipelines, stages and lead stages the file names</label>
                         <label><input type="checkbox" id="ci-link-contacts" checked> Create and link the contacts on each row</label>
+                    </div>
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;font-size:13px">
+                        <label style="font-weight:700">Company
+                            <select id="ci-company" style="margin-left:6px;padding:6px 10px;border-radius:8px"></select>
+                        </label>
+                        <span style="color:var(--ws-text-muted,#94a3b8)">Records whose responsible person is an employee here take that person's company; the rest take this one. Employees see CRM records of their own company.</span>
                     </div>
 
                     <details style="margin-bottom:14px">
@@ -1274,6 +1291,7 @@
                     { key: 'deals',      title: 'Deals',         icon: 'deal',        tab: 'deals' },
                     { key: 'leads',      title: 'Leads',         icon: 'users',       tab: 'leads' },
                     { key: 'crmimport',  title: 'CRM import',    icon: 'deal',        tab: 'crmimport' },
+                    { key: 'crmperms',   title: 'CRM permissions', icon: 'shield',    tab: 'crmperms' },
                 ]},
                 { label: 'Attendance', items: [
                     { key: 'attendance', title: 'Attendance',    icon: 'attend',      tab: 'attendance' },
@@ -1809,11 +1827,48 @@
                 if (currentTab === 'shifts'     && !shiftData)               loadShifts();
                 if (currentTab === 'selfies'    && !selfieData)              loadSelfies();
                 if (currentTab === 'leave'      && !leaveData)               loadLeave();
+                if (currentTab === 'crmimport')                              ciUnowned();
             });
         });
 
         // ---------- CRM import (deals and leads) ----------
         let ciRows = [], ciHeaders = [];
+        (function fillCompanies() {
+            const list = (window.WSCompanies && WSCompanies.companies) || [];
+            const opts = '<option value="">Choose a company…</option>' + list.map(c => `<option>${c.replace(/[&<>"]/g, '')}</option>`).join('');
+            document.getElementById('ci-company').innerHTML = opts;
+            document.getElementById('ci-unowned-company').innerHTML = opts;
+        })();
+        /** How many deals, leads and contacts have no company — nobody but admins can see those. */
+        async function ciUnowned() {
+            const box = document.getElementById('ci-unowned');
+            try {
+                const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'crm_unowned' }) });
+                const d = await r.json();
+                const n = k => Number(d[k]) || 0;
+                if (!r.ok || !(n('deals') + n('leads') + n('contacts'))) { box.hidden = true; return; }
+                const part = (k, one) => n(k) ? `${n(k).toLocaleString('en-IN')} ${one}${n(k) === 1 ? '' : 's'}` : '';
+                document.getElementById('ci-unowned-text').textContent =
+                    `${[part('deals', 'deal'), part('leads', 'lead'), part('contacts', 'contact')].filter(Boolean).join(', ')} have no company, so only workspace admins can see them. ` +
+                    'Give them to the company they belong to and its employees will see them in the CRM. Importing a file again with a company chosen does the same for its rows.';
+                box.hidden = false;
+            } catch (e) { box.hidden = true; }
+        }
+        document.getElementById('ci-unowned-apply').addEventListener('click', async () => {
+            const company = document.getElementById('ci-unowned-company').value, msg = document.getElementById('ci-unowned-msg');
+            if (!company) { msg.textContent = 'Choose a company first.'; return; }
+            const btn = document.getElementById('ci-unowned-apply'); btn.disabled = true; msg.textContent = 'Updating…';
+            try {
+                const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'crm_fill_company', company }) });
+                const d = await r.json();
+                if (!r.ok) throw new Error((d.error || 'Update failed') + (d.detail ? ` — ${d.detail}` : ''));
+                const u = d.updated || {};
+                msg.textContent = `Done: ${u.deals || 0} deals, ${u.leads || 0} leads and ${u.contacts || 0} contacts now belong to ${company}.`;
+                window.dispatchEvent(new CustomEvent('crm-imported', { detail: { kind: 'all' } }));
+                setTimeout(ciUnowned, 1500);
+            } catch (e) { msg.textContent = String(e.message || e); }
+            finally { btn.disabled = false; }
+        });
 
         /** Comma, semicolon or tab — whichever the header really uses. */
         function sniffDelimiter(text) {
@@ -1923,6 +1978,8 @@
             const kind = document.getElementById('ci-kind').value;
             const createMissing = document.getElementById('ci-create-missing').checked;
             const linkContacts = document.getElementById('ci-link-contacts').checked;
+            const company = document.getElementById('ci-company').value;
+            if (!company) { result.innerHTML = '<div style="font-size:13.5px;font-weight:700;color:#fca5a5">Choose the company these records belong to.</div>'; return; }
             const BATCH = 250;                       // the endpoint takes 500 at most; keep each request quick
             const total = ciRows.length;
             const sum = { inserted: 0, updated: 0, contacts: 0, pipelines: 0, stages: 0, statuses: 0 };
@@ -1938,7 +1995,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             action: 'import_crm', kind, rows: slice, headers: ciHeaders,
-                            create_missing: createMissing, link_contacts: linkContacts,
+                            create_missing: createMissing, link_contacts: linkContacts, company,
                             row_offset: at,
                         }),
                     });
@@ -1969,6 +2026,7 @@
                         skipped.slice(0, 10).map(s => `row ${s.row} (${s.why})`).join(', ') + (skipped.length > 10 ? '…' : '') + '</div>' : '');
                 ciRows = []; ciHeaders = [];
                 window.dispatchEvent(new CustomEvent('crm-imported', { detail: { kind } }));
+                ciUnowned();
                 document.getElementById('ci-file').value = '';
                 document.getElementById('ci-preview').innerHTML = '';
             } catch (e) {
@@ -3457,5 +3515,6 @@
     <script src="/admin/management.js"></script>
     <script src="/admin/console.js"></script>
     <script src="/admin/crm-records.js"></script>
+    <script src="/admin/crm-permissions.js"></script>
 </body>
 </html>

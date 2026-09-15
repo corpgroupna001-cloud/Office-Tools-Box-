@@ -63,9 +63,12 @@ test('source_row holds an object and nothing else', { skip }, async () => {
   await assert.rejects(upsertDeal('bitrix:deal:1', 'x', JSON.stringify(['not', 'an', 'object'])), /source_row_ck/);
 });
 
-test('the column layout is for the console only, never a browser session', { skip }, async () => {
+test('the column layout is read by the CRM lists and written only by the console', { skip }, async () => {
   await db.query(`insert into crm_import_layouts (entity, headers) values ('deal', array['ID', 'Pipeline'])
                   on conflict (entity) do update set headers = excluded.headers`);
   await assert.rejects(db.query(`insert into crm_import_layouts (entity) values ('invoice')`), /entity_ck/);
-  await assert.rejects(as(db, U, () => db.query(`select * from crm_import_layouts`)), /permission denied/);
+  const read = await as(db, U, () => db.query(`select headers from crm_import_layouts where entity = 'deal'`));
+  assert.deepEqual(read.rows[0].headers, ['ID', 'Pipeline']);
+  await assert.rejects(as(db, U, () => db.query(`update crm_import_layouts set headers = '{}' where entity = 'deal'`)), /permission denied/);
+  await assert.rejects(as(db, U, () => db.query(`insert into crm_import_layouts (entity) values ('lead')`)), /permission denied/);
 });
