@@ -21,11 +21,15 @@
     const CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED'];
     const COLORS = ['pending', 'late', 'leave', 'holiday', 'present', 'absent', 'weekoff'];
     const BASE = 'id, company, title, contact_id, organization, owner_id, pipeline_id, stage_id, value, currency, probability, expected_close_date, actual_close_date, status, source, description, lead_id, tags, position, archived_at, created_by, created_at, updated_at, contact:crm_contacts(id, full_name, organization)';
-    const [cols, invLv] = await Promise.all([
+    const [cols, invLv, imp] = await Promise.all([
         B.columns('crm_deals', BASE + ', number, custom, company_id, amount_from_products, company_rec:crm_companies(id, title)', BASE),
         B.levels('invoice'),
+        // Imported deals (supabase-crm-import-migration.sql) carry their export row; the list shows it.
+        B.columns('crm_deals', 'id, external_ref, source_row', 'id'),
     ]);
     const SELECT = cols.select;
+    const LIST_SELECT = SELECT + (imp.full ? ', external_ref, source_row' : '');
+    const ALL = 'all';   // "All pipelines" in the list view
     let lk = await C.lookups();
 
     const page = { mode: null, pipeline: '', grid: null, board: null, filter: null, lv: null, cf: [], unsub: null };
@@ -36,11 +40,13 @@
     function stagePill(stageId) { const s = lk.stageById[stageId]; return s ? `<span class="b24-stage-pill" style="--c:${stageHex(s)}">${esc(s.name)}</span>` : ''; }
     /** The Bitrix-style stage bar in the list: a segment per stage, filled up to the deal's stage; clicking one moves the deal there. */
     function stageBar(d) {
-        const cur = lk.stageById[d.stage_id]; if (!cur) return '';
-        const shown = stagesFor(d.pipeline_id).filter(s => !s.is_lost);
-        const at = cur.is_lost ? shown.length - 1 : shown.findIndex(s => s.id === cur.id);
+        const cur = lk.stageById[d.stage_id]; if (!cur) return esc(B.src(d, 'Stage'));
         const can = page.lv.edit !== 'none' && canEditDeal(d);
-        return `<div class="b24-stagebar${cur.is_lost ? ' lost' : ''}" style="--c:${stageHex(cur)}">${shown.map((s, i) => `<button type="button" class="seg${i <= at ? ' on' : ''}"${can && s.id !== cur.id ? ` data-deal-seg="${esc(d.id)}" data-stage="${esc(s.id)}"` : ' tabindex="-1"'} title="${esc(can && s.id !== cur.id ? 'Move to ' + s.name : s.name)}" aria-label="${esc(can && s.id !== cur.id ? 'Move to ' + s.name : s.name)}"></button>`).join('')}</div><span class="b24-stagebar-l">${esc(cur.name)}</span>`;
+        return B.stageBar({
+            stages: stagesFor(d.pipeline_id).filter(s => !s.is_lost).map(s => ({ key: s.id, name: s.name })),
+            current: cur.id, hex: stageHex(cur), lost: cur.is_lost, label: cur.name,
+            attr: s => can && s.key !== cur.id ? `data-deal-seg="${esc(d.id)}" data-stage="${esc(s.key)}"` : '',
+        });
     }
     view.addEventListener('click', async e => {
         const b = e.target.closest('[data-deal-seg]'); if (!b) return;
@@ -55,13 +61,24 @@
     function companyName(d) { return (d.company_rec && d.company_rec.title) || d.organization || ''; }
     const canEditDeal = (d, lv) => B.allowed((lv || page.lv).edit, d, me);
     const canDeleteDeal = (d, lv) => B.allowed((lv || page.lv).delete, d, me);
-    function initialPipeline() {
+    const defaultPipelineId = () => (lk.defaultPipeline && lk.defaultPipeline.id) || (lk.pipelines[0] && lk.pipelines[0].id) || '';
+    const readStore = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+    const writeStore = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
+    /**
+     * The pipeline a view shows. The Kanban needs one pipeline: the chosen one, else the default.
+     * The list (and activities) also offer "All pipelines", which they show until one is chosen there.
+     */
+    function initialPipeline(kind) {
+        const board = kind === 'kanban';
+        const ok = v => v && (pipelineOf(v) || (v === ALL && !board && lk.pipelines.length > 1));
         const p = C.param('pipeline');
-        if (p && pipelineOf(p)) return p;
-        let s = null; try { s = localStorage.getItem('ws-deals-pipeline'); } catch (e) { /* private mode */ }
-        if (s && pipelineOf(s)) return s;
-        return (lk.defaultPipeline && lk.defaultPipeline.id) || (lk.pipelines[0] && lk.pipelines[0].id) || '';
+        if (ok(p)) return p;
+        const s = readStore(board ? 'ws-deals-pipeline' : 'ws-deals-list-pipeline');
+        if (ok(s)) return s;
+        return !board && lk.pipelines.length > 1 ? ALL : defaultPipelineId();
     }
+    const allPipes = () => page.pipeline === ALL;
+    const realPipeline = () => (allPipes() ? '' : page.pipeline);
 
     /* ------------------------------------------------------------ routing */
     function route() {
@@ -81,7 +98,7 @@
             return C.alert({ title: 'No pipeline yet', message: ctx.isManager ? 'Configure a pipeline first (the gear next to the filter).' : 'Ask a manager to set up a sales pipeline first.' });
         }
         const d = defaults || {};
-        const pipelineId = d.pipeline_id || page.pipeline || (lk.defaultPipeline && lk.defaultPipeline.id) || lk.pipelines[0].id;
+        const pipelineId = d.pipeline_id || realPipeline() || (lk.defaultPipeline && lk.defaultPipeline.id) || lk.pipelines[0].id;
         const stageOpts = pid => stagesFor(pid).map(s => ({ value: s.id, label: s.name + (s.is_won ? ' (won)' : s.is_lost ? ' (lost)' : '') }));
         const firstStage = d.stage_id || (L.firstOpenStage(lk.stages, pipelineId) || stagesFor(pipelineId)[0] || {}).id || '';
         let orgField = null;
@@ -193,7 +210,10 @@
     }
 
     /* ------------------------------------------------------ list page */
-    function stageOptions() { return stagesFor(page.pipeline).map(s => ({ value: s.id, label: s.name })); }
+    function stageOptions() {
+        if (!allPipes()) return stagesFor(page.pipeline).map(s => ({ value: s.id, label: s.name }));
+        return lk.pipelines.flatMap(p => stagesFor(p.id).map(s => ({ value: s.id, label: `${p.name}: ${s.name}` })));
+    }
     function filterFields() {
         return [
             { key: 'status', title: 'Deal status', type: 'select', options: [{ value: 'open', label: 'In progress' }, { value: 'won', label: 'Won' }, { value: 'lost', label: 'Lost' }] },
@@ -220,7 +240,7 @@
     function scoped(builder, opts) {
         const v = page.filter.get().values;
         builder = v.archived ? builder.not('archived_at', 'is', null) : builder.is('archived_at', null);
-        if (!(opts && opts.allPipelines)) builder = builder.eq('pipeline_id', page.pipeline);
+        if (!(opts && opts.allPipelines) && !allPipes()) builder = builder.eq('pipeline_id', page.pipeline);
         return page.filter.apply(builder, { searchColumns: ['title', 'organization'] });
     }
     function readView() { const v = C.param('view'); if (['kanban', 'list', 'activity'].includes(v)) return v; try { return localStorage.getItem('ws-deals-view') || 'kanban'; } catch (e) { return 'kanban'; } }
@@ -230,13 +250,15 @@
         WSShell.setCrumb('Deals');
         document.title = 'Deals · WorkSuite';
         lk = await C.lookups();
-        page.pipeline = initialPipeline();
-        [page.lv, page.cf] = await Promise.all([B.levels('deal', page.pipeline), B.customFields('deal', page.pipeline)]);
+        const kind = readView();
+        page.pipeline = initialPipeline(kind);
+        [page.lv, page.cf, page.layout] = await Promise.all([B.levels('deal', realPipeline()), B.customFields('deal', realPipeline()), imp.full ? B.importLayout('deal') : []]);
         const canAdd = page.lv.add !== 'none';
         const pipe = pipelineOf(page.pipeline);
+        const createUrl = () => `/deals/?id=new&pipeline=${encodeURIComponent(realPipeline())}`;
         view.innerHTML = B.titleBar({
             title: 'Deals', createLabel: canAdd ? 'Create' : '', gear: ctx.isManager,
-            afterTitle: lk.pipelines.length ? `<button type="button" class="b24-btn-glass" data-pipes aria-haspopup="menu">${esc(pipe ? pipe.name : 'Pipeline')} <span aria-hidden="true">▾</span></button>` : '',
+            afterTitle: lk.pipelines.length ? `<button type="button" class="b24-btn-glass" data-pipes aria-haspopup="menu">${esc(allPipes() ? 'All pipelines' : pipe ? pipe.name : 'Pipeline')} <span aria-hidden="true">▾</span></button>` : '',
         }) + `
             <div class="b24-toolbar">
                 <div class="b24-views" role="tablist" aria-label="View">
@@ -253,22 +275,31 @@
             id: 'deals', fields: filterFields(), presets: PRESETS, defaultPreset: 'open', me: me.id, onChange: () => refreshList(),
         });
         const create = view.querySelector('[data-create]');
-        if (create) create.addEventListener('click', () => B.openRecord(`/deals/?id=new&pipeline=${encodeURIComponent(page.pipeline || '')}`, refreshList));
+        if (create) create.addEventListener('click', () => B.openRecord(createUrl(), refreshList));
         const gear = view.querySelector('[data-gear]');
         if (gear) gear.addEventListener('click', () => C.menu(gear, [
             { label: 'Configure pipelines and stages', icon: 'board', onClick: () => openPipelineSettings(() => { lk = null; showList(); }) },
         ]));
         const pipes = view.querySelector('[data-pipes]');
-        if (pipes) pipes.addEventListener('click', () => C.menu(pipes, lk.pipelines.map(p => ({ label: p.name + (p.id === page.pipeline ? '  ✓' : ''), icon: 'board', onClick: () => {
-            try { localStorage.setItem('ws-deals-pipeline', p.id); } catch (e) { /* private mode */ }
-            C.setParam('pipeline', p.id, true);
-            const v = page.filter.get().values; delete v.stage;
+        const choosePipeline = id => {
+            // A pipeline chosen anywhere is remembered for both views; "All pipelines" only for the list.
+            writeStore('ws-deals-list-pipeline', id);
+            if (id !== ALL) writeStore('ws-deals-pipeline', id);
+            C.setParam('pipeline', id, true);
+            if (id !== ALL) { const v = page.filter.get().values; delete v.stage; }
             showList();
-        } })).concat(ctx.isManager ? ['sep', { label: 'Configure pipelines', icon: 'edit', onClick: () => openPipelineSettings(() => showList()) }] : [])));
+        };
+        if (pipes) pipes.addEventListener('click', () => C.menu(pipes, [
+            ...(page.view !== 'kanban' && lk.pipelines.length > 1 ? [{ label: 'All pipelines' + (allPipes() ? '  ✓' : ''), icon: 'board', onClick: () => choosePipeline(ALL) }, 'sep'] : []),
+            ...lk.pipelines.map(p => ({ label: p.name + (p.id === page.pipeline ? '  ✓' : ''), icon: 'board', onClick: () => choosePipeline(p.id) })),
+        ].concat(ctx.isManager ? ['sep', { label: 'Configure pipelines', icon: 'edit', onClick: () => openPipelineSettings(() => showList()) }] : [])));
         view.querySelector('.b24-views').addEventListener('click', e => {
             const b = e.target.closest('[data-view]'); if (!b) return;
-            try { localStorage.setItem('ws-deals-view', b.dataset.view); } catch (err) { /* private mode */ }
+            writeStore('ws-deals-view', b.dataset.view);
             C.setParam('view', b.dataset.view === 'kanban' ? null : b.dataset.view, true);
+            // The Kanban cannot show "All pipelines": it opens the remembered (or default) pipeline instead.
+            if (b.dataset.view === 'kanban' && C.param('pipeline') === ALL) C.setParam('pipeline', null, true);
+            if (initialPipeline(b.dataset.view) !== page.pipeline) return showList();
             mountView(b.dataset.view);
         });
         view.querySelector('#counters').addEventListener('click', e => {
@@ -277,12 +308,12 @@
         });
         // A stage filter from another pipeline would hide everything.
         const v0 = page.filter.get().values;
-        if (v0.stage && v0.stage.some(id => !stagesFor(page.pipeline).some(s => s.id === id))) { delete v0.stage; page.filter.set(v0); }
-        mountView(readView());
+        if (v0.stage && v0.stage.some(id => !(allPipes() ? lk.stageById[id] : stagesFor(page.pipeline).some(s => s.id === id)))) { delete v0.stage; page.filter.set(v0); }
+        mountView(kind);
         loadCounters();
         if (page.unsub) page.unsub();
         page.unsub = C.subscribe('deals', [{ table: 'crm_deals' }], C.debounce(() => refreshList(true), 900));
-        if (C.param('new') === '1' && canAdd) { C.setParam('new', null, true); B.openRecord(`/deals/?id=new&pipeline=${encodeURIComponent(page.pipeline || '')}`, refreshList); }
+        if (C.param('new') === '1' && canAdd) { C.setParam('new', null, true); B.openRecord(createUrl(), refreshList); }
     }
     function mountView(kind) {
         page.view = kind;
@@ -305,7 +336,7 @@
     async function loadCounters() {
         const el = view.querySelector('#counters'); if (!el) return;
         const today = L.todayIST();
-        const head = () => sb.from('crm_deals').select('id', { count: 'exact', head: true }).is('archived_at', null).eq('status', 'open').eq('pipeline_id', page.pipeline);
+        const head = () => { const b = sb.from('crm_deals').select('id', { count: 'exact', head: true }).is('archived_at', null).eq('status', 'open'); return allPipes() ? b : b.eq('pipeline_id', page.pipeline); };
         try {
             const [o, t, u] = await Promise.all([
                 head().eq('owner_id', me.id).lt('expected_close_date', today),
@@ -370,27 +401,48 @@
     }
 
     /* ----- List ----- */
+    /** The Deal cell: the name, then (grey) the deal type, repeat marks, company and source — from the import when the deal came from one. */
+    function dealCell(r) {
+        const type = B.src(r, 'Type');
+        const repeat = [B.isYes(B.src(r, 'Repeat inquiry')) ? '(Repeat inquiry)' : '', B.isYes(B.src(r, 'Repeat deal')) ? '(Repeat deal)' : ''].filter(Boolean).join(' ');
+        const co = companyName(r), source = r.source || B.src(r, 'Source');
+        const sub = (t, cls) => t ? `<span class="sub${cls ? ' ' + cls : ''}" title="${esc(t)}">${esc(t)}</span>` : '';
+        return `<a href="/deals/?id=${esc(r.id)}" data-open>${esc(r.title)}</a>${sub(type)}${sub(repeat, 'rep')}${co && co !== contactName(r) ? sub(co) : ''}${sub(source)}`;
+    }
+    /** Client: the linked contact, else the contact the import named; the company under it. */
+    function clientCell(r) {
+        const name = contactName(r) || B.src(r, 'Contact');
+        const main = r.contact_id ? `<a href="/contacts/?id=${esc(r.contact_id)}" data-contact="${esc(r.contact_id)}">${esc(name || 'Contact')}</a>` : esc(name);
+        const co = (r.company_rec && r.company_rec.title) || B.src(r, 'Company');
+        return main + (co && co !== name ? `<span class="sub">${esc(co)}</span>` : '');
+    }
     function gridColumns() {
         const people = [{ value: '', label: 'Not assigned' }].concat(B.peopleOptions());
         const can = page.lv.edit !== 'none';
         const save = key => async (r, v) => { if (!canEditDeal(r)) throw new Error('You do not have permission to change this deal.'); await updateDeal(r, { [key]: v }); };
-        return [
-            ...(cols.full ? [{ key: 'number', title: 'ID', width: 70, render: r => esc(r.number == null ? '' : r.number) }] : []),
-            { key: 'title', title: 'Deal', width: 250, render: r => `<a href="/deals/?id=${esc(r.id)}" data-open>${esc(r.title)}</a>${companyName(r) ? `<span class="sub">${esc(companyName(r))}</span>` : ''}`, edit: can ? { type: 'text', save: save('title') } : undefined },
+        const list = [
+            { key: 'number', title: 'ID', width: 80, sortable: cols.full, render: r => esc(B.sourceId(r) || (r.number == null ? '' : r.number)) },
+            { key: 'title', title: 'Deal', width: 290, render: r => dealCell(r), edit: can ? { type: 'text', save: save('title') } : undefined },
+            { key: 'pipeline_id', title: 'Pipeline', width: 170, sortable: false, render: r => esc((pipelineOf(r.pipeline_id) || {}).name || B.src(r, 'Pipeline')) },
             { key: 'stage_id', title: 'Stage', width: 210, sortable: false, render: r => stageBar(r),
               edit: can ? { type: 'select', options: r => stagesFor(r.pipeline_id).map(s => ({ value: s.id, label: s.name })), save: async (r, v) => { if (!canEditDeal(r)) throw new Error('You do not have permission to change this deal.'); const ok = await moveToStage(r, lk.stageById[v]); if (ok === false) throw new Error('Stage not changed'); } } : undefined },
-            { key: 'value', title: 'Amount', width: 140, align: 'right', render: r => esc(L.money(r.value, r.currency)), edit: can ? { type: 'money', save: save('value') } : undefined },
-            { key: 'owner_id', title: 'Responsible', width: 180, render: r => C.personHtml(r.owner_id, { link: false }), edit: can ? { type: 'people', options: people, save: save('owner_id') } : undefined },
-            { key: 'contact_id', title: 'Contact', width: 180, sortable: false, render: r => r.contact_id ? `<a href="/contacts/?id=${esc(r.contact_id)}" data-contact="${esc(r.contact_id)}">${esc(contactName(r) || 'Contact')}</a>` : '' },
-            { key: 'expected_close_date', title: 'Expected close', width: 140, render: r => r.expected_close_date ? `<span class="crm-due ${r.status === 'open' ? L.taskDueState({ due_date: r.expected_close_date }) : ''}">${esc(L.fmtDate(r.expected_close_date))}</span>` : '', edit: can ? { type: 'date', save: save('expected_close_date') } : undefined },
-            { key: 'probability', title: 'Probability', width: 110, align: 'right', render: r => `${esc(r.probability)}%` },
+            { key: 'contact_id', title: 'Client', width: 190, sortable: false, render: r => clientCell(r) },
+            { key: 'observers', title: 'Observers', width: 190, sortable: false, render: r => B.peopleCell(B.src(r, 'Observers')) },
+            { key: 'probability', title: 'Probability', width: 110, align: 'right', render: r => r.probability == null ? '' : `${esc(r.probability)}%` },
+            { key: 'value', title: 'Amount/Currency', width: 150, align: 'right', render: r => `<span class="amt">${esc(L.money(r.value, r.currency, { whole: Number(r.value) % 1 === 0 }))}</span>`, edit: can ? { type: 'money', save: save('value') } : undefined },
+            { key: 'payment_status', title: 'Payment status', width: 150, sortable: false, render: r => esc(B.src(r, 'Payment status')) },
+            { key: 'owner_id', title: 'Responsible', width: 210, render: r => B.personCell(r.owner_id, B.src(r, 'Responsible')), edit: can ? { type: 'people', options: people, save: save('owner_id') } : undefined },
+            { key: 'created_by', title: 'Created by', width: 210, default: false, sortable: false, render: r => B.personCell(r.created_by, B.src(r, 'Created by')) },
+            { key: 'expected_close_date', title: 'Expected close', width: 140, default: false, render: r => r.expected_close_date ? `<span class="crm-due ${r.status === 'open' ? L.taskDueState({ due_date: r.expected_close_date }) : ''}">${esc(L.fmtDate(r.expected_close_date))}</span>` : '', edit: can ? { type: 'date', save: save('expected_close_date') } : undefined },
             { key: 'status', title: 'Status', width: 110, default: false, render: r => C.statusBadge(L.DEAL_STATUS, r.status) },
-            { key: 'source', title: 'Source', width: 130, default: false, render: r => esc(r.source || '') },
-            { key: 'created_at', title: 'Created', width: 120, render: r => `<span class="muted">${esc(L.fmtDate(r.created_at, { short: true }))}</span>` },
+            { key: 'source', title: 'Source', width: 130, default: false, render: r => esc(r.source || B.src(r, 'Source')) },
+            { key: 'created_at', title: 'Created', width: 110, default: false, render: r => esc(B.dotDate(r.created_at)) },
             { key: 'updated_at', title: 'Modified', width: 120, default: false, render: r => `<span class="muted">${esc(L.fmtRelative(r.updated_at))}</span>` },
             { key: 'tags', title: 'Tags', width: 160, default: false, sortable: false, render: r => C.tagsHtml(r.tags) },
             ...B.cfColumns(page.cf),
         ];
+        // Every column of the Bitrix24 export, off until picked in the column settings.
+        return list.concat(B.importColumns(page.layout || [], list.map(c => c.title).concat('Deal Name', 'Amount', 'Currency', 'Contact')));
     }
     function mountGrid(body) {
         const host = document.createElement('div');
@@ -408,7 +460,8 @@
                 if (!v) return false;
                 const s = lk.stageById[v];
                 if ((s.is_won || s.is_lost) && !await C.confirm({ title: `Close these deals as ${s.is_won ? 'won' : 'lost'}?`, message: 'They will be closed today.', okText: 'Confirm', danger: s.is_lost })) return false;
-                await bulkUpdate(ids, o, { stage_id: v });
+                // Across pipelines, a stage takes its pipeline with it.
+                await bulkUpdate(ids, o, allPipes() ? { stage_id: v, pipeline_id: s.pipeline_id } : { stage_id: v });
             } });
             bulk.push({ label: 'Archive', icon: 'trash', run: async (ids, o) => {
                 if (!await C.confirm({ title: o.all ? 'Archive every deal in this filter?' : `Archive ${ids.length} deal${ids.length > 1 ? 's' : ''}?`, message: 'Archived deals leave the board and lists but keep their history.', okText: 'Archive', danger: true })) return false;
@@ -422,9 +475,10 @@
             C.toast('Deleted', 'ok');
         } });
         page.grid = WSGrid.mount(host, {
-            id: 'deals', columns: gridColumns(), sort: { key: 'updated_at', dir: 'desc' },
+            // 'deals-list': the Bitrix24 column set; the settings saved for the old list do not carry over.
+            id: 'deals-list', columns: gridColumns(), sort: { key: 'updated_at', dir: 'desc' },
             load: async ({ offset, limit, sort }) => {
-                let b = scoped(sb.from('crm_deals').select(SELECT));
+                let b = scoped(sb.from('crm_deals').select(LIST_SELECT));
                 b = sort ? b.order(sort.key, { ascending: sort.dir === 'asc', nullsFirst: false }) : b.order('updated_at', { ascending: false });
                 return (await C.q(b.range(offset, offset + limit - 1))).data || [];
             },
@@ -773,7 +827,7 @@
     /* ------------------------------------------------- pipeline settings */
     async function openPipelineSettings(after) {
         lk = await C.lookups(true);
-        let current = page.pipeline || (lk.defaultPipeline && lk.defaultPipeline.id) || (lk.pipelines[0] && lk.pipelines[0].id) || null;
+        let current = realPipeline() || (lk.defaultPipeline && lk.defaultPipeline.id) || (lk.pipelines[0] && lk.pipelines[0].id) || null;
         const body = document.createElement('div');
         const m = C.modal({ title: 'Pipelines and stages', size: 'wide', body, actions: [{ label: 'Done', primary: true, close: true }], onClose: () => { if (after) after(); } });
         async function usage(stageId) {

@@ -247,6 +247,97 @@
     }
     const fieldsSettingsUrl = entity => `/crm/settings?section=fields&entity=${encodeURIComponent(entity)}`;
 
+    /* ---------- imported records (supabase-crm-import-migration.sql) ---------- */
+    // Deals and leads brought in from Bitrix24 keep their export row in source_row
+    // ({ "column name": "cell" }); records made here have none, so every helper
+    // below answers '' for them and the page falls back to the record's own fields.
+    const layoutCache = {};
+    /** The export's column names for 'deal' | 'lead', in file order; [] before the migration or any import. */
+    function importLayout(entity) {
+        if (layoutCache[entity]) return layoutCache[entity];
+        layoutCache[entity] = (async () => {
+            try {
+                const ctx = await C().boot();
+                const r = await ctx.sb.from('crm_import_layouts').select('headers').eq('entity', entity).limit(1);
+                const row = !r.error && Array.isArray(r.data) ? r.data[0] : null;
+                const seen = new Set();
+                return (row && Array.isArray(row.headers) ? row.headers : [])
+                    .filter(h => typeof h === 'string' && h.trim() && !seen.has(h) && seen.add(h));
+            } catch (e) { return []; }
+        })();
+        return layoutCache[entity];
+    }
+    /** A Bitrix cell as one line of plain text: [p], [br], [b], [url=…] and the like taken out. */
+    function plainText(v) {
+        if (v == null) return '';
+        if (typeof v === 'object') v = Array.isArray(v) ? v.join(', ') : JSON.stringify(v);
+        return String(v).replace(/\[br\s*\/?\]|\[\/p\]/gi, ' ').replace(/\[\/?[a-z*]{1,10}(?:=[^\]]*)?\]/gi, '')
+            .replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
+    }
+    /** One cell of the record's export row, as plain text ('' when there is no such cell). */
+    function src(row, header) {
+        const s = row && row.source_row;
+        return s && typeof s === 'object' && s[header] != null ? plainText(s[header]) : '';
+    }
+    const isYes = v => /^(y|yes|true|1)$/i.test(String(v || '').trim());
+    /** The number the record had in the other system ("17651"), or ''. */
+    function sourceId(row) {
+        const m = String((row && row.external_ref) || '').match(/:(?:deal|lead):(.+)$/);
+        return m ? m[1] : src(row, 'ID');
+    }
+    /** Optional grid columns, one per export column; `taken` = titles the page already uses. */
+    function importColumns(headers, taken) {
+        const used = new Set((taken || []).map(t => String(t).toLowerCase()));
+        return (headers || []).map(h => ({
+            key: 'src:' + h, title: used.has(h.toLowerCase()) ? `${h} (import)` : h, default: false, sortable: false, width: 170,
+            render: r => { const v = src(r, h); return v ? `<span title="${esc(v)}">${esc(v)}</span>` : ''; },
+        }));
+    }
+    /** 'DD.MM.YYYY' in IST, the way Bitrix24 lists dates. */
+    function dotDate(v) {
+        const iso = v ? window.WSCrmLogic.istDate(v) : null;
+        return iso ? iso.split('-').reverse().join('.') : '';
+    }
+    function personByCode(code) {
+        const c = String(code || '').trim().toLowerCase();
+        if (!c) return null;
+        return (C().ctx().people || []).find(p => String(p.employee_id || '').trim().toLowerCase() === c) || null;
+    }
+    /**
+     * A person in a list cell: the record's person when it has one; else who the
+     * import file named (an employee with that Employee ID, or the text itself
+     * beside a generic avatar); else "Unassigned".
+     */
+    function personCell(id, named, opts) {
+        if (id) return C().personHtml(id, { link: false });
+        const text = plainText(named);
+        if (!text) return C().personHtml(null, { link: false, ...(opts || {}) });
+        const p = personByCode(text);
+        if (p) return C().personHtml(p.id, { link: false });
+        return `<span class="crm-person b24-person-imp" title="${esc(text)} (from the import)"><span class="ws-avatar b24-avatar-gen"><span class="ic ic-user"></span></span><span class="nm">${esc(text)}</span></span>`;
+    }
+    /** Several people named in one cell ("GL-A-001, GL-B-002"): the first two, then "+N". */
+    function peopleCell(named) {
+        const list = plainText(named).split(/\s*[,;]\s*/).filter(Boolean);
+        if (!list.length) return '';
+        const extra = list.length - 2;
+        return `<span class="b24-people-cell" title="${esc(list.join(', '))}">${list.slice(0, 2).map(n => personCell(null, n)).join('')}${extra > 0 ? `<span class="more">+${extra} more</span>` : ''}</span>`;
+    }
+    /**
+     * The Bitrix-style stage bar of a list row: a segment per stage, filled in the
+     * current stage's colour up to it, the stage name under it.
+     *   { stages: [{ key, name }], current, hex, lost, label, attr(stage) -> '' | 'data-…' (makes it clickable) }
+     */
+    function stageBar(o) {
+        const at = o.lost ? o.stages.length - 1 : o.stages.findIndex(s => s.key === o.current);
+        return `<div class="b24-stagebar${o.lost ? ' lost' : ''}" style="--c:${esc(o.hex)}">${o.stages.map((s, i) => {
+            const a = o.attr ? o.attr(s) : '';
+            const t = a ? 'Move to ' + s.name : s.name;
+            return `<button type="button" class="seg${i <= at ? ' on' : ''}${a ? ' can' : ''}"${a ? ' ' + a : ' tabindex="-1"'} title="${esc(t)}" aria-label="${esc(t)}"></button>`;
+        }).join('')}</div><span class="b24-stagebar-l">${esc(o.label || '')}</span>`;
+    }
+
     window.WSB24 = { columns, customFields, cfColumns, cfFilters, cfSection, cfDisplay, levels, allowed, hex, peopleOptions, openRecord, pick, titleBar,
-                     csvParse, csvStringify, exportCsv, importCsv, download, cfFormFields, splitCustom, afterCreate, leaveCreate, fieldsSettingsUrl };
+                     csvParse, csvStringify, exportCsv, importCsv, download, cfFormFields, splitCustom, afterCreate, leaveCreate, fieldsSettingsUrl,
+                     importLayout, plainText, src, isYes, sourceId, importColumns, dotDate, personCell, peopleCell, stageBar };
 })();

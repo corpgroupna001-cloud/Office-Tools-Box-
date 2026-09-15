@@ -1371,11 +1371,23 @@ body.ws-b24 .cal-week .col .cal-ev:hover, body.ws-b24 .cal-week .col .cal-ev:foc
 .b24-stagebar { display: flex; gap: 2px; height: 10px; width: 100%; max-width: 190px; }
 .b24-stagebar .seg { flex: 1; min-width: 6px; height: 100%; padding: 0; border: 0; border-radius: 2px; background: #e3e7ea; cursor: default; }
 .b24-stagebar .seg.on { background: var(--c); }
-.b24-stagebar .seg[data-deal-seg] { cursor: pointer; }
-.b24-stagebar .seg[data-deal-seg]:hover { background: color-mix(in srgb, var(--c) 55%, #fff); box-shadow: 0 0 0 1px var(--c) inset; }
+.b24-stagebar .seg:not(.on) { box-shadow: 0 0 0 1px #d5dade inset; background: #eef1f3; }
+.b24-stagebar .seg[data-deal-seg], .b24-stagebar .seg.can { cursor: pointer; }
+.b24-stagebar .seg[data-deal-seg]:hover, .b24-stagebar .seg.can:hover { background: color-mix(in srgb, var(--c) 55%, #fff); box-shadow: 0 0 0 1px var(--c) inset; }
 .b24-stagebar.lost .seg.on { background: #ff5752; }
 .b24-stagebar.busy { opacity: .5; pointer-events: none; }
 .b24-stagebar-l { display: block; margin-top: 3px; font-size: 11.5px; color: var(--b24-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:root[data-theme="dark"] .b24-stagebar .seg:not(.on) { background: #2b3644; box-shadow: 0 0 0 1px #3a4757 inset; }
+
+/* Deals and leads lists in the Bitrix24 layout (imported rows keep their export's names). */
+.b24-grid-table td .amt { font-weight: 600; font-variant-numeric: tabular-nums; }
+.b24-avatar-gen { background: #dfe5ea !important; color: #8a96a3 !important; }
+.b24-avatar-gen .ic { width: 15px; height: 15px; }
+.b24-person-imp .nm { font-weight: 600; font-variant-numeric: tabular-nums; }
+.b24-people-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.b24-people-cell .crm-person { max-width: 100%; }
+.b24-people-cell .ws-avatar { width: 20px !important; height: 20px !important; font-size: 9px !important; }
+.b24-people-cell .more { font-size: 11.5px; color: var(--b24-muted); }
 
 .dv-create { display: flex; align-items: stretch; gap: 10px; margin: 0 0 12px; overflow-x: auto; padding-bottom: 2px; }
 .dv-create[hidden] { display: none; }

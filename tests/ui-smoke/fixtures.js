@@ -29,6 +29,11 @@ function db(opts = {}) {
     ['S3', 'Proposal', 3, 50, false, false, 'leave'], ['S4', 'Negotiation', 4, 75, false, false, 'holiday'],
     ['S5', 'Won', 5, 100, true, false, 'present'], ['S6', 'Lost', 6, 0, false, true, 'absent'],
   ].map(([id, name, position, probability, is_won, is_lost, color]) => ({ id, pipeline_id: 'PIPE1', name, position, probability, is_won, is_lost, color, created_at: at(-50) }));
+  // A second pipeline, the way a Bitrix24 import brings them in.
+  stages.push(...[
+    ['BG1', 'New inquiry', 1, 10, false, false, 'pending'], ['BG2', 'Documents received', 2, 40, false, false, 'late'],
+    ['BG3', 'Check in progress', 3, 70, false, false, 'leave'], ['BG4', 'Report delivered', 4, 100, true, false, 'present'], ['BG5', 'Cancelled', 5, 0, false, true, 'absent'],
+  ].map(([id, name, position, probability, is_won, is_lost, color]) => ({ id, pipeline_id: 'PIPE2', name, position, probability, is_won, is_lost, color, created_at: at(-50) })));
   const person = (id, full_name, email, extra) => ({ id, full_name, email, avatar_url: null, company: NOVA, company2: null, email_verified: true,
     status: 'active', app_role: 'employee', manager_id: ME, department: 'Sales', job_title: 'Sales Executive', employee_code: null, phone: '+91 90000 0000' + id[0],
     joining_date: ist(-400), is_wfh: false, shift_id: 1, shift2_id: null, last_seen_at: now, created_at: at(-400), ...extra });
@@ -57,7 +62,8 @@ function db(opts = {}) {
       { key: 'blocked', label: 'Blocked', sort_order: 3, is_done: false, color: 'absent' }, { key: 'review', label: 'Review', sort_order: 4, is_done: false, color: 'late' },
       { key: 'completed', label: 'Completed', sort_order: 5, is_done: true, color: 'present' },
     ],
-    crm_pipelines: [{ id: 'PIPE1', company: null, name: 'Sales', is_default: true, created_at: at(-50) }],
+    crm_pipelines: [{ id: 'PIPE1', company: null, name: 'Sales', is_default: true, created_at: at(-50) },
+      { id: 'PIPE2', company: null, name: 'Employment BGC Supports', is_default: false, created_at: at(-40) }],
     crm_pipeline_stages: stages,
     crm_contacts: [
       { id: 'C1', company: NOVA, first_name: 'Ravi', last_name: 'Shah', full_name: 'Ravi Shah', organization: 'Acme Sports Academy', job_title: 'Procurement Head', email: 'ravi@acme.test', phone: '+91 98765 43210', city: 'Hyderabad', country: 'India', source: 'Referral', owner_id: ME, status: 'active', tags: ['vip', 'schools'], notes: 'Prefers calls after 4 pm.', created_by: ME, ...base },
@@ -68,11 +74,21 @@ function db(opts = {}) {
       { id: 'L1', company: NOVA, name: 'Sunrise Academy', organization: 'Sunrise Trust', email: 'buy@sunrise.test', phone: '+91 90000 11111', source: 'Website', owner_id: ME, status: 'new', estimated_value: 120000, currency: 'INR', priority: 'high', next_follow_up_at: at(0, '09:00'), tags: [], created_by: ME, ...base },
       { id: 'L2', company: NOVA, name: 'Metro Runners Club', organization: 'Metro Runners', email: 'hello@metro.test', source: 'Event', owner_id: U2, status: 'contacted', estimated_value: 45000, currency: 'INR', priority: 'normal', next_follow_up_at: at(2), tags: ['event'], created_by: U2, ...base },
       { id: 'L3', company: NOVA, name: 'Ravi Shah', organization: 'Acme Sports Academy', email: 'ravi@acme.test', status: 'converted', owner_id: ME, estimated_value: 250000, currency: 'INR', priority: 'normal', converted_at: at(-8), converted_by: ME, converted_contact_id: 'C1', converted_deal_id: 'D1', tags: [], created_by: ME, ...base },
+      // Imported from Bitrix24: nobody matched yet, so the list shows who the file named.
+      { id: 'L4', company: NOVA, name: 'Samuel Okafor', organization: null, source: 'Referral', owner_id: null, status: 'qualified', estimated_value: null, currency: 'USD', priority: 'normal', tags: [], created_by: null,
+        external_ref: 'bitrix:lead:2951', created_at: '2026-03-20T07:11:48Z', updated_at: at(-1),
+        source_row: { ID: '2951', 'Lead Name': 'Samuel Okafor', Stage: 'Good Lead', Source: 'Referral', 'Repeat lead': 'Y', Responsible: 'GL-EBS-ESM-SLE-001', 'Created by': 'NSP-SLS-EXE-002', Position: 'Data Engineer', Referrer: 'Grace [b]Mensah[/b]', Created: '20.03.2026 12:41:48 pm', Comment: '[p]Wants a callback[/p][p]after 6 pm[/p]' } },
     ],
     crm_deals: [
       { id: 'D1', company: NOVA, title: 'Acme academy kit supply', contact_id: 'C1', organization: 'Acme Sports Academy', owner_id: ME, pipeline_id: 'PIPE1', stage_id: 'S3', value: 250000, currency: 'INR', probability: 50, expected_close_date: ist(12), status: 'open', source: 'Referral', description: 'Jerseys and training kit for 200 students.', lead_id: 'L3', tags: ['schools'], position: 1000, created_by: ME, ...base },
       { id: 'D2', company: NOVA, title: 'Bluewave gym equipment', contact_id: 'C2', organization: 'Bluewave Fitness', owner_id: U2, pipeline_id: 'PIPE1', stage_id: 'S1', value: 90000, currency: 'INR', probability: 10, expected_close_date: ist(-2), status: 'open', tags: [], position: 1000, created_by: U2, ...base },
       { id: 'D3', company: NOVA, title: 'Riverside sports day', contact_id: 'C3', organization: 'Riverside School', owner_id: ME, pipeline_id: 'PIPE1', stage_id: 'S5', value: 60000, currency: 'INR', probability: 100, actual_close_date: ist(-1), status: 'won', tags: [], position: 1000, created_by: ME, ...base },
+      // Imported from Bitrix24 into another pipeline, owner not matched to an employee yet.
+      { id: 'D4', company: NOVA, title: 'Robel Geleta - Background check', contact_id: null, organization: null, owner_id: null, pipeline_id: 'PIPE2', stage_id: 'BG2', value: 500, currency: 'USD', probability: 40, status: 'open', source: 'Referral', tags: [], position: 1000, created_by: null,
+        number: 412, external_ref: 'bitrix:deal:17651', created_at: '2026-09-12T03:11:57Z', updated_at: at(0, '08:00'),
+        source_row: { ID: '17651', 'Deal Name': 'Robel Geleta - Background check', Pipeline: 'Employment BGC Supports', Stage: 'Documents received', Type: 'Employment BGC Saviors - USA - Background Check', Source: 'Referral',
+          'Repeat deal': 'N', 'Repeat inquiry': 'Y', Responsible: 'GL-EBS-ESM-SLE-001', 'Created by': 'GL-PIS-CSM-IC-001', Created: '12.09.2026 03:11:57 am', Contact: 'Robel Geleta',
+          Observers: 'NSP-SLS-EXE-002, GL-PIS-CSM-IC-001, GL-ACC-FIN-003', Probability: '40', Income: '500', Currency: 'US Dollar', 'Payment status': 'Partially paid', 'Candidate Payment Status': 'Paid' } },
     ],
     projects: [{ id: 'P1', company: NOVA, name: 'Acme kit delivery', description: 'Measure, produce and deliver 200 kits.', owner_id: ME, manager_id: ME, status: 'active', priority: 'high', start_date: ist(-5), due_date: ist(20), contact_id: 'C1', deal_id: 'D1', board_id: 'B1', tags: ['delivery'], created_by: ME, ...base }],
     project_members: [{ project_id: 'P1', user_id: U2, role: 'member', added_by: ME, created_at: at(-5) }],
@@ -107,6 +123,10 @@ function db(opts = {}) {
       { id: 'A1', company: NOVA, actor_id: ME, action: 'deal.stage_changed', entity_type: 'deal', entity_id: 'D1', entity_label: 'Acme academy kit supply', meta: { from: 'Qualification', to: 'Proposal' }, contact_id: 'C1', deal_id: 'D1', created_at: at(-2) },
       { id: 'A2', company: NOVA, actor_id: ME, action: 'lead.converted', entity_type: 'lead', entity_id: 'L3', entity_label: 'Ravi Shah', meta: {}, contact_id: 'C1', lead_id: 'L3', deal_id: 'D1', created_at: at(-8) },
       { id: 'A3', company: NOVA, actor_id: U2, action: 'task.created', entity_type: 'task', entity_id: 'T2', entity_label: 'Chase Bluewave for measurements', meta: {}, deal_id: 'D2', created_at: at(-1) },
+    ],
+    crm_import_layouts: [
+      { entity: 'deal', headers: ['ID', 'Deal Name', 'Pipeline', 'Stage', 'Type', 'Source', 'Repeat deal', 'Repeat inquiry', 'Responsible', 'Created by', 'Created', 'Contact', 'Observers', 'Probability', 'Income', 'Currency', 'Payment status', 'Candidate Payment Status'], updated_at: at(-1) },
+      { entity: 'lead', headers: ['ID', 'Lead Name', 'Stage', 'Source', 'Repeat lead', 'Responsible', 'Created by', 'Position', 'Referrer', 'Created', 'Comment'], updated_at: at(-1) },
     ],
     comments: [{ id: 'CM1', company: NOVA, entity_type: 'contact', entity_id: 'C1', author_id: U2, body: 'Spoke to @Maya Manager about the discount.', mentions: [ME], created_at: at(-1), updated_at: at(-1) }],
     messages: [

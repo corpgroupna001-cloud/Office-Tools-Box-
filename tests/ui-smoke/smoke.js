@@ -29,8 +29,8 @@ if (!CHROME) { console.error('No Chrome found. Set CHROME_PATH.'); process.exit(
 const PAGES = [
   ['/', 'home'], ['/crm', 'crm'], ['/crm/settings', 'crm-settings'], ['/companies', 'companies'],
   ['/contacts', 'contacts'], ['/contacts?id=C1', 'contact-record'],
-  ['/leads', 'leads'], ['/leads?id=L1', 'lead-record'],
-  ['/deals', 'deals'], ['/deals?id=D1', 'deal-record'],
+  ['/leads', 'leads'], ['/leads?view=list', 'leads-list'], ['/leads?id=L1', 'lead-record'],
+  ['/deals', 'deals'], ['/deals?view=list', 'deals-list'], ['/deals?id=D1', 'deal-record'],
   ['/boards', 'boards'], ['/boards?id=B1', 'board'],
   ['/projects', 'projects'], ['/projects?id=P1', 'project-record'],
   ['/tasks', 'tasks'], ['/tasks?id=T1', 'task-record'],
@@ -42,7 +42,7 @@ const PAGES = [
   ['/chat', 'messenger'], [`/call?id=${F.CALL}`, 'call'], ['/attendance', 'attendance'],
   ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
 ];
-const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'lead-record', 'deals', 'deal-record', 'boards', 'board', 'projects',
+const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'leads-list', 'lead-record', 'deals', 'deals-list', 'deal-record', 'boards', 'board', 'projects',
   'project-record', 'tasks', 'task-record', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record']);
 const VIEWPORTS = [['desktop', { width: 1366, height: 900 }], ['phone', { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]];
 
@@ -406,6 +406,36 @@ async function interact(page, name, result) {
     });
   }
   if (name === 'deals') await expect('the pipeline shows one column per stage', async () => (await page.$$('.kb-col')).length >= 5 || (await page.$$('.ws-table tbody tr')).length >= 1);
+  if (name === 'deals-list') {
+    const text = () => page.evaluate(() => document.querySelector('.b24-grid-table').innerText);
+    await expect('the list opens on All pipelines, with deals from both', async () => {
+      const t = await text();
+      return /All pipelines/.test(await page.evaluate(() => document.querySelector('[data-pipes]').textContent)) && t.includes('Acme academy kit supply') && t.includes('Robel Geleta - Background check');
+    });
+    await expect('an imported deal shows its Bitrix24 number, type, repeat mark, amount, payment status and responsible', async () => {
+      const t = await text();
+      return ['17651', 'Employment BGC Saviors - USA - Background Check', '(Repeat inquiry)', '$500', 'Partially paid', 'GL-EBS-ESM-SLE-001', 'Employment BGC Supports'].every(s => t.includes(s));
+    });
+    await expect('every row has a stage bar', async () => (await page.$$('.b24-grid-table tbody tr[data-id] .b24-stagebar')).length >= 3);
+    await expect('the column settings offer the export columns', async () => {
+      await page.click('[data-colsettings]'); await wait(300);
+      const ok = (await page.evaluate(() => document.querySelector('.b24-colpop').innerText)).includes('Candidate Payment Status');
+      await page.click('.b24-colpop [data-cancel]');
+      return ok;
+    });
+    await expect('switching to Kanban opens the default pipeline', async () => {
+      await page.click('[data-view="kanban"]'); await wait(1500);
+      return (await page.$$('.kb-col')).length === 6 && /Sales/.test(await page.evaluate(() => document.querySelector('[data-pipes]').textContent));
+    });
+  }
+  if (name === 'leads-list') await expect('an imported lead shows its source, repeat mark, position, date and who the file named', async () => {
+    const t = await page.evaluate(() => document.querySelector('.b24-grid-table').innerText);
+    return ['Repeat lead', 'Data Engineer', '20.03.2026', 'GL-EBS-ESM-SLE-001', 'Sunrise Academy'].every(s => t.includes(s)) && (await page.$$('.b24-grid-table .b24-stagebar')).length >= 3;
+  });
+  if (name === 'leads-list') await expect('clicking a stage segment moves the lead', async () => {
+    await page.click('tr[data-id="L1"] [data-lead-seg][data-stage="contacted"]'); await wait(1200);
+    return page.evaluate(() => document.querySelector('tr[data-id="L1"] .b24-stagebar-l').textContent === 'Contacted');
+  });
   if (name === 'tasks') await expect('My Tasks lists my tasks', async () => (await page.$$('.b24-grid-table tbody tr[data-id], .kb-card')).length >= 1);
   if (name === 'typing') await expect('with its dialogs closed, the typing test page scrolls again', async () => {
     await page.evaluate(() => {

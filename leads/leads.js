@@ -19,10 +19,14 @@
     const SOURCES = ['Website', 'Referral', 'Cold call', 'Email campaign', 'Social media', 'Event', 'Partner', 'Walk-in', 'Other'];
     const CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED'];
     const BASE = 'id, company, name, organization, email, phone, source, source_detail, owner_id, status, estimated_value, currency, priority, notes, next_follow_up_at, tags, converted_at, converted_by, converted_contact_id, converted_deal_id, archived_at, created_by, created_at, updated_at';
-    const [cols, lk, cf, lv] = await Promise.all([
+    const [cols, lk, cf, lv, imp] = await Promise.all([
         B.columns('crm_leads', BASE + ', number, company_id, custom', BASE), C.lookups(), B.customFields('lead'), B.levels('lead'),
+        // Imported leads (supabase-crm-import-migration.sql) carry their export row; the list shows it.
+        B.columns('crm_leads', 'id, external_ref, source_row', 'id'),
     ]);
     const SELECT = cols.select;
+    const LIST_SELECT = SELECT + (imp.full ? ', external_ref, source_row' : '');
+    const layout = imp.full ? await B.importLayout('lead') : [];
 
     const statuses = lk.leadStatuses.length ? lk.leadStatuses : [
         { key: 'new', label: 'New', color: 'pending' }, { key: 'contacted', label: 'Contacted', color: 'late' },
@@ -33,6 +37,18 @@
     const openKeys = statuses.filter(s => !s.is_closed).map(s => s.key);
     const hexOf = key => { const i = statuses.findIndex(s => s.key === key); return B.hex(i >= 0 && statuses[i].color, i); };
     const stagePill = key => `<span class="b24-stage-pill" style="--c:${hexOf(key)}">${esc(STATUS[key] ? STATUS[key].label : key)}</span>`;
+    /** The Bitrix-style stage bar in the list: the working stages, then Converted; a closed-as-junk lead shows it all in red. Clicking a segment moves the lead. */
+    function stageBar(l) {
+        const cur = statuses.find(s => s.key === l.status);
+        if (!cur) return stagePill(l.status);
+        const junk = cur.is_closed && !cur.is_converted;
+        const can = lv.edit !== 'none' && canEditLead(l) && l.status !== 'converted' && !l.archived_at;
+        return B.stageBar({
+            stages: statuses.filter(s => !s.is_closed || s.is_converted).map(s => ({ key: s.key, name: s.label })),
+            current: cur.key, hex: hexOf(cur.key), lost: junk, label: cur.label,
+            attr: s => can && s.key !== cur.key ? `data-lead-seg="${esc(l.id)}" data-stage="${esc(s.key)}"` : '',
+        });
+    }
     const canAdd = lv.add !== 'none';
     const canEditLead = l => B.allowed(lv.edit, l, me);
     const canDeleteLead = l => B.allowed(lv.delete, l, me);
@@ -452,28 +468,48 @@
     }
 
     /* ----- List ----- */
+    /** The Lead cell: the name, then (grey) the company, source and "Repeat lead" — from the import when the lead came from one. */
+    function leadCell(r) {
+        const source = r.source || B.src(r, 'Source');
+        const sub = (t, cls) => t ? `<span class="sub${cls ? ' ' + cls : ''}" title="${esc(t)}">${esc(t)}</span>` : '';
+        return `<a href="/leads/?id=${esc(r.id)}" data-open>${esc(r.name)}</a>${r.organization && r.organization !== r.name ? sub(r.organization) : ''}${sub(source)}${B.isYes(B.src(r, 'Repeat lead')) ? sub('Repeat lead', 'rep') : ''}`;
+    }
+    view.addEventListener('click', async e => {
+        const b = e.target.closest('[data-lead-seg]'); if (!b) return;
+        e.preventDefault();
+        const l = (page.grid ? page.grid.rows() : []).find(x => String(x.id) === b.dataset.leadSeg);
+        if (!l) return;
+        const to = b.dataset.stage;
+        if (to === 'converted') return openConvert(l, refreshList);
+        const bar = b.closest('.b24-stagebar'); if (bar) bar.classList.add('busy');
+        try { await setLeadStatus(l, to); loadCounters(); if (page.grid) await page.grid.refresh(); }
+        catch (err) { C.toast(err.message, 'bad'); if (bar) bar.classList.remove('busy'); }
+    });
     function gridColumns() {
         const people = [{ value: '', label: 'Not assigned' }].concat(B.peopleOptions());
         const editable = (spec) => (lv.edit !== 'none' ? spec : undefined);
         const save = key => async (r, v) => { if (!canEditLead(r)) throw new Error('You do not have permission to change this lead.'); await updateLead(r, { [key]: v }); };
-        return [
-            ...(cols.full ? [{ key: 'number', title: 'ID', width: 70, render: r => esc(r.number == null ? '' : r.number) }] : []),
-            { key: 'name', title: 'Lead', width: 250, render: r => `<a href="/leads/?id=${esc(r.id)}" data-open>${esc(r.name)}</a>${r.organization ? `<span class="sub">${esc(r.organization)}</span>` : ''}`, edit: editable({ type: 'text', save: save('name') }) },
-            { key: 'status', title: 'Stage', width: 160, render: r => stagePill(r.status), edit: editable({ type: 'select', options: statuses.filter(s => !s.is_converted).map(s => ({ value: s.key, label: s.label })), save: save('status') }) },
-            { key: 'owner_id', title: 'Responsible', width: 180, render: r => C.personHtml(r.owner_id, { link: false }), edit: editable({ type: 'people', options: people, save: save('owner_id') }) },
-            { key: 'estimated_value', title: 'Amount', width: 130, align: 'right', render: r => r.estimated_value != null ? esc(L.money(r.estimated_value, r.currency)) : '', edit: editable({ type: 'money', save: save('estimated_value') }) },
-            { key: 'next_follow_up_at', title: 'Follow-up', width: 170, render: r => followHtml(r) },
-            { key: 'source', title: 'Source', width: 130, render: r => esc(r.source || ''), edit: editable({ type: 'select', options: [{ value: '', label: '—' }].concat(SOURCES), save: save('source') }) },
-            { key: 'phone', title: 'Phone', width: 150, render: r => r.phone ? `<a href="tel:${esc(r.phone)}">${esc(r.phone)}</a>` : '', edit: editable({ type: 'text', save: save('phone') }) },
-            { key: 'email', title: 'Email', width: 200, render: r => r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : '', edit: editable({ type: 'text', save: save('email') }) },
-            { key: 'created_at', title: 'Created', width: 120, render: r => `<span class="muted">${esc(L.fmtDate(r.created_at, { short: true }))}</span>` },
+        const list = [
+            { key: 'name', title: 'Lead', width: 270, render: r => leadCell(r), edit: editable({ type: 'text', save: save('name') }) },
+            { key: 'status', title: 'Stage', width: 200, render: r => stageBar(r), edit: editable({ type: 'select', options: statuses.filter(s => !s.is_converted).map(s => ({ value: s.key, label: s.label })), save: save('status') }) },
+            { key: 'created_at', title: 'Created', width: 110, render: r => esc(B.dotDate(r.created_at)) },
+            { key: 'source', title: 'Source', width: 140, render: r => esc(r.source || B.src(r, 'Source')), edit: editable({ type: 'select', options: [{ value: '', label: '—' }].concat(SOURCES), save: save('source') }) },
+            { key: 'owner_id', title: 'Responsible', width: 210, render: r => B.personCell(r.owner_id, B.src(r, 'Responsible')), edit: editable({ type: 'people', options: people, save: save('owner_id') }) },
+            { key: 'created_by', title: 'Created by', width: 210, sortable: false, render: r => B.personCell(r.created_by, B.src(r, 'Created by')) },
+            { key: 'position', title: 'Position', width: 170, sortable: false, render: r => esc(B.src(r, 'Position')) },
+            { key: 'number', title: 'ID', width: 80, default: false, sortable: cols.full, render: r => esc(B.sourceId(r) || (r.number == null ? '' : r.number)) },
+            { key: 'estimated_value', title: 'Amount', width: 130, align: 'right', default: false, render: r => r.estimated_value != null ? esc(L.money(r.estimated_value, r.currency)) : '', edit: editable({ type: 'money', save: save('estimated_value') }) },
+            { key: 'next_follow_up_at', title: 'Follow-up', width: 170, default: false, render: r => followHtml(r) },
+            { key: 'phone', title: 'Phone', width: 150, default: false, render: r => r.phone ? `<a href="tel:${esc(r.phone)}">${esc(r.phone)}</a>` : '', edit: editable({ type: 'text', save: save('phone') }) },
+            { key: 'email', title: 'Email', width: 200, default: false, render: r => r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : '', edit: editable({ type: 'text', save: save('email') }) },
             { key: 'priority', title: 'Priority', width: 110, default: false, render: r => C.priorityBadge(r.priority) },
             { key: 'organization', title: 'Company name', width: 180, default: false, render: r => esc(r.organization || '') },
             { key: 'updated_at', title: 'Modified', width: 120, default: false, render: r => `<span class="muted">${esc(L.fmtRelative(r.updated_at))}</span>` },
-            { key: 'created_by', title: 'Created by', width: 170, default: false, sortable: false, render: r => C.personHtml(r.created_by, { link: false }) },
             { key: 'tags', title: 'Tags', width: 160, default: false, sortable: false, render: r => C.tagsHtml(r.tags) },
             ...B.cfColumns(cf),
         ];
+        // Every column of the Bitrix24 export, off until picked in the column settings.
+        return list.concat(B.importColumns(layout, list.map(c => c.title).concat('Lead Name')));
     }
     function mountGrid(body) {
         const host = document.createElement('div');
@@ -506,9 +542,10 @@
             } });
         }
         page.grid = WSGrid.mount(host, {
-            id: 'leads', columns: gridColumns(), sort: { key: 'updated_at', dir: 'desc' }, perPage: 20,
+            // 'leads-list': the Bitrix24 column set; the settings saved for the old list do not carry over.
+            id: 'leads-list', columns: gridColumns(), sort: { key: 'updated_at', dir: 'desc' }, perPage: 20,
             load: async ({ offset, limit, sort }) => {
-                let b = scoped(sb.from('crm_leads').select(SELECT));
+                let b = scoped(sb.from('crm_leads').select(LIST_SELECT));
                 b = sort ? b.order(sort.key, { ascending: sort.dir === 'asc', nullsFirst: false }) : b.order('updated_at', { ascending: false });
                 return (await C.q(b.range(offset, offset + limit - 1))).data || [];
             },
