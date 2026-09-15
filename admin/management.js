@@ -31,7 +31,7 @@
     const day = new Date($('mg-date').value+'T12:00:00+05:30').getUTCDay() || 7;
     const filter=$('mg-company').value, search=$('mg-search').value.trim().toLowerCase();
     const left=people.filter(p=>p.status==='inactive').length;
-    const visible=people.filter(p=>p.status!=='inactive' && (!filter || p.company===filter) && (!search || [p.full_name,p.email,p.department,p.employee_code].join(' ').toLowerCase().includes(search)));
+    const visible=people.filter(p=>p.status!=='inactive' && (!filter || p.company===filter) && (!search || [p.employee_id,p.full_name,p.email,p.department,p.employee_code].join(' ').toLowerCase().includes(search)));
     const names = [...new Set([...WSCompanies.companies,...visible.map(p=>p.company || 'Company assignment needed')])].filter(c=>!filter || c===filter);
     let rows='', count=0;
     for(const company of names) {
@@ -47,7 +47,7 @@
         const manager=people.find(x=>x.id===p.manager_id);
         const scheduled=s && (!s.working_days || s.working_days.includes(day));
         const secondScheduled=s2 && (!s2.working_days || s2.working_days.includes(day));
-        rows+=`<tr><td>${esc(p.full_name || p.email)}<small>${esc(p.job_title || p.employee_code || 'Employee')} · ${p.is_wfh?'WFH':'Office'}</small>${manager?`<small>Reports to ${esc(manager.full_name || manager.email)}</small>`:''}<small>${s?.company_default?'Company default':p.shift_id?'Assigned shift':'General default'}</small></td><td>${scheduled?bar(s):'<small>Weekly off / no shift</small>'}${secondScheduled?bar(s2,true)+`<small>Secondary: ${esc(p.company2)}</small>`:''}</td></tr>`;
+        rows+=`<tr><td>${p.employee_id?`<b>${esc(p.employee_id)}</b> · `:''}${esc(p.full_name || p.email)}<small>${esc(p.job_title || 'Employee')} · ${p.is_wfh?'WFH':'Office'}</small>${manager?`<small>Reports to ${esc(manager.full_name || manager.email)}</small>`:''}<small>${s?.company_default?'Company default':p.shift_id?'Assigned shift':'General default'}</small></td><td>${scheduled?bar(s):'<small>Weekly off / no shift</small>'}${secondScheduled?bar(s2,true)+`<small>Secondary: ${esc(p.company2)}</small>`:''}</td></tr>`;
         count++;
       }
     }
@@ -99,7 +99,7 @@
   window.addEventListener('admin-refresh',()=>{if(active==='company')loadCompany();if(active==='email'){loadHealth();loadMail();}});
 
   const ROLE_LABELS={employee:'Employee — own company records, edits what they own or are assigned',manager:'Manager — edit and delete across the company, invoices, team attendance and leave',admin:'Admin — the same across every company'};
-  const fieldSpec=[['email','Login / notification email','email'],['company','Company','company'],['app_role','Workspace role (CRM & work modules)','role'],['employee_code','Employee ID (also the biometric code)','text'],['department','Department','text'],['job_title','Job title','text'],['phone','Phone','tel'],['joining_date','Joining date','date'],['manager_id','Reports to','manager'],['shift_id','Primary shift','shift'],['company2','Secondary company','company2'],['shift2_id','Secondary shift','shift2']];
+  const fieldSpec=[['email','Login / notification email','email'],['company','Company','company'],['app_role','Workspace role (CRM & work modules)','role'],['employee_id','Employee ID','text'],['employee_code','Biometric ID','text'],['department','Department','text'],['job_title','Job title','text'],['phone','Phone','tel'],['joining_date','Joining date','date'],['manager_id','Reports to','manager'],['shift_id','Primary shift','shift'],['company2','Secondary company','company2'],['shift2_id','Secondary shift','shift2']];
   window.WSAdminPeople={
     async open(emp) {
       editorEmployee=emp; $('edit-emp-save').disabled=true; $('mg-edit-fields').textContent='Loading account settings…';

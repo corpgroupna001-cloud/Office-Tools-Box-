@@ -212,7 +212,7 @@
         // 3) Teammates
         contacts.forEach(c => {
             const name = c.full_name || c.email || 'Unknown';
-            const s = Math.max(score(q, name), score(q, c.email || ''));
+            const s = Math.max(score(q, name), score(q, c.email || ''), score(q, c.employee_id || ''));
             if ((q && s > 0) || (!q && contacts.length <= 12)) list.push({
                 group: 'Teammates',
                 score: s,
@@ -227,7 +227,7 @@
                     return `
                         <div class="item-icon" style="border:none;background:transparent;padding:0;">${avatar}</div>
                         <div class="item-body">
-                            <div class="item-title">${esc(name)} ${online ? '<span style="color:#6ee7b7;font-size:11px;margin-left:6px;">● online</span>' : ''}</div>
+                            <div class="item-title">${c.employee_id ? `<b>${esc(c.employee_id)}</b> · ` : ''}${esc(name)} ${online ? '<span style="color:#6ee7b7;font-size:11px;margin-left:6px;">● online</span>' : ''}</div>
                             <div class="item-sub">${esc(c.email || '')} · Enter to chat, ⇧Enter for profile</div>
                         </div>
                         <div class="item-shortcut">Chat</div>`;
@@ -388,9 +388,9 @@
             const { data: { session } } = await sb.auth.getSession();
             if (!session) { sb = null; return; }
             currentUserId = session.user.id;
-            const { data } = await sb.from('profiles')
-                .select('id, full_name, email, avatar_url, last_seen_at, status')
-                .not('id', 'eq', currentUserId).limit(300);
+            const pick = cols => sb.from('profiles').select(cols).not('id', 'eq', currentUserId).limit(300);
+            let { data, error } = await pick('id, full_name, email, avatar_url, last_seen_at, status, employee_id');
+            if (error) ({ data } = await pick('id, full_name, email, avatar_url, last_seen_at, status'));   // before the Employee ID migration
             contacts = (data || []).filter(p => (p.status || 'active') !== 'inactive')
                 .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
         } catch (e) { /* silent */ }

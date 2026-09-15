@@ -134,9 +134,10 @@
     }
     async function loadPeople(sb) {
         try {
-            const { data, error } = await sb.from('profiles')
-                .select('id, full_name, email, avatar_url, company, company2, department, job_title, status, last_seen_at, manager_id, employee_code, joining_date, is_wfh, phone, shift_id')
-                .order('full_name').limit(1000);
+            const cols = 'id, full_name, email, avatar_url, company, company2, department, job_title, status, last_seen_at, manager_id, employee_code, joining_date, is_wfh, phone, shift_id';
+            // employee_id arrives with supabase-employee-id-migration.sql.
+            let { data, error } = await sb.from('profiles').select(cols + ', employee_id').order('full_name').limit(1000);
+            if (error && String(error.code) === '42703') ({ data, error } = await sb.from('profiles').select(cols).order('full_name').limit(1000));
             if (error) throw error;
             state.people = (data || []).map(p => ({ ...p, name: p.full_name || (p.email || '').split('@')[0] || 'Unknown' }));
         } catch (e) {
@@ -207,16 +208,16 @@
     /* ---------------------------------------------------------- people */
     function person(id) { return id ? state.peopleById.get(id) || null : null; }
     function personName(id, fallback) { const p = person(id); return p ? p.name : (fallback || (id ? 'Former employee' : 'Unassigned')); }
-    /** How a person is picked and listed: employee ID first ("GL-PIS-CSM-IC-001 · Kemi Ade"), the name alone without one. */
+    /** How a person is picked and listed: Employee ID first ("GL-PIS-CSM-IC-001 · Kemi Ade"), the name alone without one. */
     function personLabel(p) {
         const who = typeof p === 'string' ? person(p) : p;
         if (!who) return '';
-        const code = String(who.employee_code || '').trim();
+        const code = String(who.employee_id || '').trim();
         return code ? `${code} · ${who.name}` : who.name;
     }
-    /** People with an employee ID first, in ID order; the rest by name. */
+    /** People with an Employee ID first, in ID order; the rest by name. */
     function byEmployeeId(a, b) {
-        const ac = String(a.employee_code || '').trim(), bc = String(b.employee_code || '').trim();
+        const ac = String(a.employee_id || '').trim(), bc = String(b.employee_id || '').trim();
         if (!ac !== !bc) return ac ? -1 : 1;
         return (ac && bc ? ac.localeCompare(bc, 'en', { numeric: true }) : 0) || String(a.name).localeCompare(String(b.name));
     }
@@ -231,7 +232,7 @@
     function personHtml(id, opts) {
         const p = person(id);
         if (!p) return `<span class="crm-person muted"><span class="ws-avatar">?</span><span class="nm">${esc(id ? 'Former employee' : (opts && opts.none) || 'Unassigned')}</span></span>`;
-        const code = String(p.employee_code || '').trim();
+        const code = String(p.employee_id || '').trim();
         const inner = code
             ? `${avatarHtml(p)}<span class="nm emp"><span class="code">${esc(code)}</span><span class="who">${esc(p.name)}</span></span>`
             : `${avatarHtml(p)}<span class="nm">${esc(p.name)}</span>`;
@@ -776,7 +777,7 @@
         let mentionStart = -1, mItems = [], mActive = 0;
         function closeMentions() { mm.hidden = true; mentionStart = -1; }
         function renderMentions() {
-            mm.innerHTML = mItems.map((p, i) => `<button type="button" data-i="${i}" class="${i === mActive ? 'active' : ''}">${avatarHtml(p)}<span>${esc(p.name)}</span></button>`).join('');
+            mm.innerHTML = mItems.map((p, i) => `<button type="button" data-i="${i}" class="${i === mActive ? 'active' : ''}">${avatarHtml(p)}<span>${p.employee_id ? `<b>${esc(p.employee_id)}</b> ${esc(p.name)}` : esc(p.name)}</span></button>`).join('');
             mm.hidden = !mItems.length;
             mm.style.top = `${Math.min(ta.offsetHeight, 90)}px`; mm.style.left = '0';
         }
@@ -793,7 +794,7 @@
                 const term = text.slice(at + 1).toLowerCase();
                 if (term.length <= 30) {
                     mentionStart = at;
-                    mItems = activePeople().filter(p => p.id !== (state.user && state.user.id) && p.name.toLowerCase().includes(term)).slice(0, 8);
+                    mItems = activePeople().filter(p => p.id !== (state.user && state.user.id) && (p.name.toLowerCase().includes(term) || String(p.employee_id || '').toLowerCase().includes(term))).sort(byEmployeeId).slice(0, 8);
                     mActive = 0; renderMentions(); return;
                 }
             }

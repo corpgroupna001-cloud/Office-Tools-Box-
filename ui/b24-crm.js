@@ -138,7 +138,7 @@
     /** Filter options for a person: employee ID first, those with one listed first. */
     function peopleOptions() {
         return C().activePeople().slice()
-            .sort((a, b) => (!a.employee_code - !b.employee_code) || String(a.employee_code || a.name).localeCompare(String(b.employee_code || b.name), 'en', { numeric: true }))
+            .sort((a, b) => (!a.employee_id - !b.employee_id) || String(a.employee_id || a.name).localeCompare(String(b.employee_id || b.name), 'en', { numeric: true }))
             .map(p => ({ value: p.id, label: C().personLabel(p) }));
     }
 

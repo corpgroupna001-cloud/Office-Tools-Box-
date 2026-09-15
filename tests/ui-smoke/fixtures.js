@@ -35,9 +35,9 @@ function db(opts = {}) {
   const d = {
     profiles: [
       // A photo, so the home page's one-time "add your profile photo" prompt stays closed.
-      person(ME, 'Maya Manager', 'maya@nova.test', { app_role: 'manager', manager_id: null, job_title: 'Sales Manager', employee_code: 'NS001', avatar_url: '/icon-192.png' }),
-      person(U2, 'Anil Kumar', 'anil@nova.test', { employee_code: 'NS002', is_wfh: true }),
-      person(U3, 'Chitra Rao', 'chitra@nova.test', { employee_code: 'NS003', department: 'Operations', job_title: 'Coordinator', last_seen_at: at(-3) }),
+      person(ME, 'Maya Manager', 'maya@nova.test', { app_role: 'manager', manager_id: null, job_title: 'Sales Manager', employee_code: 'NS001', employee_id: 'NSP-SLS-MGR-001', avatar_url: '/icon-192.png' }),
+      person(U2, 'Anil Kumar', 'anil@nova.test', { employee_code: 'NS002', employee_id: 'NSP-SLS-EXE-002', is_wfh: true }),
+      person(U3, 'Chitra Rao', 'chitra@nova.test', { employee_code: 'NS003', employee_id: 'NSP-OPS-COO-003', department: 'Operations', job_title: 'Coordinator', last_seen_at: at(-3) }),
     ],
     shifts: [{ id: 1, name: 'General', start_time: '09:30:00', end_time: '18:30:00', grace_minutes: 10, early_out_grace_minutes: 10, working_days: [1, 2, 3, 4, 5, 6], is_default: true }],
     company_policies: [{ company: NOVA, week_offs: [7] }],

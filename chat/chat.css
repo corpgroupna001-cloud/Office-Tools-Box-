@@ -537,3 +537,8 @@ body.page-chat #ws-push-pill { bottom: 96px !important; right: 24px !important; 
 .mx-saved-row:hover { background: rgba(127, 127, 127, .14); }
 .mx-saved-row .who { font-weight: 700; flex: 0 0 auto; }
 .mx-saved-row .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .85; }
+
+/* Employee ID first wherever a colleague is listed or mentioned. */
+.mx-emp-id { font-weight: 700; font-variant-numeric: tabular-nums; }
+.mx-emp-name { font-weight: 500; opacity: .8; }
+.mx-emp-id.lg { display: block; margin-top: 10px; font-size: 13px; letter-spacing: .02em; color: var(--ws-primary); }

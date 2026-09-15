@@ -38,6 +38,7 @@ const CRM = [
   'supabase-b24-migration.sql',
   'supabase-messenger-calls-migration.sql',
   'supabase-crm-import-migration.sql',
+  'supabase-employee-id-migration.sql',
 ];
 
 function sqlOf(file) {

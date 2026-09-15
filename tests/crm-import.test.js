@@ -216,6 +216,17 @@ test('deal_name, deal name and Deal Name are the same column', () => {
   assert.deepEqual(leadsOf([asPage(lead)]), leadsOf([lead]));
 });
 
+test('the responsible person is matched on Employee ID before the biometric ID', () => {
+  const profiles = [
+    { id: 'u-bio', employee_code: 'GL-EBS-ESM-SLE-001', full_name: 'Biometric Match' },
+    { id: 'u-emp', employee_id: 'GL-EBS-ESM-SLE-001', employee_code: '00000123', full_name: 'Employee ID Match' },
+  ];
+  const d = I.mapDeals([dealRow({ Responsible: 'GL-EBS-ESM-SLE-001' })], { ...ctx(), profiles }).rows[0];
+  assert.equal(d.owner_id, 'u-emp');
+  const [cells] = I.exportCells('deals', [{ ...d, id: 'x', stage_id: 's-won' }], ['Responsible'], { people: new Map(profiles.map(p => [p.id, p])) });
+  assert.deepEqual(cells, ['GL-EBS-ESM-SLE-001'], 'and exported as that Employee ID');
+});
+
 test('a Bitrix lead keeps its value, referrer and the person\'s details', () => {
   const row = asPage({
     'ID': '2937', 'Stage': 'Good Lead', 'Lead Name': 'GL-PIS-IS-20260903008', 'Source': 'Referral',

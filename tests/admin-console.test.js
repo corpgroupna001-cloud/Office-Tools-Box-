@@ -75,9 +75,47 @@ test('a profile that will not save takes the half-made login account back out', 
   await assert.rejects(
     people.createEmployee({ email: 'clash@example.com', full_name: 'Clash', company: COMPANY, employee_code: '00000008' },
       { url: URL_BASE, key: KEY, request: sb.request }),
-    e => e.status === 409 && /biometric code/.test(e.message));
+    e => e.status === 409 && /biometric ID/.test(e.message));
   assert.equal(sb.wrote('DELETE', '/auth/v1/admin/users').length, 1, 'no orphan login is left behind');
   assert.equal(sb.wrote('POST', '/auth/v1/recover').length, 0);
+});
+
+test('a new employee keeps an Employee ID beside the biometric ID, and a taken one is named', async () => {
+  const made = supabase([
+    NO_PROFILE,
+    [on('POST', '/auth/v1/admin/users'), () => [200, { id: '33333333-3333-4333-8333-333333333333' }]],
+    [on('PATCH', '/rest/v1/profiles'), (m, p, body) => [200, [{ id: '33333333-3333-4333-8333-333333333333', ...body }]]],
+    [on('POST', '/auth/v1/recover'), () => [200, {}]],
+  ]);
+  const out = await people.createEmployee({ email: 'kemi@example.com', full_name: 'Kemi Ade', company: COMPANY, employee_id: ' GL-PIS-CSM-IC-001 ', employee_code: '00000123' },
+    { url: URL_BASE, key: KEY, request: made.request });
+  assert.deepEqual([out.employee.employee_id, out.employee.employee_code], ['GL-PIS-CSM-IC-001', '00000123']);
+
+  const clash = supabase([
+    NO_PROFILE,
+    [on('POST', '/auth/v1/admin/users'), () => [200, { id: '44444444-4444-4444-8444-444444444444' }]],
+    [on('PATCH', '/rest/v1/profiles'), () => [409, { code: '23505', message: 'duplicate key value violates unique constraint "profiles_employee_id_key"' }]],
+  ]);
+  await assert.rejects(people.createEmployee({ email: 'twin@example.com', full_name: 'Twin', company: COMPANY, employee_id: 'GL-PIS-CSM-IC-001' },
+    { url: URL_BASE, key: KEY, request: clash.request }), e => e.status === 409 && /That Employee ID already belongs/.test(e.message));
+});
+
+test('an empty Employee ID is left out until the database has the column', async () => {
+  const id = '55555555-5555-4555-8555-555555555555';
+  const edit = current => {
+    const sb = supabase([
+      [on('GET', '/rest/v1/profiles'), () => [200, [current]]],
+      [on('GET', '/auth/v1/admin/users'), () => [200, { email: current.email, user_metadata: {} }]],
+      [on('PATCH', '/rest/v1/profiles'), (m, p, body) => [200, [{ ...current, ...body }]]],
+      [on('PUT', '/auth/v1/admin/users'), () => [200, {}]],
+    ]);
+    return people.updateEmployee({ id, full_name: 'Kemi Ade', employee_id: '' }, { url: URL_BASE, key: KEY, request: sb.request })
+      .then(() => sb.wrote('PATCH', '/rest/v1/profiles')[0].body);
+  };
+  const before = await edit({ id, email: 'k@example.com', full_name: 'Kemi', company: COMPANY });
+  assert.equal('employee_id' in before, false, 'no column yet: the edit still saves');
+  const after = await edit({ id, email: 'k@example.com', full_name: 'Kemi', company: COMPANY, employee_id: 'OLD-1' });
+  assert.equal(after.employee_id, null, 'with the column, clearing it clears it');
 });
 
 test('an employee is never created without the fields the rest of WorkSuite needs', async () => {

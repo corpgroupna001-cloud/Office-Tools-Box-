@@ -98,6 +98,17 @@
         return p ? (p.full_name || p.email || '') : '';
     }
     function nameOf(id) { if (S.me && id === S.me.id) return 'You'; return fullName(id) || 'Someone'; }
+    /** The Employee ID a colleague is known by, or ''. */
+    function empId(p) { return String((p && p.employee_id) || '').trim(); }
+    /** A person in a list: Employee ID first, the name after it. */
+    function whoHtml(p) {
+        const name = esc((p && (p.full_name || p.email)) || 'Unknown');
+        return empId(p) ? `<b class="mx-emp-id">${esc(empId(p))}</b> <span class="mx-emp-name">${name}</span>` : name;
+    }
+    /** Does a search term match this person's name, email or Employee ID? */
+    function personMatches(p, q) {
+        return !q || [p.full_name, p.email, p.employee_id].some(v => String(v || '').toLowerCase().indexOf(q) !== -1);
+    }
     function firstName(id) { return nameOf(id).split(/\s+/)[0]; }
     function isOnline(id) {
         if (S.online.has(id)) return true;
@@ -246,7 +257,9 @@
 
     // ----------------------------------------------------------------- people
     async function loadPeople() {
-        let r = await S.sb.from('profiles').select('id, email, full_name, avatar_url, last_seen_at, company, job_title, department, status').order('full_name');
+        // employee_id arrives with supabase-employee-id-migration.sql; each step back drops what is missing.
+        let r = await S.sb.from('profiles').select('id, email, full_name, avatar_url, last_seen_at, company, job_title, department, status, employee_id').order('full_name');
+        if (r.error && L.isMissingColumn(r.error)) r = await S.sb.from('profiles').select('id, email, full_name, avatar_url, last_seen_at, company, job_title, department, status').order('full_name');
         if (r.error && L.isMissingColumn(r.error)) r = await S.sb.from('profiles').select('id, email, full_name, avatar_url, last_seen_at, company').order('full_name');
         if (r.error) { S.peopleError = true; console.warn('[messenger] people', r.error); return; }
         (r.data || []).forEach(p => { S.people.set(p.id, p); if (p.last_seen_at) S.lastSeen.set(p.id, p.last_seen_at); });
@@ -449,7 +462,7 @@
             .sort((a, b) => sortTime(b) - sortTime(a));
         const hasThread = new Set(all.filter(t => t.kind === 'dm' && (lastOf(t) || t.key === S.activeKey)).map(t => t.id));
         const people = [...S.people.values()]
-            .filter(p => p.id !== S.me.id && !hasThread.has(p.id) && !isInactive(p) && (match(p.full_name) || match(p.email)))
+            .filter(p => p.id !== S.me.id && !hasThread.has(p.id) && !isInactive(p) && (match(p.full_name) || match(p.email) || match(p.employee_id)))
             .sort((a, b) => (isOnline(b.id) - isOnline(a.id)) || String(a.full_name || a.email).localeCompare(String(b.full_name || b.email)));
         let html = '';
         if (chats.length) html += section('Chats', chats.length) + chats.map(threadRowHtml).join('');
@@ -490,7 +503,7 @@
         return `<div class="mx-item" role="listitem" tabindex="0" data-person="${esc(p.id)}" aria-label="${esc('Message ' + (p.full_name || p.email || ''))}">
             ${personAvatar(p.id, '', true)}
             <div class="mx-item-body">
-                <div class="mx-item-top"><span class="mx-item-name">${esc(p.full_name || p.email || 'Unknown')}${statusChip(p.id)}</span></div>
+                <div class="mx-item-top"><span class="mx-item-name">${whoHtml(p)}${statusChip(p.id)}</span></div>
                 <div class="mx-item-bottom"><span class="mx-item-prev"${on ? ' style="color:var(--mx-ok)"' : ''}>${esc(sub)}</span></div>
             </div></div>`;
     }
@@ -1784,22 +1797,23 @@
     function mentionCandidates(t) {
         t = t || activeThread();
         if (!t) return [];
-        if (t.kind === 'group') return (S.members.get(t.id) || []).map(x => x.user_id).filter(id => id !== S.me.id).map(id => ({ id, name: fullName(id) })).filter(x => x.name);
-        return [{ id: t.id, name: fullName(t.id) }].filter(x => x.name);
+        const one = id => ({ id, name: fullName(id), code: empId(person(id)) });
+        if (t.kind === 'group') return (S.members.get(t.id) || []).map(x => x.user_id).filter(id => id !== S.me.id).map(one).filter(x => x.name);
+        return [one(t.id)].filter(x => x.name);
     }
     function updateMentions() {
         const el = $('mx-input');
         const q = L.mentionQuery(el.value, el.selectionStart);
         if (!q) return closeMentions();
         const term = q.term.toLowerCase();
-        const items = mentionCandidates().filter(c => c.name.toLowerCase().indexOf(term) !== -1).slice(0, 8);
+        const items = mentionCandidates().filter(c => c.name.toLowerCase().indexOf(term) !== -1 || c.code.toLowerCase().indexOf(term) !== -1).slice(0, 8);
         if (!items.length) return closeMentions();
         S.mention = { start: q.start, items, on: Math.min(S.mention ? S.mention.on : 0, items.length - 1) };
         paintMentions();
     }
     function paintMentions() {
         const box = $('mx-mentions');
-        box.innerHTML = S.mention.items.map((c, i) => `<button type="button" role="option" data-i="${i}" class="${i === S.mention.on ? 'on' : ''}" aria-selected="${i === S.mention.on}">${personAvatar(c.id, 'sm')}<span>${esc(c.name)}</span></button>`).join('');
+        box.innerHTML = S.mention.items.map((c, i) => `<button type="button" role="option" data-i="${i}" class="${i === S.mention.on ? 'on' : ''}" aria-selected="${i === S.mention.on}">${personAvatar(c.id, 'sm')}<span>${c.code ? `<b class="mx-emp-id">${esc(c.code)}</b> <span class="mx-emp-name">${esc(c.name)}</span>` : esc(c.name)}</span></button>`).join('');
         box.hidden = false;
     }
     function closeMentions() { S.mention = null; $('mx-mentions').hidden = true; }
@@ -2248,12 +2262,12 @@
     }
 
     function peopleButtons(list) {
-        return list.map(p => `<div class="mx-item" role="listitem" tabindex="0" data-person="${esc(p.id)}">${personAvatar(p.id, 'sm', true)}<div class="mx-item-body"><div class="mx-item-top"><span class="mx-item-name">${esc(p.full_name || p.email || 'Unknown')}</span></div><div class="mx-item-bottom"><span class="mx-item-prev">${esc(isOnline(p.id) ? 'online' : (p.job_title || p.email || ''))}</span></div></div></div>`).join('')
+        return list.map(p => `<div class="mx-item" role="listitem" tabindex="0" data-person="${esc(p.id)}">${personAvatar(p.id, 'sm', true)}<div class="mx-item-body"><div class="mx-item-top"><span class="mx-item-name">${whoHtml(p)}</span></div><div class="mx-item-bottom"><span class="mx-item-prev">${esc(isOnline(p.id) ? 'online' : (p.job_title || p.email || ''))}</span></div></div></div>`).join('')
             || '<div class="mx-list-empty">Nobody matches.</div>';
     }
     function colleagues(q) {
         q = String(q || '').toLowerCase();
-        return [...S.people.values()].filter(p => p.id !== S.me.id && !isInactive(p) && (!q || String(p.full_name || '').toLowerCase().indexOf(q) !== -1 || String(p.email || '').toLowerCase().indexOf(q) !== -1))
+        return [...S.people.values()].filter(p => p.id !== S.me.id && !isInactive(p) && personMatches(p, q))
             .sort((a, b) => (isOnline(b.id) - isOnline(a.id)) || String(a.full_name || a.email).localeCompare(String(b.full_name || b.email)));
     }
     function openNewChat() {
@@ -2261,7 +2275,7 @@
         openModal(`<h3>New conversation<button type="button" class="mx-icon-btn sm" data-close aria-label="Close" data-icon="x"></button></h3>
             ${S.features.groups ? '<button type="button" class="mx-btn primary" id="nc-group" data-icon="users" style="width:100%">New group</button>' : ''}
             <label class="f" for="nc-q">Message a colleague</label>
-            <input id="nc-q" type="search" placeholder="Search by name or email" autocomplete="off">
+            <input id="nc-q" type="search" placeholder="Search by Employee ID, name or email" autocomplete="off">
             <div class="mx-people" id="nc-list" role="list">${peopleButtons(colleagues(''))}</div>`);
         const list = $('nc-list');
         $('nc-q').addEventListener('input', () => { list.innerHTML = peopleButtons(colleagues($('nc-q').value.trim())); });
@@ -2274,7 +2288,7 @@
     function pickHtml(exclude, q) {
         const ex = new Set(exclude || []);
         const list = colleagues(q).filter(p => !ex.has(p.id));
-        return list.map(p => `<label><input type="checkbox" value="${esc(p.id)}">${personAvatar(p.id, 'sm')}<span>${esc(p.full_name || p.email)}</span></label>`).join('')
+        return list.map(p => `<label><input type="checkbox" value="${esc(p.id)}">${personAvatar(p.id, 'sm')}<span>${whoHtml(p)}</span></label>`).join('')
             || '<div class="mx-list-empty">Nobody else to add.</div>';
     }
     // Keep ticks when the search filter re-renders the list.
@@ -2408,7 +2422,7 @@
         const role = [p.job_title, p.department].filter(Boolean).join(' · ');
         const t = threadFor('dm:' + id);
         openModal(`<button type="button" class="mx-icon-btn sm mx-x" data-close aria-label="Close" data-icon="x"></button>
-            <div class="mx-profile">${personAvatar(id, 'lg', true)}<h3>${esc(p.full_name || p.email || 'Unknown')}</h3>
+            <div class="mx-profile">${personAvatar(id, 'lg', true)}${empId(p) ? `<span class="mx-emp-id lg">${esc(empId(p))}</span>` : ''}<h3>${esc(p.full_name || p.email || 'Unknown')}</h3>
                 <span class="mx-muted"${on ? ' style="color:var(--mx-ok);font-weight:600"' : ''}>${esc(on ? 'Online now' : L.fmtLastSeen(S.lastSeen.get(id)))}</span>
                 <div class="mx-facts">
                     ${p.email ? `<div><small>Email</small><span><a class="mx-link" href="mailto:${esc(p.email)}">${esc(p.email)}</a></span></div>` : ''}

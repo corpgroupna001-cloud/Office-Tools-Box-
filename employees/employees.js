@@ -17,7 +17,10 @@
     const ctx = await C.boot({ active: 'employees', crumb: 'Employees' });
     const sb = ctx.sb, me = ctx.user;
 
-    const FULL = 'id, full_name, email, avatar_url, company, company2, department, job_title, employee_code, phone, joining_date, manager_id, status, is_wfh, shift_id, shift2_id, last_seen_at, app_role';
+    let FULL = 'id, full_name, email, avatar_url, company, company2, department, job_title, employee_code, phone, joining_date, manager_id, status, is_wfh, shift_id, shift2_id, last_seen_at, app_role';
+    // Employee ID arrives with supabase-employee-id-migration.sql; until then the page works without it.
+    const hasEmployeeId = !(await sb.from('profiles').select('employee_id').limit(1)).error;
+    if (hasEmployeeId) FULL += ', employee_id';
     const ROLE = { manager: { label: 'Manager', color: 'pending' }, admin: { label: 'Admin', color: 'leave' } };
     const EMP_STATUS = { active: { label: 'Active', color: 'present' }, inactive: { label: 'Offboarded', color: 'weekoff' } };
     const ONLINE_MS = 2 * 60000;
@@ -81,7 +84,7 @@
         const st = ctx.isManager ? (v.status || '') : 'active';
         if (st === 'active') b = b.or('status.is.null,status.eq.active');
         else if (st) b = b.eq('status', st);
-        return page.filter ? page.filter.apply(b, { searchColumns: ['full_name', 'email', 'employee_code', 'job_title', 'department'] }) : b;
+        return page.filter ? page.filter.apply(b, { searchColumns: (hasEmployeeId ? ['employee_id'] : []).concat(['full_name', 'email', 'employee_code', 'job_title', 'department']) }) : b;
     }
     function personMenu(p) {
         const items = [{ label: 'Open profile', icon: 'user', onClick: () => go(`/employees/?id=${p.id}`) }];
@@ -157,7 +160,7 @@
         page.grid = WSGrid.mount(host, {
             id: 'employees', sort: { key: 'full_name', dir: 'asc' },
             columns: [
-                { key: 'employee_code', title: 'Employee ID', width: 170, render: p => (p.employee_code ? `<b>${esc(p.employee_code)}</b>` : '<span class="muted">—</span>') },
+                { key: 'employee_id', title: 'Employee ID', width: 170, sortable: hasEmployeeId, render: p => (p.employee_id ? `<b>${esc(p.employee_id)}</b>` : '<span class="muted">—</span>') },
                 { key: 'full_name', title: 'Full name', width: 270, render: p => `<span class="b24-who">${avatar(p)}<span><a href="/employees/?id=${esc(p.id)}" data-emp="${esc(p.id)}">${esc(nameOf(p))}</a><span class="sub">${esc(p.job_title || '')}</span></span></span>` },
                 { key: 'department', title: 'Department', width: 170, render: p => esc(p.department || '') },
                 { key: 'email', title: 'Email', width: 220, render: p => (p.email ? `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : '') },
@@ -167,6 +170,7 @@
                 { key: 'company', title: 'Company', width: 190, render: p => esc(p.company || '') + (p.company2 ? `<span class="sub">also ${esc(p.company2)}</span>` : '') },
                 { key: 'manager_id', title: 'Reports to', width: 180, default: false, render: p => (p.manager_id ? C.personHtml(p.manager_id, { link: false }) : '') },
 
+                { key: 'employee_code', title: 'Biometric ID', width: 130, default: false, render: p => esc(p.employee_code || '') },
                 { key: 'status', title: 'Status', width: 140, default: false, render: p => C.statusBadge(EMP_STATUS, p.status || 'active') + (p.is_wfh ? ' ' + C.badge('info', 'WFH') : '') },
                 { key: 'joining_date', title: 'Joined', width: 120, default: false, render: p => esc(L.fmtDate(p.joining_date) || '') },
             ],
@@ -403,7 +407,8 @@
                         <div class="emp-pcard">
                             <div class="emp-pcard-head"><h2>Employment</h2></div>
                             <dl class="emp-fields">
-                                ${field('Employee ID', esc(p.employee_code || ''))}
+                                ${field('Employee ID', esc(p.employee_id || ''))}
+                                ${field('Biometric ID', esc(p.employee_code || ''))}
                                 ${field('Status', C.statusBadge(EMP_STATUS, p.status || 'active'))}
                                 ${field('Joining date', esc(L.fmtDate(p.joining_date) || ''))}
                                 ${field('Work location', p.is_wfh ? 'Work from home' : 'Office')}

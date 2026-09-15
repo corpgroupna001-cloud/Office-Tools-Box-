@@ -663,7 +663,9 @@ module.exports = async function handler(req, res) {
       const offset = Number(body.row_offset) || 0;        // so a skipped row names its line in the whole file
 
       // Who the file points at: an employee code, an email address or a name.
-      const profiles = await readAll('profiles?select=id,email,full_name,employee_code,company&order=id');
+      // Employee ID first; a database without supabase-employee-id-migration.sql still matches on the rest.
+      let profiles = await readAll('profiles?select=id,email,full_name,employee_id,employee_code,company&order=id');
+      if (!profiles.length) profiles = await readAll('profiles?select=id,email,full_name,employee_code,company&order=id');
 
       const report = { inserted: 0, matched: 0, skipped: [], warnings: [], contacts_created: 0, pipelines_created: 0, stages_created: 0, statuses_created: 0 };
       const table = kind === 'leads' ? 'crm_leads' : 'crm_deals';
@@ -868,7 +870,8 @@ module.exports = async function handler(req, res) {
       const stages = sg.ok ? await sg.json() : [];
       const statuses = st.ok ? await st.json() : [];
       const layout = lay.ok ? ((await lay.json())[0] || {}).headers || [] : [];
-      const people = await readAll('profiles?select=id,full_name,email,employee_code&order=full_name.asc');
+      let people = await readAll('profiles?select=id,full_name,email,employee_id,employee_code&order=full_name.asc');
+      if (!people.length) people = await readAll('profiles?select=id,full_name,email,employee_code&order=full_name.asc');
       const headers = layout.length ? layout : CI.DEFAULT_HEADERS[kind];
 
       const q = String(body.q || '').replace(/[,()*"\\]/g, ' ').trim().slice(0, 100);
@@ -914,7 +917,7 @@ module.exports = async function handler(req, res) {
           pipelines: pipelines.map(p => ({ id: p.id, name: p.name })),
           stages: stages.map(s => ({ id: s.id, pipeline_id: s.pipeline_id, name: s.name })),
           statuses: statuses.map(s => ({ key: s.key, label: s.label })),
-          people: people.map(p => ({ id: p.id, name: p.full_name || p.email || p.employee_code, code: p.employee_code || '' })),
+          people: people.map(p => ({ id: p.id, name: p.full_name || p.email || p.employee_id || p.employee_code, code: p.employee_id || '', biometric: p.employee_code || '' })),
         };
       }
       return res.status(200).json(out);

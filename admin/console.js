@@ -128,7 +128,7 @@
   document.body.append(addModal);
 
   const ADD_FIELDS = [['full_name','Full name','text'],['email','Login / notification email','email'],
-    ['company','Company','company'],['employee_code','Employee ID (also the biometric code)','text'],
+    ['company','Company','company'],['employee_id','Employee ID','text'],['employee_code','Biometric ID','text'],
     ['department','Department','text'],['job_title','Job title','text'],['phone','Phone','tel'],
     ['joining_date','Joining date','date'],['shift_id','Primary shift','shift']];
 
@@ -239,7 +239,7 @@
   });
 
   /* ===================== Bulk import ===================== */
-  const COLUMNS = ['email','full_name','company','employee_code','department','job_title','phone','joining_date','is_wfh'];
+  const COLUMNS = ['email','full_name','company','employee_id','employee_code','department','job_title','phone','joining_date','is_wfh'];
   let importRows = [], importPreviewed = false;
   const importPanel = panel('import-panel', `<h1>Bulk import employees</h1>
     <p>Upload or paste a CSV. Rows are matched on <b>email</b>: an address already in WorkSuite is updated, a new one creates an account and sends an invite. Nothing is written until you check the preview and confirm. Large files are sent in small batches, so a big import takes a little while — leave the tab open until it finishes.</p>
@@ -248,14 +248,14 @@
       <button id="im-template">Download template</button>
       <label class="mg-check"><input id="im-invite" type="checkbox" checked> Invite new employees by email</label>
     </div>
-    <label>Or paste CSV<textarea id="im-text" rows="6" style="width:100%;font-family:ui-monospace,monospace;font-size:12px" placeholder="email,full_name,company,employee_code"></textarea></label>
+    <label>Or paste CSV<textarea id="im-text" rows="6" style="width:100%;font-family:ui-monospace,monospace;font-size:12px" placeholder="email,full_name,company,employee_id,employee_code"></textarea></label>
     <div class="mg-toolbar"><button id="im-preview" class="btn-primary text-white font-black px-5 py-2 rounded-xl">Check the file</button><button id="im-apply" disabled>Apply changes</button></div>
     <p id="im-message" aria-live="polite"></p><div id="im-results"></div>`);
 
   $('im-template').addEventListener('click', () => {
     download('worksuite-employee-import-template.csv',
       COLUMNS.join(',') + '\r\n' + csvCell('new.person@example.com') + ',' + csvCell('New Person') + ',' +
-      csvCell(WSCompanies.companies[0]) + ',' + csvCell('00000123') + ',' + csvCell('Operations') + ',' +
+      csvCell(WSCompanies.companies[0]) + ',' + csvCell('EMP-001') + ',' + csvCell('00000123') + ',' + csvCell('Operations') + ',' +
       csvCell('Executive') + ',' + csvCell('9000000000') + ',' + csvCell(today()) + ',' + csvCell('false'));
   });
   $('im-file').addEventListener('change', async () => {

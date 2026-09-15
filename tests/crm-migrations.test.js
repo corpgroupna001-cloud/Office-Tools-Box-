@@ -14,7 +14,9 @@ const FILES = [
   'supabase-b24-migration.sql',
   'supabase-messenger-calls-migration.sql',
   'supabase-crm-import-migration.sql',
+  'supabase-employee-id-migration.sql',
 ];
+const ALTER_ONLY = new Set(['supabase-employee-id-migration.sql']);
 const read = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 const stripComments = sql => sql.replace(/--[^\n]*/g, '');
 
@@ -41,7 +43,8 @@ test('every table a migration creates has row level security enabled', () => {
   for (const f of FILES) {
     const sql = stripComments(read(f)).toLowerCase();
     const created = [...sql.matchAll(/create\s+table\s+if\s+not\s+exists\s+public\.([a-z_]+)/g)].map(m => m[1]);
-    assert.ok(created.length, `${f} creates no tables?`);
+    // Column-only migrations (profiles.employee_id) create no table of their own.
+    if (!ALTER_ONLY.has(f)) assert.ok(created.length, `${f} creates no tables?`);
     for (const t of created) {
       assert.match(sql, new RegExp(`alter\\s+table\\s+public\\.${t}\\s+enable\\s+row\\s+level\\s+security`), `${f}: ${t} has no RLS`);
     }
