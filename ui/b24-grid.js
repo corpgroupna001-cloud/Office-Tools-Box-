@@ -294,9 +294,12 @@
         });
         container.addEventListener('dblclick', e => {
             const td = e.target.closest('td.editable'), tr = e.target.closest('tr[data-id]');
-            if (!td || !tr) return;
+            if (!tr || e.target.closest('input, select, textarea, label, .g-edit-btns, .g-check, .g-menu, .editing')) return;
             const row = st.rows.find(r => String(r[rowKey]) === tr.dataset.id);
-            if (row) startEdit(td, row);
+            if (!row) return;
+            // Bitrix24: double-click views the record; an editable cell (not its stage bar or a link) edits in place.
+            if (td && !e.target.closest('.b24-stagebar, a')) return startEdit(td, row);
+            if (opts.onOpen && !e.target.closest('a')) opts.onOpen(row, e);
         });
         container.addEventListener('keydown', e => {
             const th = e.target.closest('th.sortable');

@@ -29,8 +29,8 @@ if (!CHROME) { console.error('No Chrome found. Set CHROME_PATH.'); process.exit(
 const PAGES = [
   ['/', 'home'], ['/crm', 'crm'], ['/crm/settings', 'crm-settings'], ['/companies', 'companies'],
   ['/contacts', 'contacts'], ['/contacts?id=C1', 'contact-record'],
-  ['/leads', 'leads'], ['/leads?view=list', 'leads-list'], ['/leads?id=L1', 'lead-record'],
-  ['/deals', 'deals'], ['/deals?view=list', 'deals-list'], ['/deals?id=D1', 'deal-record'],
+  ['/leads', 'leads'], ['/leads?view=list', 'leads-list'], ['/leads?id=L1', 'lead-record'], ['/leads?id=L4', 'lead-imported'],
+  ['/deals', 'deals'], ['/deals?view=list', 'deals-list'], ['/deals?id=D1', 'deal-record'], ['/deals?id=D4', 'deal-imported'],
   ['/boards', 'boards'], ['/boards?id=B1', 'board'],
   ['/projects', 'projects'], ['/projects?id=P1', 'project-record'],
   ['/tasks', 'tasks'], ['/tasks?id=T1', 'task-record'],
@@ -42,7 +42,7 @@ const PAGES = [
   ['/chat', 'messenger'], [`/call?id=${F.CALL}`, 'call'], ['/attendance', 'attendance'],
   ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
 ];
-const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'leads-list', 'lead-record', 'deals', 'deals-list', 'deal-record', 'boards', 'board', 'projects',
+const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'leads-list', 'lead-record', 'lead-imported', 'deals', 'deals-list', 'deal-record', 'deal-imported', 'boards', 'board', 'projects',
   'project-record', 'tasks', 'task-record', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record']);
 const VIEWPORTS = [['desktop', { width: 1366, height: 900 }], ['phone', { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]];
 
@@ -435,6 +435,42 @@ async function interact(page, name, result) {
   if (name === 'leads-list') await expect('clicking a stage segment moves the lead', async () => {
     await page.click('tr[data-id="L1"] [data-lead-seg][data-stage="contacted"]'); await wait(1200);
     return page.evaluate(() => document.querySelector('tr[data-id="L1"] .b24-stagebar-l').textContent === 'Contacted');
+  });
+  if (name === 'leads-list') await expect('hovering a stage segment shows the stage name', async () => {
+    await page.hover('tr[data-id="L2"] .b24-stagebar .seg:nth-child(3)'); await wait(200);
+    const t = await page.evaluate(() => { const el = document.querySelector('.b24-stage-tip'); return el && !el.hidden ? el.innerText : ''; });
+    await page.screenshot({ path: path.join(OUT, 'leads-list-stagetip-desktop.png') });
+    await page.mouse.move(5, 5);
+    return t.includes('Qualified') && t.includes('Double-click - View');
+  });
+  if (name === 'leads-list') await expect('double-clicking a row opens the lead', async () => {
+    await page.click('tr[data-id="L2"] td[data-col="created_at"]', { count: 2 });
+    const ok = !!(await page.waitForSelector('.ws-slider iframe', { timeout: 3000 }).catch(() => null));
+    await page.keyboard.press('Escape'); await wait(400);
+    return ok;
+  });
+  if (name === 'deals-list') {
+    // (runs after the Kanban switch above, so it checks the gear on the board view too)
+    await expect('the gear menu offers the exports and access permissions', async () => {
+      await page.click('[data-gear]'); await wait(300);
+      const t = await page.evaluate(() => (document.querySelector('.crm-menu.open') || {}).innerText || '');
+      await page.keyboard.press('Escape');
+      return ['Configure pipelines and stages', 'Import custom CSV data', 'Export to CSV', 'Export to Excel', 'Access permissions'].every(x => t.includes(x));
+    });
+  }
+  if (name === 'lead-imported') await expect('an imported lead card shows Bitrix24 fields and its custom section', async () => {
+    const t = await page.evaluate(() => document.querySelector('#card').innerText);
+    return ['LEAD INFORMATION', 'Repeat lead', 'GL-EBS-ESM-SLE-001', 'Wants a callback', 'CUSTOM SECTION', 'Referrer', 'Grace Mensah', 'Complete lead'].every(x => t.includes(x));
+  });
+  if (name === 'deal-imported') await expect('an imported deal card shows the amount, payment box, type and custom section', async () => {
+    const t = await page.evaluate(() => document.querySelector('#card').innerText);
+    return ['ABOUT DEAL', '$500', 'Receive payment', 'Deal total', 'Employment BGC Saviors - USA - Background Check', 'Robel Geleta', 'CUSTOM SECTION', 'Candidate Payment Status', 'Close deal', 'Employment BGC Supports'].every(x => t.includes(x));
+  });
+  if (name === 'deal-record') await expect('the section edit link opens every field of the section', async () => {
+    await page.click('.b24-sect [data-sect-edit="0"]'); await wait(400);
+    const n = await page.evaluate(() => document.querySelectorAll('.ws-modal .crm-field, [role=dialog] .crm-field').length);
+    await page.keyboard.press('Escape'); await wait(200);
+    return n >= 5;
   });
   if (name === 'tasks') await expect('My Tasks lists my tasks', async () => (await page.$$('.b24-grid-table tbody tr[data-id], .kb-card')).length >= 1);
   if (name === 'typing') await expect('with its dialogs closed, the typing test page scrolls again', async () => {

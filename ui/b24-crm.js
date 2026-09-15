@@ -12,6 +12,8 @@
      WSB24.openRecord(url, onClose)        slide-over (full page inside a slide-over or on phones)
      WSB24.pick(title, field)              a one-field dialog; resolves with the value
      WSB24.titleBar({ title, createLabel, createMenu, gear })   markup for the title row
+     WSB24.listGear({ anchor, before, importItem, exportRows, permissions })   the ⚙ menu of a CRM list
+     WSB24.personBox / clientBox / amountHtml / importSection / thingsToDo    record card pieces
    ============================================================================ */
 (function () {
     'use strict';
@@ -84,10 +86,10 @@
         });
     }
     /** A card section for the record's custom fields; save(code, value) persists one. */
-    function cfSection(fields, row, save, canEdit) {
+    function cfSection(fields, row, save, canEdit, title) {
         if (!fields.length) return null;
         return {
-            title: 'Additional',
+            title: title || 'Additional',
             fields: fields.map(f => ({
                 key: 'cf_' + f.code, title: f.label, type: cfType(f), options: cfOptions(f), required: f.required,
                 value: row.custom ? row.custom[f.code] : null,
@@ -333,11 +335,154 @@
         return `<div class="b24-stagebar${o.lost ? ' lost' : ''}" style="--c:${esc(o.hex)}">${o.stages.map((s, i) => {
             const a = o.attr ? o.attr(s) : '';
             const t = a ? 'Move to ' + s.name : s.name;
-            return `<button type="button" class="seg${i <= at ? ' on' : ''}${a ? ' can' : ''}"${a ? ' ' + a : ' tabindex="-1"'} title="${esc(t)}" aria-label="${esc(t)}"></button>`;
+            return `<button type="button" class="seg${i <= at ? ' on' : ''}${a ? ' can' : ''}"${a ? ' ' + a : ' tabindex="-1"'} data-tip="${esc(s.name)}" aria-label="${esc(t)}"></button>`;
         }).join('')}</div><span class="b24-stagebar-l">${esc(o.label || '')}</span>`;
+    }
+
+    /* ---------- stage bar in a list: the name bubble, click vs double-click ---------- */
+    let tipEl = null;
+    function hideStageTip() { if (tipEl) tipEl.hidden = true; }
+    function showStageTip(seg) {
+        if (!tipEl) {
+            tipEl = document.createElement('div');
+            tipEl.className = 'b24-stage-tip';
+            tipEl.setAttribute('role', 'tooltip');
+            document.body.appendChild(tipEl);
+        }
+        const bar = seg.closest('.b24-stagebar');
+        tipEl.innerHTML = `<b>${esc(seg.dataset.tip)}</b><span class="hint">Double-click - View</span>`;
+        tipEl.style.setProperty('--c', bar ? getComputedStyle(bar).getPropertyValue('--c') : '#2fc6f6');
+        tipEl.hidden = false;
+        const r = seg.getBoundingClientRect(), w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+        const left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 8));
+        tipEl.style.left = left + 'px';
+        tipEl.style.top = Math.max(8, r.top - h - 8) + 'px';
+        tipEl.style.setProperty('--arrow', Math.round(r.left + r.width / 2 - left) + 'px');
+    }
+    /**
+     * Wire a list's stage bars: hovering a segment shows the stage name (Bitrix24's bubble),
+     * a click on a movable segment calls move(button) after a short pause, and a
+     * double-click cancels that move so the row can open instead.
+     */
+    function wireStageBars(root, selector, move) {
+        let timer = null;
+        root.addEventListener('mouseover', e => { const seg = e.target.closest('.b24-stagebar .seg[data-tip]'); if (seg) showStageTip(seg); });
+        root.addEventListener('mouseout', e => { const seg = e.target.closest('.b24-stagebar .seg'); if (seg && !seg.contains(e.relatedTarget)) hideStageTip(); });
+        root.addEventListener('click', e => {
+            const b = e.target.closest(selector); if (!b) return;
+            e.preventDefault();
+            clearTimeout(timer);
+            if (e.detail > 1) return;
+            timer = setTimeout(() => { hideStageTip(); move(b); }, 260);
+        });
+        root.addEventListener('dblclick', e => { if (e.target.closest('.b24-stagebar')) { clearTimeout(timer); hideStageTip(); } });
+        window.addEventListener('scroll', hideStageTip, true);
+    }
+
+    /* ---------- record card pieces (the Bitrix24 look) ---------- */
+    /** A Bitrix cell kept as lines: [p]…[/p] and [br] become line breaks, other tags go. */
+    function plainLines(v) {
+        if (v == null) return '';
+        if (typeof v === 'object') return plainText(v);
+        return String(v).replace(/\[br\s*\/?\]|\[\/p\]/gi, '\n').replace(/\[\/?[a-z*]{1,10}(?:=[^\]]*)?\]/gi, '').replace(/&nbsp;/gi, ' ')
+            .split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).filter(Boolean).join('\n');
+    }
+    /** "$500" / "₹2,50,000": no decimals when the amount is whole. */
+    function moneyShort(v, currency) {
+        const n = Number(v) || 0;
+        return window.WSCrmLogic.money(n, currency || 'INR', { whole: n % 1 === 0 });
+    }
+    /** The big "Amount and currency" figure. */
+    function amountHtml(v, currency, extra) {
+        return `<div class="b24-amount"><span class="sum">${esc(moneyShort(v, currency))}</span>${extra || ''}</div>`;
+    }
+    /**
+     * Responsible in a bordered box: the employee (avatar, Employee ID as a link, name); for an
+     * imported record nobody matched, the code the file named; else "Not assigned".
+     */
+    function personBox(id, named) {
+        let p = id ? C().person(id) : null;
+        const text = plainText(named);
+        if (!p && !id && text) p = personByCode(text);
+        if (p) {
+            const code = String(p.employee_id || '').trim();
+            return `<span class="b24-box b24-personbox">${C().avatarHtml(p)}<span class="main"><a href="/employees/?id=${esc(p.id)}" target="_top" class="code">${esc(code || p.name)}</a>${code ? `<span class="sub">${esc(p.name)}</span>` : ''}</span></span>`;
+        }
+        if (!id && text) return `<span class="b24-box b24-personbox imp" title="${esc(text)} (from the import)"><span class="ws-avatar b24-avatar-gen"><span class="ic ic-user"></span></span><span class="main"><b class="code">${esc(text)}</b><span class="sub">from the import</span></span></span>`;
+        return `<span class="b24-box b24-personbox none"><span class="ws-avatar b24-avatar-gen"><span class="ic ic-user"></span></span><span class="main"><span class="sub">${id ? 'Former employee' : 'Not assigned'}</span></span></span>`;
+    }
+    /** A client (contact) box: the name large, lines under it, and call / e-mail / chat icons. */
+    function clientBox(o) {
+        const digits = String(o.phone || '').replace(/[^\d+]/g, '');
+        const wa = digits.replace(/\D/g, '');
+        const name = o.href ? `<a class="nm" href="${esc(o.href)}"${o.attr ? ' ' + o.attr : ''}>${esc(o.name)}</a>` : `<span class="nm">${esc(o.name)}</span>`;
+        const lines = (o.lines || []).filter(Boolean).map(l => `<span class="sub">${esc(l)}</span>`).join('');
+        const phone = o.phone ? `<a class="sub" href="tel:${esc(digits)}">${esc(o.phone)}</a>` : '';
+        const mail = o.email ? `<a class="sub" href="mailto:${esc(o.email)}">${esc(o.email)}</a>` : '';
+        const ico = (href, ic, label, on) => on ? `<a class="b24-box-ic" href="${esc(href)}" title="${label}" aria-label="${label}"${/^https?:/.test(href) ? ' target="_blank" rel="noopener"' : ''}><span class="ic ic-${ic}"></span></a>` : `<span class="b24-box-ic off" title="${label}: no details" aria-hidden="true"><span class="ic ic-${ic}"></span></span>`;
+        return `<div class="b24-box b24-clientbox">${o.label ? `<span class="kind">${esc(o.label)}</span>` : ''}<div class="row"><span class="main">${name}${lines}${phone}${mail}</span>
+            <span class="icons">${ico('tel:' + digits, 'phone', 'Call', !!digits)}${ico('mailto:' + (o.email || ''), 'mail', 'E-mail', !!o.email)}${ico('https://wa.me/' + wa, 'chat', 'Chat', wa.length >= 8)}</span></div></div>`;
+    }
+    /**
+     * CUSTOM SECTION of an imported record: every other non-empty cell of its export row, in file order.
+     * `skip` = column names the card already shows. null for records made here (no export row).
+     */
+    function importSection(row, headers, skip, title) {
+        const s = row && row.source_row;
+        if (!s || typeof s !== 'object') return null;
+        const skipSet = new Set((skip || []).map(h => String(h).toLowerCase()));
+        const order = (headers && headers.length ? headers.filter(h => h in s) : []).concat(Object.keys(s).filter(k => !(headers || []).includes(k)));
+        const fields = order.filter(h => !skipSet.has(h.toLowerCase())).map(h => ({ h, v: plainLines(s[h]) })).filter(x => x.v)
+            .map(x => ({ key: 'src:' + x.h, title: x.h, edit: false, value: x.v, display: v => esc(v).replace(/\n/g, '<br>') }));
+        return fields.length ? { title: title || 'Custom section', editLink: false, fields } : null;
+    }
+    /** "Things to do": the open to-dos of a record, soonest first, for the timeline. */
+    function thingsToDo(tasks, opts) {
+        const L = window.WSCrmLogic;
+        const open = (tasks || []).filter(t => !t.completed_at).sort((a, b) => String(a.due_date || '9999').localeCompare(String(b.due_date || '9999')));
+        const body = open.length ? open.slice(0, 5).map(t => {
+            const st = t.due_date ? L.taskDueState(t) : '';
+            return `<li><a href="/tasks/?id=${esc(t.id)}" data-open-task="${esc(t.id)}">${esc(t.title || 'To-do')}</a>${t.due_date ? `<span class="crm-due ${esc(st)}">${esc(L.fmtDate(t.due_date, { short: true }))}</span>` : ''}</li>`;
+        }).join('') + (open.length > 5 ? `<li class="more">+${open.length - 5} more in To-dos</li>` : '')
+            : `<li class="empty">${esc((opts && opts.empty) || 'No activities planned. Add a to-do so you do not forget the next step.')}</li>`;
+        return `<div class="b24-todo"><span class="b24-todo-h">Things to do</span><ul>${body}</ul></div>`;
+    }
+
+    /* ---------- list gear menu and exports ---------- */
+    /** Rows to an Excel-readable file (an HTML table saved as .xls). */
+    function exportXls(filename, columns, rows) {
+        const cell = v => esc(Array.isArray(v) ? v.join(', ') : v == null ? '' : v);
+        const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body><table border="1">
+            <tr>${columns.map(c => `<th>${cell(c.title)}</th>`).join('')}</tr>
+            ${rows.map(r => `<tr>${columns.map(c => `<td style="mso-number-format:'\\@'">${cell(c.value(r))}</td>`).join('')}</tr>`).join('')}</table></body></html>`;
+        download(filename, html, 'application/vnd.ms-excel;charset=utf-8');
+    }
+    /**
+     * The ⚙ menu of a CRM list: pipeline settings (Deals), Import custom CSV data, Export to CSV / Excel,
+     * Access permissions. Items the person cannot use are left out.
+     *   { anchor, before: [items], importItem: item | null, exportRows: async () => ({ filename, columns, rows }) | null, permissions: bool }
+     */
+    function listGear(o) {
+        const items = (o.before || []).slice();
+        const run = fmt => async () => {
+            try {
+                const x = await o.exportRows();
+                const name = `${x.filename}-${window.WSCrmLogic.todayIST()}`;
+                if (fmt === 'xls') exportXls(name + '.xls', x.columns, x.rows); else exportCsv(name + '.csv', x.columns, x.rows);
+                C().toast(`Exported ${x.rows.length} record${x.rows.length === 1 ? '' : 's'}${x.rows.length >= 5000 ? ' (first 5,000)' : ''}`, 'ok');
+            } catch (e) { C().toast(e.message || 'Could not export', 'bad'); }
+        };
+        if (items.length && (o.importItem || o.exportRows)) items.push('sep');
+        if (o.importItem) items.push(o.importItem);
+        if (o.exportRows) items.push({ label: 'Export to CSV', icon: 'download', onClick: run('csv') }, { label: 'Export to Excel', icon: 'download', onClick: run('xls') });
+        if (o.permissions) items.push('sep', { label: 'Access permissions', icon: 'shield', href: '/crm/settings/?section=permissions' });
+        while (items.length && items[items.length - 1] === 'sep') items.pop();
+        if (!items.length) return;
+        C().menu(o.anchor, items);
     }
 
     window.WSB24 = { columns, customFields, cfColumns, cfFilters, cfSection, cfDisplay, levels, allowed, hex, peopleOptions, openRecord, pick, titleBar,
                      csvParse, csvStringify, exportCsv, importCsv, download, cfFormFields, splitCustom, afterCreate, leaveCreate, fieldsSettingsUrl,
-                     importLayout, plainText, src, isYes, sourceId, importColumns, dotDate, personCell, peopleCell, stageBar };
+                     importLayout, plainText, src, isYes, sourceId, importColumns, dotDate, personCell, peopleCell, stageBar,
+                     wireStageBars, plainLines, moneyShort, amountHtml, personBox, clientBox, importSection, thingsToDo, exportXls, listGear };
 })();

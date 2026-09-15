@@ -6,12 +6,18 @@
 
        const card = WSCard.mount(container, {
            title, number, subtitle, onRename(title) -> Promise, canEdit,
+           titleAfter: html,                                   // beside the title (a label, a pipeline menu, a link icon)
+           handlers: { key(el, event) },                       // clicks on [data-card-act="key"] anywhere in the card
            stages: [{ key, title, hex, kind: 'open'|'won'|'lost' }], stage, canMove, onStage(key) -> Promise,
+           finalLabel: 'Close deal',                           // the last segment before an outcome is picked
            actions: [{ label, icon, primary, onClick }], menu: [{ label, icon, danger, onClick } | 'sep'],
            tabs: [{ key, title, count, render(el) }],          // shown after the "General" tab
-           sections: [{ title, fields: [{ key, title, type, value, display(value) -> html, options, entity, none, edit: false, save(value) -> Promise }] }],
+           sections: [{ title, editLink: false, fields: [{ key, title, type, value, display(value) -> html, options, entity, none, edit: false, cls,
+                                  form: [field specs] (several inputs edited together; value = { name: value }), save(value) -> Promise }] }],
+                       // a section with editable fields gets an "edit" link that edits them all in one dialog
            timeline: { entity_type, entity_id, links: { lead_id, deal_id, contact_id, project_id },
-                       composer: [{ key, title, icon, onOpen }] },   // "Comment" is built in
+                       composer: [{ key, title, icon, onOpen }],    // "Comment" is built in
+                       before: html },                             // between the composer and the feed ("Things to do")
        });
        card.refresh(opts)   // re-render with new options, keeping the open tab
 
@@ -27,7 +33,7 @@
     function isBlank(v) { return v == null || v === '' || (Array.isArray(v) && !v.length); }
     function defaultDisplay(f, v) {
         const C = window.WSCrm, L = window.WSCrmLogic;
-        if (isBlank(v)) return '<span class="none">not filled in</span>';
+        if (isBlank(v)) return '<span class="none">field is empty</span>';
         switch (f.type) {
             case 'email': return `<a href="mailto:${esc(v)}">${esc(v)}</a>`;
             case 'tel': return `<a href="tel:${esc(v)}">${esc(v)}</a>`;
@@ -59,7 +65,10 @@
             const finals = opts.stages.filter(s => s.kind === 'won' || s.kind === 'lost');
             const cur = opts.stages.find(s => s.key === opts.stage) || null;
             const curIdx = cur ? open.indexOf(cur) : -1;
-            const done = cur && cur.kind === 'won' ? open.length : curIdx;
+            // Bitrix24: every stage up to the current one is filled in the current stage's colour;
+            // the ones still ahead are grey with their own colour as an underline. A closed record fills the whole bar.
+            const done = cur && (cur.kind === 'won' || cur.kind === 'lost') ? open.length : curIdx;
+            const fill = cur ? (cur.hex || (cur.kind === 'won' ? '#7bd500' : cur.kind === 'lost' ? '#ff5752' : '#2fc6f6')) : '#2fc6f6';
             const btn = (s, i) => {
                 const reached = cur && (s === cur || (i >= 0 && i < done));
                 return `<button type="button" class="st${reached ? ' on' : ''}${s === cur ? ' cur' : ''}" data-stage="${esc(s.key)}" style="--c:${esc(s.hex || '#2fc6f6')}"${opts.canMove ? '' : ' disabled'} title="${esc(s.title)}"><span>${esc(s.title)}</span></button>`;
@@ -67,18 +76,24 @@
             let fin = '';
             if (finals.length) {
                 const f = cur && finals.includes(cur) ? cur : null;
-                fin = `<button type="button" class="st final${f ? ' on cur ' + f.kind : ''}" data-final style="--c:${esc(f ? f.hex || (f.kind === 'won' ? '#7bd500' : '#ff5752') : '#c8ced4')}"${opts.canMove ? '' : ' disabled'}><span>${esc(f ? f.title : 'Final stage')}</span></button>`;
+                const label = f ? f.title : (opts.finalLabel || 'Final stage');
+                fin = `<button type="button" class="st final${f ? ' on cur ' + f.kind : ''}" data-final style="--c:#7bd500"${opts.canMove ? '' : ' disabled'} title="${esc(label)}"><span>${esc(label)}</span></button>`;
             }
-            return `<div class="b24-stages" role="group" aria-label="Stage">${open.map((s, i) => btn(s, i)).join('')}${fin}</div>`;
+            return `<div class="b24-stages${cur && cur.kind === 'lost' ? ' lost' : ''}" role="group" aria-label="Stage" style="--fill:${esc(fill)}">${open.map((s, i) => btn(s, i)).join('')}${fin}</div>`;
         }
+        const canEditField = f => opts.canEdit !== false && f.edit !== false && typeof f.save === 'function';
         function fieldHtml(f, si, fi) {
             const shown = f.display ? f.display(f.value) : defaultDisplay(f, f.value);
-            const editable = opts.canEdit !== false && f.edit !== false && typeof f.save === 'function';
-            return `<div class="b24-field${editable ? ' editable' : ''}" data-f="${si}:${fi}">
-                <div class="lbl">${esc(f.title)}</div>
-                <div class="val">${shown == null || shown === '' ? '<span class="none">not filled in</span>' : shown}</div>
-                ${editable ? `<button type="button" class="pen" data-edit="${si}:${fi}" aria-label="Edit ${esc(f.title)}">${icon('edit', 'sm')}</button>` : ''}
+            const editable = canEditField(f);
+            return `<div class="b24-field${editable ? ' editable' : ''}${f.cls ? ' ' + esc(f.cls) : ''}" data-f="${si}:${fi}">
+                ${f.title ? `<div class="lbl">${esc(f.title)}</div>` : ''}
+                <div class="val">${shown == null || shown === '' ? '<span class="none">field is empty</span>' : shown}</div>
+                ${editable ? `<button type="button" class="pen" data-edit="${si}:${fi}" aria-label="Edit ${esc(f.title || '')}">${icon('edit', 'sm')}</button>` : ''}
             </div>`;
+        }
+        function sectionHtml(s, si) {
+            const link = s.editLink !== false && s.fields.some(canEditField);
+            return `<section class="b24-sect${s.cls ? ' ' + esc(s.cls) : ''}"><header><h3>${esc(s.title)}</h3>${link ? `<button type="button" class="b24-sect-edit" data-sect-edit="${si}">edit</button>` : ''}</header>${s.fields.map((f, fi) => fieldHtml(f, si, fi)).join('')}</section>`;
         }
         function render() {
             const tabs = [{ key: 'general', title: 'General' }].concat(opts.tabs || []);
@@ -86,7 +101,7 @@
             container.innerHTML = `
                 <div class="b24-card-head">
                     <h1 class="b24-card-title"><span class="t" data-title>${esc(opts.title || '')}</span>${opts.number ? `<span class="num">#${esc(opts.number)}</span>` : ''}
-                        ${opts.onRename && opts.canEdit !== false ? `<button type="button" class="pen" data-rename aria-label="Rename">${icon('edit', 'sm')}</button>` : ''}</h1>
+                        ${opts.onRename && opts.canEdit !== false ? `<button type="button" class="pen" data-rename aria-label="Rename">${icon('edit', 'sm')}</button>` : ''}${opts.titleAfter || ''}</h1>
                     ${opts.subtitle ? `<div class="sub">${opts.subtitle}</div>` : ''}
                     <div class="acts">
                         ${(opts.actions || []).map((a, i) => `<button type="button" class="${a.primary ? 'b24-btn-create' : 'b24-btn-card'}" data-act="${i}">${a.icon && !a.primary ? icon(a.icon) : ''}<span>${esc(a.label)}</span></button>`).join('')}
@@ -98,13 +113,14 @@
                 <div class="b24-card-panel" data-panel="general"${tab === 'general' ? '' : ' hidden'}>
                     <div class="b24-card-cols">
                         <div class="b24-card-fields">
-                            ${(opts.sections || []).map((s, si) => `<section class="b24-sect"><header><h3>${esc(s.title)}</h3></header>${s.fields.map((f, fi) => fieldHtml(f, si, fi)).join('')}</section>`).join('')}
+                            ${(opts.sections || []).map(sectionHtml).join('')}
                         </div>
                         <div class="b24-card-timeline">
                             ${opts.timeline ? `<div class="b24-composer">
                                 <div class="tabs">${[{ key: 'comment', title: 'Comment', icon: 'chat' }].concat(opts.timeline.composer || []).map((c, i) => `<button type="button" data-compose="${i}" class="${i === 0 ? 'on' : ''}">${esc(c.title)}</button>`).join('')}</div>
                                 <div class="box" data-composer></div>
                             </div>
+                            ${opts.timeline.before || ''}
                             <div class="b24-timeline" data-feed></div>` : ''}
                         </div>
                     </div>
@@ -138,7 +154,9 @@
             if (!box || box.classList.contains('editing')) return;
             box.classList.add('editing');
             const spec = { name: 'v', label: f.title, type: f.type || 'text', options: f.options, entity: f.entity, none: f.none, full: true, placeholder: f.placeholder, required: !!f.required, rows: f.rows };
-            const frm = C.form([spec], { v: f.value });
+            const multi = Array.isArray(f.form);
+            const frm = multi ? C.form(f.form, Object.assign({}, f.value || {})) : C.form([spec], { v: f.value });
+            if (multi) box.classList.add('multi');
             box.querySelector('.val').replaceWith(Object.assign(document.createElement('div'), { className: 'val' }));
             const val = box.querySelector('.val');
             val.appendChild(frm.el);
@@ -151,7 +169,7 @@
             const cancel = () => render();
             const ok = async () => {
                 if (!frm.validate()) return;
-                const v = frm.get().v;
+                const v = multi ? frm.get() : frm.get().v;
                 btns.querySelectorAll('button').forEach(b => { b.disabled = true; });
                 try { await f.save(v); f.value = v; render(); if (api.feed) api.feed.reload(); }
                 catch (e) { btns.querySelectorAll('button').forEach(b => { b.disabled = false; }); C.toast(e.message || 'Could not save', 'bad'); }
@@ -161,6 +179,35 @@
             val.addEventListener('keydown', e => {
                 if (e.key === 'Escape') { e.stopPropagation(); cancel(); }
                 if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') { e.preventDefault(); ok(); }
+            });
+        }
+        /** The section's "edit" link: every editable field of it in one dialog; changed ones are saved in order. */
+        function editSection(si) {
+            const C = window.WSCrm, s = opts.sections[si];
+            const list = s.fields.map((f, fi) => ({ f, fi })).filter(x => canEditField(x.f));
+            const fields = [], values = {};
+            list.forEach(({ f, fi }) => {
+                if (Array.isArray(f.form)) f.form.forEach(sp => { fields.push({ ...sp, name: `${fi}__${sp.name}` }); values[`${fi}__${sp.name}`] = (f.value || {})[sp.name]; });
+                else { fields.push({ name: String(fi), label: f.title, type: f.type || 'text', options: f.options, entity: f.entity, none: f.none, placeholder: f.placeholder, required: !!f.required, rows: f.rows, full: ['textarea', 'tags', 'entity'].includes(f.type) }); values[String(fi)] = f.value; }
+            });
+            const same = (a, b) => JSON.stringify(isBlank(a) ? null : a) === JSON.stringify(isBlank(b) ? null : b);
+            return C.formModal({
+                title: s.title, size: 'wide', fields, values, submitLabel: 'Save',
+                onSubmit: async v => {
+                    let changed = 0;
+                    for (const { f, fi } of list) {
+                        let next;
+                        if (Array.isArray(f.form)) {
+                            next = {}; f.form.forEach(sp => { next[sp.name] = v[`${fi}__${sp.name}`]; });
+                            if (f.form.every(sp => same(next[sp.name], (f.value || {})[sp.name]))) continue;
+                        } else {
+                            next = v[String(fi)];
+                            if (same(next, f.value)) continue;
+                        }
+                        await f.save(next); f.value = next; changed++;
+                    }
+                    if (changed) { render(); if (api.feed) api.feed.reload(); }
+                },
             });
         }
         async function rename() {
@@ -212,6 +259,9 @@
 
         container.addEventListener('click', e => {
             const t = e.target;
+            const ca = t.closest('[data-card-act]');
+            if (ca && opts.handlers && typeof opts.handlers[ca.dataset.cardAct] === 'function') { e.preventDefault(); return opts.handlers[ca.dataset.cardAct](ca, e); }
+            const se = t.closest('[data-sect-edit]'); if (se) return editSection(Number(se.dataset.sectEdit));
             const st = t.closest('[data-stage]'); if (st && !st.disabled) return moveTo(st.dataset.stage);
             const fin = t.closest('[data-final]'); if (fin && !fin.disabled) return finalMenu(fin);
             const tb = t.closest('[data-tab]');

@@ -48,9 +48,8 @@
             attr: s => can && s.key !== cur.id ? `data-deal-seg="${esc(d.id)}" data-stage="${esc(s.key)}"` : '',
         });
     }
-    view.addEventListener('click', async e => {
-        const b = e.target.closest('[data-deal-seg]'); if (!b) return;
-        e.preventDefault();
+    // A click on a stage segment moves the deal (after a pause, so a double-click can open the row instead).
+    B.wireStageBars(view, '[data-deal-seg]', async b => {
         const d = (page.grid ? page.grid.rows() : []).find(x => String(x.id) === b.dataset.dealSeg), s = lk.stageById[b.dataset.stage];
         if (!d || !s) return;
         const bar = b.closest('.b24-stagebar'); if (bar) bar.classList.add('busy');
@@ -257,7 +256,7 @@
         const pipe = pipelineOf(page.pipeline);
         const createUrl = () => `/deals/?id=new&pipeline=${encodeURIComponent(realPipeline())}`;
         view.innerHTML = B.titleBar({
-            title: 'Deals', createLabel: canAdd ? 'Create' : '', gear: ctx.isManager,
+            title: 'Deals', createLabel: canAdd ? 'Create' : '', gear: true,
             afterTitle: lk.pipelines.length ? `<button type="button" class="b24-btn-glass" data-pipes aria-haspopup="menu">${esc(allPipes() ? 'All pipelines' : pipe ? pipe.name : 'Pipeline')} <span aria-hidden="true">▾</span></button>` : '',
         }) + `
             <div class="b24-toolbar">
@@ -277,9 +276,13 @@
         const create = view.querySelector('[data-create]');
         if (create) create.addEventListener('click', () => B.openRecord(createUrl(), refreshList));
         const gear = view.querySelector('[data-gear]');
-        if (gear) gear.addEventListener('click', () => C.menu(gear, [
-            { label: 'Configure pipelines and stages', icon: 'board', onClick: () => openPipelineSettings(() => { lk = null; showList(); }) },
-        ]));
+        if (gear) gear.addEventListener('click', () => B.listGear({
+            anchor: gear,
+            before: ctx.isManager ? [{ label: 'Configure pipelines and stages', icon: 'board', onClick: () => openPipelineSettings(() => { lk = null; showList(); }) }] : [],
+            importItem: ctx.isManager && page.lv.import !== 'none' ? { label: 'Import custom CSV data', icon: 'upload', href: '/wsm-admin?tab=crmimport' } : null,
+            exportRows: page.lv.export !== 'none' ? exportRows : null,
+            permissions: ctx.isManager,
+        }));
         const pipes = view.querySelector('[data-pipes]');
         const choosePipeline = id => {
             // A pipeline chosen anywhere is remembered for both views; "All pipelines" only for the list.
@@ -443,6 +446,26 @@
         ];
         // Every column of the Bitrix24 export, off until picked in the column settings.
         return list.concat(B.importColumns(page.layout || [], list.map(c => c.title).concat('Deal Name', 'Amount', 'Currency', 'Contact')));
+    }
+    /** Export to CSV / Excel: the filtered deals (this pipeline or all) with the list's columns, then every column of the import. */
+    async function exportRows() {
+        const b = scoped(sb.from('crm_deals').select(LIST_SELECT)).order('updated_at', { ascending: false }).limit(5000);
+        const rows = (await C.q(b)).data || [];
+        const columns = [
+            { title: 'ID', value: r => B.sourceId(r) || (r.number == null ? '' : r.number) },
+            { title: 'Deal', value: r => r.title }, { title: 'Pipeline', value: r => (pipelineOf(r.pipeline_id) || {}).name || B.src(r, 'Pipeline') },
+            { title: 'Stage', value: r => lk.stageById[r.stage_id] ? lk.stageById[r.stage_id].name : B.src(r, 'Stage') },
+            { title: 'Client', value: r => contactName(r) || B.src(r, 'Contact') }, { title: 'Company', value: r => companyName(r) },
+            { title: 'Probability', value: r => r.probability }, { title: 'Amount', value: r => r.value }, { title: 'Currency', value: r => r.currency },
+            { title: 'Status', value: r => L.DEAL_STATUS[r.status] ? L.DEAL_STATUS[r.status].label : r.status },
+            { title: 'Responsible', value: r => r.owner_id ? C.personText(r.owner_id) : B.src(r, 'Responsible') },
+            { title: 'Created by', value: r => r.created_by ? C.personText(r.created_by) : B.src(r, 'Created by') },
+            { title: 'Expected close', value: r => r.expected_close_date }, { title: 'Source', value: r => r.source || B.src(r, 'Source') },
+            { title: 'Created', value: r => B.dotDate(r.created_at) }, { title: 'Comment', value: r => r.description || B.plainText(B.src(r, 'Comment')) },
+        ];
+        const taken = new Set(columns.map(c => c.title.toLowerCase()).concat('deal name'));
+        (page.layout || []).filter(h => !taken.has(h.toLowerCase())).forEach(h => columns.push({ title: h, value: r => B.src(r, h) }));
+        return { filename: allPipes() ? 'deals' : `deals-${String((pipelineOf(page.pipeline) || {}).name || 'pipeline').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, columns, rows };
     }
     function mountGrid(body) {
         const host = document.createElement('div');
@@ -622,7 +645,7 @@
         if (page.board) { page.board.destroy(); page.board = null; }
         C.loading(view, 'Loading deal…');
         let d;
-        try { d = (await C.q(sb.from('crm_deals').select(SELECT).eq('id', id).maybeSingle())).data; }
+        try { d = (await C.q(sb.from('crm_deals').select(LIST_SELECT).eq('id', id).maybeSingle())).data; }
         catch (e) { return C.errorState(view, e, () => showRecord(id)); }
         if (!d) { view.innerHTML = '<div class="b24-area pad"></div>'; C.empty(view.firstElementChild, 'Deal not found', 'It may have been deleted, or you may not have access to it.', '<a class="ws-btn" href="/deals/">All deals</a>'); return; }
         lk = await C.lookups();
@@ -632,12 +655,15 @@
         const pipeline = pipelineOf(d.pipeline_id) || {};
         document.title = `${d.title} · Deals · WorkSuite`;
         WSShell.setCrumb(d.title);
-        const [tasks, events, invoices, projects] = await Promise.all([
+        const [tasks, events, invoices, projects, clientRows, layout] = await Promise.all([
             C.related('tasks', 'deal_id', id, 'id, title, status, priority, assignee_id, due_date, completed_at, archived_at, created_at', b => b.is('archived_at', null)),
             C.related('calendar_events', 'deal_id', id, 'id, title, starts_at, ends_at, event_type, status, owner_id', b => b.order('starts_at', { ascending: false })),
             invLv.read !== 'none' ? C.related('invoices', 'deal_id', id, 'id, invoice_number, invoice_date, due_date, status, total, amount_paid, balance, currency') : Promise.resolve([]),
             C.related('projects', 'deal_id', id, 'id, name, status, due_date'),
+            d.contact_id ? C.related('crm_contacts', 'id', d.contact_id, 'id, full_name, organization, job_title, phone, email') : Promise.resolve([]),
+            imp.full ? B.importLayout('deal') : Promise.resolve([]),
         ]);
+        const client = clientRows[0] || null;
         const refresh = () => showRecord(id);
         const save = key => async v => { await updateDeal(d, { [key]: v }); };
         const links = { deal_id: id, contact_id: d.contact_id || null };
@@ -656,33 +682,58 @@
         if (canDeleteDeal(d, lv)) menu.push({ label: 'Delete permanently', icon: 'trash', danger: true, onClick: () => deleteDeal(d) });
         if (window.WSShell && WSShell.inSlider) menu.push('sep', { label: 'Open as a page', icon: 'link', onClick: () => { window.top.location.href = `/deals/?id=${d.id}`; } });
 
+        // ABOUT DEAL as Bitrix24 shows it; an imported deal fills the gaps from its export row.
+        const invoiceUrl = `/invoices/?new=1&deal_id=${encodeURIComponent(d.id)}${d.contact_id ? '&contact_id=' + encodeURIComponent(d.contact_id) : ''}`;
+        const canInvoice = invLv.add !== 'none';
+        const srcComment = B.plainLines(d.source_row && d.source_row.Comment);
+        const paid = invoices.reduce((a, i) => a + (Number(i.amount_paid) || 0), 0);
+        const dealType = B.src(d, 'Type');
         const sections = [
             { title: 'About deal', fields: [
+                { key: 'stage_id', title: 'Stage', type: 'select', options: stages.map(s => ({ value: s.id, label: s.name })), value: d.stage_id, display: v => stagePill(v) || esc(B.src(d, 'Stage')),
+                  save: d.archived_at ? null : async v => { const ok = await moveToStage(d, lk.stageById[v]); if (ok === false) throw new Error('Stage not changed'); refresh(); } },
+                { key: 'client', title: 'Client',
+                  form: [{ name: 'contact_id', label: 'Contact', type: 'entity', entity: 'contact', placeholder: 'Contact name, phone or email' },
+                         ...(cols.full ? [{ name: 'company_id', label: 'Company', type: 'entity', entity: 'company', placeholder: 'Company name, phone or email' }] : []),
+                         { name: 'organization', label: 'Company name (text)', type: 'text' }],
+                  value: { contact_id: d.contact_id, ...(cols.full ? { company_id: d.company_id } : {}), organization: d.organization },
+                  display: () => {
+                      const name = (client && (client.full_name || client.organization)) || contactName(d) || B.src(d, 'Contact');
+                      const co = companyName(d) || B.src(d, 'Company');
+                      if (!name && !co) return '';
+                      return B.clientBox({ name: name || co, href: d.contact_id ? `/contacts/?id=${d.contact_id}` : null,
+                          lines: [client && client.job_title, name && co !== name ? co : ''], phone: client && client.phone, email: client && client.email });
+                  },
+                  save: async v => { const patch = { contact_id: v.contact_id || null, organization: v.organization ? String(v.organization).trim() || null : null }; if (cols.full) patch.company_id = v.company_id || null; await updateDeal(d, patch); refresh(); } },
+                { key: 'amount', title: 'Amount and currency',
+                  form: [{ name: 'value', label: 'Amount', type: 'money', required: true }, { name: 'currency', label: 'Currency', type: 'select', options: CURRENCIES, required: true }],
+                  value: { value: Number(d.value), currency: d.currency },
+                  display: () => B.amountHtml(d.value, d.currency, (d.amount_from_products ? '<span class="muted">(from products)</span>' : '') + (canInvoice ? `<a class="b24-pay" target="_top" href="${esc(invoiceUrl)}">Receive payment</a>` : '')),
+                  save: d.amount_from_products ? null : async v => { await updateDeal(d, { value: Number(v.value) || 0, currency: v.currency }); } },
+                { key: 'payment', title: 'Payment and delivery', edit: false, value: 1,
+                  display: () => `<div class="b24-paybox"><span>${invoices.length ? `${invoices.length} invoice${invoices.length === 1 ? '' : 's'} · paid ${esc(B.moneyShort(paid, d.currency))}` : 'This box will show information about payments, deliveries and sales.'}</span>
+                      <div class="foot">${canInvoice ? `<a target="_top" href="${esc(invoiceUrl)}">Add</a>` : '<span></span>'}<span>Deal total <b>${esc(B.moneyShort(d.value, d.currency))}</b></span></div></div>` },
+                { key: 'owner_id', title: 'Responsible', type: 'people', none: 'Not assigned', value: d.owner_id, display: v => B.personBox(v, B.src(d, 'Responsible')), save: save('owner_id') },
+                ...(dealType ? [{ key: 'type', title: 'Type', edit: false, value: dealType, display: v => esc(v) }] : []),
+                { key: 'description', title: 'Comment', type: 'textarea', value: d.description || srcComment, display: v => v ? `<span class="b24-lines">${C.linkify(C.nl2br(v))}</span>` : '', save: save('description') },
+            ] },
+            { title: 'Additional information', fields: [
                 { key: 'title', title: 'Deal name', type: 'text', value: d.title, required: true, save: save('title') },
-                { key: 'value', title: 'Amount', type: 'money', value: Number(d.value), display: v => esc(L.money(v, d.currency)) + (d.amount_from_products ? ' <span class="muted">(from products)</span>' : ''), save: d.amount_from_products ? null : save('value') },
-                { key: 'currency', title: 'Currency', type: 'select', options: CURRENCIES, value: d.currency, save: save('currency') },
-                { key: 'pipeline', title: 'Pipeline', edit: false, value: pipeline.name, display: () => `${esc(pipeline.name || '')} · ${esc(d.probability)}%` },
+                { key: 'pipeline', title: 'Pipeline', edit: false, value: pipeline.name, display: () => `${esc(pipeline.name || B.src(d, 'Pipeline'))} · ${esc(d.probability)}%` },
                 { key: 'expected_close_date', title: 'Expected close', type: 'date', value: d.expected_close_date, save: save('expected_close_date') },
                 { key: 'actual_close_date', title: 'Closed', edit: false, value: d.actual_close_date, display: v => v ? esc(L.fmtDate(v)) : '' },
-                { key: 'source', title: 'Source', type: 'select', options: SOURCES, value: d.source, save: save('source') },
+                { key: 'source', title: 'Source', type: 'select', options: SOURCES, placeholder: 'Not selected', value: d.source, display: v => esc(v || B.src(d, 'Source')), save: save('source') },
                 { key: 'tags', title: 'Tags', type: 'tags', value: d.tags, save: save('tags') },
-            ] },
-            { title: 'Client', fields: [
-                { key: 'contact_id', title: 'Contact', type: 'entity', entity: 'contact', value: d.contact_id, display: v => v ? C.entityChip('contact', v, contactName(d) || 'Contact') : '', save: save('contact_id') },
-                ...(cols.full ? [{ key: 'company_id', title: 'Company', type: 'entity', entity: 'company', value: d.company_id, display: v => v ? C.entityChip('company', v, (d.company_rec && d.company_rec.title) || 'Company') : '', save: save('company_id') }] : []),
-                { key: 'organization', title: 'Company name (text)', type: 'text', value: d.organization, save: save('organization') },
-            ] },
-            { title: 'Responsible', fields: [
-                { key: 'owner_id', title: 'Responsible person', type: 'people', none: 'Not assigned', value: d.owner_id, display: v => C.personHtml(v), save: save('owner_id') },
-            ] },
-            B.cfSection(cf, d, async (code, v) => { await updateDeal(d, { custom: { ...(d.custom || {}), [code]: v } }); }, edit),
-            { title: 'More', fields: [
-                { key: 'description', title: 'Comment', type: 'textarea', value: d.description, save: save('description') },
                 ...(d.lead_id ? [{ key: 'lead', title: 'Converted from', edit: false, value: d.lead_id, display: () => C.entityChip('lead', d.lead_id, 'Open lead') }] : []),
-                { key: 'created', title: 'Created', edit: false, value: d.created_at, display: () => `${esc(L.fmtDateTime(d.created_at))} · ${C.personHtml(d.created_by)}` },
+                { key: 'created', title: 'Created', edit: false, value: d.created_at, display: () => `${esc(L.fmtDateTime(d.created_at))} · ${d.created_by ? C.personHtml(d.created_by) : B.personCell(null, B.src(d, 'Created by'))}` },
                 { key: 'updated', title: 'Modified', edit: false, value: d.updated_at, display: () => esc(L.fmtDateTime(d.updated_at)) },
             ] },
+            B.cfSection(cf, d, async (code, v) => { await updateDeal(d, { custom: { ...(d.custom || {}), [code]: v } }); }, edit),
+            // CUSTOM SECTION: the rest of the Bitrix24 export row (imported deals only).
+            B.importSection(d, layout, ['ID', 'Deal Name', 'Pipeline', 'Stage', 'Type', 'Source', 'Responsible', 'Created by', 'Created', 'Modified', 'Comment', 'Contact', 'Probability', 'Income', 'Amount', 'Currency']),
         ].filter(Boolean);
+        const lastSect = sections[sections.length - 1];
+        if (lastSect && lastSect.fields.some(f => String(f.key).startsWith('src:'))) lastSect.cls = 'custom';
 
         const tabs = [];
         if (cols.full) tabs.push({ key: 'products', title: 'Products', render: el => renderProducts(el, d, edit, refresh) });
@@ -727,8 +778,14 @@
 
         view.innerHTML = '<div id="card"></div>';
         WSCard.mount(view.querySelector('#card'), {
-            title: d.title, number: d.number, canEdit: edit, onRename: edit ? save('title') : null,
-            subtitle: [`<b>${esc(L.money(d.value, d.currency))}</b>`, C.statusBadge(L.DEAL_STATUS, d.status), d.archived_at ? C.badge('mute', 'Archived') : ''].filter(Boolean).join(' '),
+            title: d.title, number: B.sourceId(d) || d.number, canEdit: edit, onRename: edit ? save('title') : null,
+            // The pipeline beside the title; its caret moves the deal to another pipeline.
+            titleAfter: pipeline.name ? (edit && !d.archived_at && lk.pipelines.length > 1
+                ? `<button type="button" class="b24-pipe" data-card-act="pipeline" aria-haspopup="menu" title="Move to another pipeline">${esc(pipeline.name)} <span class="caret" aria-hidden="true">▾</span></button>`
+                : `<span class="b24-pipe">${esc(pipeline.name)}</span>`) : '',
+            handlers: { pipeline: el => C.menu(el, lk.pipelines.map(p => ({ label: p.name + (p.id === d.pipeline_id ? '  ✓' : ''), icon: 'board', onClick: () => changePipeline(d, p, refresh) }))) },
+            finalLabel: 'Close deal',
+            subtitle: [C.statusBadge(L.DEAL_STATUS, d.status), d.archived_at ? C.badge('mute', 'Archived') : ''].filter(Boolean).join(' '),
             stages: stages.map(s => ({ key: s.id, title: s.name, hex: stageHex(s), kind: s.is_won ? 'won' : s.is_lost ? 'lost' : 'open' })),
             stage: d.stage_id, canMove: edit && !d.archived_at,
             onStage: async key => {
@@ -738,7 +795,7 @@
             },
             actions: [], menu, sections, tabs,
             timeline: {
-                entity_type: 'deal', entity_id: id, links,
+                entity_type: 'deal', entity_id: id, links, before: B.thingsToDo(tasks),
                 composer: [
                     { title: 'To-do', onOpen: newTask },
                     { title: 'Meeting', onOpen: newMeet },
@@ -749,6 +806,22 @@
         });
         page.unsub = C.subscribe('deal', [{ table: 'crm_deals', filter: `id=eq.${id}` }], C.debounce(() => { if (C.param('id') === id && !document.querySelector('.b24-field.editing')) refresh(); }, 800));
     }
+
+    /** The pipeline menu on the deal card: the deal goes to the first open stage of the other pipeline. */
+    async function changePipeline(d, p, after) {
+        if (p.id === d.pipeline_id) return;
+        const first = L.firstOpenStage(lk.stages, p.id) || stagesFor(p.id)[0];
+        if (!first) return C.alert({ title: 'No stages', message: `${p.name} has no stages yet.` });
+        if (!await C.confirm({ title: `Move to ${p.name}?`, message: `${d.title} moves to the “${first.name}” stage of ${p.name}.`, okText: 'Move' })) return;
+        try { await updateDeal(d, { pipeline_id: p.id, stage_id: first.id }); C.toast(`Moved to ${p.name}`, 'ok'); if (after) after(); }
+        catch (e) { C.toast(e.message, 'bad'); }
+    }
+    view.addEventListener('click', e => {
+        const a = e.target.closest('a[data-open-task]');
+        if (!a || e.metaKey || e.ctrlKey || e.shiftKey || page.mode !== 'record') return;
+        e.preventDefault();
+        B.openRecord(`/tasks/?id=${a.dataset.openTask}`, () => C.param('id') && showRecord(C.param('id')));
+    });
 
     /* ---------------------------------------------------------- products */
     async function renderProducts(el, d, edit, refresh) {

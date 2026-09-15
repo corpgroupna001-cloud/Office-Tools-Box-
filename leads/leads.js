@@ -344,7 +344,7 @@
         WSShell.setCrumb('Leads');
         document.title = 'Leads · WorkSuite';
         const current = readView();
-        view.innerHTML = B.titleBar({ title: 'Leads', createLabel: canAdd ? 'Create' : '' }) + `
+        view.innerHTML = B.titleBar({ title: 'Leads', createLabel: canAdd ? 'Create' : '', gear: true }) + `
             <div class="b24-toolbar">
                 <div class="b24-views" role="tablist" aria-label="View">
                     <button type="button" role="tab" data-view="kanban">Kanban</button>
@@ -362,6 +362,13 @@
         });
         const create = view.querySelector('[data-create]');
         if (create) create.addEventListener('click', () => B.openRecord('/leads/?id=new', refreshList));
+        const gear = view.querySelector('[data-gear]');
+        if (gear) gear.addEventListener('click', () => B.listGear({
+            anchor: gear,
+            importItem: ctx.isManager && lv.import !== 'none' ? { label: 'Import custom CSV data', icon: 'upload', href: '/wsm-admin?tab=crmimport' } : null,
+            exportRows: lv.export !== 'none' ? exportRows : null,
+            permissions: ctx.isManager,
+        }));
         view.querySelector('.b24-views').addEventListener('click', e => {
             const b = e.target.closest('[data-view]'); if (!b) return;
             try { localStorage.setItem('ws-leads-view', b.dataset.view); } catch (err) { /* private mode */ }
@@ -474,9 +481,8 @@
         const sub = (t, cls) => t ? `<span class="sub${cls ? ' ' + cls : ''}" title="${esc(t)}">${esc(t)}</span>` : '';
         return `<a href="/leads/?id=${esc(r.id)}" data-open>${esc(r.name)}</a>${r.organization && r.organization !== r.name ? sub(r.organization) : ''}${sub(source)}${B.isYes(B.src(r, 'Repeat lead')) ? sub('Repeat lead', 'rep') : ''}`;
     }
-    view.addEventListener('click', async e => {
-        const b = e.target.closest('[data-lead-seg]'); if (!b) return;
-        e.preventDefault();
+    // A click on a stage segment moves the lead (after a pause, so a double-click can open the row instead).
+    B.wireStageBars(view, '[data-lead-seg]', async b => {
         const l = (page.grid ? page.grid.rows() : []).find(x => String(x.id) === b.dataset.leadSeg);
         if (!l) return;
         const to = b.dataset.stage;
@@ -485,6 +491,23 @@
         try { await setLeadStatus(l, to); loadCounters(); if (page.grid) await page.grid.refresh(); }
         catch (err) { C.toast(err.message, 'bad'); if (bar) bar.classList.remove('busy'); }
     });
+    /** Export to CSV / Excel: the filtered list with the list's columns, then every column of the import. */
+    async function exportRows() {
+        const b = scoped(sb.from('crm_leads').select(LIST_SELECT)).order('updated_at', { ascending: false }).limit(5000);
+        const rows = (await C.q(b)).data || [];
+        const columns = [
+            { title: 'ID', value: r => B.sourceId(r) || (r.number == null ? '' : r.number) },
+            { title: 'Lead', value: r => r.name }, { title: 'Stage', value: r => STATUS[r.status] ? STATUS[r.status].label : r.status },
+            { title: 'Created', value: r => B.dotDate(r.created_at) }, { title: 'Source', value: r => r.source || B.src(r, 'Source') },
+            { title: 'Responsible', value: r => r.owner_id ? C.personText(r.owner_id) : B.src(r, 'Responsible') },
+            { title: 'Created by', value: r => r.created_by ? C.personText(r.created_by) : B.src(r, 'Created by') },
+            { title: 'Company name', value: r => r.organization }, { title: 'Phone', value: r => r.phone }, { title: 'Email', value: r => r.email },
+            { title: 'Amount', value: r => r.estimated_value }, { title: 'Currency', value: r => r.currency }, { title: 'Comment', value: r => r.notes || B.plainText(B.src(r, 'Comment')) },
+        ];
+        const taken = new Set(columns.map(c => c.title.toLowerCase()).concat('lead name'));
+        layout.filter(h => !taken.has(h.toLowerCase())).forEach(h => columns.push({ title: h, value: r => B.src(r, h) }));
+        return { filename: 'leads', columns, rows };
+    }
     function gridColumns() {
         const people = [{ value: '', label: 'Not assigned' }].concat(B.peopleOptions());
         const editable = (spec) => (lv.edit !== 'none' ? spec : undefined);
@@ -607,6 +630,13 @@
             const l = e.target.closest('[data-lead]'); if (l) { e.preventDefault(); openLead(l.dataset.lead); }
         });
     }
+    // "Things to do" on the lead card: a to-do opens in a slide-over.
+    view.addEventListener('click', e => {
+        const a = e.target.closest('a[data-open-task]');
+        if (!a || e.metaKey || e.ctrlKey || e.shiftKey || page.mode !== 'record') return;
+        e.preventDefault();
+        B.openRecord(`/tasks/?id=${a.dataset.openTask}`, () => C.param('id') && showRecord(C.param('id')));
+    });
     // Title links inside the list and board open the card as a slide-over.
     view.addEventListener('click', e => {
         const a = e.target.closest('a[data-open]');
@@ -672,7 +702,7 @@
         if (page.board) { page.board.destroy(); page.board = null; }
         C.loading(view, 'Loading lead…');
         let l;
-        try { l = (await C.q(sb.from('crm_leads').select(SELECT).eq('id', id).maybeSingle())).data; }
+        try { l = (await C.q(sb.from('crm_leads').select(LIST_SELECT).eq('id', id).maybeSingle())).data; }
         catch (e) { return C.errorState(view, e, () => showRecord(id)); }
         if (!l) { view.innerHTML = '<div class="b24-area pad"></div>'; C.empty(view.firstElementChild, 'Lead not found', 'It may have been deleted, or you may not have access to it.', '<a class="ws-btn" href="/leads/">All leads</a>'); return; }
         document.title = `${l.name} · Leads · WorkSuite`;
@@ -706,36 +736,50 @@
         if (canDeleteLead(l)) menu.push({ label: 'Delete permanently', icon: 'trash', danger: true, onClick: () => deleteLead(l) });
         if (window.WSShell && WSShell.inSlider) menu.push('sep', { label: 'Open as a page', icon: 'link', onClick: () => { window.top.location.href = `/leads/?id=${l.id}`; } });
 
+        // LEAD INFORMATION as Bitrix24 shows it; an imported lead fills the gaps from its export row.
+        const anySrc = names => names.map(n => B.src(l, n)).find(Boolean) || '';
+        const srcComment = B.plainLines(l.source_row && l.source_row.Comment);
+        const position = B.src(l, 'Position');
+        const stageOptions = statuses.filter(s => !s.is_converted).map(s => ({ value: s.key, label: s.label }));
         const sections = [
-            { title: 'About lead', fields: [
+            { title: 'Lead information', fields: [
+                { key: 'status', title: 'Stage', type: 'select', options: stageOptions, value: l.status, display: v => stagePill(v),
+                  save: converted || l.archived_at ? null : async v => { await setLeadStatus(l, v); refresh(); } },
+                { key: 'source', title: 'Source', type: 'select', options: SOURCES, placeholder: 'Not selected', value: l.source, display: v => esc(v || B.src(l, 'Source')), save: save('source') },
+                { key: 'owner_id', title: 'Responsible', type: 'people', none: 'Not assigned', value: l.owner_id, display: v => B.personBox(v, B.src(l, 'Responsible')), save: save('owner_id') },
+                { key: 'client', title: 'Contact',
+                  form: [{ name: 'phone', label: 'Phone', type: 'tel' }, { name: 'email', label: 'E-mail', type: 'email' }, { name: 'organization', label: 'Company name', type: 'text' }],
+                  value: { phone: l.phone, email: l.email, organization: l.organization },
+                  display: () => B.clientBox({ name: l.name, lines: [l.organization && l.organization !== l.name ? l.organization : '', position],
+                      phone: l.phone || anySrc(['Phone', 'Mobile Phone', 'Work Phone']), email: l.email || anySrc(['E-mail', 'Work E-mail', 'Email']) }),
+                  save: async v => { await updateLead(l, v); } },
+                { key: 'notes', title: 'Comment', type: 'textarea', value: l.notes || srcComment, display: v => v ? `<span class="b24-lines">${C.linkify(C.nl2br(v))}</span>` : '', save: save('notes') },
+                { key: 'amount', title: 'Amount and currency',
+                  form: [{ name: 'estimated_value', label: 'Amount', type: 'money' }, { name: 'currency', label: 'Currency', type: 'select', options: CURRENCIES, required: true }],
+                  value: { estimated_value: l.estimated_value, currency: l.currency },
+                  display: () => l.estimated_value == null ? '' : B.amountHtml(l.estimated_value, l.currency), save: async v => { await updateLead(l, v); } },
+            ] },
+            { title: 'Additional information', fields: [
                 { key: 'name', title: 'Lead name', type: 'text', value: l.name, required: true, save: save('name') },
-                { key: 'organization', title: 'Company name', type: 'text', value: l.organization, save: save('organization') },
-                { key: 'estimated_value', title: 'Amount', type: 'money', value: l.estimated_value, display: v => v == null ? '' : esc(L.money(v, l.currency)), save: save('estimated_value') },
-                { key: 'currency', title: 'Currency', type: 'select', options: CURRENCIES, value: l.currency, save: save('currency') },
-                { key: 'source', title: 'Source', type: 'select', options: SOURCES, value: l.source, save: save('source') },
                 { key: 'source_detail', title: 'Source information', type: 'text', value: l.source_detail, save: save('source_detail') },
                 { key: 'priority', title: 'Priority', type: 'select', options: PRIORITIES, value: l.priority, display: v => C.priorityBadge(v), save: save('priority') },
                 { key: 'next_follow_up_at', title: 'Next follow-up', type: 'datetime', value: l.next_follow_up_at, display: () => followHtml(l) || (l.next_follow_up_at ? esc(L.fmtDateTime(l.next_follow_up_at)) : ''), save: save('next_follow_up_at') },
                 { key: 'tags', title: 'Tags', type: 'tags', value: l.tags, save: save('tags') },
-            ] },
-            { title: 'Contact information', fields: [
-                { key: 'phone', title: 'Phone', type: 'tel', value: l.phone, save: save('phone') },
-                { key: 'email', title: 'Email', type: 'email', value: l.email, save: save('email') },
-            ] },
-            { title: 'Responsible', fields: [
-                { key: 'owner_id', title: 'Responsible person', type: 'people', none: 'Not assigned', value: l.owner_id, display: v => C.personHtml(v), save: save('owner_id') },
-            ] },
-            B.cfSection(cf, l, async (code, v) => { await updateLead(l, { custom: { ...(l.custom || {}), [code]: v } }); }, edit),
-            { title: 'More', fields: [
-                { key: 'notes', title: 'Comment', type: 'textarea', value: l.notes, save: save('notes') },
-                { key: 'created', title: 'Created', edit: false, value: l.created_at, display: () => `${esc(L.fmtDateTime(l.created_at))} · ${C.personHtml(l.created_by)}` },
+                { key: 'created', title: 'Created', edit: false, value: l.created_at, display: () => `${esc(L.fmtDateTime(l.created_at))} · ${l.created_by ? C.personHtml(l.created_by) : B.personCell(null, B.src(l, 'Created by'))}` },
                 { key: 'updated', title: 'Modified', edit: false, value: l.updated_at, display: () => esc(L.fmtDateTime(l.updated_at)) },
             ] },
+            B.cfSection(cf, l, async (code, v) => { await updateLead(l, { custom: { ...(l.custom || {}), [code]: v } }); }, edit),
+            // CUSTOM SECTION: the rest of the Bitrix24 export row (imported leads only).
+            B.importSection(l, layout, ['ID', 'Lead Name', 'Name', 'Stage', 'Source', 'Responsible', 'Comment', 'Repeat lead', 'Position', 'Phone', 'Mobile Phone', 'Work Phone', 'E-mail', 'Work E-mail', 'Email', 'Created by', 'Created', 'Modified']
+                .concat(l.estimated_value != null ? ['Amount', 'Currency'] : [])),
         ].filter(Boolean);
+        const lastSect = sections[sections.length - 1];
+        if (lastSect && lastSect.fields.some(f => String(f.key).startsWith('src:'))) lastSect.cls = 'custom';
 
         view.innerHTML = '<div id="card"></div>';
         WSCard.mount(view.querySelector('#card'), {
             title: l.name, number: l.number, subtitle, canEdit: edit, onRename: edit ? save('name') : null,
+            titleAfter: B.isYes(B.src(l, 'Repeat lead')) ? '<span class="b24-rep">Repeat lead</span>' : '', finalLabel: 'Complete lead',
             stages: statuses.map(s => ({ key: s.key, title: s.label, hex: hexOf(s.key), kind: s.is_converted ? 'won' : s.is_closed ? 'lost' : 'open' })),
             stage: l.status, canMove: edit && !converted && !l.archived_at,
             onStage: async key => {
@@ -781,7 +825,7 @@
                 { key: 'history', title: 'History', render: el => C.activityFeed(el, { entity_type: 'lead', entity_id: id, lead_id: id, limit: 200 }) },
             ],
             timeline: {
-                entity_type: 'lead', entity_id: id, links: { lead_id: id },
+                entity_type: 'lead', entity_id: id, links: { lead_id: id }, before: B.thingsToDo(tasks),
                 composer: [
                     { title: 'To-do', onOpen: newTask },
                     { title: 'Meeting', onOpen: newMeet },

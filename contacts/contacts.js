@@ -28,6 +28,10 @@
     const canDeleteC = c => B.allowed(lv.delete, c, me);
     const nameOf = c => c.full_name || [c.first_name, c.last_name].filter(Boolean).join(' ') || c.organization || '(no name)';
     const companyOf = c => (c.company_rec && c.company_rec.title) || c.organization || '';
+    const fullName = c => [c.first_name, c.last_name].filter(Boolean).join(' ') || c.full_name || '';
+    // "Contact type" is not a built-in field: an admin-defined custom field named that way stands in for it.
+    const typeField = cf.find(f => /^(contact[_-]?)?type$/i.test(String(f.code || '')) || /^contact\s*type$/i.test(String(f.label || ''))) || null;
+    const typeOf = c => (typeField ? B.plainText(B.cfDisplay(typeField, c.custom && c.custom[typeField.code]).replace(/<[^>]*>/g, '')) : '');
 
     const page = { mode: null, grid: null, filter: null, view: 'list' };
     function route() {
@@ -206,25 +210,25 @@
         page.mode = 'list';
         WSShell.setCrumb('Contacts');
         document.title = 'Contacts · WorkSuite';
-        const menu = [];
-        if (lv.import !== 'none' && canAdd) menu.push({ label: 'Import from CSV', icon: 'upload', onClick: importContacts });
-        if (lv.export !== 'none') menu.push({ label: 'Export to CSV', icon: 'download', onClick: exportContacts });
-        view.innerHTML = B.titleBar({ title: 'Contacts', createLabel: canAdd ? 'Create' : '', createMenu: menu.length > 0 }) + `
+        view.innerHTML = B.titleBar({ title: 'Contacts', createLabel: canAdd ? 'Create' : '', gear: true }) + `
             <div class="b24-toolbar">
                 <div class="b24-views" role="tablist" aria-label="View">
                     <button type="button" role="tab" data-view="list">List</button>
                     <button type="button" role="tab" data-view="activity">Activities</button>
                 </div>
                 <span class="grow"></span>
-                ${!canAdd && menu.length ? `<button type="button" class="ws-btn sm" data-export>${C.icon('download')}<span>Export to CSV</span></button>` : ''}
             </div>
             <div id="body"></div>`;
         page.filter = WSFilter.mount(view.querySelector('[data-filter]'), { id: 'contacts', fields: filterFields(), presets: PRESETS, defaultPreset: 'active', me: me.id, onChange: () => refreshList() });
         const create = view.querySelector('[data-create]');
         if (create) create.addEventListener('click', () => B.openRecord('/contacts/?id=new', refreshList));
-        const more = view.querySelector('[data-create-menu]');
-        if (more) more.addEventListener('click', () => C.menu(more, menu));
-        const ex = view.querySelector('[data-export]'); if (ex) ex.addEventListener('click', exportContacts);
+        const gear = view.querySelector('[data-gear]');
+        if (gear) gear.addEventListener('click', () => B.listGear({
+            anchor: gear,
+            importItem: lv.import !== 'none' && canAdd ? { label: 'Import custom CSV data', icon: 'upload', onClick: importContacts } : null,
+            exportRows: lv.export !== 'none' ? exportRows : null,
+            permissions: ctx.isManager,
+        }));
         view.querySelector('.b24-views').addEventListener('click', e => { const b = e.target.closest('[data-view]'); if (b) mountView(b.dataset.view); });
         mountView(C.param('view') === 'activity' ? 'activity' : 'list');
         if (C.param('new') === '1' && canAdd) { C.setParam('new', null, true); B.openRecord('/contacts/?id=new', refreshList); }
@@ -244,21 +248,28 @@
         const can = lv.edit !== 'none';
         const save = key => async (r, v) => { if (!canEditC(r)) throw new Error('You do not have permission to change this contact.'); await updateContact(r, { [key]: v }); };
         const people = [{ value: '', label: 'Not assigned' }].concat(B.peopleOptions());
+        // Bitrix24's contact list: Contact | Full Name | Job Title | Company | Contact Type | Responsible | Phone | Email.
+        const whoCell = r => {
+            const sub = [typeOf(r), r.job_title].filter(Boolean).join(', ');
+            return `<span class="b24-who round">${C.avatarHtml({ name: nameOf(r) }, 'sm')}<span><a href="/contacts/?id=${esc(r.id)}" data-open>${esc(nameOf(r))}</a>${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</span></span>`;
+        };
         return [
-            ...(cols.full ? [{ key: 'number', title: 'ID', width: 70, render: r => esc(r.number == null ? '' : r.number) }] : []),
-            { key: 'full_name', title: 'Contact', width: 240, render: r => `<span class="b24-who">${C.avatarHtml({ name: nameOf(r) }, 'sm')}<span><a href="/contacts/?id=${esc(r.id)}" data-open>${esc(nameOf(r))}</a>${r.job_title ? `<span class="sub">${esc(r.job_title)}</span>` : ''}</span></span>` },
+            { key: 'full_name', title: 'Contact', width: 250, render: whoCell },
+            { key: 'first_name', title: 'Full Name', width: 190, render: r => esc(fullName(r)) },
+            { key: 'job_title', title: 'Job Title', width: 170, render: r => esc(r.job_title || ''), edit: can ? { type: 'text', save: save('job_title') } : undefined },
             { key: 'organization', title: 'Company', width: 200, render: r => r.company_id ? `<a href="/companies/?id=${esc(r.company_id)}" data-company="${esc(r.company_id)}">${esc(companyOf(r))}</a>` : esc(r.organization || ''), edit: can ? { type: 'text', save: save('organization') } : undefined },
+            ...(typeField ? [{ key: 'contact_type', title: 'Contact Type', width: 150, sortable: false, render: r => esc(typeOf(r)) }] : []),
+            { key: 'owner_id', title: 'Responsible', width: 200, render: r => B.personCell(r.owner_id), edit: can ? { type: 'people', options: people, save: save('owner_id') } : undefined },
             { key: 'phone', title: 'Phone', width: 150, render: r => r.phone ? `<a href="tel:${esc(r.phone)}">${esc(r.phone)}</a>` : '', edit: can ? { type: 'text', save: save('phone') } : undefined },
             { key: 'email', title: 'Email', width: 210, render: r => r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : '', edit: can ? { type: 'text', save: save('email') } : undefined },
-            { key: 'owner_id', title: 'Responsible', width: 180, render: r => C.personHtml(r.owner_id, { link: false }), edit: can ? { type: 'people', options: people, save: save('owner_id') } : undefined },
-            { key: 'status', title: 'Status', width: 110, render: r => C.statusBadge(STATUS, r.status) },
-            { key: 'created_at', title: 'Created', width: 120, render: r => `<span class="muted">${esc(L.fmtDate(r.created_at, { short: true }))}</span>` },
+            ...(cols.full ? [{ key: 'number', title: 'ID', width: 70, default: false, render: r => esc(r.number == null ? '' : r.number) }] : []),
+            { key: 'status', title: 'Status', width: 110, default: false, render: r => C.statusBadge(STATUS, r.status) },
+            { key: 'created_at', title: 'Created', width: 120, default: false, render: r => esc(B.dotDate(r.created_at)) },
             { key: 'source', title: 'Source', width: 130, default: false, render: r => esc(r.source || '') },
             { key: 'city', title: 'City', width: 130, default: false, render: r => esc(r.city || '') },
-            { key: 'job_title', title: 'Position', width: 150, default: false, render: r => esc(r.job_title || '') },
             { key: 'updated_at', title: 'Modified', width: 120, default: false, render: r => `<span class="muted">${esc(L.fmtRelative(r.updated_at))}</span>` },
             { key: 'tags', title: 'Tags', width: 160, default: false, sortable: false, render: r => C.tagsHtml(r.tags) },
-            ...B.cfColumns(cf),
+            ...B.cfColumns(cf.filter(f => f !== typeField)),
         ];
     }
     function mountGrid(host) {
@@ -281,7 +292,8 @@
             C.toast('Deleted', 'ok');
         } });
         page.grid = WSGrid.mount(host, {
-            id: 'contacts', columns: gridColumns(), sort: { key: 'updated_at', dir: 'desc' },
+            // 'contacts-list': the Bitrix24 column set; the settings saved for the old list do not carry over.
+            id: 'contacts-list', columns: gridColumns(), sort: { key: 'updated_at', dir: 'desc' },
             load: async ({ offset, limit, sort }) => {
                 let b = scoped(sb.from('crm_contacts').select(SELECT));
                 b = sort ? b.order(sort.key, { ascending: sort.dir === 'asc', nullsFirst: false }) : b.order('updated_at', { ascending: false });
@@ -338,21 +350,29 @@
         if (id) openContact(id);
     });
 
+    // On the contact card: a deal or to-do beside the timeline opens in a slide-over.
+    view.addEventListener('click', e => {
+        const a = e.target.closest('a[data-open-deal], a[data-open-task]');
+        if (!a || e.metaKey || e.ctrlKey || e.shiftKey || page.mode !== 'record') return;
+        e.preventDefault();
+        const again = () => C.param('id') && showRecord(C.param('id'));
+        if (a.dataset.openDeal) B.openRecord(`/deals/?id=${a.dataset.openDeal}`, again); else B.openRecord(`/tasks/?id=${a.dataset.openTask}`, again);
+    });
+
     /* ------------------------------------------------- import / export */
-    async function exportContacts() {
-        try {
-            const { data } = await C.q(scoped(sb.from('crm_contacts').select(SELECT)).order('full_name').limit(5000));
-            const rows = data || [];
-            B.exportCsv(`contacts-${L.todayIST()}.csv`, [
-                { title: 'First name', value: r => r.first_name }, { title: 'Last name', value: r => r.last_name },
-                { title: 'Position', value: r => r.job_title }, { title: 'Company', value: r => companyOf(r) },
-                { title: 'Email', value: r => r.email }, { title: 'Phone', value: r => r.phone },
-                { title: 'City', value: r => r.city }, { title: 'Country', value: r => r.country }, { title: 'Source', value: r => r.source },
-                { title: 'Responsible', value: r => r.owner_id ? C.personName(r.owner_id) : '' }, { title: 'Status', value: r => STATUS[r.status] ? STATUS[r.status].label : r.status },
-                { title: 'Tags', value: r => r.tags }, { title: 'Created', value: r => L.fmtDate(r.created_at) },
-            ], rows);
-            C.toast(`Exported ${rows.length} contact${rows.length === 1 ? '' : 's'}${rows.length >= 5000 ? ' (first 5,000)' : ''}`, 'ok');
-        } catch (e) { C.toast(e.message, 'bad'); }
+    /** Export to CSV / Excel (the ⚙ menu): the filtered contacts. */
+    async function exportRows() {
+        const { data } = await C.q(scoped(sb.from('crm_contacts').select(SELECT)).order('full_name').limit(5000));
+        return { filename: 'contacts', rows: data || [], columns: [
+            { title: 'Contact', value: r => nameOf(r) }, { title: 'First name', value: r => r.first_name }, { title: 'Last name', value: r => r.last_name },
+            { title: 'Job Title', value: r => r.job_title }, { title: 'Company', value: r => companyOf(r) },
+            ...(typeField ? [{ title: 'Contact Type', value: r => typeOf(r) }] : []),
+            { title: 'Responsible', value: r => r.owner_id ? C.personText(r.owner_id) : '' },
+            { title: 'Phone', value: r => r.phone }, { title: 'Email', value: r => r.email },
+            { title: 'City', value: r => r.city }, { title: 'Country', value: r => r.country }, { title: 'Source', value: r => r.source },
+            { title: 'Status', value: r => STATUS[r.status] ? STATUS[r.status].label : r.status },
+            { title: 'Tags', value: r => r.tags }, { title: 'Created', value: r => L.fmtDate(r.created_at) },
+        ] };
     }
     function importContacts() {
         B.importCsv({
@@ -455,7 +475,7 @@
         document.title = `${nameOf(c)} · Contacts · WorkSuite`;
         WSShell.setCrumb(nameOf(c));
         const [deals, tasks, events, invoices, projects] = await Promise.all([
-            C.related('crm_deals', 'contact_id', id, 'id, title, value, currency, status, stage_id, owner_id, expected_close_date, created_at'),
+            C.related('crm_deals', 'contact_id', id, 'id, title, value, currency, status, stage_id, owner_id, expected_close_date, actual_close_date, created_at'),
             C.related('tasks', 'contact_id', id, 'id, title, status, priority, assignee_id, due_date, completed_at, archived_at, created_at', b => b.is('archived_at', null)),
             C.related('calendar_events', 'contact_id', id, 'id, title, starts_at, ends_at, event_type, status, owner_id', b => b.order('starts_at', { ascending: false })),
             invLv.read !== 'none' ? C.related('invoices', 'contact_id', id, 'id, invoice_number, invoice_date, due_date, status, total, amount_paid, balance, currency') : Promise.resolve([]),
@@ -478,20 +498,25 @@
         if (window.WSShell && WSShell.inSlider) menu.push('sep', { label: 'Open as a page', icon: 'link', onClick: () => { window.top.location.href = `/contacts/?id=${c.id}`; } });
 
         const sections = [
+            // ABOUT CONTACT as Bitrix24 shows it.
             { title: 'About contact', fields: [
+                { key: 'job_title', title: 'Job Title', type: 'text', value: c.job_title, save: save('job_title') },
+                ...(typeField ? [{ ...B.cfSection([typeField], c, async (code, v) => { await updateContact(c, { custom: { ...(c.custom || {}), [typeField.code]: v } }); }, true).fields[0], title: 'Contact type' }] : []),
+                { key: 'owner_id', title: 'Responsible', type: 'people', none: 'Not assigned', value: c.owner_id, display: v => B.personBox(v), save: save('owner_id') },
+                { key: 'phone', title: 'Phone', type: 'tel', value: c.phone, display: v => v ? `<a href="tel:${esc(v)}">${esc(v)}</a><span class="b24-sublbl">Work Phone</span>` : '', save: save('phone') },
+                { key: 'email', title: 'E-mail', type: 'email', value: c.email, display: v => v ? `<a href="mailto:${esc(v)}">${esc(v)}</a><span class="b24-sublbl">Work E-mail</span>` : '', save: save('email') },
+                { key: 'notes', title: 'Comment', type: 'textarea', value: c.notes, display: v => v ? `<span class="b24-lines">${C.linkify(C.nl2br(v))}</span>` : '', save: save('notes') },
+                { key: 'source', title: 'Source', type: 'select', options: SOURCES, placeholder: 'Not selected', value: c.source, save: save('source') },
+            ] },
+            B.cfSection(cf.filter(f => f !== typeField), c, async (code, v) => { await updateContact(c, { custom: { ...(c.custom || {}), [code]: v } }); }, edit, 'Custom section'),
+            { title: 'Contact details', fields: [
                 { key: 'first_name', title: 'First name', type: 'text', value: c.first_name, required: true, save: save('first_name') },
                 { key: 'last_name', title: 'Last name', type: 'text', value: c.last_name, save: save('last_name') },
-                { key: 'job_title', title: 'Position', type: 'text', value: c.job_title, save: save('job_title') },
                 { key: 'status', title: 'Status', type: 'select', options: [{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }], value: c.status, display: v => C.statusBadge(STATUS, v), save: c.status === 'archived' ? null : save('status') },
-                { key: 'source', title: 'Source', type: 'select', options: SOURCES, value: c.source, save: save('source') },
-                { key: 'tags', title: 'Tags', type: 'tags', value: c.tags, save: save('tags') },
-            ] },
-            { title: 'Contact information', fields: [
-                { key: 'phone', title: 'Phone', type: 'tel', value: c.phone, save: save('phone') },
                 { key: 'phone2', title: 'Other phone', type: 'tel', value: c.phone2, save: save('phone2') },
-                { key: 'email', title: 'Email', type: 'email', value: c.email, save: save('email') },
                 { key: 'email2', title: 'Other email', type: 'email', value: c.email2, save: save('email2') },
                 { key: 'website', title: 'Website', type: 'url', value: c.website, save: save('website') },
+                { key: 'tags', title: 'Tags', type: 'tags', value: c.tags, save: save('tags') },
             ] },
             { title: 'Company', fields: [
                 ...(cols.full ? [{ key: 'company_id', title: 'Company', type: 'entity', entity: 'company', value: c.company_id, display: v => v ? C.entityChip('company', v, (c.company_rec && c.company_rec.title) || 'Company') : '', save: save('company_id') }] : []),
@@ -504,12 +529,7 @@
                 { key: 'postal_code', title: 'Postal code', type: 'text', value: c.postal_code, save: save('postal_code') },
                 { key: 'country', title: 'Country', type: 'text', value: c.country, save: save('country') },
             ] },
-            { title: 'Responsible', fields: [
-                { key: 'owner_id', title: 'Responsible person', type: 'people', none: 'Not assigned', value: c.owner_id, display: v => C.personHtml(v), save: save('owner_id') },
-            ] },
-            B.cfSection(cf, c, async (code, v) => { await updateContact(c, { custom: { ...(c.custom || {}), [code]: v } }); }, edit),
             { title: 'More', fields: [
-                { key: 'notes', title: 'Comment', type: 'textarea', value: c.notes, save: save('notes') },
                 { key: 'deals', title: 'Deals', edit: false, value: 1, display: () => `${pm.open_count} in progress · ${esc(L.money(pm.pipeline_value))} · ${pm.won_count} won` },
                 ...(c.lead_id ? [{ key: 'lead', title: 'Converted from', edit: false, value: c.lead_id, display: () => C.entityChip('lead', c.lead_id, 'Open lead') }] : []),
                 { key: 'created', title: 'Created', edit: false, value: c.created_at, display: () => `${esc(L.fmtDateTime(c.created_at))} · ${C.personHtml(c.created_by)}` },
@@ -517,6 +537,16 @@
             ] },
         ].filter(Boolean);
         sections.forEach(s => s.fields.forEach(f => { if (!edit) f.save = null; }));
+        // Beside the timeline: the contact's to-dos, then its deals ("Deal completed · Deal won · <deal>").
+        const dealLine = dl => {
+            const st = lk.stageById[dl.stage_id];
+            const hexOf = st ? B.hex(st.color, L.stagesOf(lk.stages, st.pipeline_id).indexOf(st)) : '#2fc6f6';
+            const what = dl.status === 'won' ? 'Deal completed' : dl.status === 'lost' ? 'Deal closed' : 'Deal';
+            const badges = (dl.status === 'won' ? '<span class="b24-dbadge" style="--c:#7bd500">Deal won</span>' : dl.status === 'lost' ? '<span class="b24-dbadge" style="--c:#ff5752">Deal lost</span>' : '')
+                + (st && !(dl.status !== 'open' && /^(won|lost)$/i.test(st.name)) ? `<span class="b24-dbadge" style="--c:${esc(hexOf)}">${esc(st.name)}</span>` : '');
+            return `<li><span class="deal"><span class="what">${what}</span>${badges}<a href="/deals/?id=${esc(dl.id)}" data-open-deal="${esc(dl.id)}">${esc(dl.title)}</a><span class="amt">${esc(B.moneyShort(dl.value, dl.currency))}</span></span></li>`;
+        };
+        const dealsHtml = deals.length ? `<div class="b24-todo deals"><span class="b24-todo-h">Deals</span><ul>${deals.slice(0, 8).map(dealLine).join('')}${deals.length > 8 ? `<li class="more">+${deals.length - 8} more in the Deals tab</li>` : ''}</ul></div>` : '';
 
         const tabs = [
             { key: 'deals', title: 'Deals', count: deals.length, render: el => {
@@ -569,11 +599,16 @@
         view.innerHTML = '<div id="card"></div>';
         WSCard.mount(view.querySelector('#card'), {
             title: nameOf(c), number: c.number, canEdit: edit,
+            titleAfter: `<button type="button" class="b24-titlelink" data-card-act="copylink" title="Copy the link to this contact" aria-label="Copy link">${C.icon('link')}</button>`,
+            handlers: { copylink: async () => {
+                const url = `${location.origin}/contacts/?id=${c.id}`;
+                try { await navigator.clipboard.writeText(url); C.toast('Link copied', 'ok'); } catch (e) { C.toast(url, ''); }
+            } },
             subtitle: [c.job_title, companyOf(c)].filter(Boolean).map(esc).join(' · ') + (c.status === 'archived' ? ' ' + C.badge('mute', 'Archived') : ''),
             actions: [{ label: 'New deal', icon: 'deal', onClick: () => newDealFor(c, refresh) }],
             menu, sections, tabs,
             timeline: {
-                entity_type: 'contact', entity_id: id, links: { contact_id: id },
+                entity_type: 'contact', entity_id: id, links: { contact_id: id }, before: B.thingsToDo(tasks) + dealsHtml,
                 composer: [
                     { title: 'To-do', onOpen: newTask },
                     { title: 'Meeting', onOpen: newMeet },

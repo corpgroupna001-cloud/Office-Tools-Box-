@@ -1391,6 +1391,12 @@
             renderAll();
             if (window.WSShell) WSShell.setUser({ name: 'Administrator', company: 'Admin console' });
             document.dispatchEvent(new CustomEvent('admin-unlocked'));
+            // /wsm-admin?tab=crmimport opens on that tab (the CRM pages link here).
+            try {
+                const wanted = new URLSearchParams(location.search).get('tab');
+                const tabBtn = wanted && document.querySelector(`.admin-tab[data-tab="${CSS.escape(wanted)}"]`);
+                if (tabBtn) tabBtn.click();
+            } catch (e) { /* no such tab: stay on the overview */ }
         }
 
         document.getElementById('gate-form').addEventListener('submit', async (e) => {
