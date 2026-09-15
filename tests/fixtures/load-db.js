@@ -26,6 +26,7 @@ const BASE = [
   'supabase-bitrix-migration.sql', 'supabase-bitrix-log-migration.sql', 'supabase-device-enrolments-migration.sql',
   'supabase-admin-management-migration.sql', 'supabase-admin-console-migration.sql',
   'supabase-corpgroup-retire-migration.sql',
+  'supabase-attendance-bitrix-migration.sql',
 ];
 
 // The CRM set, in the order SETUP.md tells an administrator to run it.

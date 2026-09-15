@@ -537,6 +537,27 @@ on the company name, so nothing is lost.
 
 ---
 
+### Attendance → Bitrix24: delivery and shift-end logouts
+
+Run `supabase-attendance-bitrix-migration.sql` (after the dual-shift and Bitrix
+log migrations). Every punch then records whether its group message went
+(**Admin → Attendance**, Bitrix column, with the reason when it did not).
+
+The scheduled call that the dual-shift migration set up
+(`worksuite-shift-switch`, every 5 minutes, `?job=shift_switch`) now also:
+
+- sends again the punches Bitrix did not take (failed or out of time) — up to
+  4 attempts, within 6 hours of the punch;
+- closes a shift nobody logged out of: 10 minutes after the shift ends, someone
+  still logged in is posted as **Logout at the shift end** ("shift ended without
+  a punch-out"), and someone still on a break as **Logout at that break** ("did
+  not return from break by shift end"). Once per person per day. The calendar and
+  pay sheet count that day as ending at the shift end.
+
+Check the scheduler exists with `select jobname, schedule from cron.job;`. If it
+does not, schedule it as `supabase-dual-shift-migration.sql` shows (`?job=attendance_tick`
+works too). Its runs: `select * from cron.job_run_details order by start_time desc limit 10;`.
+
 ## Step 9 — Admin console: onboarding, offboarding, import and audit
 
 Run these two migrations, in order:

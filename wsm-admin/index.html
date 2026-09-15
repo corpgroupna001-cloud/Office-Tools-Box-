@@ -738,7 +738,7 @@
                     <div class="overflow-x-auto" style="max-height:420px;">
                         <table class="w-full text-sm">
                             <thead>
-                                <tr><th>Time</th><th>Employee</th><th>Type</th><th>Device</th><th>Email</th></tr>
+                                <tr><th>Time</th><th>Employee</th><th>Type</th><th>Device</th><th>Email</th><th title="The message in the company's Bitrix24 group">Bitrix</th></tr>
                             </thead>
                             <tbody id="att-feed-tbody"></tbody>
                         </table>
@@ -2921,6 +2921,15 @@
             }
 
             // ---- punch feed ----
+            // Group message delivery (supabase-attendance-bitrix-migration.sql); failed and
+            // deferred ones are sent again by the attendance job.
+            const BX = {
+                sent:     '<span class="text-emerald-300 font-black">✅ Sent</span>',
+                failed:   '<span class="text-rose-300 font-black">❌ Failed · retrying</span>',
+                deferred: '<span class="text-amber-300 font-black">⏳ Retrying</span>',
+                no_group: '<span class="text-amber-300 font-black">⚠️ No group mapped</span>',
+                skipped:  '<span class="text-slate-400 font-bold">— Skipped</span>',
+            };
             const MAIL = {
                 sent:     '<span class="text-emerald-300 font-black">✅ Sent</span>',
                 failed:   '<span class="text-rose-300 font-black">❌ Failed</span>',
@@ -2941,8 +2950,9 @@
                                 : '<span class="text-slate-400 font-bold">• Punch</span>'}</td>
                         <td class="text-slate-300 font-bold">${escapeHtml(l.device_name || l.device_sn || '—')}</td>
                         <td title="${escapeHtml(l.email_error || '')}">${MAIL[l.email_status] || escapeHtml(l.email_status || '—')}</td>
+                        <td title="${escapeHtml(l.bitrix_error || '')}">${BX[l.bitrix_status] || (l.email_status === 'unmapped' ? '<span class="text-amber-300 font-black">⚠️ Not sent: unmapped</span>' : '<span class="text-slate-500">—</span>')}${l.bitrix_error ? `<br><span class="text-slate-400 text-xs">${escapeHtml(l.bitrix_error.slice(0, 80))}</span>` : ''}</td>
                     </tr>`).join('')
-                : '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold">No punches on this date.</td></tr>';
+                : '<tr><td colspan="6" class="p-8 text-center text-slate-400 font-bold">No punches on this date.</td></tr>';
         }
 
         // Bind an unmapped device code to a person.

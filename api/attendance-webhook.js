@@ -57,6 +57,7 @@ const {
   computeMonthlyPay, computePay,
   effectiveShift, shiftPartAt, shiftDays, istIsoWeekday,
   buildPunchChatLine, buildLeaveChatLine,
+  shiftEndAt, autoLogoutFor,
 } = require('../lib/attendance');
 
 // Vercel Hobby kills the function at 10s. Stop starting new sends at 7.5s and
@@ -186,7 +187,8 @@ module.exports = async function handler(req, res) {
   // The scheduler that fires the dual-shift switch may carry its own secret
   // (CRON_SECRET) instead of the device key; nothing else accepts it.
   const CRON_SECRET = process.env.CRON_SECRET || '';
-  const isJobCall = String(req.query && req.query.job || '') === 'shift_switch' && CRON_SECRET && supplied === CRON_SECRET;
+  const JOB = String(req.query && req.query.job || '');
+  const isJobCall = (JOB === 'shift_switch' || JOB === 'attendance_tick') && CRON_SECRET && supplied === CRON_SECRET;
 
   if (supplied !== API_KEY && !isJobCall) {
     // Not the device key — the only other accepted caller is a signed-in
@@ -210,9 +212,19 @@ module.exports = async function handler(req, res) {
   // The dual-shift switch job (pg_cron / any scheduler, every few minutes):
   // posts "Logout" to the first company's chat and "Login" to the second's
   // at the moment the second shift starts, for people who are on site.
-  if (String(req.query && req.query.job || '') === 'shift_switch') {
+  // The same scheduled call also retries punches Bitrix did not take and posts
+  // the Logout for shifts that ended with nobody punched out.
+  if (JOB === 'shift_switch' || JOB === 'attendance_tick') {
     if (!SUPABASE_URL || !SERVICE_KEY) return res.status(500).json({ error: 'Supabase server config missing.' });
-    return runShiftSwitchJob({ res, SUPABASE_URL, SERVICE_KEY });
+    const out = {};
+    if (JOB === 'shift_switch') {
+      const cap = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(b) { this.body = b; return this; } };
+      try { await runShiftSwitchJob({ res: cap, SUPABASE_URL, SERVICE_KEY }); out.shift_switch = cap.body; }
+      catch (e) { out.shift_switch = { error: String(e && e.message || e).slice(0, 200) }; }
+    }
+    try { out.attendance = await runAttendanceTick({ SUPABASE_URL, SERVICE_KEY, startedAt }); }
+    catch (e) { out.attendance = { error: String(e && e.message || e).slice(0, 200) }; }
+    return res.status(200).json({ ok: true, ...out });
   }
 
   // A GET with a valid key is a health check — handy when pasting the URL
@@ -614,6 +626,7 @@ module.exports = async function handler(req, res) {
       else if (out.reason === 'deadline') bitrixDeferred++;
       else if (out.ok) bitrixSent++;
       else bitrixFailed++;
+      await markBitrix({ SUPABASE_URL, H, id: row.id, out });
     };
 
     await Promise.all([
@@ -700,6 +713,146 @@ const EVENT_LABEL = {
 
 // A repeat of the same event inside this window is treated as a double-tap.
 const SELFIE_REPEAT_WINDOW_MS = 60 * 1000;
+
+/* ---------------------------------------------------------------------------
+ * Delivery bookkeeping: what happened to each punch's group message, so the
+ * scheduled job can send again what Bitrix did not take. Fail-soft: before
+ * supabase-attendance-bitrix-migration.sql the columns do not exist and the
+ * PATCH is simply refused.
+ * ------------------------------------------------------------------------- */
+function bitrixStatusOf(out) {
+  if (!out) return 'failed';
+  if (out.ok) return 'sent';
+  if (out.reason === 'no_group') return 'no_group';
+  if (out.reason === 'deadline') return 'deferred';
+  return 'failed';
+}
+async function markBitrix({ SUPABASE_URL, H, id, out, attempts }) {
+  if (!id) return;
+  const patch = { bitrix_status: bitrixStatusOf(out), bitrix_at: new Date().toISOString(),
+                  bitrix_error: out && !out.ok ? `${out.reason || 'error'}: ${out.detail || ''}`.slice(0, 400) : null };
+  if (attempts != null) patch.bitrix_attempts = attempts;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/attendance_logs?id=eq.${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: { ...H, Prefer: 'return=minimal' }, body: JSON.stringify(patch),
+    });
+  } catch { /* bookkeeping only */ }
+}
+
+/* ---------------------------------------------------------------------------
+ * The attendance job (every few minutes, with the shift switch):
+ *
+ *   1. Punches whose group message failed or ran out of time are sent again,
+ *      up to 4 attempts, for 6 hours after the punch.
+ *   2. A shift that has ended with the person still logged in - or still on
+ *      a break - gets its Logout: posted to the group once (attendance_auto_
+ *      logouts claims the day first), and counted as a logout at the shift end
+ *      by the calendar and pay sheet (lib/attendance autoLogoutFor).
+ * ------------------------------------------------------------------------- */
+const RETRY_WINDOW_MS = 6 * 3600 * 1000;
+const RETRY_MAX_ATTEMPTS = 4;
+const AUTO_LOGOUT_GRACE_MS = 10 * 60 * 1000;     // a late punch-out a few minutes after the end still counts
+const AUTO_LOGOUT_WINDOW_MS = 12 * 3600 * 1000;  // after that, too stale to announce
+const TICK_BUDGET_MS = 8000;
+
+async function runAttendanceTick({ SUPABASE_URL, SERVICE_KEY, startedAt = Date.now() }) {
+  const H = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
+  const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...H, ...(opts.headers || {}) } });
+  const report = { retried: 0, retry_sent: 0, auto_logouts: 0, auto_posted: 0, notes: [] };
+  const outOfTime = () => Date.now() - startedAt > TICK_BUDGET_MS;
+  const now = new Date(Date.now());
+
+  const pRes = await fetchProfiles(SUPABASE_URL, H);
+  if (!pRes.ok) return { ...report, error: 'profiles fetch failed' };
+  const profiles = await pRes.json();
+  const byId = new Map(profiles.map(p => [p.id, p]));
+  const shiftList = await sb('shifts?select=*').then(r => (r.ok ? r.json() : [])).catch(() => []);
+  const shiftById = new Map(shiftList.map(x => [x.id, x]));
+  const defaultShift = shiftList.find(x => x.is_default) || null;
+  const shift1Of = p => resolveShift(p, shiftById, defaultShift);
+  const shift2Of = p => (p && p.shift2_id && shiftById.get(p.shift2_id)) || null;
+  const shiftFor = (p, when) => { const s2 = shift2Of(p); return s2 ? effectiveShift(shift1Of(p), s2, istIsoWeekday(new Date(when))) : shift1Of(p); };
+  const companyFor = (p, when) => { const s2 = shift2Of(p); return s2 && p.company2 && shiftPartAt(shift1Of(p), s2, when) === 2 ? p.company2 : p.company; };
+  const bx = await loadBitrixContext({ SUPABASE_URL, H, profiles });
+
+  // ---- 1. Send again what Bitrix did not take ----
+  const since = new Date(now.getTime() - RETRY_WINDOW_MS).toISOString();
+  const rr = await sb(`attendance_logs?select=id,user_id,employee_code,direction,event_type,log_datetime,source,bitrix_attempts` +
+    `&bitrix_status=in.(failed,deferred)&bitrix_attempts=lt.${RETRY_MAX_ATTEMPTS}&user_id=not.is.null` +
+    `&log_datetime=gte.${encodeURIComponent(since)}&order=log_datetime.asc&limit=40`).catch(() => null);
+  if (!rr || !rr.ok) report.notes.push('retry skipped: run supabase-attendance-bitrix-migration.sql');
+  else {
+    for (const row of await rr.json()) {
+      if (outOfTime()) { report.notes.push('retry stopped at the time budget'); break; }
+      const p = byId.get(row.user_id); if (!p) continue;
+      const when = new Date(row.log_datetime);
+      const shift = shiftFor(p, when);
+      const shiftEval = shift ? evaluateShift({ shift, date: when,
+        firstIn: row.event_type === 'LOGIN' ? when : null, lastOut: row.event_type === 'LOGOUT' ? when : null }) : null;
+      report.retried++;
+      const out = await postPunchToGroup({ SUPABASE_URL, H, bx, company: companyFor(p, when), enroll: row.employee_code || p.employee_code,
+        message: buildPunchChatLine({ fullName: p.full_name, eventType: row.event_type, direction: row.direction, when, shift: shiftEval, source: row.source }) });
+      if (out.ok) report.retry_sent++;
+      await markBitrix({ SUPABASE_URL, H, id: row.id, out, attempts: (row.bitrix_attempts || 0) + 1 });
+    }
+  }
+
+  // ---- 2. Shifts that ended with nobody logged out ----
+  const today = istParts(now).isoDate;
+  const yesterday = istParts(new Date(now.getTime() - 86400000)).isoDate;
+  const lr = await sb(`attendance_logs?select=id,user_id,direction,event_type,log_datetime,log_date,source` +
+    `&log_date=in.(${yesterday},${today})&user_id=not.is.null&order=log_datetime.asc&limit=5000`).catch(() => null);
+  if (!lr || !lr.ok) return { ...report, notes: report.notes.concat('auto logout skipped: attendance read failed') };
+  const days = new Map();
+  for (const l of await lr.json()) {
+    const k = `${l.user_id}|${l.log_date}`;
+    if (!days.has(k)) days.set(k, []);
+    days.get(k).push(l);
+  }
+  const lastPunchOf = new Map();                       // user -> their latest punch across both days
+  for (const list of days.values()) for (const l of list) {
+    const cur = lastPunchOf.get(l.user_id);
+    if (!cur || new Date(l.log_datetime) > new Date(cur.log_datetime)) lastPunchOf.set(l.user_id, l);
+  }
+
+  for (const [k, list] of days) {
+    if (outOfTime()) { report.notes.push('auto logout stopped at the time budget'); break; }
+    const [userId, date] = k.split('|');
+    const p = byId.get(userId); if (!p) continue;
+    const shift = shiftFor(p, list[0].log_datetime);
+    const end = shiftEndAt(date, shift);
+    if (!end) continue;
+    if (now - end < AUTO_LOGOUT_GRACE_MS || now - end > AUTO_LOGOUT_WINDOW_MS) continue;
+    const last = list[list.length - 1];
+    if (lastPunchOf.get(userId) !== last) continue;    // they have punched since: that day is closed
+    const auto = autoLogoutFor({ date, shift, punches: list, now });
+    if (!auto) continue;
+
+    // Claim the day before posting, so a scheduler firing every few minutes posts once.
+    const claim = await sb('attendance_auto_logouts?on_conflict=user_id,log_date', {
+      method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
+      body: JSON.stringify({ user_id: userId, log_date: date, kind: auto.kind, logout_at: auto.at.toISOString(), company: companyFor(p, auto.at) }),
+    }).catch(() => null);
+    if (!claim || !claim.ok) { report.notes.push('auto logout skipped: run supabase-attendance-bitrix-migration.sql'); break; }
+    if (!(await claim.json()).length) continue;        // already posted
+    report.auto_logouts++;
+
+    if (auto.kind === 'break_not_returned') {
+      // The break was the end of their day.
+      await sb(`attendance_logs?id=eq.${auto.lastPunch.id}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ event_type: 'LOGOUT' }) }).catch(() => {});
+    }
+    const out = await postPunchToGroup({ SUPABASE_URL, H, bx, company: companyFor(p, auto.at), enroll: p.employee_code, kind: 'auto_logout',
+      message: buildPunchChatLine({ fullName: p.full_name, eventType: 'LOGOUT', direction: 'OUT', when: auto.at, source: 'auto',
+        note: auto.kind === 'no_punch_out' ? 'shift ended without a punch-out' : 'did not return from break by shift end' }) });
+    if (out.ok) report.auto_posted++;
+    await sb(`attendance_auto_logouts?user_id=eq.${encodeURIComponent(userId)}&log_date=eq.${date}`, {
+      method: 'PATCH', headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ bitrix_ok: !!out.ok, detail: out.ok ? null : `${out.reason || 'error'}: ${out.detail || ''}`.slice(0, 300) }),
+    }).catch(() => {});
+  }
+  return report;
+}
 
 /* ---------------------------------------------------------------------------
  * Bitrix: who posts, and where
@@ -1323,8 +1476,10 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
       }
     } catch { /* email still goes out, just without the shift note */ }
 
-    let emailed = false, emailError = null;
-    if (profile.email) {
+    // Email and the group message go out together: one waiting on the other
+    // can run past Vercel's 10 seconds and lose the second one.
+    const emailJob = (async () => {
+      if (!profile.email) return { ok: false, reason: 'no_email', detail: 'No email on the profile.' };
       const { subject, html, text } = buildPunchEmail({
         fullName: profile.full_name,
         direction: insertRow.direction,
@@ -1334,10 +1489,29 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
         employeeCode: profile.employee_code,
         shift: shiftEval,
       });
-      const result = await sendMail({ company: profile.company, to: profile.email, subject, html, text });
-      emailed = result.ok;
-      if (!result.ok) emailError = `${result.reason}: ${result.detail}`.slice(0, 400);
-    }
+      try { return await sendMail({ company: profile.company, to: profile.email, subject, html, text }); }
+      catch (e) { return { ok: false, reason: 'error', detail: String(e && e.message || e) }; }
+    })();
+    // Same group post as a biometric punch - a WFH selfie is a punch, posted
+    // as the person. Never allowed to fail the request: the photo is stored.
+    const bitrixJob = (async () => {
+      try {
+        const out = await postToCompanyGroup({ SUPABASE_URL, H, company: profile.company, enroll: profile.employee_code, message:
+          buildPunchChatLine({
+            fullName: profile.full_name, eventType, direction: insertRow.direction,
+            when, shift: shiftEval, source: 'selfie',
+          }) });
+        await markBitrix({ SUPABASE_URL, H, id: row.id, out });
+        return out;
+      } catch (e) {
+        console.error('[selfie] bitrix', String(e && e.message || e));
+        await markBitrix({ SUPABASE_URL, H, id: row.id, out: { ok: false, reason: 'error', detail: String(e && e.message || e) } });
+        return { ok: false };
+      }
+    })();
+    const [mail] = await Promise.all([emailJob, bitrixJob]);
+    const emailed = !!mail.ok;
+    const emailError = emailed || !profile.email ? null : `${mail.reason}: ${mail.detail}`.slice(0, 400);
 
     await fetch(`${SUPABASE_URL}/rest/v1/attendance_logs?id=eq.${row.id}`, {
       method: 'PATCH',
@@ -1348,17 +1522,6 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
         email_error:  emailed ? null : emailError,
       }),
     }).catch(() => {});
-
-    // Same group post as a biometric punch - a WFH selfie is a punch, posted
-    // as the person. Awaited but never allowed to fail the request: the
-    // photo is already stored.
-    try {
-      await postToCompanyGroup({ SUPABASE_URL, H, company: profile.company, enroll: profile.employee_code, message:
-        buildPunchChatLine({
-          fullName: profile.full_name, eventType, direction: insertRow.direction,
-          when, shift: shiftEval, source: 'selfie',
-        }) });
-    } catch (e) { console.error('[selfie] bitrix', String(e && e.message || e)); }
 
     return res.status(200).json({
       success: true,
