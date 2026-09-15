@@ -245,6 +245,10 @@ test('the tasks badge counts overdue plus due today, open tasks only', () => {
 test('project progress is derived from completed tasks', () => {
   assert.deepEqual(L.projectProgress([]), { total: 0, done: 0, pct: 0 });
   assert.deepEqual(L.projectProgress([{ completed_at: 'x' }, {}, {}, { completed_at: 'x', archived_at: 'x' }]), { total: 3, done: 1, pct: 33 });
+  // A completed project is finished whatever its tasks say; any other status still counts tasks.
+  assert.deepEqual(L.projectProgress([], { status: 'completed' }), { total: 0, done: 0, pct: 100, completed: true });
+  assert.deepEqual(L.projectProgress([{ completed_at: 'x' }, {}], { status: 'completed' }), { total: 2, done: 1, pct: 100, completed: true });
+  assert.deepEqual(L.projectProgress([{ completed_at: 'x' }, {}], { status: 'active' }), { total: 2, done: 1, pct: 50 });
 });
 
 /* ====== Permissions ====== */

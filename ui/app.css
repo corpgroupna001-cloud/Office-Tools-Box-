@@ -496,6 +496,7 @@ body.ws-app [hidden] { display: none !important; }
 /* Progress bar */
 .ws-bar { height: 6px; border-radius: 999px; background: var(--ws-bg-2); overflow: hidden; }
 .ws-bar > i { display: block; height: 100%; background: var(--ws-primary); border-radius: 999px; transition: width 400ms cubic-bezier(.2,.9,.3,1); }
+.ws-bar.done > i { background: var(--ws-success, #22c55e); }
 
 /* Empty state / skeleton / toast */
 .ws-empty { padding: 22px 12px; text-align: center; color: var(--ws-text-muted); font-size: 13px; font-weight: 500; }

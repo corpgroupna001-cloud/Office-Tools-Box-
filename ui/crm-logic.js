@@ -362,10 +362,17 @@
   /** The number on the Tasks nav badge: overdue + due today, open only. */
   function taskBadgeCount(tasks, today) { const c = taskCounts(tasks, today); return c.overdue + c.due_today; }
   /** Project progress derived from its tasks (subtasks count too). */
-  function projectProgress(tasks) {
+  /**
+   * How far along a project is: the share of its live tasks that are done.
+   * A project marked completed is finished whatever its tasks say, so it
+   * reads 100% (with completed: true); one with no tasks yet reads 0%.
+   */
+  function projectProgress(tasks, project) {
     const live = (tasks || []).filter(t => !t.archived_at);
     const done = live.filter(t => !!t.completed_at).length;
-    return { total: live.length, done, pct: live.length ? Math.round((done / live.length) * 100) : 0 };
+    const out = { total: live.length, done, pct: live.length ? Math.round((done / live.length) * 100) : 0 };
+    if (project && project.status === 'completed') return { ...out, pct: 100, completed: true };
+    return out;
   }
   const PRIORITY = {
     low: { label: 'Low', color: 'weekoff', rank: 0 },

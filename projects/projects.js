@@ -56,8 +56,14 @@
         const label = st === 'overdue' ? `Overdue · ${L.fmtDate(p.due_date, { short: true })}` : st === 'today' ? 'Due today' : `Due ${L.fmtDate(p.due_date, { short: true })}`;
         return `<span class="crm-due ${st}">${esc(label)}</span>`;
     }
+    /** What the bar says: tasks done, or that the project is completed, or that it has no tasks yet. */
+    function progressText(prog) {
+        const tasks = `${prog.done} of ${prog.total} task${prog.total === 1 ? '' : 's'} done`;
+        if (prog.completed) return prog.total ? `Completed · ${tasks}` : 'Completed · 100%';
+        return prog.total ? `${tasks} · ${prog.pct}%` : 'No tasks yet · 0%';
+    }
     function progressHtml(prog, withText) {
-        return `<div class="ws-bar" title="${prog.done} of ${prog.total} tasks done"><i style="width:${prog.pct}%"></i></div>${withText ? `<span class="muted" style="font-size:12.5px">${prog.done} of ${prog.total} task${prog.total === 1 ? '' : 's'} done · ${prog.pct}%</span>` : ''}`;
+        return `<div class="ws-bar${prog.completed ? ' done' : ''}" title="${esc(progressText(prog))}"><i style="width:${prog.pct}%"></i></div>${withText ? `<span class="muted" style="font-size:12.5px">${esc(progressText(prog))}</span>` : ''}`;
     }
     function canEditProject(p, memberIds) {
         return L.canEdit({ owner_id: p.owner_id, manager_id: p.manager_id, created_by: p.created_by, member_ids: memberIds || [] }, me);
@@ -161,7 +167,7 @@
         return m ? ({ manager: 'Manager', moderator: 'Moderator', owner: 'Owner' }[m.role] || 'Member') : '';
     }
     function memberIdsOf(pid) { return page.members.filter(m => m.project_id === pid).map(m => m.user_id); }
-    function progressOfP(pid) { return L.projectProgress(page.tasks.filter(t => t.project_id === pid)); }
+    function progressOfP(p) { return L.projectProgress(page.tasks.filter(t => t.project_id === p.id), p); }
     function joinHtml(p) {
         if (!cols.full || myRole(p) || p.archived_at) return '';
         if ((p.privacy || 'public') === 'public') return `<button type="button" class="ws-btn sm" data-join="${esc(p.id)}">Join</button>`;
@@ -317,7 +323,7 @@
                 { key: 'members', title: 'Members', width: 150, sortable: false, render: p => C.avatarsHtml([p.owner_id, p.manager_id].filter(Boolean).concat(memberIdsOf(p.id)).filter((x, i, a) => a.indexOf(x) === i), 5) },
                 { key: 'role', title: 'My role', width: 130, sortable: false, render: p => esc(myRole(p)) || joinHtml(p) },
                 ...(cols.full ? [{ key: 'privacy', title: 'Privacy', width: 110, render: privacyBadge }] : []),
-                { key: 'progress', title: 'Progress', width: 150, sortable: false, render: p => { const pr = progressOfP(p.id); return `<div style="min-width:110px">${progressHtml(pr, false)}<span class="muted" style="font-size:12px">${pr.done}/${pr.total} · ${pr.pct}%</span></div>`; } },
+                { key: 'progress', title: 'Progress', width: 150, sortable: false, render: p => { const pr = progressOfP(p); return `<div style="min-width:110px">${progressHtml(pr, false)}<span class="muted" style="font-size:12px">${pr.completed ? 'Completed · 100%' : pr.total ? `${pr.done}/${pr.total} · ${pr.pct}%` : 'No tasks · 0%'}</span></div>`; } },
                 { key: 'status', title: 'Status', width: 120, render: p => C.statusBadge(L.PROJECT_STATUS, p.status) },
                 { key: 'due_date', title: 'Deadline', width: 150, render: p => dueChip(p) },
                 { key: 'manager_id', title: 'Project manager', width: 170, default: false, render: p => C.personHtml(p.manager_id, { link: false, none: 'Not assigned' }) },
@@ -342,7 +348,7 @@
             try {
                 const rows = await withExtras((await C.q(scoped(sb.from('projects').select(SELECT)).order('updated_at', { ascending: false }).limit(200))).data || []);
                 if (!rows.length) { body.innerHTML = '<div class="b24-area pad"></div>'; C.empty(body.firstElementChild, 'No projects here', 'Change the filter, or create a project for your team.'); return; }
-                body.innerHTML = `<div class="b24-tiles">${rows.map(p => { const pr = progressOfP(p.id); return `<article class="b24-tile" data-id="${esc(p.id)}">
+                body.innerHTML = `<div class="b24-tiles">${rows.map(p => { const pr = progressOfP(p); return `<article class="b24-tile" data-id="${esc(p.id)}">
                     <div class="top">${projAvatar(p, 'lg')}<div class="t"><a href="/projects/?id=${esc(p.id)}" data-open>${esc(p.name)}</a><span>${esc(myRole(p) || (cols.full ? PRIVACY[p.privacy || 'public'].label + ' project' : ''))}</span></div><button type="button" class="g-rowmenu" data-tile-menu="${esc(p.id)}" aria-label="Actions">☰</button></div>
                     <div class="badges">${C.statusBadge(L.PROJECT_STATUS, p.status)}${cols.full ? privacyBadge(p) : ''}${dueChip(p)}</div>
                     ${progressHtml(pr, true)}
@@ -494,7 +500,7 @@
         const canEdit = () => canEditProject(p, mids());
         // The same people project_members_manage lets in (moderators approve join requests, which a trigger turns into members).
         const canManageMembers = () => ctx.isManager || p.owner_id === me.id || p.manager_id === me.id || p.created_by === me.id;
-        const prog = () => L.projectProgress(tasks);
+        const prog = () => L.projectProgress(tasks, p);
 
         function headHtml() {
             const pr = prog();
@@ -547,7 +553,7 @@
                 <div class="crm-kpis">
                     <div class="crm-kpi"><div class="lbl">Open tasks</div><div class="val">${counts.open}</div><div class="sub">${counts.total} total</div></div>
                     <div class="crm-kpi ${counts.overdue ? 'bad' : ''}"><div class="lbl">Overdue</div><div class="val">${counts.overdue}</div><div class="sub ${counts.overdue ? 'bad' : ''}">${counts.due_today} due today</div></div>
-                    <div class="crm-kpi ok"><div class="lbl">Completed</div><div class="val">${counts.completed}</div><div class="sub">${prog().pct}% of tasks</div></div>
+                    <div class="crm-kpi ok"><div class="lbl">Completed</div><div class="val">${counts.completed}</div><div class="sub">${L.projectProgress(tasks).pct}% of tasks</div></div>
                     <div class="crm-kpi"><div class="lbl">Upcoming meetings</div><div class="val">${upcoming.length}</div><div class="sub">${events.filter(e => e.status !== 'cancelled').length} scheduled in total</div></div>
                 </div>
                 <div class="crm-detail">
