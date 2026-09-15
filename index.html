@@ -27,6 +27,9 @@
         .online-names { font-size: 12.5px; color: var(--ws-text-2); font-weight: 600; }
         .online-names a { color: inherit; text-decoration: none; }
         .online-names a:hover { color: var(--ws-primary); }
+        /* Team today: Employee ID above the name */
+        #team-body .who b.emp-id { display: block; font-variant-numeric: tabular-nums; }
+        #team-body .who .emp-name { display: block; font-size: 12.5px; font-weight: 500; color: var(--ws-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .dash-strip-skel { display: flex; gap: 5px; }
         .dash-strip-skel .ws-skel { flex: 1; height: 28px; }
         .lv-days { font-size: 11px; color: var(--ws-text-muted); font-weight: 600; }
@@ -252,95 +255,6 @@
         </div>
     </div>
 
-    <!-- Profile Settings Modal (home-screen version) -->
-    <div id="profile-modal" class="fixed inset-0 z-[62] hidden items-center justify-center p-4" data-ws="scrim">
-        <div class="w-full max-w-md rounded-[2.5rem] p-8 max-h-[92vh] overflow-y-auto" data-ws="panel">
-
-            <!-- Avatar + name -->
-            <div class="text-center mb-6">
-                <div class="relative inline-block group">
-                    <div id="profile-avatar" class="w-20 h-20 rounded-3xl flex items-center justify-center text-white font-black text-3xl mx-auto mb-3 overflow-hidden" data-ws="primary">S</div>
-                    <label for="profile-photo-input" class="absolute -bottom-1 -right-1 w-8 h-8 rounded-full flex items-center justify-center text-white text-sm cursor-pointer transition-all hover:scale-110" style="background: linear-gradient(135deg,#10b981,#059669); box-shadow: 0 4px 12px rgba(16,185,129,0.5); border: 2px solid #0b1120;" title="Change photo">
-                        ✎
-                        <input id="profile-photo-input" type="file" accept="image/*" class="hidden">
-                    </label>
-                </div>
-                <h3 id="profile-name" class="text-xl font-black text-white">—</h3>
-                <p id="profile-email" class="text-slate-400 text-sm font-semibold">—</p>
-                <p id="profile-company" class="text-slate-300 text-xs font-bold mt-1">—</p>
-            </div>
-
-            <!-- Stats -->
-            <div class="grid grid-cols-3 gap-2 mb-6">
-                <div class="rounded-2xl p-3 text-center" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">
-                    <div class="text-[10px] font-black text-slate-400 tracking-widest mb-1">TESTS</div>
-                    <div id="profile-tests" class="text-2xl font-black text-white">0</div>
-                </div>
-                <div class="rounded-2xl p-3 text-center" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">
-                    <div class="text-[10px] font-black text-slate-400 tracking-widest mb-1">BEST WPM</div>
-                    <div id="profile-best-wpm" class="text-2xl font-black text-blue-300">0</div>
-                </div>
-                <div class="rounded-2xl p-3 text-center" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">
-                    <div class="text-[10px] font-black text-slate-400 tracking-widest mb-1">QUIZZES</div>
-                    <div id="profile-quizzes" class="text-2xl font-black text-orange-300">0</div>
-                </div>
-            </div>
-
-            <!-- Display name -->
-            <label class="text-[10px] font-black text-slate-400 tracking-widest mb-1 block">DISPLAY NAME</label>
-            <div class="flex gap-2 mb-5">
-                <input id="profile-name-input" type="text" class="flex-1 px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white" data-ws="inset">
-                <button id="profile-name-save" class="px-4 py-3 rounded-xl text-white font-black text-sm" data-ws="primary">Save</button>
-            </div>
-
-            <!-- Account email -->
-            <label class="text-[10px] font-black text-slate-400 tracking-widest mb-1 block">ACCOUNT EMAIL</label>
-            <div class="flex gap-2 mb-2">
-                <input id="profile-email-input" type="email" autocomplete="email" placeholder="new.address@company.com"
-                       class="flex-1 px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400"
-                       style="background: var(--ws-surface); border: 1px solid var(--ws-border);">
-                <button id="profile-email-save" class="px-4 py-3 rounded-xl text-white font-black text-sm whitespace-nowrap"
-                        data-ws="primary">Send link</button>
-            </div>
-            <p id="profile-email-note" class="text-[11px] font-bold text-slate-400 mb-5 leading-relaxed">
-                We email a confirmation link to the new address. Your current address keeps
-                working until you open that link, so a typo locks nobody out.
-            </p>
-
-            <!-- Company -->
-            <label class="text-[10px] font-black text-slate-400 tracking-widest mb-1 block">COMPANY</label>
-            <div class="flex gap-2 mb-5">
-                <select id="profile-company-select" class="flex-1 px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-orange-400/20 font-bold text-white cursor-pointer" data-ws="inset">
-                    <option value="" disabled>Select company</option>
-                    <option value="Nova Sportsmart Private Limited">Nova Sportsmart Private Limited</option>
-                    <option value="Protathlitis Sportsmart LLP">Protathlitis Sportsmart LLP</option>
-                    <option value="Navyug Raise A Player Foundation">Navyug Raise A Player Foundation</option>
-                    <option value="Jobways Point LLP">Jobways Point LLP</option>
-                    <option value="Genie Lamp Private Limited">Genie Lamp Private Limited</option>
-                </select>
-                <button id="profile-company-save" class="px-4 py-3 rounded-xl text-white font-black text-sm" style="background: linear-gradient(135deg,#f97316,#ef4444); box-shadow: 0 4px 12px rgba(249,115,22,0.4);">Save</button>
-            </div>
-
-            <!-- Change password -->
-            <label class="text-[10px] font-black text-slate-400 tracking-widest mb-1 block">CHANGE PASSWORD</label>
-            <div class="space-y-2 mb-5">
-                <input id="profile-pwd" type="password" placeholder="New password (min 6 chars)" class="w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
-                <input id="profile-pwd2" type="password" placeholder="Confirm new password" class="w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-400/20 font-bold text-white placeholder-slate-400" data-ws="inset">
-                <button id="profile-pwd-save" class="w-full text-white font-extrabold py-3 rounded-xl text-sm" data-ws="primary">Update Password</button>
-            </div>
-
-            <!-- Preferences -->
-            <div class="rounded-2xl p-4 mb-5" style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);">
-                <div class="text-[10px] font-black text-slate-400 tracking-widest mb-3">PREFERENCES</div>
-                <div class="flex justify-between text-sm text-white font-semibold mb-2"><span>Version</span><span class="text-slate-300">v2.4</span></div>
-                <div class="flex justify-between text-sm text-white font-semibold"><span>Member since</span><span id="profile-since" class="text-slate-300">—</span></div>
-            </div>
-
-            <button id="profile-signout" class="w-full py-3 rounded-2xl font-black text-rose-300 mb-2 transition-all hover:bg-white/5" style="background: rgba(244,63,94,0.08); border: 1px solid rgba(244,63,94,0.2);">Sign Out</button>
-            <button id="profile-close" class="w-full py-3 rounded-2xl font-black text-white/80 transition-all hover:bg-white/5" data-ws="inset">Close</button>
-        </div>
-    </div>
-
     <!-- Employee dashboard -->
     <main id="dash">
         <div class="ws-page-head ws-anim" style="--i:0">
@@ -512,7 +426,7 @@
     <script>
         WSShell.mount({
             active: 'home', crumb: 'Dashboard',
-            onProfile: function () { if (typeof openProfileModal === 'function') openProfileModal(); },
+            onProfile: function () { location.href = '/employees/?id=me'; },
             onSignOut: async function () {
                 if (window.rootSb) { try { await rootSb.auth.signOut(); } catch (e) {} }
                 if (typeof onLoggedOut === 'function') onLoggedOut();
@@ -933,7 +847,7 @@
                 setInterval(() => loadOnlineTeam().catch(() => {}), 20000),
                 setInterval(() => loadTeamToday().catch(() => {}), 90000),
             ];
-            if (location.hash === '#profile') { history.replaceState(null, '', '/'); openProfileModal(); }
+            if (location.hash === '#profile') { location.replace('/employees/?id=me'); return; }
         }
 
         // ---------- Dashboard ----------
@@ -1010,9 +924,12 @@
 
         async function loadProfileFacts() {
             const facts = document.getElementById('dash-facts');
-            const { data: p } = await rootSb.from('profiles').select('company,shift_id,is_wfh,employee_code').eq('id', currentUser.id).maybeSingle();
+            let pr = await rootSb.from('profiles').select('company,shift_id,is_wfh,employee_code,employee_id').eq('id', currentUser.id).maybeSingle();
+            if (pr.error) pr = await rootSb.from('profiles').select('company,shift_id,is_wfh,employee_code').eq('id', currentUser.id).maybeSingle();   // before the Employee ID migration
+            const p = pr.data;
             myCompany = (p && p.company) || shellUser?.company || '';
             const chips = [];
+            if (p && p.employee_id) chips.push(`<span title="Employee ID"><span class="ic ic-user"></span><b>${esc(p.employee_id)}</b></span>`);
             if (myCompany) chips.push(`<span><span class="ic ic-users"></span>${esc(myCompany)}</span>`);
             try {
                 const { data: shifts } = await rootSb.from('shifts').select('id,name,start_time,end_time,is_default');
@@ -1026,7 +943,7 @@
                 } catch {}
             } catch {}
             if (p && p.is_wfh) chips.push(`<span><span class="ic ic-home"></span>Work from home</span>`);
-            if (p && p.employee_code) chips.push(`<span><span class="ic ic-fingerprint"></span>ID ${esc(p.employee_code)}</span>`);
+            if (p && p.employee_code) chips.push(`<span><span class="ic ic-fingerprint"></span>Biometric ID ${esc(p.employee_code)}</span>`);
             if (facts) { facts.innerHTML = chips.join(''); facts.hidden = !chips.length; }
         }
 
@@ -1093,15 +1010,24 @@
             document.getElementById('strip-sub').textContent = `${worked14} worked · ${fmtDM.format(atNoon(from))} – ${fmtDM.format(atNoon(today))}`;
         }
 
-        let teamAll = [], teamShowAll = false, teamAvatars = null;
+        let teamAll = [], teamShowAll = false, teamAvatars = null, teamIds = new Map();
         async function loadTeamToday() {
             const body = document.getElementById('team-body');
             const counts = document.getElementById('team-counts');
             const toggle = document.getElementById('team-toggle');
             const [t] = await Promise.all([
                 apiView({ mode: 'team_status' }),
-                teamAvatars ? null : rootSb.from('profiles').select('id, avatar_url').not('avatar_url', 'is', null).limit(300)
-                    .then(r => { teamAvatars = new Map((r.data || []).map(p => [p.id, p.avatar_url])); }).catch(() => { teamAvatars = new Map(); }),
+                teamAvatars ? null : (async () => {
+                    // Photos and Employee IDs; before supabase-employee-id-migration.sql there are only photos.
+                    const r = await rootSb.from('profiles').select('id, avatar_url, employee_id').limit(2000);
+                    if (!r.error) {
+                        teamAvatars = new Map((r.data || []).filter(p => p.avatar_url).map(p => [p.id, p.avatar_url]));
+                        teamIds = new Map((r.data || []).filter(p => p.employee_id).map(p => [p.id, p.employee_id]));
+                        return;
+                    }
+                    const r2 = await rootSb.from('profiles').select('id, avatar_url').not('avatar_url', 'is', null).limit(300);
+                    teamAvatars = new Map((r2.data || []).map(p => [p.id, p.avatar_url]));
+                })().catch(() => { teamAvatars = new Map(); }),
             ]);
             const ORDER = { present: 0, late: 1, pending: 2, leave: 3, holiday: 4, weekoff: 5, absent: 6 };
             teamAll = (t.people || []).slice().sort((a, b) => {
@@ -1123,7 +1049,7 @@
                 const list = teamShowAll ? teamAll : teamAll.slice(0, 8);
                 body.innerHTML = list.map(p => `
                     <tr${p.id === currentUser.id ? ' class="me"' : ''}>
-                        <td><div class="who">${avatarHtml({ ...p, avatar_url: teamAvatars && teamAvatars.get(p.id) || '' }, 'sm')}<div><b>${esc(p.name)}${p.id === currentUser.id ? ' <span class="muted">(you)</span>' : ''}</b>${p.is_wfh ? '<small>Work from home</small>' : ''}<small class="co">${esc(p.company || '—')}</small></div></div></td>
+                        <td><div class="who">${avatarHtml({ ...p, avatar_url: teamAvatars && teamAvatars.get(p.id) || '' }, 'sm')}<div>${teamIds.get(p.id) ? `<b class="emp-id">${esc(teamIds.get(p.id))}</b><span class="emp-name">${esc(p.name)}${p.id === currentUser.id ? ' <span class="muted">(you)</span>' : ''}</span>` : `<b>${esc(p.name)}${p.id === currentUser.id ? ' <span class="muted">(you)</span>' : ''}</b>`}${p.is_wfh ? '<small>Work from home</small>' : ''}<small class="co">${esc(p.company || '—')}</small></div></div></td>
                         <td class="muted col-co">${esc(p.company || '—')}</td>
                         <td><span class="ws-badge ${STATUS_BADGE[p.status] || 'mute'}">${esc(p.status === 'pending' ? 'Not in yet' : p.label)}</span></td>
                     </tr>`).join('') || `<tr><td colspan="3"><div class="ws-empty">Nobody on the roster yet.</div></td></tr>`;
@@ -1188,11 +1114,9 @@
             const sub = document.getElementById('online-sub');
             // "Online" = last_seen_at within 60s (matches presence.js threshold)
             const cutoff = new Date(Date.now() - 60_000).toISOString();
-            const { data } = await rootSb.from('profiles')
-                .select('id, full_name, email, avatar_url, last_seen_at')
-                .gte('last_seen_at', cutoff)
-                .not('id', 'eq', currentUser.id)
-                .limit(50);
+            const online = cols => rootSb.from('profiles').select(cols).gte('last_seen_at', cutoff).not('id', 'eq', currentUser.id).limit(50);
+            let { data, error } = await online('id, full_name, email, avatar_url, last_seen_at, employee_id');
+            if (error) ({ data } = await online('id, full_name, email, avatar_url, last_seen_at'));   // before the Employee ID migration
             if (!data || !data.length) {
                 sub.textContent = '';
                 host.innerHTML = '<div class="ws-empty" style="width:100%;padding:10px 0"><b>Nobody else online</b>You are holding the fort.</div>';
@@ -1201,7 +1125,7 @@
             sub.textContent = `${data.length} teammate${data.length > 1 ? 's' : ''}`;
             const shown = data.slice(0, 8);
             host.innerHTML = `<div class="ws-avatar-stack">${shown.map(p => avatarHtml(p, 'sm')).join('')}</div>` +
-                `<div class="online-names">${shown.map(p => `<a href="./chat/#thread=${encodeURIComponent(p.id)}" title="Message ${esc(p.full_name || p.email)}">${esc((p.full_name || p.email || '?').split(' ')[0])}</a>`).join(', ')}${data.length > shown.length ? ` +${data.length - shown.length} more` : ''}</div>`;
+                `<div class="online-names">${shown.map(p => `<a href="./chat/#thread=${encodeURIComponent(p.id)}" title="Message ${esc((p.employee_id ? p.employee_id + ' · ' : '') + (p.full_name || p.email))}">${p.employee_id ? `<b>${esc(p.employee_id)}</b> ` : ''}${esc((p.full_name || p.email || '?').split(' ')[0])}</a>`).join(', ')}${data.length > shown.length ? ` +${data.length - shown.length} more` : ''}</div>`;
         }
 
         async function loadToolStats() {
@@ -1369,7 +1293,6 @@
             dashTimers.forEach(clearInterval); dashTimers = [];
             hideCompanyModal();
             hidePhotoModal();
-            closeProfileModal();
             showAuthModal();
         }
 
@@ -1618,200 +1541,14 @@
         // (Sign-out is available from the Profile Settings modal now.)
 
         // ---------- Nav avatar + Profile Settings modal ----------
-        let profileData = null;
 
         function setNavAvatar(avatarUrl, name) {
             syncShellUser({ avatar: avatarUrl || '', name: name || shellUser?.name || '' });
         }
 
-        async function openProfileModal() {
-            if (!rootSb || !currentUser) return;
-            const m = document.getElementById('profile-modal');
-            m.classList.remove('hidden'); m.classList.add('flex');
-
-            // Load profile row
-            try {
-                const { data: p } = await rootSb.from('profiles').select('*').eq('id', currentUser.id).maybeSingle();
-                profileData = p || {};
-                const name  = p?.full_name || currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
-                const email = p?.email || currentUser.email;
-                const company = p?.company || currentUser.user_metadata?.company || '';
-                const avatar = p?.avatar_url || currentUser.user_metadata?.avatar_url || '';
-
-                document.getElementById('profile-name').innerText = name;
-                document.getElementById('profile-email').innerText = email;
-                document.getElementById('profile-company').innerText = company || 'No company set';
-                document.getElementById('profile-name-input').value = name;
-                document.getElementById('profile-company-select').value = company;
-
-                const av = document.getElementById('profile-avatar');
-                if (avatar) av.innerHTML = `<img src="${avatar}" class="w-full h-full object-cover" alt="">`;
-                else av.innerText = (name || '?').charAt(0).toUpperCase();
-
-                const created = p?.created_at ? new Date(p.created_at) : new Date(currentUser.created_at);
-                document.getElementById('profile-since').innerText = created.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
-            } catch {}
-
-            // Load stats
-            try {
-                const [{ count: tests }, { data: bestRows }, { count: quizzes }] = await Promise.all([
-                    rootSb.from('test_results').select('*', { count: 'exact', head: true }).eq('user_id', currentUser.id),
-                    rootSb.from('test_results').select('wpm').eq('user_id', currentUser.id).order('wpm', { ascending: false }).limit(1),
-                    rootSb.from('quiz_results').select('*', { count: 'exact', head: true }).eq('user_id', currentUser.id)
-                ]);
-                document.getElementById('profile-tests').innerText = tests ?? 0;
-                document.getElementById('profile-best-wpm').innerText = bestRows?.[0]?.wpm ?? 0;
-                document.getElementById('profile-quizzes').innerText = quizzes ?? 0;
-            } catch {}
-        }
-        function closeProfileModal() {
-            const m = document.getElementById('profile-modal');
-            m.classList.add('hidden'); m.classList.remove('flex');
-        }
-
-        document.getElementById('profile-close').addEventListener('click', closeProfileModal);
-
-        // Change photo from profile modal
-        document.getElementById('profile-photo-input').addEventListener('change', async (e) => {
-            const file = e.target.files?.[0];
-            if (!file || !currentUser) return;
-            try {
-                showToast('Compressing photo…', 'info');
-                const dataUrl = await compressImageFile(file, 400, 0.85);
-                const { error } = await rootSb.from('profiles').update({ avatar_url: dataUrl }).eq('id', currentUser.id);
-                if (error) throw error;
-                // (Deliberately NOT mirrored into auth user_metadata — big data
-                // URLs in the JWT break Storage uploads with nginx 400s.)
-                document.getElementById('profile-avatar').innerHTML = `<img src="${dataUrl}" class="w-full h-full object-cover" alt="">`;
-                setNavAvatar(dataUrl, profileData?.full_name);
-                showToast('Photo updated!', 'success');
-            } catch (ex) {
-                showDialog({ type: 'error', title: "Couldn't update photo", message: ex.message || 'Please try a different image.' });
-            } finally { e.target.value = ''; }
-        });
-
-        // Save display name
-        document.getElementById('profile-name-save').addEventListener('click', async () => {
-            const newName = document.getElementById('profile-name-input').value.trim();
-            if (!newName || newName.length < 2) {
-                showDialog({ type: 'warning', title: 'Name too short', message: 'Your display name needs at least 2 characters.' });
-                return;
-            }
-            try {
-                const { error } = await rootSb.from('profiles').update({ full_name: newName }).eq('id', currentUser.id);
-                if (error) throw error;
-                try { await rootSb.auth.updateUser({ data: { full_name: newName } }); } catch {}
-                document.getElementById('profile-name').innerText = newName;
-                setNavAvatar(profileData?.avatar_url, newName);
-                personalizeHero(newName);
-                showToast('Name updated!', 'success');
-            } catch (ex) {
-                showDialog({ type: 'error', title: "Couldn't save name", message: ex.message });
-            }
-        });
-
-        // Change account email.
-        //
-        // Deliberately does NOT write the new address anywhere yet. Supabase
-        // mails a confirmation link and only swaps auth.users.email when it is
-        // opened, so an address entered by mistake - or by someone at an
-        // unlocked desk - can never take over the account. public.profiles is
-        // brought into line by a database trigger on that same update, not from
-        // here, because the confirmation usually happens in a different browser
-        // session from the one that asked for it.
-        document.getElementById('profile-email-save').addEventListener('click', async () => {
-            const input = document.getElementById('profile-email-input');
-            const note  = document.getElementById('profile-email-note');
-            const btn   = document.getElementById('profile-email-save');
-            const next    = input.value.trim().toLowerCase();
-            const current = String(currentUser?.email || '').trim().toLowerCase();
-
-            if (!next) {
-                showDialog({ type: 'warning', title: 'Enter an address',
-                             message: 'Type the new email address you want to use.' });
-                return;
-            }
-            if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(next)) {
-                showDialog({ type: 'warning', title: "That doesn't look like an email",
-                             message: `"${next}" is missing an @ or a domain.` });
-                return;
-            }
-            if (next === current) {
-                showDialog({ type: 'info', title: 'Already your address',
-                             message: 'That is the address on the account already.' });
-                return;
-            }
-
-            const label = btn.textContent;
-            btn.disabled = true; btn.textContent = 'Sending…';
-            try {
-                const { error } = await rootSb.auth.updateUser({ email: next });
-                if (error) throw error;
-                note.textContent = `Confirmation link sent to ${next}. Open it from that inbox to finish the change — until then you keep signing in with ${current}.`;
-                note.className = 'text-[11px] font-bold text-emerald-300 mb-5 leading-relaxed';
-                input.value = '';
-                showToast('Confirmation link sent', 'success');
-            } catch (ex) {
-                const raw = String(ex.message || ex);
-                const friendly = /already been registered|already registered|already exists/i.test(raw)
-                    ? 'Another account already uses that address.'
-                    : /rate|too many/i.test(raw)
-                        ? 'Too many attempts just now. Wait a minute and try again.'
-                        : raw;
-                showDialog({ type: 'error', title: "Couldn't change the email", message: friendly });
-            } finally {
-                btn.disabled = false; btn.textContent = label;
-            }
-        });
-
-        // Save company
-        document.getElementById('profile-company-save').addEventListener('click', async () => {
-            const c = document.getElementById('profile-company-select').value;
-            if (!c) {
-                showDialog({ type: 'warning', title: 'Pick a company', message: 'Please select a company from the dropdown.' });
-                return;
-            }
-            try {
-                const { error } = await rootSb.from('profiles').update({ company: c }).eq('id', currentUser.id);
-                if (error) throw error;
-                try { await rootSb.auth.updateUser({ data: { company: c } }); } catch {}
-                document.getElementById('profile-company').innerText = c;
-                showToast('Company updated!', 'success');
-            } catch (ex) {
-                showDialog({ type: 'error', title: "Couldn't save company", message: ex.message });
-            }
-        });
-
-        // Change password
-        document.getElementById('profile-pwd-save').addEventListener('click', async () => {
-            const p1 = document.getElementById('profile-pwd').value;
-            const p2 = document.getElementById('profile-pwd2').value;
-            if (p1.length < 6) {
-                showDialog({ type: 'warning', title: 'Password too short', message: 'Your new password needs to be at least 6 characters.' });
-                return;
-            }
-            if (p1 !== p2) {
-                showDialog({ type: 'warning', title: "Passwords don't match", message: 'The two password fields need to match. Try again.' });
-                return;
-            }
-            try {
-                const { error } = await rootSb.auth.updateUser({ password: p1 });
-                if (error) throw error;
-                document.getElementById('profile-pwd').value = '';
-                document.getElementById('profile-pwd2').value = '';
-                showDialog({ type: 'success', title: 'Password updated ✓', message: 'Your password has been changed. You may need to log in again on other devices.' });
-            } catch (ex) {
-                showDialog({ type: 'error', title: "Couldn't update password", message: ex.message });
-            }
-        });
-
-        // Sign out
-        document.getElementById('profile-signout').addEventListener('click', async () => {
-            if (rootSb) await rootSb.auth.signOut();
-            closeProfileModal();
-            showToast('You have been signed out.', 'info');
-            onLoggedOut();
-        });
+        // My profile is the Bitrix24-style employee card (employees/employees.js):
+        // photo, name, company, email, password and security are edited there.
+        function openProfileModal() { location.href = '/employees/?id=me'; }
 
         // An invitation link (Employees → Invite): /?signup=1&company=…&email=…
         // opens the sign-up form with those filled in. Nothing else changes:

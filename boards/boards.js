@@ -291,7 +291,7 @@
         wbPage.stamp = fresh.updated_at; snapshotBase((fresh.data || {}).elements);
         wbPage.board.setData(merged);
         scheduleSave(id, merged);
-        setWbStatus(`Merged with ${C.personName(fresh.updated_by)}'s changes…`);
+        setWbStatus(`Merged with ${C.personText(fresh.updated_by)}'s changes…`);
     }
     async function saveNow(id) {
         const data = wbPage.pending; if (!data || !id) return;
@@ -373,7 +373,7 @@
             if (!fresh || fresh.updated_at === wbPage.stamp || wbPage.dirty || wbPage.id !== id) return;
             if (wbPage.board.setData(fresh.data)) {
                 wbPage.stamp = fresh.updated_at; snapshotBase((fresh.data || {}).elements);
-                setWbStatus(fresh.updated_by === me.id ? 'Updated from your other window' : `Updated by ${C.personName(fresh.updated_by)}`);
+                setWbStatus(fresh.updated_by === me.id ? 'Updated from your other window' : `Updated by ${C.personText(fresh.updated_by)}`);
             } else setTimeout(applyRemote, 800);
         };
         wbPage.unsub = C.subscribe('whiteboard', [{ event: 'UPDATE', table: 'whiteboards', filter: `id=eq.${id}` }], payload => {

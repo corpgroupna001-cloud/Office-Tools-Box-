@@ -409,7 +409,7 @@
             </div>
 
             <div class="glass rounded-2xl p-4 mb-6 flex flex-wrap gap-3 items-center">
-                <input id="search-input" type="text" placeholder="Search by name or email…"
+                <input id="search-input" type="text" placeholder="Search by employee ID, name or email…"
                     class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
                 <select id="sort-select" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
                     <option value="created_at.desc">Newest First</option>
@@ -524,7 +524,7 @@
 
                 <!-- Filters -->
                 <div class="glass rounded-2xl p-4 mb-6 flex flex-wrap gap-3 items-center">
-                    <input id="quiz-search" type="text" placeholder="Search by name or email…"
+                    <input id="quiz-search" type="text" placeholder="Search by employee ID, name or email…"
                         class="glass flex-1 min-w-[180px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-400/40">
                     <select id="quiz-cat-filter" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
                         <option value="">All categories</option>
@@ -626,7 +626,7 @@
             <!-- WFH CHECK-INS PANEL -->
             <div id="wfh-panel" class="hidden">
                 <div class="glass rounded-2xl p-4 mb-6 flex flex-wrap gap-3 items-center">
-                    <input id="wfh-search" type="text" placeholder="Search by name or email…"
+                    <input id="wfh-search" type="text" placeholder="Search by employee ID, name or email…"
                         class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
                     <input id="wfh-week" type="date"
                         class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
@@ -688,7 +688,7 @@
                     </div>
                     <button id="att-today" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/10">Today</button>
                     <button id="att-refresh" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh</button>
-                    <input id="att-search" type="text" placeholder="Search name, email or code…"
+                    <input id="att-search" type="text" placeholder="Search employee ID, name, email or biometric ID…"
                         class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
                     <button id="att-resend" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold text-amber-200 inline-flex items-center gap-2 hover:bg-amber-500/10"><span class="ic ic-refresh sm"></span>Resend failed</button>
                     <button id="att-export" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">⬇ Export CSV</button>
@@ -712,7 +712,7 @@
                             <thead>
                                 <tr>
                                     <th>Employee</th>
-                                    <th>Code</th>
+                                    <th title="The fingerprint reader's enrolment number">Biometric ID</th>
                                     <th>Shift</th>
                                     <th>Status</th>
                                     <th>First IN</th>
@@ -806,7 +806,7 @@
                 <div class="section-head mb-3"><h3><span class="ic ic-users"></span>Who works which shift</h3><span class="sub">Changes save immediately · a second shift makes the day one window (first start to last end) and, for another company, posts an automatic Logout / Login to both Bitrix chats when it starts</span></div>
                 <p id="shift-dual-note" class="text-xs font-bold text-amber-300 mb-3" hidden>Second shifts are switched off until <b>supabase-dual-shift-migration.sql</b> has been run in Supabase.</p>
                 <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
-                    <input id="shift-emp-search" type="text" placeholder="Search employee…"
+                    <input id="shift-emp-search" type="text" placeholder="Search employee ID or name…"
                         class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
                     <select id="shift-bulk-select" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none"></select>
                     <button id="shift-bulk-apply" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold text-blue-200 hover:bg-blue-500/10">Apply to all shown</button>
@@ -1014,7 +1014,7 @@
                 <div id="rost-summary" class="glass rounded-2xl p-4 mb-4"></div>
                 <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-4 items-center">
                     <button id="rost-reload" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh</button>
-                    <input id="rost-search" type="text" placeholder="Search name or code&hellip;"
+                    <input id="rost-search" type="text" placeholder="Search name, employee ID or code&hellip;"
                         class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium focus:outline-none">
                     <label class="flex items-center gap-2 text-slate-300 text-xs font-black cursor-pointer">
                         <input id="rost-unbound" type="checkbox" class="w-4 h-4"> Unbound only
@@ -1024,7 +1024,7 @@
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm">
                             <thead>
-                                <tr><th>Enroll No</th><th>Name on device</th><th>Employee Code</th><th>Punches</th><th>Last seen</th><th>WorkSuite account</th></tr>
+                                <tr><th title="The enrolment number on the fingerprint reader">Biometric ID</th><th>Name on device</th><th title="The staff code the reader itself holds, if any">Staff code</th><th>Punches</th><th>Last seen</th><th>WorkSuite account</th></tr>
                             </thead>
                             <tbody id="rost-body"></tbody>
                         </table>
@@ -1071,7 +1071,7 @@
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm">
                             <thead>
-                                <tr><th>Enroll</th><th>Employee</th><th>Company</th><th>Env var</th><th class="text-center">Webhook</th><th>Test</th></tr>
+                                <tr><th title="The enrolment number on the fingerprint reader">Biometric ID</th><th>Employee</th><th>Company</th><th>Env var</th><th class="text-center">Webhook</th><th>Test</th></tr>
                             </thead>
                             <tbody id="bx-hooks-body"></tbody>
                         </table>
@@ -1459,6 +1459,7 @@
             let filtered = allResults;
             if (search) {
                 filtered = filtered.filter(r =>
+                    (r.employee_id || '').toLowerCase().includes(search) ||
                     (r.full_name || '').toLowerCase().includes(search) ||
                     (r.email || '').toLowerCase().includes(search)
                 );
@@ -1481,7 +1482,7 @@
             empty.classList.add('hidden');
             tbody.innerHTML = filtered.map(r => `
                 <tr>
-                    <td class="font-bold">${escapeHtml(r.full_name || '—')}</td>
+                    <td class="font-bold">${empNameHtml(r.employee_id, r.full_name)}</td>
                     <td class="text-slate-300 text-xs">${escapeHtml(r.email || '—')}</td>
                     <td class="mono font-black text-blue-300">${r.wpm ?? '—'}</td>
                     <td class="mono font-black text-emerald-300">${r.accuracy ?? '—'}%</td>
@@ -1559,6 +1560,7 @@
 
             let filtered = allQuizzes;
             if (search) filtered = filtered.filter(r =>
+                (r.employee_id || '').toLowerCase().includes(search) ||
                 (r.full_name || '').toLowerCase().includes(search) ||
                 (r.email || '').toLowerCase().includes(search)
             );
@@ -1590,7 +1592,7 @@
                 const scorePct = Math.round(((r.score || 0) / (r.total || 10)) * 100);
                 const scoreCls = scorePct >= 90 ? 'text-emerald-300' : scorePct >= 70 ? 'text-blue-300' : scorePct >= 50 ? 'text-amber-300' : 'text-rose-300';
                 return `<tr>
-                    <td class="font-bold text-white">${escapeHtml(r.full_name || '—')}<div class="text-slate-400 text-[10px]">${escapeHtml(r.email || '')}</div></td>
+                    <td class="font-bold text-white">${empNameHtml(r.employee_id, r.full_name)}<div class="text-slate-400 text-[10px]">${escapeHtml(r.email || '')}</div></td>
                     <td class="text-slate-200 text-xs">${escapeHtml(catLabel)}${r.ai_topic ? `<div class="text-purple-300 text-[10px]">${escapeHtml(r.ai_topic)}</div>` : ''}</td>
                     <td class="text-slate-300 text-xs">${escapeHtml(r.difficulty || '—')}</td>
                     <td class="mono font-black ${scoreCls}">${r.score ?? '—'}/${r.total ?? 10}</td>
@@ -1746,6 +1748,12 @@
 
         function escapeHtml(s) {
             return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+        /** A person in a list: the Employee ID in bold, then the name; the name alone when there is no ID. Escaped. */
+        function empNameHtml(employeeId, name) {
+            const id = String(employeeId || '').trim();
+            const who = escapeHtml(name || '—');
+            return id ? `<b class="mono whitespace-nowrap">${escapeHtml(id)}</b> <span class="font-semibold">${who}</span>` : who;
         }
         function formatDate(iso) {
             if (!iso) return '—';
@@ -2266,6 +2274,7 @@
             let rows = allWfh;
             if (search) {
                 rows = rows.filter(r =>
+                    (r.employee_id || '').toLowerCase().includes(search) ||
                     (r.full_name || '').toLowerCase().includes(search) ||
                     (r.email     || '').toLowerCase().includes(search)
                 );
@@ -2367,7 +2376,7 @@
                     <div class="glass-strong rounded-2xl p-5">
                         <div class="flex items-start justify-between mb-4 gap-2 flex-wrap">
                             <div>
-                                <h4 class="text-white font-black text-lg">${escapeHtml(row.full_name || '—')}</h4>
+                                <h4 class="text-white font-black text-lg">${empNameHtml(row.employee_id, row.full_name)}</h4>
                                 <p class="text-slate-400 text-xs font-bold">${escapeHtml(row.email || '')} · ${wo}</p>
                             </div>
                             <div class="flex items-center gap-2 flex-wrap">
@@ -2673,7 +2682,7 @@
                     : '<span class="text-emerald-300 font-black">—</span>';
 
                 return `<tr>
-                    <td class="font-bold text-white">${escapeHtml(row.name || '—')}<br><span class="text-slate-400 text-xs font-medium">${escapeHtml(row.email || '')}</span></td>
+                    <td class="font-bold text-white">${empNameHtml(row.employee_id, row.name)}<br><span class="text-slate-400 text-xs font-medium">${escapeHtml(row.email || '')}</span></td>
                     <td class="text-slate-300 font-bold">${escapeHtml(row.company || '—')}</td>
                     <td>${typingCell}</td>
                     <td>${videoCell}</td>
@@ -2815,7 +2824,7 @@
                 ...(attReport.unknown || []).map(u => ({ ...u, full_name: u.employee_name || `Code ${u.employee_code}`, email: null }))
             ];
             const rows = search
-                ? all.filter(r => [r.full_name, r.email, r.employee_code].some(v => String(v || '').toLowerCase().includes(search)))
+                ? all.filter(r => [r.employee_id, r.full_name, r.email, r.employee_code].some(v => String(v || '').toLowerCase().includes(search)))
                 : all;
 
             const tbody = document.getElementById('att-tbody');
@@ -2825,7 +2834,7 @@
                 empty.classList.add('hidden');
                 tbody.innerHTML = rows.map(r => `
                     <tr>
-                        <td class="font-bold text-white">${escapeHtml(r.full_name || '—')}<br>
+                        <td class="font-bold text-white">${empNameHtml(r.employee_id, r.full_name)}<br>
                             <span class="text-slate-400 text-xs font-medium">${escapeHtml(r.email || r.company || '')}</span></td>
                         <td class="text-slate-300 font-bold">${escapeHtml(r.employee_code || '—')}</td>
                         <td class="text-slate-300 font-bold">${r.shift_name
@@ -2858,8 +2867,8 @@
                 ? attFeed.map(l => `
                     <tr>
                         <td class="text-white font-black">${escapeHtml(l.pretty_time || '—')}</td>
-                        <td class="font-bold text-white">${escapeHtml(l.full_name || l.employee_code || '—')}<br>
-                            <span class="text-slate-400 text-xs font-medium">${escapeHtml(l.employee_code || '')}</span></td>
+                        <td class="font-bold text-white">${empNameHtml(l.employee_id, l.full_name || l.employee_code)}<br>
+                            <span class="text-slate-400 text-xs font-medium">${l.employee_code ? 'Biometric ID ' + escapeHtml(l.employee_code) : ''}</span></td>
                         <td>${l.direction === 'IN'
                             ? '<span class="text-emerald-300 font-black">→ IN</span>'
                             : l.direction === 'OUT'
@@ -3035,7 +3044,7 @@
         function shiftVisibleEmployees() {
             const q = document.getElementById('shift-emp-search').value.trim().toLowerCase();
             const list = (shiftData.employees || []);
-            return q ? list.filter(e => [e.full_name, e.email, e.company].some(v => String(v || '').toLowerCase().includes(q))) : list;
+            return q ? list.filter(e => [e.employee_id, e.full_name, e.email, e.company].some(v => String(v || '').toLowerCase().includes(q))) : list;
         }
 
         function renderShiftEmployees() {
@@ -3047,7 +3056,7 @@
                 shifts.map(sh => `<option value="${sh.id}"${String(sel) === String(sh.id) ? ' selected' : ''}>${escapeHtml(sh.name)} (${escapeHtml(hhmm(sh.start_time))}–${escapeHtml(hhmm(sh.end_time))})</option>`).join('');
             document.getElementById('shift-emp-tbody').innerHTML = rows.length ? rows.map(e => `
                 <tr${e.shift2_id ? ' class="dual"' : ''}>
-                    <td class="font-bold text-white">${escapeHtml(e.full_name || '—')}<br>
+                    <td class="font-bold text-white">${empNameHtml(e.employee_id, e.full_name)}<br>
                         <span class="text-slate-400 text-xs font-medium">${escapeHtml(e.email || '')}</span></td>
                     <td class="text-slate-300 font-bold">${escapeHtml(e.company || '—')}</td>
                     <td>
@@ -3287,7 +3296,7 @@
                         : `<div style="width:100%;aspect-ratio:3/4;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.04);">
                              <span class="text-slate-500 text-xs font-bold text-center px-3">Photo purged<br>(over 90 days old)</span></div>`}
                     <div class="p-4">
-                        <p class="text-white font-black text-sm">${escapeHtml(s.full_name || '—')}</p>
+                        <p class="text-white font-black text-sm">${empNameHtml(s.employee_id, s.full_name)}</p>
                         <p class="text-slate-400 text-xs font-bold mb-2">${escapeHtml(s.company || '')}</p>
                         <p class="text-slate-200 font-bold text-xs mb-1">${SF_EVENT[s.event_type] || s.event_type} · ${escapeHtml(s.pretty_time || '')}</p>
                         <p class="text-slate-500 text-xs font-bold mb-2">${escapeHtml(s.pretty_date || '')}</p>
@@ -3392,7 +3401,7 @@
             const rows = leaveData.requests || [];
             document.getElementById('lv-tbody').innerHTML = rows.length ? rows.map(r => `
                 <tr>
-                    <td class="font-bold text-white">${escapeHtml(r.full_name || '—')}<br>
+                    <td class="font-bold text-white">${empNameHtml(r.employee_id, r.full_name)}<br>
                         <span class="text-slate-400 text-xs font-medium">${escapeHtml(r.company || '')}</span></td>
                     <td class="text-slate-300 font-bold">${escapeHtml(r.type_name)}
                         ${r.is_paid === false ? '<br><span class="text-amber-300 text-xs font-black">unpaid</span>' : ''}</td>

@@ -1334,6 +1334,9 @@ body.ws-app .cal-week.three { grid-template-columns: 44px repeat(3, minmax(0, 1f
 .org-node .head { display: flex; align-items: center; gap: 8px; min-height: 32px; margin-top: 8px; font-size: 12.5px; }
 .org-node .head .ws-avatar { width: 30px; height: 30px; flex: 0 0 auto; font-size: 11px; }
 .org-node .head b { display: block; font-size: 12.5px; }
+.org-node .head > span { min-width: 0; }
+.org-node .head b.emp-id { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.org-node .head b.emp-name { font-weight: 500; }
 .org-node .head span span { display: block; font-size: 11px; color: #828b95; }
 .org-node .ft { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px solid #eef2f4; font-size: 12px; color: #525c69; }
 .org-node .ft .avs { display: flex; align-items: center; }
@@ -1598,6 +1601,30 @@ body.ws-b24 .b24-titlebar.emp-bar { margin-bottom: 10px; }
 .emp-photo b { color: var(--b24-text); font-size: 16px; }
 .emp-photo > span { color: var(--b24-text-2); font-size: 13px; }
 .emp-photo .seen { color: var(--b24-muted); font-size: 12px; }
+/* My profile: the photo is the "change photo" button, and the Employee ID leads the name. */
+.emp-photo .shot.editable { position: relative; cursor: pointer; }
+.emp-photo .shot .shot-edit { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 9px; background: rgba(0, 0, 0, .55); color: #fff; font-size: 13px; font-weight: 600; opacity: 0; transition: opacity .15s; }
+.emp-photo .shot.editable:hover .shot-edit, .emp-photo .shot.editable:focus-within .shot-edit { opacity: 1; }
+@media (hover: none) { .emp-photo .shot .shot-edit { opacity: 1; } }
+.emp-photo .emp-idline { color: var(--b24-text); font-size: 13px; font-weight: 700; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+.emp-inline { margin-left: 6px; font-size: 12.5px; }
+.emp-dots { letter-spacing: .12em; color: var(--b24-text-2); }
+.emp-edit { display: grid; gap: 12px; }
+.emp-edit label { display: grid; gap: 4px; }
+.emp-edit label span { color: var(--b24-muted); font-size: 12px; }
+.emp-edit input, .emp-edit select { min-height: 38px; padding: 7px 10px; border: 1px solid var(--b24-line); border-radius: 8px; background: var(--b24-surface); color: var(--b24-text); font-size: 14px; }
+.emp-edit input:focus, .emp-edit select:focus { outline: 2px solid var(--b24-blue, #2fc6f6); outline-offset: 0; border-color: transparent; }
+.emp-edit .muted { margin: 0; font-size: 12.5px; }
+.emp-edit .ok { margin: 0; color: #3f7a00; font-size: 13px; }
+:root[data-theme="dark"] .emp-edit .ok { color: #b7ef61; }
+.emp-edit-do { display: flex; flex-wrap: wrap; gap: 8px; }
+.emp-edit.inline { grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; margin-top: 6px; }
+.emp-edit.inline .muted, .emp-edit.inline .ok { grid-column: 1 / -1; }
+@media (max-width: 560px) { .emp-edit.inline { grid-template-columns: minmax(0, 1fr); } }
+.emp-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.emp-stats > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--b24-surface-2); }
+.emp-stats span { color: var(--b24-muted); font-size: 12px; }
+.emp-stats b { color: var(--b24-text); font-size: 22px; font-weight: 600; }
 .emp-do { display: flex; flex-direction: column; gap: 8px; }
 .emp-do .ws-btn { width: 100%; justify-content: flex-start; }
 /* Field list: label above value, the way a record card reads. */

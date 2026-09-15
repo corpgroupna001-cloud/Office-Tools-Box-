@@ -56,7 +56,8 @@
         const opts = profiles.map(p => {
             const held = p.employee_code && p.employee_code !== row.enroll_no
                 ? ` — now ${esc(p.employee_code)}` : '';
-            return `<option value="${esc(p.id)}"${p.id === row.user_id ? ' selected' : ''}>${esc(p.full_name || p.email)}${held}</option>`;
+            const who = p.employee_id ? `${p.employee_id} · ${p.full_name || p.email}` : (p.full_name || p.email);
+            return `<option value="${esc(p.id)}"${p.id === row.user_id ? ' selected' : ''}>${esc(who)}${held}</option>`;
         }).join('');
         return `<select class="rost-pick glass px-3 py-1.5 rounded-lg text-white font-bold w-56 focus:outline-none" data-enroll="${esc(row.enroll_no)}">` +
                `<option value=""${row.user_id ? '' : ' selected'}>— not bound —</option>` + opts + `</select>`;
@@ -90,7 +91,7 @@
         const unboundOnly = document.getElementById('rost-unbound').checked;
         let rows = d.rows || [];
         if (unboundOnly) rows = rows.filter(r => !r.user_id);
-        if (q) rows = rows.filter(r => [r.enroll_no, r.device_name, r.staff_code, r.bound_name]
+        if (q) rows = rows.filter(r => [r.enroll_no, r.device_name, r.staff_code, r.bound_name, r.bound_employee_id]
             .some(v => String(v || '').toLowerCase().includes(q)));
 
         body.innerHTML = rows.length ? rows.map(r => `
@@ -103,7 +104,7 @@
                 <td>
                     ${accountPicker(r, d.profiles || [])}
                     ${r.user_id
-                        ? `<div class="text-[11px] text-emerald-300 font-bold mt-1">${esc(r.bound_email || '')}</div>`
+                        ? `<div class="text-[11px] text-emerald-300 font-bold mt-1">${r.bound_employee_id ? `<b class="mono">${esc(r.bound_employee_id)}</b> · ` : ''}${esc(r.bound_email || '')}</div>`
                         : ''}
                 </td>
             </tr>`).join('') : '<tr><td colspan="6" class="p-8 text-center text-slate-400 font-bold">Nothing matches.</td></tr>';

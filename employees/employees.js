@@ -17,7 +17,7 @@
     const ctx = await C.boot({ active: 'employees', crumb: 'Employees' });
     const sb = ctx.sb, me = ctx.user;
 
-    let FULL = 'id, full_name, email, avatar_url, company, company2, department, job_title, employee_code, phone, joining_date, manager_id, status, is_wfh, shift_id, shift2_id, last_seen_at, app_role';
+    let FULL = 'id, full_name, email, avatar_url, company, company2, department, job_title, employee_code, phone, joining_date, manager_id, status, is_wfh, shift_id, shift2_id, last_seen_at, app_role, created_at';
     // Employee ID arrives with supabase-employee-id-migration.sql; until then the page works without it.
     const hasEmployeeId = !(await sb.from('profiles').select('employee_id').limit(1)).error;
     if (hasEmployeeId) FULL += ', employee_id';
@@ -69,7 +69,9 @@
         navSeq++;
         if (page.grid) { page.grid.destroy(); page.grid = null; }
         if (page.filter) { page.filter.destroy(); page.filter = null; }
-        const id = C.param('id');
+        let id = C.param('id');
+        // /employees/?id=me is "My profile", what the workspace menu opens.
+        if (id === 'me') { id = me.id; history.replaceState(null, '', `/employees/?id=${encodeURIComponent(id)}${location.hash}`); }
         if (!id && C.param('invite')) return showInvite();
         return id ? showProfile(id) : showDirectory();
     }
@@ -353,14 +355,15 @@
 
         const online = isOnline(p.last_seen_at);
         const roleChip = p.app_role && ROLE[p.app_role] ? ROLE[p.app_role].label : 'Employee';
-        const editHref = self ? '/#profile' : (ctx.isAdmin ? '/wsm-admin' : '');
+        // Your own card is edited right here, the way Bitrix24 does it; others' by an admin in the console.
+        const editHref = !self && ctx.isAdmin ? '/wsm-admin' : '';
         const field = (label, value) => `<div class="f"><dt>${esc(label)}</dt><dd>${value || '<span class="empty">field is empty</span>'}</dd></div>`;
         view.innerHTML = `
             <div class="b24-titlebar emp-bar">
                 <a class="b24-btn-glass" href="/employees/" data-nav>${C.icon('arrow')}<span>Employees</span></a>
                 <h1 class="b24-title">${esc(name)}</h1>
                 <span class="grow"></span>
-                ${self ? `<a class="b24-btn-glass" href="/#profile">${C.icon('edit')}<span>Edit profile</span></a>`
+                ${self ? `<a class="b24-btn-glass" href="/security">${C.icon('shield')}<span>Security</span></a>`
                        : `<a class="b24-btn-glass" href="/chat/#thread=${esc(p.id)}">${C.icon('chat')}<span>Message</span></a>`}
                 ${ctx.isAdmin ? `<a class="b24-btn-glass round" href="/wsm-admin" title="Admin console" aria-label="Admin console">${C.icon('shield')}</a>` : ''}
             </div>
@@ -373,7 +376,10 @@
                                 <span class="role ${esc(p.app_role || 'employee')}">${esc(roleChip)}</span>
                                 <span class="pres${online ? ' on' : ''}"><i></i>${esc(online ? 'Online' : 'Offline')}</span>
                             </div>
-                            <div class="shot">${p.avatar_url ? `<img src="${esc(p.avatar_url)}" alt="${esc(name)}">` : `<span class="mono">${esc(L.initials(name))}</span>`}</div>
+                            ${self
+                                ? `<label class="shot editable" title="Change photo">${p.avatar_url ? `<img src="${esc(p.avatar_url)}" alt="${esc(name)}">` : `<span class="mono">${esc(L.initials(name))}</span>`}<span class="shot-edit">${C.icon('camera')}Change photo</span><input type="file" accept="image/*" id="me-photo" hidden></label>`
+                                : `<div class="shot">${p.avatar_url ? `<img src="${esc(p.avatar_url)}" alt="${esc(name)}">` : `<span class="mono">${esc(L.initials(name))}</span>`}</div>`}
+                            ${p.employee_id ? `<span class="emp-idline" title="Employee ID">${esc(p.employee_id)}</span>` : ''}
                             <b>${esc(name)}</b>
                             <span>${esc([p.job_title, p.department].filter(Boolean).join(' · ') || p.email || '')}</span>
                             <span class="seen">${esc(lastSeen(p))}</span>
@@ -392,10 +398,10 @@
                     </aside>
                     <div class="emp-main">
                         <div class="emp-pcard">
-                            <div class="emp-pcard-head"><h2>Contact information</h2>${editHref ? `<a class="b24-link" href="${esc(editHref)}">edit</a>` : ''}</div>
-                            <dl class="emp-fields">
+                            <div class="emp-pcard-head"><h2>Contact information</h2>${self ? '<button type="button" class="b24-link" id="me-edit">edit</button>' : editHref ? `<a class="b24-link" href="${esc(editHref)}">edit</a>` : ''}</div>
+                            <dl class="emp-fields" id="me-contact">
                                 ${field('Full name', esc(name))}
-                                ${field('Email', p.email ? `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : '')}
+                                ${field('Email', (p.email ? `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : '') + (self ? ' <button type="button" class="b24-link emp-inline" id="me-email-btn">change</button>' : ''))}
                                 ${field('Mobile', p.phone ? `<a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : '')}
                                 ${field('Position', esc(p.job_title || ''))}
                                 ${field('Department', esc(p.department || ''))}
@@ -411,12 +417,25 @@
                                 ${field('Biometric ID', esc(p.employee_code || ''))}
                                 ${field('Status', C.statusBadge(EMP_STATUS, p.status || 'active'))}
                                 ${field('Joining date', esc(L.fmtDate(p.joining_date) || ''))}
+                                ${p.created_at ? field('In WorkSuite since', esc(L.fmtDate(p.created_at))) : ''}
                                 ${field('Work location', p.is_wfh ? 'Work from home' : 'Office')}
                                 ${field('Shift', esc(describeShift(shift)) + (shift && shift.company_default ? '<br><span class="muted">Company default</span>' : ''))}
                                 ${shift2 ? field('Second shift', esc(describeShift(shift2)) + (p.company2 ? `<br><span class="muted">for ${esc(p.company2)}</span>` : '')) : ''}
                             </dl>
                             ${ctx.isAdmin ? `<p class="muted" style="font-size:12.5px;margin:14px 0 0">Payroll, salary and offboarding are managed in the <a class="crm-link" href="/wsm-admin">Admin console</a>.</p>` : ''}
                         </div>
+                        ${self ? `<div class="emp-pcard" id="me-security">
+                            <div class="emp-pcard-head"><h2>Security</h2></div>
+                            <dl class="emp-fields">
+                                <div class="f"><dt>Password</dt><dd><span class="emp-dots">••••••••</span> <button type="button" class="b24-link emp-inline" id="me-pwd-btn">change</button></dd></div>
+                                <div class="f"><dt>Two-step verification</dt><dd>A code from an authenticator app at sign-in. <a class="b24-link" href="/security">Manage</a></dd></div>
+                                <div class="f"><dt>Signed in as</dt><dd>${esc(p.email || me.email || '')} <button type="button" class="b24-link emp-inline" id="me-signout">sign out</button></dd></div>
+                            </dl>
+                        </div>
+                        <div class="emp-pcard">
+                            <div class="emp-pcard-head"><h2>Assessments</h2></div>
+                            <div class="emp-stats"><div><span>Typing tests</span><b id="me-tests">—</b></div><div><span>Best WPM</span><b id="me-wpm">—</b></div><div><span>Quizzes</span><b id="me-quizzes">—</b></div></div>
+                        </div>` : ''}
                         <div class="emp-two">
                             <div class="emp-pcard"><div class="emp-pcard-head"><h2>Open tasks</h2></div><div id="ov-tasks"></div></div>
                             <div class="emp-pcard"><div class="emp-pcard-head"><h2>Next 7 days</h2></div><div id="ov-events"></div></div>
@@ -601,10 +620,159 @@
         }
         loadTab(tabs.active);
 
+        if (self) wireMyProfile(p, id);
+
         const assign = () => C.openTaskEditor({ defaults: { assignee_id: p.id }, onSaved: () => { loaded.tasks = false; if (tabs.active === 'tasks') loadTab('tasks'); showProfile(id); } });
         view.querySelector('#task-btn').addEventListener('click', assign);
         view.querySelector('#task-btn-2').addEventListener('click', assign);
         view.querySelector('#meet-btn').addEventListener('click', () => C.openEventEditor({ defaults: { participants: self ? [] : [p.id], title: self ? '' : `Meeting with ${name}` }, onSaved: () => showProfile(id) }));
+    }
+
+    /* ------------------------------------------------------- my profile */
+    // Everything the old profile window did, in place on your own card:
+    // photo, name and company, email (by confirmation link), password.
+    function wireMyProfile(p, id) {
+        const $ = sel => view.querySelector(sel);
+        const reload = () => showProfile(id);
+        const syncShell = patch => { try { WSShell.setUser({ name: patch.full_name || p.full_name, email: p.email, avatar: patch.avatar_url || p.avatar_url || '', company: patch.company || p.company }); } catch (e) { /* older shell */ } };
+
+        // Photo: square-cropped to 400px so it stays small enough to keep on the profile row.
+        $('#me-photo').addEventListener('change', async e => {
+            const file = e.target.files && e.target.files[0];
+            e.target.value = '';
+            if (!file) return;
+            try {
+                const url = await squarePhoto(file, 400, 0.85);
+                await C.q(sb.from('profiles').update({ avatar_url: url }).eq('id', p.id));
+                syncShell({ avatar_url: url });
+                C.toast('Photo updated', 'ok');
+                reload();
+            } catch (err) { C.toast(C.friendly(err), 'bad'); }
+        });
+
+        // Contact information: name and company.
+        $('#me-edit').addEventListener('click', () => {
+            const box = $('#me-contact');
+            const companies = (window.WSCompanies && WSCompanies.companies) || [p.company].filter(Boolean);
+            box.outerHTML = `<form class="emp-edit" id="me-contact-form">
+                <label><span>Full name</span><input name="full_name" required minlength="2" maxlength="150" value="${esc(p.full_name || '')}"></label>
+                <label><span>Company</span><select name="company">${companies.map(c => `<option${c === p.company ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
+                <p class="muted">Email, position, department and IDs: email is changed from its own field; the rest is kept by an administrator.</p>
+                <div class="emp-edit-do"><button type="submit" class="ws-btn primary">Save</button><button type="button" class="ws-btn" data-cancel>Cancel</button></div>
+            </form>`;
+            const form = $('#me-contact-form');
+            form.querySelector('[data-cancel]').addEventListener('click', reload);
+            form.full_name.focus();
+            form.addEventListener('submit', async e => {
+                e.preventDefault();
+                const patch = { full_name: form.full_name.value.trim(), company: form.company.value };
+                if (patch.full_name.length < 2) return C.toast('Your name needs at least 2 characters', 'bad');
+                const btn = form.querySelector('[type=submit]'); btn.disabled = true;
+                try {
+                    await C.q(sb.from('profiles').update(patch).eq('id', p.id));
+                    try { await sb.auth.updateUser({ data: patch }); } catch (err) { /* the profile row is what WorkSuite reads */ }
+                    syncShell(patch);
+                    C.toast('Profile saved', 'ok');
+                    reload();
+                } catch (err) { btn.disabled = false; C.toast(C.friendly(err), 'bad'); }
+            });
+        });
+
+        // Email: nothing changes until the link sent to the new address is opened.
+        $('#me-email-btn').addEventListener('click', e => {
+            const dd = e.target.closest('dd');
+            dd.innerHTML = `<form class="emp-edit inline" id="me-email-form">
+                <input type="email" name="email" required autocomplete="email" placeholder="new.address@company.com">
+                <button type="submit" class="ws-btn primary sm">Send link</button><button type="button" class="ws-btn sm" data-cancel>Cancel</button>
+                <p class="muted">We email a confirmation link to the new address. ${esc(p.email || '')} keeps working until that link is opened, so a typo locks nobody out.</p>
+            </form>`;
+            const form = dd.querySelector('form');
+            form.email.focus();
+            form.querySelector('[data-cancel]').addEventListener('click', reload);
+            form.addEventListener('submit', async ev => {
+                ev.preventDefault();
+                const next = form.email.value.trim().toLowerCase();
+                if (next === String(p.email || '').toLowerCase()) return C.toast('That is already your address', 'bad');
+                const btn = form.querySelector('[type=submit]'); btn.disabled = true;
+                try {
+                    const { error } = await sb.auth.updateUser({ email: next });
+                    if (error) throw error;
+                    form.innerHTML = `<p class="ok">Confirmation link sent to ${esc(next)}. Open it from that inbox to finish — until then you keep signing in with ${esc(p.email || '')}.</p>`;
+                } catch (err) {
+                    btn.disabled = false;
+                    const raw = String(err.message || err);
+                    C.toast(/already (been )?registered|already exists/i.test(raw) ? 'Another account already uses that address' : /rate|too many/i.test(raw) ? 'Too many attempts just now. Wait a minute and try again.' : raw, 'bad');
+                }
+            });
+        });
+
+        // Password.
+        $('#me-pwd-btn').addEventListener('click', e => {
+            const dd = e.target.closest('dd');
+            dd.innerHTML = `<form class="emp-edit" id="me-pwd-form">
+                <label><span>New password</span><input type="password" name="p1" required minlength="6" autocomplete="new-password"></label>
+                <label><span>Confirm new password</span><input type="password" name="p2" required minlength="6" autocomplete="new-password"></label>
+                <div class="emp-edit-do"><button type="submit" class="ws-btn primary">Update password</button><button type="button" class="ws-btn" data-cancel>Cancel</button></div>
+            </form>`;
+            const form = dd.querySelector('form');
+            form.p1.focus();
+            form.querySelector('[data-cancel]').addEventListener('click', reload);
+            form.addEventListener('submit', async ev => {
+                ev.preventDefault();
+                if (form.p1.value.length < 6) return C.toast('Your new password needs at least 6 characters', 'bad');
+                if (form.p1.value !== form.p2.value) return C.toast('The two passwords do not match', 'bad');
+                const btn = form.querySelector('[type=submit]'); btn.disabled = true;
+                try {
+                    const { error } = await sb.auth.updateUser({ password: form.p1.value });
+                    if (error) throw error;
+                    C.toast('Password updated', 'ok');
+                    reload();
+                } catch (err) { btn.disabled = false; C.toast(C.friendly(err), 'bad'); }
+            });
+        });
+
+        $('#me-signout').addEventListener('click', async () => {
+            try { await sb.auth.signOut(); } catch (err) { /* leave anyway */ }
+            location.replace('/');
+        });
+
+        // Assessments: counts only, from your own results.
+        (async () => {
+            try {
+                const [tests, best, quizzes] = await Promise.all([
+                    sb.from('test_results').select('id', { count: 'exact', head: true }).eq('user_id', p.id),
+                    sb.from('test_results').select('wpm').eq('user_id', p.id).order('wpm', { ascending: false }).limit(1),
+                    sb.from('quiz_results').select('id', { count: 'exact', head: true }).eq('user_id', p.id),
+                ]);
+                const set = (sel, v) => { const el = $(sel); if (el) el.textContent = v; };
+                set('#me-tests', tests.count ?? 0);
+                set('#me-wpm', (best.data && best.data[0] && best.data[0].wpm) || 0);
+                set('#me-quizzes', quizzes.count ?? 0);
+            } catch (err) { /* the card keeps its dashes */ }
+        })();
+    }
+
+    /** A picked image as a square JPEG data URL, at most `max` pixels a side. */
+    function squarePhoto(file, max, quality) {
+        return new Promise((resolve, reject) => {
+            if (!file || !/^image\//.test(file.type)) return reject(new Error('Please pick an image file.'));
+            if (file.size > 10 * 1024 * 1024) return reject(new Error('That image is over 10 MB. Please pick a smaller one.'));
+            const reader = new FileReader();
+            reader.onerror = () => reject(new Error('That image could not be read.'));
+            reader.onload = () => {
+                const img = new Image();
+                img.onerror = () => reject(new Error('That image could not be read.'));
+                img.onload = () => {
+                    const side = Math.min(img.width, img.height), size = Math.min(max, side);
+                    const canvas = document.createElement('canvas');
+                    canvas.width = size; canvas.height = size;
+                    canvas.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, size, size);
+                    resolve(canvas.toDataURL('image/jpeg', quality));
+                };
+                img.src = reader.result;
+            };
+            reader.readAsDataURL(file);
+        });
     }
 
     route();

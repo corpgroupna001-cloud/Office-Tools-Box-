@@ -454,7 +454,7 @@
                     ? `<span class="ws-chip ok">Set</span>`
                     : `<span class="ws-chip bad">Set — not a URL</span>`);
             const name = e.name
-                ? esc(e.name)
+                ? (e.employee_id ? `<b class="mono whitespace-nowrap">${esc(e.employee_id)}</b> ${esc(e.name)}` : esc(e.name))
                 : `<span class="text-slate-500 italic">no name on device</span>`;
             const canTest = e.configured && e.valid;
             const test = canTest

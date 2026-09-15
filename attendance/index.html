@@ -414,7 +414,7 @@
         let myShift = null;
         let myCompany = '';
         let isWfh = false;
-        let myName = '';
+        let myName = '', myEmpId = '';   // the selfie stamp shows the Employee ID above the name
 
         // ---- Supabase client (reuse whatever the guard/presence already made) ----
         let sb = window.__WS_SB__ || window.__WS_PRESENCE_SB__ || null;
@@ -484,9 +484,12 @@
 
         async function loadMyShift() {
             try {
-                const { data: prof } = await sb.from('profiles').select('shift_id, is_wfh, full_name, company').eq('id', session.user.id).maybeSingle();
+                let pr = await sb.from('profiles').select('shift_id, is_wfh, full_name, company, employee_id').eq('id', session.user.id).maybeSingle();
+                if (pr.error) pr = await sb.from('profiles').select('shift_id, is_wfh, full_name, company').eq('id', session.user.id).maybeSingle();   // before the Employee ID migration
+                const prof = pr.data;
                 isWfh = !!(prof && prof.is_wfh === true);
                 myName = (prof && prof.full_name) || '';
+                myEmpId = (prof && prof.employee_id) || '';
                 myCompany = (prof && prof.company) || '';
                 if (isWfh) el('clock').style.display = '';
                 loadHolidays();
@@ -1171,6 +1174,7 @@
             };
 
             const lines = [
+                ...(myEmpId ? [{ t: myEmpId, big: true }] : []),
                 { t: `${myName || 'Employee'} · ${EVENT_TITLE[pendingEvent]}`, big: true },
                 { t: new Intl.DateTimeFormat('en-GB', { timeZone: IST, dateStyle: 'medium', timeStyle: 'medium' }).format(new Date()) + ' IST', big: false },
             ];

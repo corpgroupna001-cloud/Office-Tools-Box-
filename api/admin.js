@@ -26,6 +26,26 @@ async function dualCols(sb) {
   catch { return ''; }
 }
 
+/**
+ * A profiles read with employee_id added to its select - or, before
+ * supabase-employee-id-migration.sql has run and PostgREST refuses the
+ * unknown column, the same read without it. `get` is the caller's own
+ * path -> Response fetch helper. The admin lists show the Employee ID
+ * first when a person has one.
+ */
+async function withEmployeeId(get, path) {
+  const r = await get(path.replace('select=', 'select=employee_id,'));
+  return r.ok ? r : get(path);
+}
+
+/** Profile id -> Employee ID, for rows that only carry a user_id. Empty before the migration. */
+async function employeeIdsById(get) {
+  try {
+    const r = await get('profiles?select=id,employee_id&employee_id=not.is.null&limit=5000');
+    return new Map(r.ok ? (await r.json()).map(p => [p.id, p.employee_id]) : []);
+  } catch { return new Map(); }
+}
+
 /* ---------------------------------------------------------------------------
  * Built-in public-holiday lists, for the "Pre-fill" button in Admin -> Holidays.
  *
@@ -90,7 +110,7 @@ const HOLIDAY_COMPANIES = [
 async function recomputePunches({ sb, from, to, apply, employeeCode, deadlineAt }) {
   const dual = await dualCols(sb);
   const [pRes, shiftsRes, logsRes] = await Promise.all([
-    sb(`profiles?select=id,full_name,company,employee_code,shift_id${dual}&limit=2000`),
+    withEmployeeId(sb, `profiles?select=id,full_name,company,employee_code,shift_id${dual}&limit=2000`),
     sb('shifts?select=*'),
     sb(`attendance_logs?select=id,user_id,employee_code,log_datetime,log_date,direction,direction_derived,event_type,source` +
        (employeeCode ? `&employee_code=eq.${encodeURIComponent(employeeCode)}` : '') +
@@ -128,7 +148,9 @@ async function recomputePunches({ sb, from, to, apply, employeeCode, deadlineAt 
     for (const m of assignDays(list, { shiftFor: punch => shiftOf(owner, punch && punch.log_datetime) })) {
       const s = list.find(x => x.id === m.id);
       if (s.log_date !== m.log_date || s.direction !== m.direction || s.event_type !== m.event_type) {
+        const who = s.user_id ? profById.get(s.user_id) : null;
         changes.push({ id: s.id, employee_code: s.employee_code, log_datetime: s.log_datetime,
+                       employee_id: (who && who.employee_id) || null, full_name: (who && who.full_name) || null,
                        before: { log_date: s.log_date, direction: s.direction, event_type: s.event_type },
                        after:  { log_date: m.log_date, direction: m.direction, event_type: m.event_type,
                                  direction_derived: m.direction_derived } });
@@ -206,6 +228,8 @@ module.exports = async function handler(req, res) {
   res = auditWrap(res, req, action, body);
 
   try {
+    const restGet = path => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } });
+
     if (action === 'results') {
       // Fetch every result, most recent first. Cap at 1000 for now.
       const r = await fetch(`${SUPABASE_URL}/rest/v1/test_results?select=*&order=created_at.desc&limit=1000`, {
@@ -218,7 +242,8 @@ module.exports = async function handler(req, res) {
         const msg = (await r.text()).slice(0, 300);
         return res.status(502).json({ error: 'Supabase fetch failed', detail: msg });
       }
-      const results = await r.json();
+      const ids = await employeeIdsById(restGet);
+      const results = (await r.json()).map(x => ({ ...x, employee_id: ids.get(x.user_id) || null }));
       return res.status(200).json({ results });
     }
 
@@ -227,8 +252,9 @@ module.exports = async function handler(req, res) {
       let r = await fetch(`${SUPABASE_URL}/rest/v1/quiz_results?select=*&order=created_at.desc&limit=2000`, {
         headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` }
       });
+      const ids = await employeeIdsById(restGet);
       if (r.ok) {
-        const results = await r.json();
+        const results = (await r.json()).map(x => ({ ...x, employee_id: ids.get(x.user_id) || null }));
         return res.status(200).json({ results, source: 'quiz_results' });
       }
       // Fallback: pull MCQ rows from test_results
@@ -246,6 +272,7 @@ module.exports = async function handler(req, res) {
         return {
           id: r.id,
           user_id: r.user_id,
+          employee_id: ids.get(r.user_id) || null,
           full_name: r.full_name,
           email: r.email,
           category: parts[1] || null,
@@ -414,10 +441,7 @@ module.exports = async function handler(req, res) {
       const reqMap = {};
       if (userIds.length) {
         try {
-          const pr = await fetch(
-            `${SUPABASE_URL}/rest/v1/profiles?id=in.(${userIds.join(',')})&select=id,req_mobile,req_laptop,req_tab`,
-            { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } }
-          );
+          const pr = await withEmployeeId(restGet, `profiles?id=in.(${userIds.join(',')})&select=id,req_mobile,req_laptop,req_tab`);
           if (pr.ok) (await pr.json()).forEach(p => { reqMap[p.id] = p; });
         } catch {}
       }
@@ -433,7 +457,7 @@ module.exports = async function handler(req, res) {
         const required = p
           ? ['mobile', 'laptop', 'tab'].filter(d => p[`req_${d}`] !== false)
           : ['mobile', 'laptop', 'tab'];
-        return { ...row, mobile_url, laptop_url, tab_url, video_url, required };
+        return { ...row, mobile_url, laptop_url, tab_url, video_url, required, employee_id: (p && p.employee_id) || null };
       }));
       return res.status(200).json({ recordings: signed });
     }
@@ -535,7 +559,7 @@ module.exports = async function handler(req, res) {
       const H = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` };
 
       const [pRes2, rRes2, tRes2] = await Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/profiles?is_wfh=eq.true&select=id,full_name,email,company,req_mobile,req_laptop,req_tab`, { headers: H }),
+        withEmployeeId(restGet, 'profiles?is_wfh=eq.true&select=id,full_name,email,company,req_mobile,req_laptop,req_tab'),
         fetch(`${SUPABASE_URL}/rest/v1/wfh_recordings?week_of=eq.${week}&select=user_id,mobile_path,laptop_path,tab_path,status,review_note`, { headers: H }),
         fetch(`${SUPABASE_URL}/rest/v1/test_results?created_at=gte.${encodeURIComponent(dayStart)}&created_at=lte.${encodeURIComponent(dayEnd)}&select=user_id,wpm,accuracy,category,duration,created_at&limit=5000`, { headers: H }),
       ]);
@@ -571,6 +595,7 @@ module.exports = async function handler(req, res) {
 
         return {
           id: emp.id,
+          employee_id: emp.employee_id || null,
           name: emp.full_name || '',
           email: emp.email || '',
           company: emp.company || '',
@@ -938,19 +963,20 @@ module.exports = async function handler(req, res) {
         const enrol = await r.json();
         // Who is available to bind: every profile, with a note of any code it
         // already holds. The browser never sees more than name/email/company.
-        const pr = await sb('profiles?select=id,full_name,email,company,employee_code&order=full_name.asc&limit=2000');
+        const pr = await withEmployeeId(sb, 'profiles?select=id,full_name,email,company,employee_code&order=full_name.asc&limit=2000');
         const profiles = pr.ok ? await pr.json() : [];
         const byId = new Map(profiles.map(p => [p.id, p]));
         const rows = enrol.map(e => {
           const p = e.user_id ? byId.get(e.user_id) : null;
           return { ...e,
             bound_name:  p ? (p.full_name || p.email) : null,
+            bound_employee_id: p ? (p.employee_id || null) : null,
             bound_email: p ? p.email : null,
             bound_company: p ? p.company : null };
         });
         return res.status(200).json({
           rows,
-          profiles: profiles.map(p => ({ id: p.id, full_name: p.full_name, email: p.email,
+          profiles: profiles.map(p => ({ id: p.id, full_name: p.full_name, email: p.email, employee_id: p.employee_id || null,
                                          company: p.company, employee_code: p.employee_code || null })),
           summary: {
             total: rows.length,
@@ -1273,7 +1299,7 @@ module.exports = async function handler(req, res) {
 
         const [enrolments, profiles] = await Promise.all([
           sb('device_enrolments?select=enroll_no,device_name,staff_code,user_id,punches&limit=2000').then(r => r.ok ? r.json() : []),
-          sb('profiles?select=id,full_name,company&limit=2000').then(r => r.ok ? r.json() : []),
+          withEmployeeId(sb, 'profiles?select=id,full_name,company&limit=2000').then(r => r.ok ? r.json() : []),
         ]);
         const profById = new Map(profiles.map(p => [p.id, p]));
 
@@ -1289,6 +1315,7 @@ module.exports = async function handler(req, res) {
             enroll_no: enroll,
             env_key: PREFIX + enroll,
             name,
+            employee_id: (prof && prof.employee_id) || null,
             company: (prof && prof.company) || null,
             bound: !!e.user_id,
             punches: e.punches || 0,
@@ -1582,7 +1609,9 @@ module.exports = async function handler(req, res) {
 
       const dual = await dualCols(sb);
       const [profiles, shifts, policies, holidays, leaveRows, leaveTypes, logs, salaries, secondaries] = await Promise.all([
-        fetchAll(`profiles?select=id,full_name,email,company,employee_code,shift_id,is_wfh${dual}&order=full_name.asc`),
+        fetchAll(`profiles?select=employee_id,id,full_name,email,company,employee_code,shift_id,is_wfh${dual}&order=full_name.asc`)
+          // Before supabase-employee-id-migration.sql the column is refused and nothing comes back: read again without it.
+          .then(list => list.length ? list : fetchAll(`profiles?select=id,full_name,email,company,employee_code,shift_id,is_wfh${dual}&order=full_name.asc`)),
         sb('shifts?select=*').then(r => r.ok ? r.json() : []),
         sb('company_policies?select=company,week_offs').then(r => r.ok ? r.json() : []),
         sb(`holidays?select=holiday_date,name,company&holiday_date=gte.${from}&holiday_date=lte.${to}`).then(r => r.ok ? r.json() : []),
@@ -1680,6 +1709,7 @@ module.exports = async function handler(req, res) {
         return {
           id: p.id,
           name: p.full_name || p.email,
+          employee_id: p.employee_id || null,
           email: p.email,
           company: p.company || null,
           employee_code: p.employee_code || null,
@@ -1736,7 +1766,7 @@ module.exports = async function handler(req, res) {
       if (action === 'leave_list') {
         const status = ['pending', 'approved', 'rejected', 'cancelled'].includes(body.status) ? body.status : null;
         const [profiles, tRes, rRes] = await Promise.all([
-          sb('profiles?select=id,full_name,email,company&limit=2000').then(r => r.ok ? r.json() : []),
+          withEmployeeId(sb, 'profiles?select=id,full_name,email,company&limit=2000').then(r => r.ok ? r.json() : []),
           sb('leave_types?select=*&order=sort_order.asc'),
           sb(`leave_requests?select=*&order=created_at.desc&limit=500` + (status ? `&status=eq.${status}` : '')),
         ]);
@@ -1759,6 +1789,7 @@ module.exports = async function handler(req, res) {
             return {
               ...r,
               full_name: p ? p.full_name : null,
+              employee_id: p ? (p.employee_id || null) : null,
               email: p ? p.email : null,
               company: p ? p.company : null,
               type_name: t ? t.name : '—',
@@ -1928,7 +1959,7 @@ module.exports = async function handler(req, res) {
         const dual = await dualCols(sb);
         const [sRes, pRes] = await Promise.all([
           sb('shifts?select=*&order=start_time.asc'),
-          sb(`profiles?select=id,full_name,email,company,shift_id${dual}&order=full_name.asc&limit=2000`),
+          withEmployeeId(sb, `profiles?select=id,full_name,email,company,shift_id${dual}&order=full_name.asc&limit=2000`),
         ]);
         if (!sRes.ok) return res.status(502).json({ error: 'shifts fetch failed', detail: (await sRes.text()).slice(0, 200) });
         const shifts = await sRes.json();
@@ -2041,7 +2072,7 @@ module.exports = async function handler(req, res) {
       const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...AH, ...(opts.headers || {}) } });
       const loadProfiles = async () => {
         const dual = await dualCols(sb);
-        const r = await sb(`profiles?select=id,email,full_name,company,employee_code,shift_id${dual}&limit=2000`);
+        const r = await withEmployeeId(sb, `profiles?select=id,email,full_name,company,employee_code,shift_id${dual}&limit=2000`);
         if (!r.ok) throw new Error('profiles fetch failed: ' + (await r.text()).slice(0, 160));
         return r.json();
       };
@@ -2180,7 +2211,7 @@ module.exports = async function handler(req, res) {
           else if (sh.isWorkingDay === false)    status = 'Week-off';
 
           return {
-            user_id: p.id, full_name: p.full_name, email: p.email,
+            user_id: p.id, full_name: p.full_name, email: p.email, employee_id: p.employee_id || null,
             company: p.company, employee_code: p.employee_code || null,
             holiday_name: holiday ? holiday.name : null,
             leave_type:   leaveType ? leaveType.name : (leave ? 'Leave' : null),
@@ -2255,6 +2286,7 @@ module.exports = async function handler(req, res) {
           return {
             ...l,
             full_name: p ? p.full_name : (l.employee_name || null),
+            employee_id: p ? (p.employee_id || null) : null,
             company:   p ? p.company : null,
             pretty_time: t.prettyTime,
             pretty_date: t.prettyDate,
@@ -2287,11 +2319,11 @@ module.exports = async function handler(req, res) {
         // name the device sends, so an admin must be able to re-point a code
         // that landed on the wrong person.
         free_profiles: profiles
-          .map(p => ({ id: p.id, full_name: p.full_name, email: p.email, company: p.company, employee_code: p.employee_code || null }))
+          .map(p => ({ id: p.id, full_name: p.full_name, email: p.email, employee_id: p.employee_id || null, company: p.company, employee_code: p.employee_code || null }))
           .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || ''))),
         mapped: profiles
           .filter(p => p.employee_code)
-          .map(p => ({ id: p.id, full_name: p.full_name, email: p.email, employee_code: p.employee_code }))
+          .map(p => ({ id: p.id, full_name: p.full_name, email: p.email, employee_id: p.employee_id || null, employee_code: p.employee_code }))
           .sort((a, b) => String(a.full_name || '').localeCompare(String(b.full_name || ''))),
       });
     }
@@ -2425,6 +2457,7 @@ module.exports = async function handler(req, res) {
             return {
               id: l.id,
               full_name: p ? p.full_name : (l.employee_name || null),
+              employee_id: p ? (p.employee_id || null) : null,
               email: p ? p.email : null,
               company: p ? p.company : null,
               event_type: l.event_type,

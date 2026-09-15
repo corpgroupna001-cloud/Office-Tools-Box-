@@ -47,7 +47,7 @@
         const manager=people.find(x=>x.id===p.manager_id);
         const scheduled=s && (!s.working_days || s.working_days.includes(day));
         const secondScheduled=s2 && (!s2.working_days || s2.working_days.includes(day));
-        rows+=`<tr><td>${p.employee_id?`<b>${esc(p.employee_id)}</b> · `:''}${esc(p.full_name || p.email)}<small>${esc(p.job_title || 'Employee')} · ${p.is_wfh?'WFH':'Office'}</small>${manager?`<small>Reports to ${esc(manager.full_name || manager.email)}</small>`:''}<small>${s?.company_default?'Company default':p.shift_id?'Assigned shift':'General default'}</small></td><td>${scheduled?bar(s):'<small>Weekly off / no shift</small>'}${secondScheduled?bar(s2,true)+`<small>Secondary: ${esc(p.company2)}</small>`:''}</td></tr>`;
+        rows+=`<tr><td>${p.employee_id?`<b>${esc(p.employee_id)}</b> · `:''}${esc(p.full_name || p.email)}<small>${esc(p.job_title || 'Employee')} · ${p.is_wfh?'WFH':'Office'}</small>${manager?`<small>Reports to ${manager.employee_id?`<b>${esc(manager.employee_id)}</b> · `:''}${esc(manager.full_name || manager.email)}</small>`:''}<small>${s?.company_default?'Company default':p.shift_id?'Assigned shift':'General default'}</small></td><td>${scheduled?bar(s):'<small>Weekly off / no shift</small>'}${secondScheduled?bar(s2,true)+`<small>Secondary: ${esc(p.company2)}</small>`:''}</td></tr>`;
         count++;
       }
     }

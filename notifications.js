@@ -272,13 +272,15 @@
                         if (window.WSShell && WSShell.refreshUnread) WSShell.refreshUnread();
                         const preview = previewOf(m.body);
                         if (!preview) return;
-                        let name = 'Someone', avatar = null;
+                        let name = 'Someone', avatar = null, shown = 'Someone';
                         try {
-                            const { data: p } = await sb.from('profiles').select('full_name,email,avatar_url').eq('id', m.sender_id).single();
-                            if (p) { name = p.full_name || p.email || 'Someone'; avatar = p.avatar_url; }
+                            let r = await sb.from('profiles').select('full_name,email,avatar_url,employee_id').eq('id', m.sender_id).single();
+                            if (r.error) r = await sb.from('profiles').select('full_name,email,avatar_url').eq('id', m.sender_id).single();   // before the Employee ID migration
+                            const p = r.data;
+                            if (p) { name = p.full_name || p.email || 'Someone'; avatar = p.avatar_url; shown = p.employee_id ? `${p.employee_id} · ${name}` : name; }
                         } catch {}
                         const url = `/chat/#thread=${encodeURIComponent(m.sender_id)}`;
-                        showToast({ title: name, message: preview, avatarUrl: avatar, onClick: () => { location.href = url; } });
+                        showToast({ title: shown, message: preview, avatarUrl: avatar, onClick: () => { location.href = url; } });
                         playPing();
                         // Same tag as the Web Push for this conversation, so only one notification shows.
                         browserNotify(name, preview, `dm-${m.sender_id}`, url);

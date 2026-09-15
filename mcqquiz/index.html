@@ -1512,6 +1512,17 @@
         // ============================================================
         // LEADERBOARD (reads from quiz_results, falls back to test_results)
         // ============================================================
+        /** Employee IDs for these user ids ({ id: employee_id }); empty before supabase-employee-id-migration.sql. */
+        async function employeeIdsFor(client, ids) {
+            const out = new Map();
+            ids = [...new Set(ids.filter(Boolean))];
+            if (!client || !ids.length) return out;
+            try {
+                const { data, error } = await client.from('profiles').select('id, employee_id').in('id', ids);
+                if (!error) (data || []).forEach(p => { if (p.employee_id) out.set(p.id, p.employee_id); });
+            } catch { /* column not there yet */ }
+            return out;
+        }
         async function loadLeaderboard() {
             const body = document.getElementById('lb-body');
             const empty = document.getElementById('lb-empty');
@@ -1587,12 +1598,13 @@
 
                 if (rows.length === 0) { empty.classList.remove('hidden'); return; }
 
+                const empIds = await employeeIdsFor(supabaseClient, rows.map(r => r.user_id));
                 body.innerHTML = rows.map((r, i) => {
                     const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}`;
                     const isMe = currentUser && r.user_id === currentUser.id;
                     return `<tr class="border-b border-white/5 hover:bg-white/5 ${isMe ? 'bg-orange-500/10' : ''}">
                         <td class="px-6 py-4 font-black text-lg">${medal}</td>
-                        <td class="px-4 py-4 font-bold text-white">${escapeHtml(r.full_name || '—')}${isMe ? ' <span class="text-orange-300 text-xs">(You)</span>' : ''}</td>
+                        <td class="px-4 py-4 font-bold text-white">${empIds.get(r.user_id) ? `<span class="block mono font-black">${escapeHtml(empIds.get(r.user_id))}</span><span class="font-medium text-slate-300">${escapeHtml(r.full_name || '—')}</span>` : escapeHtml(r.full_name || '—')}${isMe ? ' <span class="text-orange-300 text-xs">(You)</span>' : ''}</td>
                         <td class="px-4 py-4 text-right mono font-black text-orange-300">${r.best_score ?? '—'}/${r.total ?? 10}</td>
                         <td class="px-4 py-4 text-right mono font-black text-emerald-300">${r.best_accuracy ?? '—'}%</td>
                         <td class="px-4 py-4 text-right text-slate-300">${r.attempts}</td>

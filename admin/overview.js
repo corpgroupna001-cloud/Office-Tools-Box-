@@ -89,7 +89,7 @@
             const st = r.status === 'Absent' && !r.is_working_day ? 'Week-off' : r.status;
             const label = st === 'On leave' || st === 'Half day leave' ? (r.leave_type || st) : st === 'Holiday' ? (r.holiday_name || 'Holiday') : st;
             return `<tr>
-                <td><div class="who"><b>${esc(r.full_name || r.email || r.employee_code || '—')}</b>${r.is_wfh ? '<small>Work from home</small>' : ''}<small class="co">${esc(r.company || '')}</small></div></td>
+                <td><div class="who"><b>${r.employee_id ? `<span class="mono">${esc(r.employee_id)}</span> · ` : ''}${esc(r.full_name || r.email || r.employee_code || '—')}</b>${r.is_wfh ? '<small>Work from home</small>' : ''}<small class="co">${esc(r.company || '')}</small></div></td>
                 <td class="muted col-co">${esc(r.company || '—')}</td>
                 <td class="muted">${esc(r.shift_name || '—')}</td>
                 <td class="num">${t(r.first_in)}${r.is_late ? ` <span class="ws-badge late">+${r.late_minutes}m</span>` : ''}</td>
@@ -107,7 +107,7 @@
         $('ov-link-leave').className = 'stat' + (reqs.length ? ' new' : '');
         $('ov-leave').innerHTML = reqs.slice(0, 5).map(l => `<li>
             <div class="date"><b>${Number(String(l.start_date).slice(8, 10))}</b><span>${esc(fmtDM.format(new Date(l.start_date + 'T12:00:00+05:30')).slice(3))}</span></div>
-            <div class="main"><b>${esc(l.full_name || l.email || '—')}</b><span>${esc(l.type_name)} · ${l.start_date === l.end_date ? '' : esc(fmtDM.format(new Date(l.start_date + 'T12:00:00+05:30')) + ' – ' + fmtDM.format(new Date(l.end_date + 'T12:00:00+05:30'))) + ' · '}${esc(l.day_part_label || '')}${l.days ? ` · ${l.days} day${l.days === 1 ? '' : 's'}` : ''}</span></div>
+            <div class="main"><b>${l.employee_id ? `<span class="mono">${esc(l.employee_id)}</span> · ` : ''}${esc(l.full_name || l.email || '—')}</b><span>${esc(l.type_name)} · ${l.start_date === l.end_date ? '' : esc(fmtDM.format(new Date(l.start_date + 'T12:00:00+05:30')) + ' – ' + fmtDM.format(new Date(l.end_date + 'T12:00:00+05:30'))) + ' · '}${esc(l.day_part_label || '')}${l.days ? ` · ${l.days} day${l.days === 1 ? '' : 's'}` : ''}</span></div>
             <div class="right"><span class="ws-badge pending">Pending</span></div>
         </li>`).join('') || '<li><div class="ws-empty" style="width:100%"><b>Nothing waiting</b>Every request has a decision.</div></li>';
 

@@ -270,7 +270,7 @@
         const pr = list.length ? await sb.from('projects').select('id, name').in('id', [...new Set(list.map(x => x.project_id))]) : { data: [] };
         const pname = id => ((pr.data || []).find(p => p.id === id) || {}).name || 'Project';
         const body = document.createElement('div');
-        body.innerHTML = list.length ? `<ul class="crm-list">${list.map(x => `<li>${C.avatarHtml(x.user_id)}<div class="main"><b>${esc(C.personName(x.user_id))} → ${esc(pname(x.project_id))}</b><span>${esc(x.message || 'No message')} · ${esc(L.fmtRelative(x.created_at))}</span></div><div class="right"><button type="button" class="ws-btn sm primary" data-ok="${esc(x.id)}">Accept</button> <button type="button" class="ws-btn sm" data-no="${esc(x.id)}">Decline</button></div></li>`).join('')}</ul>` : '<div class="ws-empty">No requests waiting.</div>';
+        body.innerHTML = list.length ? `<ul class="crm-list">${list.map(x => `<li>${C.avatarHtml(x.user_id)}<div class="main"><b>${esc(C.personText(x.user_id))} → ${esc(pname(x.project_id))}</b><span>${esc(x.message || 'No message')} · ${esc(L.fmtRelative(x.created_at))}</span></div><div class="right"><button type="button" class="ws-btn sm primary" data-ok="${esc(x.id)}">Accept</button> <button type="button" class="ws-btn sm" data-no="${esc(x.id)}">Decline</button></div></li>`).join('')}</ul>` : '<div class="ws-empty">No requests waiting.</div>';
         const m = C.modal({ title: 'Requests to join', body, size: 'wide', actions: [{ label: 'Done', primary: true, close: true }], onClose: () => refreshList(true) });
         body.addEventListener('click', async e => {
             const b = e.target.closest('[data-ok], [data-no]'); if (!b) return;
@@ -567,7 +567,7 @@
                                 <div><dt>Related contact</dt><dd>${p.contact_id ? C.entityChip('contact', p.contact_id, contactLabel) : '—'}</dd></div>
                                 <div><dt>Related deal</dt><dd>${p.deal_id ? C.entityChip('deal', p.deal_id, dealLabel) : '—'}</dd></div>
                                 <div><dt>Tags</dt><dd>${C.tagsHtml(p.tags) || '—'}</dd></div>
-                                <div><dt>Created</dt><dd>${esc(L.fmtDateTime(p.created_at))} by ${esc(C.personName(p.created_by))}</dd></div>
+                                <div><dt>Created</dt><dd>${esc(L.fmtDateTime(p.created_at))} by ${C.personInline(p.created_by)}</dd></div>
                                 <div><dt>Project ID</dt><dd class="muted" style="font-size:12px">${esc(p.id)}</dd></div>
                             </dl>
                         </div>
@@ -580,7 +580,7 @@
                     <div class="ws-stack">
                         <div class="ws-card">
                             <div class="crm-section-title"><h3>Team</h3><div class="right"><button type="button" class="ws-btn sm ghost" data-tab-go="members">Manage</button></div></div>
-                            ${members.length ? `<ul class="crm-list compact">${members.map(m => `<li>${C.avatarHtml(m.user_id)}<div class="main"><b><a href="/employees/?id=${esc(m.user_id)}">${esc(C.personName(m.user_id))}</a></b><span>${m.role === 'manager' ? 'Manager' : 'Member'}</span></div></li>`).join('')}</ul>` : '<p class="muted" style="margin:0;font-size:13.5px">No members yet.</p>'}
+                            ${members.length ? `<ul class="crm-list compact">${members.map(m => `<li>${C.avatarHtml(m.user_id)}<div class="main"><b><a href="/employees/?id=${esc(m.user_id)}">${esc(C.personText(m.user_id))}</a></b><span>${m.role === 'manager' ? 'Manager' : 'Member'}</span></div></li>`).join('')}</ul>` : '<p class="muted" style="margin:0;font-size:13.5px">No members yet.</p>'}
                         </div>
                         <div class="ws-card">
                             <div class="crm-section-title"><h3>Upcoming</h3></div>
@@ -588,7 +588,7 @@
                         </div>
                         <div class="ws-card">
                             <div class="crm-section-title"><h3>Due soon</h3></div>
-                            ${(() => { const soon = tasks.filter(t => !t.completed_at && t.due_date).sort((a, b) => L.dayNumber(a.due_date) - L.dayNumber(b.due_date)).slice(0, 5); return soon.length ? `<ul class="crm-list compact">${soon.map(t => `<li>${C.icon('tasks')}<div class="main"><b><a href="/tasks/?id=${esc(t.id)}">${esc(t.title)}</a></b><span>${C.personName(t.assignee_id)}</span></div><div class="right">${C.dueHtml(t, today)}</div></li>`).join('')}</ul>` : '<p class="muted" style="margin:0;font-size:13.5px">Nothing due.</p>'; })()}
+                            ${(() => { const soon = tasks.filter(t => !t.completed_at && t.due_date).sort((a, b) => L.dayNumber(a.due_date) - L.dayNumber(b.due_date)).slice(0, 5); return soon.length ? `<ul class="crm-list compact">${soon.map(t => `<li>${C.icon('tasks')}<div class="main"><b><a href="/tasks/?id=${esc(t.id)}">${esc(t.title)}</a></b><span>${C.personInline(t.assignee_id)}</span></div><div class="right">${C.dueHtml(t, today)}</div></li>`).join('')}</ul>` : '<p class="muted" style="margin:0;font-size:13.5px">Nothing due.</p>'; })()}
                         </div>
                     </div>
                 </div>`;
@@ -710,7 +710,7 @@
                 items.forEach(it => {
                     if (it.day !== day) { day = it.day; html += `<div class="day-h${day === today ? ' today' : ''}">${day === today ? 'Today · ' : ''}${esc(L.fmtDate(day))}${L.dayNumber(day) < L.dayNumber(today) ? ' <span class="muted" style="text-transform:none;letter-spacing:0">(past)</span>' : ''}</div><ul class="crm-list compact">`; }
                     if (it.kind === 'event') html += `<li><span class="crm-dot pending"></span><div class="main"><b><a href="/calendar/?id=${esc(it.e.id)}">${esc(it.e.title)}</a></b><span>${it.e.all_day ? 'All day' : esc(L.fmtTime(it.e.starts_at) + ' – ' + L.fmtTime(it.e.ends_at))} · ${esc(L.EVENT_TYPE[it.e.event_type] ? L.EVENT_TYPE[it.e.event_type].label : it.e.event_type)}</span></div><div class="right">${C.avatarHtml(it.e.owner_id)}</div></li>`;
-                    else if (it.kind === 'task') html += `<li><span class="crm-dot late"></span><div class="main"><b><a href="/tasks/?id=${esc(it.t.id)}">${esc(it.t.title)}</a></b><span>Task due${it.t.due_time ? ' at ' + esc(L.fmtTime(it.at)) : ''} · ${esc(C.personName(it.t.assignee_id))}</span></div><div class="right">${C.dueHtml(it.t, today)}</div></li>`;
+                    else if (it.kind === 'task') html += `<li><span class="crm-dot late"></span><div class="main"><b><a href="/tasks/?id=${esc(it.t.id)}">${esc(it.t.title)}</a></b><span>Task due${it.t.due_time ? ' at ' + esc(L.fmtTime(it.at)) : ''} · ${C.personInline(it.t.assignee_id)}</span></div><div class="right">${C.dueHtml(it.t, today)}</div></li>`;
                     else html += `<li><span class="crm-dot absent"></span><div class="main"><b>Project deadline</b><span>${esc(p.name)} is due</span></div></li>`;
                     const next = items[items.indexOf(it) + 1];
                     if (!next || next.day !== day) html += '</ul>';
@@ -729,7 +729,7 @@
             box.className = 'ws-card flush';
             box.style.marginTop = '12px';
             box.innerHTML = `<div class="ws-card-head"><h3>Requests to join</h3><span class="sub">${list.length}</span></div>` + (list.length
-                ? `<ul class="crm-list" style="padding:0 20px 12px">${list.map(x => `<li>${C.avatarHtml(x.user_id)}<div class="main"><b>${esc(C.personName(x.user_id))}</b><span>${esc(x.message || 'No message')} · ${esc(L.fmtRelative(x.created_at))}</span></div><div class="right"><button type="button" class="ws-btn sm primary" data-req-ok="${esc(x.id)}">Accept</button> <button type="button" class="ws-btn sm" data-req-no="${esc(x.id)}">Decline</button></div></li>`).join('')}</ul>`
+                ? `<ul class="crm-list" style="padding:0 20px 12px">${list.map(x => `<li>${C.avatarHtml(x.user_id)}<div class="main"><b>${esc(C.personText(x.user_id))}</b><span>${esc(x.message || 'No message')} · ${esc(L.fmtRelative(x.created_at))}</span></div><div class="right"><button type="button" class="ws-btn sm primary" data-req-ok="${esc(x.id)}">Accept</button> <button type="button" class="ws-btn sm" data-req-no="${esc(x.id)}">Decline</button></div></li>`).join('')}</ul>`
                 : '<div class="ws-empty" style="padding:14px">No requests waiting.</div>');
             el.appendChild(box);
             box.addEventListener('click', async e => {
@@ -752,7 +752,7 @@
                 ${[...(p.owner_id ? [{ user_id: p.owner_id, role: 'owner' }] : []), ...(p.manager_id && p.manager_id !== p.owner_id ? [{ user_id: p.manager_id, role: 'pm' }] : []), ...members.filter(m => m.user_id !== p.owner_id && m.user_id !== p.manager_id)].map(m => `<tr>
                     <td class="lead" data-label="Person"><a class="crm-person link" href="/employees/?id=${esc(m.user_id)}">${C.avatarHtml(m.user_id)}<span class="nm">${esc(C.personName(m.user_id))}</span></a></td>
                     <td data-label="Role">${m.role === 'owner' ? C.badge('pending', 'Owner') : m.role === 'pm' ? C.badge('leave', 'Project manager') : manage ? `<select data-role="${esc(m.user_id)}" aria-label="Role"><option value="member"${m.role === 'member' ? ' selected' : ''}>Member</option><option value="moderator"${m.role === 'moderator' ? ' selected' : ''}>Moderator</option><option value="manager"${m.role === 'manager' ? ' selected' : ''}>Manager</option></select>` : C.badge(m.role === 'manager' || m.role === 'moderator' ? 'leave' : 'mute', m.role === 'manager' ? 'Manager' : m.role === 'moderator' ? 'Moderator' : 'Member')}</td>
-                    <td data-label="Added"><span class="muted">${m.created_at ? esc(L.fmtDate(m.created_at)) + ' by ' + esc(C.personName(m.added_by)) : '—'}</span></td>
+                    <td data-label="Added"><span class="muted">${m.created_at ? esc(L.fmtDate(m.created_at)) + ' by ' + C.personInline(m.added_by) : '—'}</span></td>
                     ${manage ? `<td class="actions">${m.role === 'owner' || m.role === 'pm' ? '' : `<button type="button" class="ws-btn sm icon" data-remove="${esc(m.user_id)}" aria-label="Remove">${C.icon('x')}</button>`}</td>` : ''}
                 </tr>`).join('') || `<tr><td colspan="4" class="muted" style="text-align:center;padding:24px">No members yet.</td></tr>`}
                 </tbody></table></div></div>`;

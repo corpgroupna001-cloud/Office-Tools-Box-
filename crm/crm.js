@@ -176,12 +176,12 @@
                 const soon = open.filter(d => d.expected_close_date && L.daysBetween(today, d.expected_close_date) <= 30).sort((a, b) => a.expected_close_date.localeCompare(b.expected_close_date)).slice(0, 8);
                 const clEl = view.querySelector('#w-closing');
                 if (!soon.length) C.empty(clEl, 'Nothing closing soon', 'Open deals with an expected close date in the next 30 days appear here.');
-                else clEl.innerHTML = `<ul class="crm-list compact">${soon.map(d => { const days = L.daysBetween(today, d.expected_close_date); return listItem('deal', `/deals/?id=${d.id}`, d.title, `${esc(lk.stageById[d.stage_id] ? lk.stageById[d.stage_id].name : '')} · ${esc(C.personName(d.owner_id))}`, `<span class="crm-due ${days < 0 ? 'overdue' : days === 0 ? 'today' : 'soon'}">${days < 0 ? Math.abs(days) + 'd late' : days === 0 ? 'Today' : days + 'd'}</span><b style="font-size:13px">${esc(L.moneyShort(d.value, d.currency))}</b>`); }).join('')}</ul>`;
+                else clEl.innerHTML = `<ul class="crm-list compact">${soon.map(d => { const days = L.daysBetween(today, d.expected_close_date); return listItem('deal', `/deals/?id=${d.id}`, d.title, `${esc(lk.stageById[d.stage_id] ? lk.stageById[d.stage_id].name : '')} · ${esc(C.personText(d.owner_id))}`, `<span class="crm-due ${days < 0 ? 'overdue' : days === 0 ? 'today' : 'soon'}">${days < 0 ? Math.abs(days) + 'd late' : days === 0 ? 'Today' : days + 'd'}</span><b style="font-size:13px">${esc(L.moneyShort(d.value, d.currency))}</b>`); }).join('')}</ul>`;
                 // Top open deals
                 const top = open.slice().sort((a, b) => Number(b.value) - Number(a.value)).slice(0, 6);
                 const tpEl = view.querySelector('#w-top');
                 if (!top.length) C.empty(tpEl, 'No open deals', '');
-                else tpEl.innerHTML = `<ul class="crm-list compact">${top.map(d => listItem('deal', `/deals/?id=${d.id}`, d.title, `${esc(lk.stageById[d.stage_id] ? lk.stageById[d.stage_id].name : '')} · ${d.probability}% · ${esc(C.personName(d.owner_id))}`, `<b style="font-size:13px">${esc(L.money(d.value, d.currency))}</b>`)).join('')}</ul>`;
+                else tpEl.innerHTML = `<ul class="crm-list compact">${top.map(d => listItem('deal', `/deals/?id=${d.id}`, d.title, `${esc(lk.stageById[d.stage_id] ? lk.stageById[d.stage_id].name : '')} · ${d.probability}% · ${esc(C.personText(d.owner_id))}`, `<b style="font-size:13px">${esc(L.money(d.value, d.currency))}</b>`)).join('')}</ul>`;
             } catch (e) {
                 el.innerHTML = ['Open deals', 'Won deals', 'Lost deals', 'Pipeline value', 'Expected value'].map(l => kpiFail(l, e)).join('');
                 ['#w-stages', '#w-closing', '#w-top'].forEach(s => widgetError(view.querySelector(s), e));
@@ -223,12 +223,12 @@
             if (tasks) {
                 const tEl = view.querySelector('#w-tasks');
                 if (!tasks.length) C.empty(tEl, 'Nothing overdue', 'No open tasks are due today or earlier.');
-                else tEl.innerHTML = `<ul class="crm-list compact">${tasks.slice(0, 10).map(t => listItem('tasks', `/tasks/?id=${t.id}`, t.title, `${esc(C.personName(t.assignee_id))} · ${C.priorityBadge(t.priority)}`, C.dueHtml(t, today))).join('')}</ul>${tasks.length > 10 ? `<p class="muted" style="font-size:12.5px;margin:10px 0 0"><a class="crm-link" href="/tasks/?view=overdue">${tasks.length - 10} more…</a></p>` : ''}`;
+                else tEl.innerHTML = `<ul class="crm-list compact">${tasks.slice(0, 10).map(t => listItem('tasks', `/tasks/?id=${t.id}`, t.title, `${esc(C.personText(t.assignee_id))} · ${C.priorityBadge(t.priority)}`, C.dueHtml(t, today))).join('')}</ul>${tasks.length > 10 ? `<p class="muted" style="font-size:12.5px;margin:10px 0 0"><a class="crm-link" href="/tasks/?view=overdue">${tasks.length - 10} more…</a></p>` : ''}`;
             }
             if (events) {
                 const mEl = view.querySelector('#w-meetings');
                 if (!events.length) C.empty(mEl, 'No meetings this week', 'Scheduled events for the next 7 days appear here.', `<a class="ws-btn sm" href="/calendar/?new=1">${C.icon('plus')}<span>Schedule</span></a>`);
-                else mEl.innerHTML = `<ul class="crm-list compact">${events.slice(0, 8).map(e => listItem('calendar', `/calendar/?id=${e.id}`, e.title, `${esc(L.fmtDateTime(e.starts_at))} · ${esc(C.personName(e.owner_id))}`, C.statusBadge(L.EVENT_TYPE, e.event_type))).join('')}</ul>`;
+                else mEl.innerHTML = `<ul class="crm-list compact">${events.slice(0, 8).map(e => listItem('calendar', `/calendar/?id=${e.id}`, e.title, `${esc(L.fmtDateTime(e.starts_at))} · ${esc(C.personText(e.owner_id))}`, C.statusBadge(L.EVENT_TYPE, e.event_type))).join('')}</ul>`;
             }
         })();
 

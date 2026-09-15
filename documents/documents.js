@@ -644,7 +644,7 @@
         if (vis(d) === 'private') return `<span class="muted" title="Only the owner">${C.icon('lock', 'sm')} Only ${mine(d) ? 'me' : 'the owner'}</span>`;
         if (vis(d) === 'company') return `<span class="muted" title="Everyone in the company">${C.icon('users', 'sm')} Company</span>`;
         const ids = shareMap.get(d.id) || [];
-        return ids.length ? `<span title="${esc(ids.map(id => C.personName(id)).join(', '))}">${C.avatarsHtml(ids, 3)}</span>` : '<span class="muted">No one yet</span>';
+        return ids.length ? `<span title="${esc(ids.map(id => C.personText(id)).join(', '))}">${C.avatarsHtml(ids, 3)}</span>` : '<span class="muted">No one yet</span>';
     }
     function pubCell(d) {
         if (d._folder) return '';
@@ -898,7 +898,7 @@
         const el = view.querySelector('[data-conflict]'); if (!el) return;
         setStatus('Not saved', true);
         el.hidden = false;
-        el.innerHTML = `<div class="crm-notice">${C.icon('refresh')}<div><b>${esc(C.personName(fresh.updated_by) || 'Someone')} saved a newer version while you were editing.</b><br>Load theirs (your unsaved changes are dropped) or keep yours (it replaces theirs).</div><div class="acts"><button type="button" class="ws-btn" data-theirs>Load their version</button><button type="button" class="ws-btn primary" data-mine>Keep mine</button></div></div>`;
+        el.innerHTML = `<div class="crm-notice">${C.icon('refresh')}<div><b>${esc(C.personText(fresh.updated_by) || 'Someone')} saved a newer version while you were editing.</b><br>Load theirs (your unsaved changes are dropped) or keep yours (it replaces theirs).</div><div class="acts"><button type="button" class="ws-btn" data-theirs>Load their version</button><button type="button" class="ws-btn primary" data-mine>Keep mine</button></div></div>`;
         el.querySelector('[data-mine]').addEventListener('click', () => { el.hidden = true; fitEditor(); dv.pending = dv.pending || (dv.editor && dv.editor.get()); saveNow(true); });
         el.querySelector('[data-theirs]').addEventListener('click', () => { el.hidden = true; fitEditor(); dv.pending = null; reloadContent(true); });
         fitEditor();
@@ -911,7 +911,7 @@
         if (force) mountEditor(d, r.content);
         else if (!dv.editor.set(r.content)) return;
         dv.stamp = r.updated_at; d._stamp = r.updated_at;
-        setStatus(r.updated_by && r.updated_by !== me.id ? `Updated by ${C.personName(r.updated_by)}` : 'All changes saved');
+        setStatus(r.updated_by && r.updated_by !== me.id ? `Updated by ${C.personText(r.updated_by)}` : 'All changes saved');
     }
     function onVisible() { if (document.visibilityState === 'visible' && dv.doc) reloadContent(false); }
     /** The editor takes exactly the room left on screen, so only its own panes scroll (never the page as well). */
@@ -1061,7 +1061,7 @@
                             <div><dt>Size</dt><dd>${esc(L.fmtBytes(d.size_bytes))}</dd></div>
                             <div><dt>Folder</dt><dd>${path.length ? path.map(f => `<a href="/documents/?folder=${esc(f.id)}" data-nav>${esc(f.name)}</a>`).join(' › ') : '<span class="muted">Documents (top level)</span>'}</dd></div>
                             ${cols.full ? `<div><dt>Access</dt><dd>${esc(VIS[vis(d)].label)}: ${esc(VIS[vis(d)].hint)}</dd></div>` : ''}
-                            <div><dt>Uploaded</dt><dd>${esc(L.fmtDateTime(d.created_at))} by ${esc(C.personName(d.created_by))}</dd></div>
+                            <div><dt>Uploaded</dt><dd>${esc(L.fmtDateTime(d.created_at))} by ${C.personInline(d.created_by)}</dd></div>
                             ${d.sha256 ? `<div><dt>Fingerprint</dt><dd class="muted" style="font-size:12px" title="SHA-256">${esc(d.sha256.slice(0, 16))}…</dd></div>` : ''}
                             ${ctx.isManager ? `<div><dt>Storage path</dt><dd class="muted" style="font-size:12px;overflow-wrap:anywhere">${esc(d.bucket)}/${esc(d.storage_path)}</dd></div>` : ''}
                         </dl>

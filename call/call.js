@@ -82,6 +82,16 @@
         return (p && (p.full_name || (p.email ? p.email.split('@')[0] : ''))) || 'Someone';
     }
     function firstName(id) { return nameOf(id).split(' ')[0]; }
+    /** The Employee ID a colleague is known by, or ''. */
+    function empId(id) { const p = id === S.me.id ? null : person(id); return String((p && p.employee_id) || '').trim(); }
+    /** A colleague as text: "GL-PIS-CSM-IC-001 · Kemi Ade", or the name alone without an ID. */
+    function labelOf(id) { return empId(id) ? `${empId(id)} · ${nameOf(id)}` : nameOf(id); }
+    /** Put a colleague's Employee ID (bold) and name into el, without innerHTML. */
+    function fillName(el, id) {
+        el.textContent = '';
+        if (empId(id)) { const b = document.createElement('b'); b.textContent = empId(id); el.append(b, ' ' + nameOf(id)); }
+        else el.textContent = nameOf(id);
+    }
     /** Fill an avatar element with a photo or an initial. Never innerHTML with names. */
     function fillAvatar(el, id, label) {
         if (!el) return;
@@ -136,7 +146,7 @@
     function callTitle() {
         if (isGroup()) return S.groupName || 'Group call';
         const o = others().find(p => p.user_id !== S.me.id);
-        return o ? nameOf(o.user_id) : 'Call';
+        return o ? labelOf(o.user_id) : 'Call';
     }
     function titleAvatarId() {
         if (isGroup()) return null;
@@ -326,7 +336,9 @@
         const missing = [...ids].filter(id => id && !S.people.has(id));
         const jobs = [];
         if (missing.length) {
-            jobs.push(S.sb.from('profiles').select('id, full_name, email, avatar_url').in('id', missing).then(({ data }) => {
+            // employee_id arrives with supabase-employee-id-migration.sql; before it, read the rest.
+            const pick = cols => S.sb.from('profiles').select(cols).in('id', missing);
+            jobs.push(pick('id, full_name, email, avatar_url, employee_id').then(r => (r.error ? pick('id, full_name, email, avatar_url') : r)).then(({ data }) => {
                 (data || []).forEach(p => S.people.set(p.id, p));
             }));
         }
@@ -384,8 +396,8 @@
         panel({
             avatarId: isGroup() ? null : caller,
             avatarGroup: isGroup() ? callTitle() : null,
-            title: isGroup() ? callTitle() : nameOf(caller),
-            sub: isGroup() ? `${nameOf(caller)} is calling the group` : (video ? 'Incoming video call' : 'Incoming voice call'),
+            title: isGroup() ? callTitle() : labelOf(caller),
+            sub: isGroup() ? `${labelOf(caller)} is calling the group` : (video ? 'Incoming video call' : 'Incoming voice call'),
             actions: [
                 { label: 'Decline', cls: 'decline', icon: ICON.end, onClick: decline },
                 { label: 'Accept', cls: 'accept', icon: video ? ICON.video : ICON.phone, onClick: () => join() },
@@ -955,8 +967,8 @@
         }
         if (!caller) {
             if (mine && mine.state === 'declined') return { title: 'Call declined', sub: '', again: !isGroup(), rejoin: live && isGroup() };
-            if (live && isGroup()) return { title: 'Group call in progress', sub: `${nameOf(c.created_by)} started it. You can still join.`, rejoin: true };
-            return { title: 'Missed call', sub: `${nameOf(c.created_by)} called you.`, again: true };
+            if (live && isGroup()) return { title: 'Group call in progress', sub: `${labelOf(c.created_by)} started it. You can still join.`, rejoin: true };
+            return { title: 'Missed call', sub: `${labelOf(c.created_by)} called you.`, again: true };
         }
         if (c.status === 'declined') return { title: 'Declined', sub: `${who} can’t talk right now.`, again: true, busy: true };
         if (c.status === 'busy') return { title: 'Busy — on another call', sub: `${who} is on another call. Try again in a little while.`, again: true, busy: true };
@@ -1178,8 +1190,8 @@
         t.el.classList.toggle('screen', !!(meta && meta.screen));
         paintTileTools(t);
         t.mic.hidden = !(meta && meta.audio === false);
-        const nm = nameOf(uid);
-        if (t.nm.textContent !== nm) { t.nm.textContent = nm; fillAvatar(t.avatar, uid); }
+        const nm = labelOf(uid);
+        if (t.nm.dataset.label !== nm) { t.nm.dataset.label = nm; fillName(t.nm, uid); fillAvatar(t.avatar, uid); }
         const st = S.peerState.get(uid);
         const label = !st ? 'Connecting…' : st === 'connecting' ? 'Connecting…' : st === 'reconnecting' ? 'Reconnecting…' : st === 'failed' ? 'Connection lost — retrying…' : '';
         t.status.hidden = !label;
@@ -1526,7 +1538,7 @@
             const st = S.stats.get(uid), state = S.peerState.get(uid);
             const li = document.createElement('li');
             const a = document.createElement('span'), b = document.createElement('span');
-            a.textContent = nameOf(uid);
+            fillName(a, uid);
             if (state !== 'connected' || !st) b.textContent = state === 'reconnecting' ? 'reconnecting…' : state === 'failed' ? 'connection lost' : 'connecting…';
             else {
                 b.textContent = `${st.relay ? 'via relay' : 'direct'}${st.rtt != null ? ` · ${st.rtt} ms` : ''} · ${st.loss || 0}% loss`;

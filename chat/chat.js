@@ -105,6 +105,17 @@
         const name = esc((p && (p.full_name || p.email)) || 'Unknown');
         return empId(p) ? `<b class="mx-emp-id">${esc(empId(p))}</b> <span class="mx-emp-name">${name}</span>` : name;
     }
+    /** A colleague by id as text: "GL-PIS-CSM-IC-001 · Kemi Ade", or nameOf() ("You", "Someone") without an ID. */
+    function nameText(id) {
+        const p = person(id);
+        return S.me && id === S.me.id ? 'You' : empId(p) ? `${empId(p)} · ${fullName(id) || 'Someone'}` : nameOf(id);
+    }
+    /** A colleague by id as HTML: Employee ID in bold, then the name. */
+    function nameHtml(id, fallback) {
+        const p = person(id);
+        if (S.me && id === S.me.id) return 'You';
+        return p ? whoHtml(p) : esc(fallback || 'Someone');
+    }
     /** Does a search term match this person's name, email or Employee ID? */
     function personMatches(p, q) {
         return !q || [p.full_name, p.email, p.employee_id].some(v => String(v || '').toLowerCase().indexOf(q) !== -1);
@@ -152,6 +163,10 @@
     function threadAvatar(t, cls) {
         if (t.kind === 'group') return avatarHtml({ name: threadName(t), group: true, cls: 'group' + (cls ? ' ' + cls : '') });
         return personAvatar(t.id, cls, true);
+    }
+    /** The thread's title as HTML: a DM shows the colleague's Employee ID first. */
+    function threadNameHtml(t) {
+        return t.kind === 'dm' && person(t.id) ? whoHtml(person(t.id)) : esc(threadName(t));
     }
     function memberCount(convId) { return (S.members.get(convId) || []).length; }
     function keyOfMessage(m) { return m.conversation_id ? 'g:' + m.conversation_id : 'dm:' + (m.sender_id === S.me.id ? m.recipient_id : m.sender_id); }
@@ -268,7 +283,9 @@
     }
     async function ensurePerson(id) {
         if (!id || S.people.has(id)) return;
-        const { data } = await S.sb.from('profiles').select('id, email, full_name, avatar_url, last_seen_at, company').eq('id', id).maybeSingle();
+        let r = await S.sb.from('profiles').select('id, email, full_name, avatar_url, last_seen_at, company, employee_id').eq('id', id).maybeSingle();
+        if (r.error) r = await S.sb.from('profiles').select('id, email, full_name, avatar_url, last_seen_at, company').eq('id', id).maybeSingle();   // before the Employee ID migration
+        const data = r.data;
         if (data) { S.people.set(data.id, data); if (data.last_seen_at) S.lastSeen.set(data.id, data.last_seen_at); }
     }
     async function pollLastSeen() {
@@ -458,7 +475,7 @@
         const match = (s) => !q || String(s || '').toLowerCase().indexOf(q) !== -1;
         const all = [...S.threads.values()];
         const chats = all.filter(t => t.kind === 'group' ? S.groups.has(t.id) : (lastOf(t) || t.key === S.activeKey))
-            .filter(t => match(threadName(t)) || (t.kind === 'dm' && match((person(t.id) || {}).email)))
+            .filter(t => match(threadName(t)) || (t.kind === 'dm' && (match((person(t.id) || {}).email) || match((person(t.id) || {}).employee_id))))
             .sort((a, b) => sortTime(b) - sortTime(a));
         const hasThread = new Set(all.filter(t => t.kind === 'dm' && (lastOf(t) || t.key === S.activeKey)).map(t => t.id));
         const people = [...S.people.values()]
@@ -493,7 +510,7 @@
         return `<div class="mx-item${t.key === S.activeKey ? ' active' : ''}${unread ? ' unread' : ''}${muted ? ' muted' : ''}" role="listitem" tabindex="0" data-key="${esc(t.key)}" aria-label="${esc(name + (unread ? `, ${t.unread} unread` : ''))}">
             ${threadAvatar(t)}
             <div class="mx-item-body">
-                <div class="mx-item-top"><span class="mx-item-name">${esc(name)}${t.kind === 'dm' ? statusChip(t.id) : ''}</span><span class="mx-item-time">${esc(time)}</span></div>
+                <div class="mx-item-top"><span class="mx-item-name">${threadNameHtml(t)}${t.kind === 'dm' ? statusChip(t.id) : ''}</span><span class="mx-item-time">${esc(time)}</span></div>
                 <div class="mx-item-bottom"><span class="mx-item-prev${prevCls}">${prev}</span>${muted ? '<span class="mx-mute-ic" title="Muted">🔕</span>' : ''}${unread ? `<span class="mx-badge">${t.unread > 99 ? '99+' : t.unread}</span>` : ''}</div>
             </div></div>`;
     }
@@ -597,7 +614,7 @@
         const t = activeThread();
         if (!t) return;
         $('mx-head-av').innerHTML = threadAvatar(t);
-        $('mx-head-name').textContent = threadName(t);
+        $('mx-head-name').innerHTML = threadNameHtml(t);
         const typers = activeTypers();
         let sub, cls = '';
         if (typers.length) {
@@ -915,12 +932,12 @@
         else if (sp.kind === 'file') { if (sp.isImage || sp.isAudio || sp.isVideo) bubbleCls.push('media'); content = fileHtml(m, sp); }
         else {
             if (L.isEmojiOnly(sp.text) && !m.reply_to_id) bubbleCls.push('emoji');
-            content = `<div class="mx-text">${L.formatBody(sp.text, { names: mentionNames(), meName: S.me.name })}</div>`;
+            content = `<div class="mx-text">${L.formatBody(sp.text, { names: mentionNames(), meName: S.me.name, codes: mentionNames.codes })}</div>`;
         }
         const live = sp.kind !== 'deleted';
         const meta = `<span class="mx-meta">${m.pinned_at && live ? '<span class="mx-pin-mark" title="Pinned">📌</span>' : ''}${m.edited_at && live ? '<span class="mx-edited">edited</span>' : ''}<time datetime="${esc(m.created_at || '')}" title="${esc(fullDate(m.created_at))}">${esc(L.fmtTime(m.created_at))}</time>${mine ? receiptHtml(m) : ''}</span>`;
         let html = '';
-        if (group && !mine && f.first) html += `<div class="mx-sender" style="color:${L.colorFor(m.sender_id)}">${esc(nameOf(m.sender_id))}</div>`;
+        if (group && !mine && f.first) html += `<div class="mx-sender" style="color:${L.colorFor(m.sender_id)}">${nameHtml(m.sender_id)}</div>`;
         html += `<div class="mx-line"><div class="${bubbleCls.join(' ')}" tabindex="0">${quoteHtml(m, parent)}${content}${meta}</div>` +
             `<button type="button" class="mx-more" data-act="menu" aria-label="Message actions" data-icon="chev"></button></div>`;
         if (m._state === 'failed') html += `<div class="mx-failed">Not sent${m._err ? ' — ' + esc(m._err) : ''} · <button type="button" data-act="retry">Retry</button> · <button type="button" data-act="discard">Delete</button></div>`;
@@ -940,7 +957,7 @@
     function quoteHtml(m, parent) {
         if (m.reply_to_id == null) return '';
         if (!parent) fetchParent(m.reply_to_id);
-        const who = parent ? (parent._missing ? '' : nameOf(parent.sender_id)) : '…';
+        const who = parent ? (parent._missing ? '' : nameText(parent.sender_id)) : '…';
         const txt = parent ? L.previewText(parent.body) : 'Loading…';
         return `<button type="button" class="mx-quote" data-act="quote" data-target="${esc(sid(m.reply_to_id))}" title="Go to the original message"><b>${esc(who)}</b><span>${esc(txt)}</span></button>`;
     }
@@ -1076,12 +1093,14 @@
         const el = document.createElement('div');
         el.className = 'mx-seen';
         el.textContent = seen.length >= others ? 'Seen by everyone' : `Seen by ${seen.length}`;
-        el.title = seen.map(id => fullName(id) || 'Someone').join(', ');
+        el.title = seen.map(nameText).join(', ');
         return { key: mKey(m), el };
     }
     function mentionNames() {
         if (!mentionNames.cache || mentionNames.size !== S.people.size) {
             mentionNames.cache = [...S.people.values()].map(p => p.full_name).filter(Boolean);
+            mentionNames.codes = {};
+            S.people.forEach(p => { if (p.full_name && empId(p) && !mentionNames.codes[p.full_name]) mentionNames.codes[p.full_name] = empId(p); });
             mentionNames.size = S.people.size;
         }
         return mentionNames.cache;
@@ -1760,7 +1779,7 @@
     }
     function startReply(m) {
         S.editing = null; S.replyTo = m;
-        showCtx('Replying to ' + (m.sender_id === S.me.id ? 'yourself' : fullName(m.sender_id) || 'message'), L.previewText(m.body));
+        showCtx('Replying to ' + (m.sender_id === S.me.id ? 'yourself' : fullName(m.sender_id) ? nameText(m.sender_id) : 'message'), L.previewText(m.body));
         updateSendButton(); focusComposer();
     }
     function startEdit(m) {
@@ -2167,7 +2186,7 @@
     function openPins() {
         if (!S.pins.length) return;
         openModal(`<h3>Pinned messages<button type="button" class="mx-icon-btn sm" data-close aria-label="Close" data-icon="x"></button></h3>
-            <div role="list">${S.pins.map(p => `<button type="button" class="mx-hit" data-jump="${esc(sid(p.id))}"><span class="who">${esc(nameOf(p.sender_id))}</span><span class="txt">${esc(L.previewText(p.body))}</span><span class="when">${esc(L.fmtListTime(p.created_at))}</span></button>`).join('')}</div>`);
+            <div role="list">${S.pins.map(p => `<button type="button" class="mx-hit" data-jump="${esc(sid(p.id))}"><span class="who">${nameHtml(p.sender_id)}</span><span class="txt">${esc(L.previewText(p.body))}</span><span class="when">${esc(L.fmtListTime(p.created_at))}</span></button>`).join('')}</div>`);
         $('mx-card').querySelectorAll('[data-jump]').forEach(b => b.addEventListener('click', () => { closeModal(); jumpTo(b.dataset.jump); }));
     }
     function openSearch() {
@@ -2216,7 +2235,7 @@
         if (r.error) { $('mx-msearch-info').textContent = 'Search is unavailable right now.'; return; }
         const hits = (r.data || []).filter(m => belongsTo(t, m) && !L.isSpecial(m.body) && String(m.body).toLowerCase().indexOf(term.toLowerCase()) !== -1);
         $('mx-msearch-info').textContent = hits.length ? `${hits.length} result${hits.length === 1 ? '' : 's'}${hits.length === 30 ? ' (newest 30)' : ''}` : 'No messages found';
-        $('mx-msearch-results').innerHTML = hits.map(m => `<button type="button" class="mx-hit" role="listitem" data-jump="${esc(sid(m.id))}"><span class="who">${esc(nameOf(m.sender_id))}</span><span class="txt">${esc(String(m.body).replace(/\s+/g, ' ').slice(0, 140))}</span><span class="when">${esc(L.fmtListTime(m.created_at))}</span></button>`).join('');
+        $('mx-msearch-results').innerHTML = hits.map(m => `<button type="button" class="mx-hit" role="listitem" data-jump="${esc(sid(m.id))}"><span class="who">${nameHtml(m.sender_id)}</span><span class="txt">${esc(String(m.body).replace(/\s+/g, ' ').slice(0, 140))}</span><span class="when">${esc(L.fmtListTime(m.created_at))}</span></button>`).join('');
     }
 
     // ---------------------------------------------------------------- dialogs
@@ -2344,13 +2363,13 @@
         openModal(`<button type="button" class="mx-icon-btn sm mx-x" data-close aria-label="Close" data-icon="x"></button>
             <div class="mx-profile">${avatarHtml({ name: g.name, group: true, cls: 'group lg' })}<h3>${esc(g.name)}</h3>
                 ${g.description ? `<p style="margin:0">${esc(g.description)}</p>` : ''}
-                <p class="mx-muted" style="margin:0">Created by ${esc(nameOf(g.created_by))} · ${esc(fullDate(g.created_at))}</p>
+                <p class="mx-muted" style="margin:0">Created by ${nameHtml(g.created_by)} · ${esc(fullDate(g.created_at))}</p>
                 <div class="mx-actions stretch" style="width:100%"><button type="button" class="mx-btn" data-icon="phone" id="gi-voice">Voice</button><button type="button" class="mx-btn" data-icon="video" id="gi-video">Video</button></div>
             </div>
             ${admin ? `<label class="f" for="gi-name">Name</label><div style="display:flex;gap:6px"><input id="gi-name" type="text" maxlength="80" value="${esc(g.name)}"><button type="button" class="mx-btn sm" id="gi-save-name">Save</button></div>
             <label class="f" for="gi-desc">Description</label><div style="display:flex;gap:6px"><input id="gi-desc" type="text" maxlength="200" value="${esc(g.description || '')}"><button type="button" class="mx-btn sm" id="gi-save-desc">Save</button></div>` : ''}
             <h4>${members.length} member${members.length === 1 ? '' : 's'}</h4>
-            <div>${members.map(m => `<div class="mx-member">${personAvatar(m.user_id, 'sm', true)}<span class="nm">${esc(m.user_id === S.me.id ? 'You' : fullName(m.user_id) || 'Former colleague')}</span>${m.user_id === g.created_by ? '<span class="role">Creator</span>' : m.role === 'admin' ? '<span class="role">Admin</span>' : ''}
+            <div>${members.map(m => `<div class="mx-member">${personAvatar(m.user_id, 'sm', true)}<span class="nm">${m.user_id === S.me.id ? 'You' : nameHtml(m.user_id, 'Former colleague')}</span>${m.user_id === g.created_by ? '<span class="role">Creator</span>' : m.role === 'admin' ? '<span class="role">Admin</span>' : ''}
                 ${admin && m.user_id !== S.me.id ? `${m.user_id === g.created_by ? '' : `<button type="button" class="mx-btn sm" data-role="${esc(m.user_id)}" data-to="${m.role === 'admin' ? 'member' : 'admin'}">${m.role === 'admin' ? 'Remove admin' : 'Make admin'}</button>`}<button type="button" class="mx-btn sm danger" data-remove="${esc(m.user_id)}" aria-label="Remove ${esc(fullName(m.user_id))}">Remove</button>` : ''}</div>`).join('')}</div>
             ${admin ? `<h4>Add members</h4><input id="gi-q" type="search" placeholder="Search colleagues" autocomplete="off"><div class="mx-pick" id="gi-pick">${pickHtml(members.map(m => m.user_id), '')}</div><div class="mx-actions"><button type="button" class="mx-btn" id="gi-add">Add selected</button></div>` : ''}
             <p class="mx-err" id="gi-err"></p>
@@ -2537,7 +2556,7 @@
         const parts = c.call_participants || [];
         const mine = c.created_by === S.me.id;
         const me = parts.find(p => p.user_id === S.me.id);
-        let key = null, name, avatar;
+        let key = null, name, avatar, nameHtmlStr = '', code = '';
         if (c.conversation_id) {
             key = S.groups.has(c.conversation_id) ? 'g:' + c.conversation_id : null;
             const g = S.groups.get(c.conversation_id);
@@ -2547,6 +2566,7 @@
             const other = mine ? (parts.find(p => p.user_id !== S.me.id) || {}).user_id : c.created_by;
             key = other ? 'dm:' + other : null;
             name = other ? fullName(other) || 'Former colleague' : 'Unknown';
+            if (other && person(other)) { nameHtmlStr = whoHtml(person(other)); code = empId(person(other)); }
             avatar = other ? personAvatar(other) : avatarHtml({ name });
         }
         const live = c.status === 'ringing' || c.status === 'active';
@@ -2557,7 +2577,7 @@
         else if (me && me.joined_at) text = 'Incoming · ' + L.fmtDuration(secs);
         else if (me && me.state === 'declined') text = 'Declined';
         else { text = 'Missed call'; miss = true; }
-        return { key, name, avatar, live, text, miss, mine, dir: mine ? '↗' : '↙' };
+        return { key, name, nameHtml: nameHtmlStr || esc(name), code, avatar, live, text, miss, mine, dir: mine ? '↗' : '↙' };
     }
     function paintCalls() {
         const box = $('mx-calls');
@@ -2571,12 +2591,12 @@
             return;
         }
         const q = $('mx-search').value.trim().toLowerCase();
-        const rows = S.calls.map(c => Object.assign({ c }, callInfo(c))).filter(x => !q || x.name.toLowerCase().indexOf(q) !== -1);
+        const rows = S.calls.map(c => Object.assign({ c }, callInfo(c))).filter(x => !q || x.name.toLowerCase().indexOf(q) !== -1 || x.code.toLowerCase().indexOf(q) !== -1);
         if (!rows.length) { box.innerHTML = `<div class="mx-list-empty">${q ? 'No calls match.' : 'No calls yet. Start one from any chat with the phone or camera button.'}</div>`; return; }
         box.innerHTML = rows.map(x => `<div class="mx-item mx-call-item${x.miss ? ' miss' : ''}" role="listitem" tabindex="0"${x.key ? ` data-key="${esc(x.key)}"` : ''}>
             ${x.avatar}
             <div class="mx-item-body">
-                <div class="mx-item-top"><span class="mx-item-name">${esc(x.name)}</span><span class="mx-item-time">${esc(L.fmtListTime(x.c.created_at))}</span></div>
+                <div class="mx-item-top"><span class="mx-item-name">${x.nameHtml}</span><span class="mx-item-time">${esc(L.fmtListTime(x.c.created_at))}</span></div>
                 <div class="mx-item-bottom"><span class="mx-item-prev"><span class="dir" aria-hidden="true">${x.dir}</span> ${x.c.media === 'video' ? '📹' : '📞'} ${esc(x.text)}</span></div>
             </div>
             <div class="mx-call-actions">${x.live && x.c.conversation_id ? `<button type="button" class="mx-btn sm" data-join="${esc(x.c.id)}">Join</button>`

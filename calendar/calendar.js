@@ -191,7 +191,7 @@
                 const r = await sb.from('leave_requests').select('id,user_id,start_date,end_date,day_part,status').eq('status', 'approved')
                     .lte('start_date', range.to).gte('end_date', range.from).limit(500);
                 if (r.error) return;
-                (r.data || []).forEach(lv => items.push({ kind: 'leave', id: lv.id, key: 'l:' + lv.id, user_id: lv.user_id, title: `On leave: ${C.personName(lv.user_id)}${lv.day_part !== 'full' ? ' (half day)' : ''}`,
+                (r.data || []).forEach(lv => items.push({ kind: 'leave', id: lv.id, key: 'l:' + lv.id, user_id: lv.user_id, title: `On leave: ${C.personText(lv.user_id)}${lv.day_part !== 'full' ? ' (half day)' : ''}`,
                     from: lv.start_date, to: lv.end_date, allDay: true, startIso: L.isoAtIST(lv.start_date, '00:00'), cls: '', tip: `${L.fmtDate(lv.start_date)} – ${L.fmtDate(lv.end_date)}` }));
             },
             async () => {                                                  // lead follow-ups
@@ -463,7 +463,7 @@
             html += `<div class="day-h${day === today ? ' today' : ''}">${day === today ? 'Today · ' : ''}${DAY_NAMES[L.isoWeekday(day) - 1]}, ${esc(L.fmtDate(day))}</div><ul class="crm-list compact">`;
             list.forEach(it => {
                 const when = it.allDay ? 'All day' : `${L.fmtTime(it.startIso)}${it.endIso && it.kind === 'event' ? ' – ' + L.fmtTime(it.endIso) : ''}`;
-                const who = it.kind === 'event' ? C.personName(it.ev.owner_id) : it.kind === 'task' ? C.personName(it.task.assignee_id) : it.kind === 'followup' ? C.personName(it.lead.owner_id) : (it.tip || '');
+                const who = it.kind === 'event' ? C.personText(it.ev.owner_id) : it.kind === 'task' ? C.personText(it.task.assignee_id) : it.kind === 'followup' ? C.personText(it.lead.owner_id) : (it.tip || '');
                 const waiting = it.kind === 'event' && myResponse(it.ev) === 'invited' && it.ev.status !== 'cancelled';
                 html += `<li class="cal-row${it.cls || ''}" data-item="${esc(it.key)}" role="button" tabindex="0" style="--ev:${colorOf(it)}">
                     <span class="when">${esc(when)}</span><span class="dot" aria-hidden="true"></span>

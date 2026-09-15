@@ -563,7 +563,7 @@
         refs.menu.querySelector('#ws-menu-profile').addEventListener('click', function () {
             toggleMenu(false);
             if (typeof state.opts.onProfile === 'function') return state.opts.onProfile();
-            location.href = '/#profile';
+            location.href = '/employees/?id=me';
         });
         refs.menu.querySelector('#ws-menu-out').addEventListener('click', function () { toggleMenu(false); doSignOut(); });
         side.querySelector('#ws-foot-out').addEventListener('click', function () { doSignOut(); });

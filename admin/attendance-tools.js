@@ -145,7 +145,7 @@
             wrap.classList.toggle('hidden', !sample.length);
             tb.innerHTML = sample.map(c => `
                 <tr>
-                    <td class="font-mono text-slate-300">${esc(c.employee_code || '—')}</td>
+                    <td class="text-slate-200">${c.employee_id ? `<b class="font-mono whitespace-nowrap">${esc(c.employee_id)}</b> ` : ''}${esc(c.full_name || '')}<div class="font-mono text-slate-400 text-xs">${c.employee_code ? 'Biometric ID ' + esc(c.employee_code) : '—'}</div></td>
                     <td class="text-slate-200 font-bold whitespace-nowrap">${esc(IST_T.format(new Date(c.log_datetime)).replace(',', ''))}</td>
                     <td class="text-rose-300 font-bold">${esc(label(c.before))}</td>
                     <td class="text-emerald-300 font-bold">${esc(label(c.after))}</td>

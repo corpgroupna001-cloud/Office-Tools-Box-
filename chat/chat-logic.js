@@ -226,6 +226,7 @@
      * @mentions of known names highlighted, newlines kept.
      *   opts.names   display names that can be mentioned
      *   opts.meName  the reader's own name (highlighted differently)
+     *   opts.codes   optional { name: Employee ID }; a mention shows the ID before the name
      */
     function formatBody(text, opts) {
         opts = opts || {};
@@ -235,23 +236,26 @@
         while ((m = URL_RE.exec(src))) {
             var url = trimUrl(m[0]);
             if (!url) continue;
-            out.push(formatPlain(src.slice(last, m.index), names, opts.meName));
+            out.push(formatPlain(src.slice(last, m.index), names, opts.meName, opts.codes));
             out.push('<a class="mx-link" href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(url) + '</a>');
             last = m.index + url.length;
             URL_RE.lastIndex = last;
         }
-        out.push(formatPlain(src.slice(last), names, opts.meName));
+        out.push(formatPlain(src.slice(last), names, opts.meName, opts.codes));
         return out.join('');
     }
-    function formatPlain(s, names, meName) {
+    function formatPlain(s, names, meName, codes) {
         var html = escapeHtml(s);
         if (html.indexOf('@') !== -1 && names.length) {
             // One pass, longest names first, so "@Anil Kumar" is wrapped once and never again as "@Anil".
             var escRe = function (t) { return t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
             var meKey = meName ? escapeHtml(meName) : null;
             var re = new RegExp('@(' + names.map(function (n) { return escRe(escapeHtml(n)); }).join('|') + ')(?![\\w])', 'g');
+            var codeOf = {};
+            if (codes) Object.keys(codes).forEach(function (k) { if (codes[k]) codeOf[escapeHtml(k)] = escapeHtml(String(codes[k])); });
             html = html.replace(re, function (all, n) {
-                return '<span class="' + (meKey && n === meKey ? 'mx-mention me' : 'mx-mention') + '">' + all + '</span>';
+                var shown = codeOf[n] ? '@<b class="mx-emp-id">' + codeOf[n] + '</b> ' + n : all;
+                return '<span class="' + (meKey && n === meKey ? 'mx-mention me' : 'mx-mention') + '">' + shown + '</span>';
             });
         }
         return html.replace(/\r?\n/g, '<br>');

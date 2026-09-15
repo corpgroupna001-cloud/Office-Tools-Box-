@@ -215,6 +215,13 @@
         const code = String(who.employee_id || '').trim();
         return code ? `${code} · ${who.name}` : who.name;
     }
+    /** A person shown as text: "GL-PIS-CSM-IC-001 · Kemi Ade", or personName() when there is no ID (or no person). */
+    function personText(id, fallback) { return personLabel(id) || personName(id, fallback); }
+    /** A person shown inline in HTML: the Employee ID in bold, then the name. Escaped. */
+    function personInline(id, fallback) {
+        const p = person(id), code = p ? String(p.employee_id || '').trim() : '';
+        return code ? `<b class="crm-emp-id">${esc(code)}</b> ${esc(p.name)}` : esc(personName(id, fallback));
+    }
     /** People with an Employee ID first, in ID order; the rest by name. */
     function byEmployeeId(a, b) {
         const ac = String(a.employee_id || '').trim(), bc = String(b.employee_id || '').trim();
@@ -225,9 +232,11 @@
     function avatarHtml(p, cls) {
         const who = typeof p === 'string' ? person(p) : p;
         const name = who ? (who.name || who.full_name || who.email || '?') : '?';
+        const code = who ? String(who.employee_id || '').trim() : '';
+        const tip = code ? `${code} · ${name}` : name;
         const c = 'ws-avatar' + (cls ? ' ' + cls : '');
-        if (who && who.avatar_url) return `<span class="${c}"><img src="${esc(who.avatar_url)}" alt=""></span>`;
-        return `<span class="${c}" title="${esc(name)}">${esc(L.initials(name))}</span>`;
+        if (who && who.avatar_url) return `<span class="${c}"${code ? ` title="${esc(tip)}"` : ''}><img src="${esc(who.avatar_url)}" alt=""></span>`;
+        return `<span class="${c}" title="${esc(tip)}">${esc(L.initials(name))}</span>`;
     }
     function personHtml(id, opts) {
         const p = person(id);
@@ -740,10 +749,10 @@
                 container.innerHTML = `<ul class="crm-timeline">${items.map(it => {
                     if (it.kind === 'comment') {
                         const c = it.c; const mine = state.user && c.author_id === state.user.id;
-                        return `<li data-comment="${esc(c.id)}"><div class="who">${avatarHtml(c.author_id)}</div><div class="what"><b>${esc(personName(c.author_id))}</b> added a note${mine || L.isManager(state.user) ? `<span class="tools">${mine ? '<button type="button" data-edit>Edit</button>' : ''}<button type="button" data-del>Delete</button></span>` : ''}<span class="when">${esc(L.fmtRelative(c.created_at))}${c.updated_at && c.updated_at !== c.created_at ? ' · edited' : ''}</span><div class="body">${renderMentions(c.body)}</div></div></li>`;
+                        return `<li data-comment="${esc(c.id)}"><div class="who">${avatarHtml(c.author_id)}</div><div class="what"><b>${esc(personText(c.author_id))}</b> added a note${mine || L.isManager(state.user) ? `<span class="tools">${mine ? '<button type="button" data-edit>Edit</button>' : ''}<button type="button" data-del>Delete</button></span>` : ''}<span class="when">${esc(L.fmtRelative(c.created_at))}${c.updated_at && c.updated_at !== c.created_at ? ' · edited' : ''}</span><div class="body">${renderMentions(c.body)}</div></div></li>`;
                     }
                     const l = activityLine(it.a);
-                    return `<li><div class="who">${it.a.actor_id ? avatarHtml(it.a.actor_id) : '<span class="ws-avatar">⚙</span>'}</div><div class="what"><b>${esc(l.who)}</b> ${esc(l.verb)} ${l.target}${l.detail ? `<span class="detail">${esc(l.detail)}</span>` : ''}<span class="when">${esc(L.fmtDateTime(it.a.created_at))}</span></div></li>`;
+                    return `<li><div class="who">${it.a.actor_id ? avatarHtml(it.a.actor_id) : '<span class="ws-avatar">⚙</span>'}</div><div class="what"><b>${it.a.actor_id ? esc(personText(it.a.actor_id)) : esc(l.who)}</b> ${esc(l.verb)} ${l.target}${l.detail ? `<span class="detail">${esc(l.detail)}</span>` : ''}<span class="when">${esc(L.fmtDateTime(it.a.created_at))}</span></div></li>`;
                 }).join('')}</ul>`;
             } catch (e) { errorState(container, e, load); }
         }
@@ -765,7 +774,12 @@
     function renderMentions(body) {
         let html = linkify(nl2br(body));
         // @Full Name mentions were inserted by the composer; highlight people we know.
-        state.people.forEach(p => { if (p.name && body.includes('@' + p.name)) html = html.split('@' + esc(p.name)).join(`<span class="mention">@${esc(p.name)}</span>`); });
+        // Longest names first, so "@Anil Kumar" is not taken for "@Anil"; the Employee ID is shown before the name.
+        state.people.slice().sort((x, y) => String(y.name || '').length - String(x.name || '').length).forEach(p => {
+            if (!p.name || !body.includes('@' + p.name)) return;
+            const code = String(p.employee_id || '').trim();
+            html = html.split('@' + esc(p.name)).join(`<span class="mention">@${code ? `<b>${esc(code)}</b> ` : ''}${esc(p.name)}</span>`);
+        });
         return html;
     }
 
@@ -904,7 +918,7 @@
                 const { data } = await q(sb.from('document_links').select('created_at, created_by, document:documents(*)').eq('entity_type', opts.entity_type).eq('entity_id', opts.entity_id).order('created_at', { ascending: false }));
                 const docs = (data || []).map(r => r.document).filter(d => d && !d.archived_at);
                 if (!docs.length) return empty(listEl, 'No files attached', opts.canEdit === false ? '' : 'Upload a file below or attach one from Documents.');
-                listEl.innerHTML = `<ul class="crm-list compact">${docs.map(d => `<li data-doc="${esc(d.id)}">${fileIcon(d)}<div class="main"><b><a href="#" data-open>${esc(d.name)}</a></b><span>${esc(L.fmtBytes(d.size_bytes))} · ${esc(personName(d.created_by))} · ${esc(L.fmtDate(d.created_at))}</span></div><div class="right"><a class="ws-btn sm" href="/documents/?id=${esc(d.id)}" title="Open in Documents">${icon('doc')}</a>${opts.canEdit === false ? '' : `<button type="button" class="ws-btn sm" data-unlink title="Remove from this record">${icon('x')}</button>`}</div></li>`).join('')}</ul>`;
+                listEl.innerHTML = `<ul class="crm-list compact">${docs.map(d => `<li data-doc="${esc(d.id)}">${fileIcon(d)}<div class="main"><b><a href="#" data-open>${esc(d.name)}</a></b><span>${esc(L.fmtBytes(d.size_bytes))} · ${esc(personText(d.created_by))} · ${esc(L.fmtDate(d.created_at))}</span></div><div class="right"><a class="ws-btn sm" href="/documents/?id=${esc(d.id)}" title="Open in Documents">${icon('doc')}</a>${opts.canEdit === false ? '' : `<button type="button" class="ws-btn sm" data-unlink title="Remove from this record">${icon('x')}</button>`}</div></li>`).join('')}</ul>`;
                 listEl._docs = docs;
             } catch (e) { errorState(listEl, e, load); }
         }
@@ -1118,7 +1132,7 @@
     window.WSCrm = {
         boot, ctx, client, lookups, q, friendly, isMissingSchema, migrationNoticeHtml,
         esc, h, $, $$, uid, debounce, param, setParam, toast, icon, nl2br, linkify,
-        person, personName, personLabel, activePeople, avatarHtml, personHtml, avatarsHtml, peopleOptions, peoplePicker,
+        person, personName, personLabel, personText, personInline, activePeople, avatarHtml, personHtml, avatarsHtml, peopleOptions, peoplePicker,
         badge, statusBadge, priorityBadge, dueHtml, tagsHtml, entityUrl, entityChip, ENTITY_META,
         loading, skeletonRows, empty, errorState,
         confirm, alert, modal, form, formModal, entityPicker, searchEntities, entityLabel,

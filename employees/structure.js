@@ -26,7 +26,12 @@
 
     const person = id => people.find(p => p.id === id);
     const nameOf = p => (p ? p.full_name || (p.email || '').split('@')[0] || 'Unknown' : 'Unknown');
-    const avatar = p => `<span class="ws-avatar" title="${esc(nameOf(p))}">${p && p.avatar_url ? `<img src="${esc(p.avatar_url)}" alt="">` : esc(L.initials(nameOf(p)))}</span>`;
+    const empId = p => String((p && p.employee_id) || '').trim();
+    /** "GL-PIS-CSM-IC-001 · Kemi Ade", or the name alone without an Employee ID. */
+    const labelOf = p => (empId(p) ? `${empId(p)} · ${nameOf(p)}` : nameOf(p));
+    /** Employee ID in bold, then the name (HTML). */
+    const whoHtml = p => (empId(p) ? `<b class="emp-id">${esc(empId(p))}</b> ${esc(nameOf(p))}` : esc(nameOf(p)));
+    const avatar = p => `<span class="ws-avatar" title="${esc(labelOf(p))}">${p && p.avatar_url ? `<img src="${esc(p.avatar_url)}" alt="">` : esc(L.initials(nameOf(p)))}</span>`;
     const kids = id => depts.filter(d => (d.parent_id || null) === id).sort((a, b) => (a.sort || 0) - (b.sort || 0) || a.name.localeCompare(b.name));
     const membersOf = id => members.filter(m => m.department_id === id && person(m.user_id))
         .sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || nameOf(person(a.user_id)).localeCompare(nameOf(person(b.user_id))));
@@ -41,7 +46,9 @@
         const [d, m, p] = await Promise.all([
             sb.from('departments').select('id, name, parent_id, company, sort').order('sort').order('name').limit(2000),
             sb.from('department_members').select('department_id, user_id, role, position').limit(20000),
-            sb.from('profiles').select('id, full_name, email, avatar_url, company, company2, department, job_title, status, last_seen_at').order('full_name').limit(3000),
+            // employee_id arrives with supabase-employee-id-migration.sql; without it the chart reads the rest.
+            sb.from('profiles').select('id, full_name, email, avatar_url, company, company2, department, job_title, status, last_seen_at, employee_id').order('full_name').limit(3000)
+                .then(r => (r.error ? sb.from('profiles').select('id, full_name, email, avatar_url, company, company2, department, job_title, status, last_seen_at').order('full_name').limit(3000) : r)),
         ]);
         if (p.error) throw p.error;
         people = (p.data || []).filter(x => (x.status || 'active') !== 'inactive');
@@ -74,7 +81,7 @@
         const total = totalIn(d.id), others = mem.filter(m => m.role !== 'head');
         return `<li><div class="org-node${depth === 0 ? ' root' : ''}" data-dept="${esc(d.id)}"${canManage(d) && d.parent_id ? ' draggable="true"' : ''} style="--c:${color}" tabindex="0" role="button" aria-label="${esc(d.name)}: ${total} ${total === 1 ? 'person' : 'people'}">
                 <div class="hd"><b class="nm">${esc(d.name)}</b>${canManage(d) ? '<button type="button" class="g-rowmenu" data-dept-menu aria-label="Department actions">☰</button>' : ''}</div>
-                <div class="head">${hp ? `${avatar(hp)}<span><b>${esc(nameOf(hp))}</b><span>${esc(head.position || 'Head of department')}</span></span>` : `<span class="muted">${depth === 0 ? (d.company ? '' : 'The whole group') : 'No head chosen'}</span>`}</div>
+                <div class="head">${hp ? `${avatar(hp)}<span>${empId(hp) ? `<b class="emp-id">${esc(empId(hp))}</b><b class="emp-name">${esc(nameOf(hp))}</b>` : `<b>${esc(nameOf(hp))}</b>`}<span>${esc(head.position || 'Head of department')}</span></span>` : `<span class="muted">${depth === 0 ? (d.company ? '' : 'The whole group') : 'No head chosen'}</span>`}</div>
                 <div class="ft"><span class="avs">${others.slice(0, 5).map(m => avatar(person(m.user_id))).join('')}${others.length > 5 ? `<span class="more">+${others.length - 5}</span>` : ''}</span><span class="n">${total === mem.length ? `${total} ${total === 1 ? 'person' : 'people'}` : mem.length ? `${mem.length} here · ${total} in all` : `${total} in all`}</span></div>
                 ${ks.length ? `<button type="button" class="org-toggle" data-toggle aria-label="${shut ? 'Show' : 'Hide'} ${ks.length} sub-department${ks.length === 1 ? '' : 's'}">${shut ? '+' + ks.length : '−'}</button>` : ''}
             </div>${ks.length && !shut && depth < 30 ? `<ul>${ks.map(k => nodeHtml(k, depth + 1)).join('')}</ul>` : ''}</li>`;
@@ -88,7 +95,7 @@
         const hitsEl = view.querySelector('[data-hits]');
         if (query) {
             const q = query.toLowerCase();
-            const hits = depts.filter(d => d.name.toLowerCase().includes(q) || membersOf(d.id).some(m => { const p = person(m.user_id); return [nameOf(p), p.job_title, p.email].some(v => v && String(v).toLowerCase().includes(q)); }));
+            const hits = depts.filter(d => d.name.toLowerCase().includes(q) || membersOf(d.id).some(m => { const p = person(m.user_id); return [nameOf(p), p.employee_id, p.job_title, p.email].some(v => v && String(v).toLowerCase().includes(q)); }));
             hits.forEach(d => { const el = org.querySelector(`[data-dept="${CSS.escape(d.id)}"]`); if (el) el.classList.add('hit'); });
             hitsEl.textContent = hits.length ? `${hits.length} department${hits.length === 1 ? '' : 's'} found` : 'Nothing found';
             const first = hits[0] && org.querySelector(`[data-dept="${CSS.escape(hits[0].id)}"]`);
@@ -141,7 +148,7 @@
             fields: [
                 ...(top ? [{ name: 'company', label: 'Company', type: 'select', required: true, full: true, options: companyOptions() }] : []),
                 { name: 'name', label: 'Name', type: 'text', required: true, full: true, placeholder: 'e.g. Sales' },
-                { name: 'head', label: 'Head of department', type: 'select', full: true, options: [{ value: '', label: 'Choose later' }, ...peopleIn(parent && parent.company).map(p => ({ value: p.id, label: nameOf(p) }))] },
+                { name: 'head', label: 'Head of department', type: 'select', full: true, options: [{ value: '', label: 'Choose later' }, ...peopleIn(parent && parent.company).map(p => ({ value: p.id, label: labelOf(p) }))] },
             ],
             values: top && myCompanies[0] ? { company: myCompanies[0] } : {},
             onSubmit: async v => {
@@ -181,7 +188,7 @@
     }
     async function chooseHead(d) {
         const cur = headOf(d.id);
-        await C.formModal({ title: `Head of ${d.name}`, submitLabel: 'Save', fields: [{ name: 'user', label: 'Person', type: 'select', required: true, full: true, options: peopleIn(d.company).map(p => ({ value: p.id, label: nameOf(p) })) }], values: { user: cur ? cur.user_id : '' },
+        await C.formModal({ title: `Head of ${d.name}`, submitLabel: 'Save', fields: [{ name: 'user', label: 'Person', type: 'select', required: true, full: true, options: peopleIn(d.company).map(p => ({ value: p.id, label: labelOf(p) })) }], values: { user: cur ? cur.user_id : '' },
             onSubmit: async v => { await setRole(d, v.user, 'head'); } });
     }
     async function setPosition(d, userId) {
@@ -243,7 +250,7 @@
         const body = document.createElement('div');
         body.innerHTML = `
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">${d.company ? C.badge('info', d.company) : C.badge('mute', 'Whole group')}<span class="muted" style="font-size:13px">${list.length} ${list.length === 1 ? 'person' : 'people'} here${total !== list.length ? `, ${total} with sub-departments` : ''}</span></div>
-            ${list.length ? `<ul class="crm-list compact">${list.map(m => { const p = person(m.user_id); return `<li>${avatar(p)}<div class="main"><b><a href="/employees/?id=${esc(p.id)}">${esc(nameOf(p))}</a></b><span>${esc(m.position || p.job_title || p.email || '')}</span></div><div class="right">${m.role !== 'member' ? C.badge(m.role === 'head' ? 'pending' : 'info', ROLE[m.role]) : ''}${manage ? `<button type="button" class="ws-btn sm icon ghost" data-member="${esc(m.user_id)}" aria-label="Actions for ${esc(nameOf(p))}">${C.icon('more', 'sm')}</button>` : ''}</div></li>`; }).join('')}</ul>`
+            ${list.length ? `<ul class="crm-list compact">${list.map(m => { const p = person(m.user_id); return `<li>${avatar(p)}<div class="main"><b><a href="/employees/?id=${esc(p.id)}">${whoHtml(p)}</a></b><span>${esc(m.position || p.job_title || p.email || '')}</span></div><div class="right">${m.role !== 'member' ? C.badge(m.role === 'head' ? 'pending' : 'info', ROLE[m.role]) : ''}${manage ? `<button type="button" class="ws-btn sm icon ghost" data-member="${esc(m.user_id)}" aria-label="Actions for ${esc(nameOf(p))}">${C.icon('more', 'sm')}</button>` : ''}</div></li>`; }).join('')}</ul>`
                 : '<div class="muted" style="font-size:13px">No one is in this department yet.</div>'}
             ${ks.length ? `<div class="crm-section-title" style="margin-top:16px"><h3>Sub-departments</h3></div><ul class="crm-list compact">${ks.map(k => `<li><span class="dv-ico k-folder" aria-hidden="true"></span><div class="main"><b><a href="#" data-sub="${esc(k.id)}">${esc(k.name)}</a></b><span>${totalIn(k.id)} ${totalIn(k.id) === 1 ? 'person' : 'people'}</span></div></li>`).join('')}</ul>` : ''}
             ${mode !== 'live' ? '<p class="muted" style="font-size:12.5px;margin:14px 0 0">Drawn from the department on each profile. Departments can be edited once the latest database update is in.</p>' : ''}`;
@@ -369,7 +376,7 @@
         const inAny = new Set(members.map(m => m.user_id));
         const list = people.filter(p => !inAny.has(p.id));
         const body = document.createElement('div');
-        body.innerHTML = `<p style="margin:0 0 10px">These people are not in any department yet. Open a department and choose <b>Add people</b> to place them.</p><ul class="crm-list compact">${list.map(p => `<li>${avatar(p)}<div class="main"><b><a href="/employees/?id=${esc(p.id)}">${esc(nameOf(p))}</a></b><span>${esc([p.job_title, p.company].filter(Boolean).join(' · ') || p.email || '')}</span></div></li>`).join('')}</ul>`;
+        body.innerHTML = `<p style="margin:0 0 10px">These people are not in any department yet. Open a department and choose <b>Add people</b> to place them.</p><ul class="crm-list compact">${list.map(p => `<li>${avatar(p)}<div class="main"><b><a href="/employees/?id=${esc(p.id)}">${whoHtml(p)}</a></b><span>${esc([p.job_title, p.company].filter(Boolean).join(' · ') || p.email || '')}</span></div></li>`).join('')}</ul>`;
         C.modal({ title: `Not in a department (${list.length})`, body, actions: [{ label: 'Close', close: true }] });
     }
 

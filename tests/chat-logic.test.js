@@ -97,6 +97,7 @@ test('formatBody escapes everything, links URLs and highlights mentions', () => 
   assert.ok(html.includes('<br>bye'));
   assert.ok(L.formatBody('"><script>', {}).startsWith('&quot;&gt;&lt;script&gt;'));
   assert.ok(L.formatBody('hi @Maya', { names: ['Maya'], meName: 'Maya' }).includes('mx-mention me'));
+  assert.ok(L.formatBody('hi @Anil Kumar', { names: ['Anil Kumar'], codes: { 'Anil Kumar': 'NSP-<1>' } }).includes('@<b class="mx-emp-id">NSP-&lt;1&gt;</b> Anil Kumar</span>'));
   assert.equal(L.firstUrl('go to https://x.test/p). now'), 'https://x.test/p');
   assert.equal(L.firstUrl('no links'), null);
 });

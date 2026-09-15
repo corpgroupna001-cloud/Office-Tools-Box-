@@ -654,7 +654,7 @@
         const taskStatusMap = lk.taskStatus || {};
         const subtitle = [
             l.archived_at ? C.badge('mute', 'Archived') : '',
-            converted ? `Converted ${esc(L.fmtDateTime(l.converted_at))} by ${esc(C.personName(l.converted_by))} → ${contact[0] ? C.entityChip('contact', contact[0].id, contact[0].full_name || contact[0].organization) : ''} ${deal[0] ? C.entityChip('deal', deal[0].id, `${deal[0].title} · ${L.money(deal[0].value, deal[0].currency)}`) : ''}` : '',
+            converted ? `Converted ${esc(L.fmtDateTime(l.converted_at))} by ${C.personInline(l.converted_by)} → ${contact[0] ? C.entityChip('contact', contact[0].id, contact[0].full_name || contact[0].organization) : ''} ${deal[0] ? C.entityChip('deal', deal[0].id, `${deal[0].title} · ${L.money(deal[0].value, deal[0].currency)}`) : ''}` : '',
         ].filter(Boolean).join(' ');
 
         const menu = [

@@ -165,6 +165,8 @@ body.ws-app .crm-person .nm.emp { display: flex; flex-direction: column; line-he
 body.ws-app .crm-person .nm.emp .code { font-weight: 650; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
 body.ws-app .crm-person .nm.emp .who { font-size: .85em; color: var(--ws-text-muted); overflow: hidden; text-overflow: ellipsis; }
 body.ws-app .crm-person.link { cursor: pointer; text-decoration: none; color: inherit; }
+/* Employee ID shown inline before a name (personInline, @mentions): never split across lines. */
+body.ws-app .crm-emp-id, body.ws-app .mention b { font-weight: 650; white-space: nowrap; font-variant-numeric: tabular-nums; }
 body.ws-app .crm-person.link:hover .nm { color: var(--ws-primary); }
 body.ws-app .crm-avatars { display: inline-flex; }
 body.ws-app .crm-avatars .ws-avatar { width: 26px; height: 26px; font-size: 11px; border-radius: 7px; margin-left: -6px; border: 2px solid var(--ws-surface); }

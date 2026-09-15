@@ -565,7 +565,7 @@
         async function render() {
             const r = await sb.from('task_templates').select('*').order('title');
             const list = r.data || [];
-            body.innerHTML = list.length ? `<ul class="crm-list">${list.map(x => `<li><div class="main"><b>${esc(x.title)}</b><span>${esc([x.deadline_days != null ? `deadline in ${x.deadline_days} day${x.deadline_days === 1 ? '' : 's'}` : 'no deadline', (x.checklist || []).length ? `${x.checklist.length} checklist item${x.checklist.length === 1 ? '' : 's'}` : '', x.assignee_id ? C.personName(x.assignee_id) : ''].filter(Boolean).join(' · '))}</span></div><div class="right"><button type="button" class="ws-btn sm" data-edit="${esc(x.id)}">Edit</button> <button type="button" class="ws-btn sm danger" data-del="${esc(x.id)}">Delete</button></div></li>`).join('')}</ul>`
+            body.innerHTML = list.length ? `<ul class="crm-list">${list.map(x => `<li><div class="main"><b>${esc(x.title)}</b><span>${esc([x.deadline_days != null ? `deadline in ${x.deadline_days} day${x.deadline_days === 1 ? '' : 's'}` : 'no deadline', (x.checklist || []).length ? `${x.checklist.length} checklist item${x.checklist.length === 1 ? '' : 's'}` : '', x.assignee_id ? C.personText(x.assignee_id) : ''].filter(Boolean).join(' · '))}</span></div><div class="right"><button type="button" class="ws-btn sm" data-edit="${esc(x.id)}">Edit</button> <button type="button" class="ws-btn sm danger" data-del="${esc(x.id)}">Delete</button></div></li>`).join('')}</ul>`
                 : '<div class="ws-empty"><b>No templates yet</b>Templates pre-fill recurring tasks, checklists included.</div>';
             body.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => edit(list.find(x => x.id === b.dataset.edit))));
             body.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => { if (!await C.confirm({ title: 'Delete this template?', okText: 'Delete', danger: true })) return; try { await C.q(sb.from('task_templates').delete().eq('id', b.dataset.del)); render(); } catch (e) { C.toast(e.message, 'bad'); } }));
@@ -773,7 +773,7 @@
                     <div class="ws-card">
                         <div class="crm-section-title"><h3>Subtasks</h3><span class="muted" style="font-size:13px">${subtasks.filter(isDone).length}/${subtasks.length} done</span></div>
                         ${subtasks.length ? `<div class="ws-bar" style="margin-bottom:12px"><i style="width:${L.projectProgress(subtasks).pct}%"></i></div>` : ''}
-                        <ul class="crm-subtasks" id="subtasks">${subtasks.map(s => `<li class="${isDone(s) ? 'done' : ''}" data-sub="${esc(s.id)}"><input type="checkbox" ${isDone(s) ? 'checked' : ''} aria-label="Complete subtask" ${canEdit ? '' : 'disabled'}><span><a class="crm-link" href="/tasks/?id=${esc(s.id)}" style="color:inherit">${esc(s.title)}</a>${s.assignee_id ? ` <span class="muted" style="font-size:12px">· ${esc(C.personName(s.assignee_id))}</span>` : ''}${s.due_date ? ` ${C.dueHtml(s, today)}` : ''}</span>${canEdit ? `<button type="button" data-rm aria-label="Remove subtask">${C.icon('x', 'sm')}</button>` : ''}</li>`).join('')}</ul>
+                        <ul class="crm-subtasks" id="subtasks">${subtasks.map(s => `<li class="${isDone(s) ? 'done' : ''}" data-sub="${esc(s.id)}"><input type="checkbox" ${isDone(s) ? 'checked' : ''} aria-label="Complete subtask" ${canEdit ? '' : 'disabled'}><span><a class="crm-link" href="/tasks/?id=${esc(s.id)}" style="color:inherit">${esc(s.title)}</a>${s.assignee_id ? ` <span class="muted" style="font-size:12px">· ${C.personInline(s.assignee_id)}</span>` : ''}${s.due_date ? ` ${C.dueHtml(s, today)}` : ''}</span>${canEdit ? `<button type="button" data-rm aria-label="Remove subtask">${C.icon('x', 'sm')}</button>` : ''}</li>`).join('')}</ul>
                         ${canEdit ? `<form id="sub-form" style="display:flex;gap:8px;margin-top:10px"><input type="text" id="sub-title" placeholder="Add a subtask and press Enter" aria-label="New subtask" style="flex:1;min-height:38px;padding:7px 11px;border:1px solid var(--ws-border-2);border-radius:6px;background:var(--ws-surface);color:var(--ws-text);font:inherit"><button type="submit" class="ws-btn sm">${C.icon('plus')}<span>Add</span></button></form>` : ''}
                     </div>
                     <div class="ws-card">
@@ -801,7 +801,7 @@
                             ${done ? `<div><dt>Completed</dt><dd>${esc(L.fmtDateTime(t.completed_at))}</dd></div>` : ''}
                             ${board ? `<div><dt>Board</dt><dd><a class="crm-link" href="/boards/?id=${esc(board.id)}">${esc(board.name)}</a>${column ? ` · ${esc(column.name)}` : ''}</dd></div>` : ''}
                             <div><dt>Tags</dt><dd>${C.tagsHtml(t.tags) || '—'}</dd></div>
-                            <div><dt>Created</dt><dd>${esc(L.fmtDateTime(t.created_at))} by ${esc(C.personName(t.created_by))}</dd></div>
+                            <div><dt>Created</dt><dd>${esc(L.fmtDateTime(t.created_at))} by ${C.personInline(t.created_by)}</dd></div>
                             <div><dt>Updated</dt><dd>${esc(L.fmtDateTime(t.updated_at))}</dd></div>
                             ${t.archived_at ? `<div><dt>Archived</dt><dd>${esc(L.fmtDateTime(t.archived_at))}</dd></div>` : ''}
                         </dl>

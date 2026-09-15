@@ -120,7 +120,7 @@
                        `<span style="background:${meta.color}"></span></td>`;
             }).join('');
             return `<tr><td class="cal-name" title="${escapeHtml(e.company || '')}">` +
-                   `<b>${escapeHtml(e.name)}</b>` +
+                   (e.employee_id ? `<b class="mono">${escapeHtml(e.employee_id)}</b> ${escapeHtml(e.name)}` : `<b>${escapeHtml(e.name)}</b>`) +
                    (e.is_wfh ? ' <span class="cal-wfh">🏠</span>' : '') +
                    `</td>${cells}` +
                    `<td class="cal-tot">${e.totals.present + e.totals.late}</td>` +
@@ -175,7 +175,7 @@
                 : '';
             const main = `
             <tr data-uid="${e.id}">
-                <td><b>${escapeHtml(e.name)}</b><div class="text-[11px] text-slate-400 font-bold">${escapeHtml(e.email || '')}</div></td>
+                <td>${e.employee_id ? `<b class="mono whitespace-nowrap">${escapeHtml(e.employee_id)}</b> ` : ''}<b>${escapeHtml(e.name)}</b><div class="text-[11px] text-slate-400 font-bold">${escapeHtml(e.email || '')}</div></td>
                 <td class="text-slate-300 font-bold">${escapeHtml(e.company || '—')}</td>
                 <td class="text-slate-300 font-bold">${escapeHtml(e.shift_name || '—')}${e.shift_assigned ? '' : ' <span class="text-slate-500">(default)</span>'}${e.shift2_name ? `<br><span class="text-slate-500 text-xs">+ ${escapeHtml(e.shift2_name)}${e.company2 ? ' · ' + escapeHtml(e.company2) : ''}</span>` : ''}</td>
                 <td class="text-right font-black text-slate-300" title="${escapeHtml(wdNote)}">${e.working_days}

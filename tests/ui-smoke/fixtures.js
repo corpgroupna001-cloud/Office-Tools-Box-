@@ -148,7 +148,7 @@ function addBigData(d) {
   const first = ['Arjun', 'Bhavna', 'Deepa', 'Farhan', 'Gauri', 'Harish', 'Isha', 'Jatin', 'Kavya', 'Lokesh', 'Meera', 'Nikhil', 'Pooja', 'Rahul', 'Sneha', 'Tarun', 'Usha', 'Varun', 'Yamini', 'Zoya'];
   const last = ['Iyer', 'Shah', 'Nair', 'Reddy', 'Gupta', 'Menon', 'Das', 'Joshi'];
   const name = i => `${pick(first, i)} ${pick(last, i * 3)}`;
-  for (let i = 1; i <= 40; i++) d.profiles.push({ ...d.profiles[1], id: uid(i), full_name: name(i), email: `p${i}@nova.test`, employee_code: `NS1${String(i).padStart(2, '0')}`, is_wfh: i % 5 === 0, last_seen_at: i % 3 ? at(-2) : now });
+  for (let i = 1; i <= 40; i++) d.profiles.push({ ...d.profiles[1], id: uid(i), full_name: name(i), email: `p${i}@nova.test`, employee_code: `NS1${String(i).padStart(2, '0')}`, employee_id: `NSP-GEN-${String(i).padStart(3, '0')}`, is_wfh: i % 5 === 0, last_seen_at: i % 3 ? at(-2) : now });
   for (let i = 1; i <= 60; i++) d.crm_contacts.push({ ...d.crm_contacts[1], id: `CX${i}`, first_name: pick(first, i), last_name: pick(last, i), full_name: name(i), email: `c${i}@client.test`, organization: `Client ${i}` });
   for (let i = 1; i <= 40; i++) d.crm_leads.push({ ...d.crm_leads[1], id: `LX${i}`, name: `Lead ${name(i)}`, email: `l${i}@lead.test` });
   for (let i = 1; i <= 30; i++) d.crm_deals.push({ ...d.crm_deals[1], id: `DX${i}`, title: `Deal ${i}: kits for ${name(i)}`, stage_id: pick(['S1', 'S2', 'S3', 'S4'], i), value: 10000 * i, position: 1000 + i });

@@ -114,7 +114,9 @@
         if (!id) return null;
         if (S.people.has(id)) return S.people.get(id);
         try {
-            const { data } = await S.sb.from('profiles').select('id, full_name, email, avatar_url').eq('id', id).maybeSingle();
+            let r = await S.sb.from('profiles').select('id, full_name, email, avatar_url, employee_id').eq('id', id).maybeSingle();
+            if (r.error) r = await S.sb.from('profiles').select('id, full_name, email, avatar_url').eq('id', id).maybeSingle();   // before the Employee ID migration
+            const data = r.data;
             if (data) S.people.set(id, data);
             return data || null;
         } catch (e) { return null; }
@@ -260,6 +262,8 @@
         const [caller, group] = await Promise.all([profile(c.created_by), c.conversation_id ? groupName(c.conversation_id) : Promise.resolve(null)]);
         if (S.incoming.get(id) !== entry) return;
         const callerName = (caller && (caller.full_name || (caller.email || '').split('@')[0])) || 'Someone';
+        const callerId = String((caller && caller.employee_id) || '').trim();            // the Employee ID, shown first
+        const callerHtml = callerId ? `<b>${esc(callerId)}</b> ${esc(callerName)}` : esc(callerName);
         const video = c.media === 'video';
         entry.call = c;
 
@@ -275,8 +279,8 @@
                 <span class="wsc-av" style="background:${pickColor(group || callerName)}">${av}</span>
                 <div style="min-width:0">
                     <div class="wsc-kind">${group ? 'Group ' + (video ? 'video' : 'voice') + ' call' : 'Incoming ' + (video ? 'video' : 'voice') + ' call'}</div>
-                    <div class="wsc-name">${esc(group || callerName)}</div>
-                    <div class="wsc-sub">${esc(group ? callerName + ' is calling' : 'WorkSuite')}</div>
+                    <div class="wsc-name">${group ? esc(group) : callerHtml}</div>
+                    <div class="wsc-sub">${group ? callerHtml + ' is calling' : 'WorkSuite'}</div>
                 </div>
             </div>
             <div class="wsc-actions">

@@ -95,7 +95,7 @@
             if (a.principal_type === 'all') return 'All employees';
             if (a.principal_type === 'app_role') return a.principal_key === 'manager' ? 'Workspace managers' : 'Workspace employees';
             if (a.principal_type === 'department') return `Department: ${deptName(a.principal_id)} (and sub-departments)`;
-            return C.personName(a.principal_id);
+            return C.personText(a.principal_id);
         }
         function cell(rid, entity, pipeline, action) {
             const p = permOf(rid, entity, pipeline, action);
@@ -405,7 +405,7 @@
         let entity = 'lead', pipeline = (lk.defaultPipeline && lk.defaultPipeline.id) || (lk.pipelines[0] && lk.pipelines[0].id) || '';
         const autoLv = { lead: (await B.levels('lead')).automation || 'none', deal: (await B.levels('deal')).automation || 'none' };
         const ACTION_LABEL = { create_task: 'Create a to-do', notify: 'Send a notification', set_owner: 'Change the responsible person', add_comment: 'Add a comment', set_field: 'Fill in a custom field' };
-        const who = u => u === 'owner' || !u ? 'the responsible person' : u === 'creator' ? 'the creator' : C.personName(u);
+        const who = u => u === 'owner' || !u ? 'the responsible person' : u === 'creator' ? 'the creator' : C.personText(u);
         function describe(r) {
             const p = r.params || {};
             if (r.action === 'create_task') return `To-do “${esc(p.title || 'Follow up: {title}')}” for ${esc(who(p.user))}${p.due_days != null && p.due_days !== '' ? `, due in ${esc(p.due_days)} day${Number(p.due_days) === 1 ? '' : 's'}` : ''}`;
