@@ -212,7 +212,8 @@ test('deal_name, deal name and Deal Name are the same column', () => {
 
   const lead = { 'ID': '2951', 'Stage': 'Good Lead', 'Lead Name': 'GL-EBS-USA-BGC-20260911001', 'Responsible': 'GL-PIS-CSM-IC-001', 'Total': '400.00', 'Currency': 'US Dollar' };
   const statuses = [{ key: 'new', label: 'New' }, { key: 'good_lead', label: 'Good Lead' }];
-  const leadsOf = rows => bare(I.mapLeads(rows, { statuses, profiles: PROFILES }));
+  // A fixed clock: a lead without a Created column is stamped with ctx.now.
+  const leadsOf = rows => bare(I.mapLeads(rows, { statuses, profiles: PROFILES, now: '2026-09-15T08:00:00.000Z' }));
   assert.deepEqual(leadsOf([asPage(lead)]), leadsOf([lead]));
 });
 
@@ -275,6 +276,11 @@ test('the endpoint creates missing lead stages and finds contacts past the first
     }
     const key = u.searchParams.get('on_conflict');
     const back = [];
+    const sent = [].concat(JSON.parse(opts.body));
+    const shape = o => Object.keys(o).sort().join(',');
+    if (sent.some(o => shape(o) !== shape(sent[0]))) {                 // as PostgREST does
+      return new Response(JSON.stringify({ code: 'PGRST102', message: 'All object keys must match' }), { status: 400 });
+    }
     [].concat(JSON.parse(opts.body)).forEach(b => {
       const had = key && rows.find(r => r[key] != null && r[key] === b[key]);
       if (had) { if (!/ignore-duplicates/.test(h.Prefer)) back.push(Object.assign(had, b)); return; }
@@ -308,6 +314,14 @@ test('the endpoint creates missing lead stages and finds contacts past the first
   }
   assert.deepEqual(db.crm_leads.map(l => l.status), ['good_lead', 'unqualified', 'long_hold']);
   assert.equal(db.crm_lead_statuses.find(s => s.key === 'long_hold').label, 'Long Hold');
+
+  // A batch where one deal names a contact and the next names nobody.
+  const noContact = dealRow({ ID: '17640', 'Contact': '', 'Contact: First name': '', 'Contact: Mobile': '', 'Contact: Work E-mail': '' });
+  const mixed = await call({ action: 'import_crm', kind: 'deals', rows: [dealRow({ ID: '17641', 'Contact: Work E-mail': 'c1401@example.test' }), noContact] }, cookie);
+  assert.equal(mixed.code, 200, JSON.stringify(mixed.body));
+  assert.equal(mixed.body.matched, 2);
+  assert.deepEqual(db.crm_deals.map(d => d.contact_id), ['c1401', null]);
+  db.crm_deals.length = 0;
 
   const deal = dealRow({ 'Contact: Work E-mail': 'c1400@example.test' });
   const r = await call({ action: 'import_crm', kind: 'deals', rows: [deal] }, cookie);

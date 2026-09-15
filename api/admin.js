@@ -813,12 +813,17 @@ module.exports = async function handler(req, res) {
           if (!r.ok) { report.warnings.push('Some contacts could not be created; their deals came in without one.'); break; }
           (await r.json()).forEach(c => { report.contacts_created++; remember(c); });
         }
-        mapped.rows.forEach(d => { if (d._contact) d.contact_id = found(d._contact) || null; });
+        // Every deal carries contact_id, null when the row names nobody: PostgREST
+        // refuses a batch whose rows do not all have the same keys (PGRST102).
+        mapped.rows.forEach(d => { d.contact_id = d._contact ? found(d._contact) || null : null; });
       }
 
       // A row that carries its source id is matched on it, so importing the
       // same file again updates that record instead of making a second copy.
       const payload = mapped.rows.map(d => { const o = { ...d }; delete o._contact; delete o._row; return o; });
+      // And whatever else a row lacks is sent as null, so no batch is refused for its shape.
+      const allKeys = [...new Set(payload.flatMap(o => Object.keys(o)))];
+      payload.forEach(o => allKeys.forEach(k => { if (!(k in o)) o[k] = null; }));
       // Columns the import migration adds: when this database lacks one, the
       // records still come in without it and the report says what to run.
       const MIGRATION = 'run supabase-crm-import-migration.sql in the Supabase SQL Editor, then import the file again';
