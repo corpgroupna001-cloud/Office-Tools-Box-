@@ -43,13 +43,13 @@
       title: 'Deals', one: 'deal', file: 'DEAL', open: '/deals/?id=',
       find: 'Deal name, company or ID',
       intro: 'Every deal, in the columns of the Bitrix24 file it was imported from. Click a row to see all of it. Export CSV downloads every deal that matches the filters, in that same format.',
-      columns: ['ID', 'Deal Name', 'Pipeline', 'Stage', 'Income', 'Currency', 'Responsible', 'Contact', 'Type', 'Created', 'Assumed close date'],
+      columns: ['ID', 'Deal Name', 'Responsible', 'Pipeline', 'Stage', 'Income', 'Currency', 'Contact', 'Type', 'Created', 'Assumed close date'],
     },
     leads: {
       title: 'Leads', one: 'lead', file: 'LEAD', open: '/leads/?id=',
       find: 'Lead name, email, phone or ID',
       intro: 'Every lead, in the columns of the Bitrix24 file it was imported from. Click a row to see all of it. Export CSV downloads every lead that matches the filters, in that same format.',
-      columns: ['ID', 'Lead Name', 'Stage', 'Total', 'Currency', 'Source', 'Responsible', 'Position', 'Referrer', 'Created'],
+      columns: ['ID', 'Lead Name', 'Responsible', 'Stage', 'Total', 'Currency', 'Source', 'Position', 'Referrer', 'Created'],
     },
   };
 
@@ -66,7 +66,7 @@
         ${kind === 'deals' ? `<label>Pipeline<select id="${p}-pipeline"><option value="">All pipelines</option></select></label>` : ''}
         <label>Stage<select id="${p}-stage"><option value="">All stages</option></select></label>
         ${kind === 'deals' ? `<label>Status<select id="${p}-status"><option value="">Any status</option><option value="open">In progress</option><option value="won">Won</option><option value="lost">Lost</option></select></label>` : ''}
-        <label>Responsible<select id="${p}-owner"><option value="">Anyone</option><option value="none">No one</option></select></label>
+        <label>Employee<select id="${p}-owner"><option value="">Every employee</option><option value="none">No employee</option></select></label>
         <button type="button" id="${p}-cols-btn" aria-expanded="false">Columns</button>
         <button type="button" id="${p}-export" data-csv-export="1" class="btn-primary text-white font-black">Export CSV</button>
       </div>
@@ -132,8 +132,11 @@
     } else {
       put('stage', L.statuses.map(s => ({ value: s.key, label: s.label })), '<option value="">All stages</option>');
     }
-    put('owner', L.people.map(x => ({ value: x.id, label: x.code ? `${x.name} (${x.code})` : x.name })),
-      '<option value="">Anyone</option><option value="none">No one</option>');
+    // Employee ID first, the way the export names people; those without one after, by name.
+    const byId = L.people.slice().sort((a, b) => (!a.code - !b.code) || String(a.code || a.name).localeCompare(String(b.code || b.name), 'en', { numeric: true }));
+    put('owner', byId.map(x => ({ value: x.id, label: x.code ? `${x.code} · ${x.name}` : x.name })),
+      '<option value="">Every employee</option><option value="none">No employee</option>');
+    v.codes = new Map(L.people.filter(x => x.code).map(x => [x.code.trim().toLowerCase(), x.name]));
   }
 
   function renderColumnsPicker(v) {
@@ -156,8 +159,15 @@
       cols.map(c => `<th scope="col">${esc(c.name)}</th>`).join('')}</tr></thead><tbody>${
       v.rows.map((r, n) => `<tr data-row="${n}" tabindex="0">${cols.map(c => {
         const text = plain(r.cells[c.i]).replace(/\s+/g, ' ');
+        const name = employeeName(v, text);
+        if (name) return `<td class="crm-emp"><b>${esc(text)}</b><small>${esc(name)}</small></td>`;
         return `<td title="${esc(text.length > 60 ? text : '')}">${esc(text.length > 60 ? text.slice(0, 57) + '…' : text)}</td>`;
       }).join('')}</tr>`).join('')}</tbody></table></div>`;
+  }
+
+  /** The name behind a cell that holds an employee ID (Responsible, Created by, Service Leads Executive…). */
+  function employeeName(v, text) {
+    return v.codes && text ? v.codes.get(text.trim().toLowerCase()) || '' : '';
   }
 
   function renderPager(v) {
@@ -195,7 +205,8 @@
       · <a href="${v.K.open}${encodeURIComponent(r.id)}" target="_blank" rel="noopener">Open in CRM</a>`;
     $('crm-record-fields').innerHTML = v.headers.map((h, i) => {
       const text = plain(r.cells[i]);
-      return text ? `<dt>${esc(h)}</dt><dd>${esc(text)}</dd>` : '';
+      const name = employeeName(v, text);
+      return text ? `<dt>${esc(h)}</dt><dd>${name ? `<b>${esc(text)}</b> · ${esc(name)}` : esc(text)}</dd>` : '';
     }).join('');
     modal.classList.remove('hidden'); modal.classList.add('flex');
     $('crm-record-close').focus();

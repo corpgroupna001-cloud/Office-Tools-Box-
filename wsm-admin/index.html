@@ -575,9 +575,10 @@
             <!-- EMPLOYEES PANEL -->
             <div id="employees-panel" class="hidden">
                 <div class="glass rounded-2xl p-4 mb-6 flex flex-wrap gap-3 items-center">
-                    <input id="emp-search" type="text" placeholder="Search employees…"
+                    <input id="emp-search" type="text" placeholder="Search by employee ID, name or email…"
                         class="glass flex-1 min-w-[200px] px-4 py-2 rounded-xl text-sm font-medium placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400/40">
                     <select id="emp-sort" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                        <option value="employee_code.asc">Employee ID</option>
                         <option value="created_at.desc">Newest Joined</option>
                         <option value="created_at.asc">Oldest Joined</option>
                         <option value="tests.desc">Most Tests</option>
@@ -596,6 +597,7 @@
                         <table class="w-full text-sm">
                             <thead>
                                 <tr>
+                                    <th>Employee ID</th>
                                     <th>Name</th>
                                     <th>Email</th>
                                     <th>Joined</th>
@@ -1968,7 +1970,7 @@
         // ---------- Employees ----------
         async function loadEmployees() {
             if (!adminAuthenticated) return;
-            document.getElementById('emp-tbody').innerHTML = '<tr><td colspan="12" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading employees…</td></tr>';
+            document.getElementById('emp-tbody').innerHTML = '<tr><td colspan="13" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading employees…</td></tr>';
             try {
                 const r = await adminFetch({
                     method: 'POST',
@@ -1980,7 +1982,7 @@
                 allEmployees = data.employees || [];
                 renderEmployees();
             } catch (e) {
-                document.getElementById('emp-tbody').innerHTML = `<tr><td colspan="11" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
+                document.getElementById('emp-tbody').innerHTML = `<tr><td colspan="13" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
             }
         }
 
@@ -1993,6 +1995,7 @@
             if (empWho === 'wfh') filtered = filtered.filter(e => e.is_wfh === true);
             if (search) {
                 filtered = filtered.filter(e =>
+                    (e.employee_code || '').toLowerCase().includes(search) ||
                     (e.full_name || '').toLowerCase().includes(search) ||
                     (e.email || '').toLowerCase().includes(search)
                 );
@@ -2002,6 +2005,9 @@
                 if (av == null && bv == null) return 0;
                 if (av == null) return 1;
                 if (bv == null) return -1;
+                if (sortKey === 'employee_code') {
+                    return String(av).localeCompare(String(bv), 'en', { numeric: true }) * (sortDir === 'asc' ? 1 : -1);
+                }
                 if (sortKey === 'created_at' || sortKey === 'last_test_at') {
                     return sortDir === 'asc' ? new Date(av) - new Date(bv) : new Date(bv) - new Date(av);
                 }
@@ -2021,6 +2027,7 @@
                 const wfhOn = !!e.is_wfh;
                 return `
                 <tr>
+                    <td class="mono font-black text-white whitespace-nowrap">${e.employee_code ? escapeHtml(e.employee_code) : '<span class="text-slate-500 font-medium" title="No employee ID yet — set it with ✏️">—</span>'}</td>
                     <td class="font-bold text-white">${escapeHtml(e.full_name || '—')}</td>
                     <td class="text-slate-300 text-xs">${escapeHtml(e.email || '—')}</td>
                     <td class="text-slate-400 text-xs">${formatDate(e.created_at)}</td>

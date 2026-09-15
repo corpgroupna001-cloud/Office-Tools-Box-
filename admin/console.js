@@ -128,7 +128,7 @@
   document.body.append(addModal);
 
   const ADD_FIELDS = [['full_name','Full name','text'],['email','Login / notification email','email'],
-    ['company','Company','company'],['employee_code','Biometric employee code','text'],
+    ['company','Company','company'],['employee_code','Employee ID (also the biometric code)','text'],
     ['department','Department','text'],['job_title','Job title','text'],['phone','Phone','tel'],
     ['joining_date','Joining date','date'],['shift_id','Primary shift','shift']];
 

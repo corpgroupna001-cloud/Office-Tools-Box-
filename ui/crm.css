@@ -160,6 +160,10 @@ body.ws-app .crm-tag {
 body.ws-app .crm-person { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 body.ws-app .crm-person .ws-avatar { width: 26px; height: 26px; font-size: 11px; border-radius: 7px; }
 body.ws-app .crm-person .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Employee ID first, the name beneath it. */
+body.ws-app .crm-person .nm.emp { display: flex; flex-direction: column; line-height: 1.2; }
+body.ws-app .crm-person .nm.emp .code { font-weight: 650; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
+body.ws-app .crm-person .nm.emp .who { font-size: .85em; color: var(--ws-text-muted); overflow: hidden; text-overflow: ellipsis; }
 body.ws-app .crm-person.link { cursor: pointer; text-decoration: none; color: inherit; }
 body.ws-app .crm-person.link:hover .nm { color: var(--ws-primary); }
 body.ws-app .crm-avatars { display: inline-flex; }

@@ -135,7 +135,12 @@
     const PALETTE = ['#39a8ef', '#2fc6f6', '#55d0e0', '#47e4c2', '#ffa900', '#f7a700', '#9b7cf5', '#7bd500', '#f76fa6', '#ff5752'];
     function hex(token, i) { return (token && token[0] === '#') ? token : (HEX[token] || PALETTE[(i || 0) % PALETTE.length]); }
 
-    function peopleOptions() { return C().activePeople().map(p => ({ value: p.id, label: p.name })); }
+    /** Filter options for a person: employee ID first, those with one listed first. */
+    function peopleOptions() {
+        return C().activePeople().slice()
+            .sort((a, b) => (!a.employee_code - !b.employee_code) || String(a.employee_code || a.name).localeCompare(String(b.employee_code || b.name), 'en', { numeric: true }))
+            .map(p => ({ value: p.id, label: C().personLabel(p) }));
+    }
 
     function openRecord(url, onClose) {
         const phone = window.matchMedia('(max-width: 640px)').matches;

@@ -110,7 +110,7 @@
             </div>
             <div id="body"></div>`;
         page.filter = WSFilter.mount(view.querySelector('[data-filter]'), {
-            id: 'employees', me: me.id, defaultPreset: 'active', placeholder: 'Find employee',
+            id: 'employees', me: me.id, defaultPreset: 'active', placeholder: 'Find by employee ID or name',
             presets: [
                 { key: 'active', title: 'Employees', values: {} },
                 { key: 'invited', title: 'Invited', values: { invited: true } },
@@ -157,6 +157,7 @@
         page.grid = WSGrid.mount(host, {
             id: 'employees', sort: { key: 'full_name', dir: 'asc' },
             columns: [
+                { key: 'employee_code', title: 'Employee ID', width: 170, render: p => (p.employee_code ? `<b>${esc(p.employee_code)}</b>` : '<span class="muted">—</span>') },
                 { key: 'full_name', title: 'Full name', width: 270, render: p => `<span class="b24-who">${avatar(p)}<span><a href="/employees/?id=${esc(p.id)}" data-emp="${esc(p.id)}">${esc(nameOf(p))}</a><span class="sub">${esc(p.job_title || '')}</span></span></span>` },
                 { key: 'department', title: 'Department', width: 170, render: p => esc(p.department || '') },
                 { key: 'email', title: 'Email', width: 220, render: p => (p.email ? `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : '') },
@@ -165,7 +166,7 @@
                 { key: 'job_title', title: 'Position', width: 170, render: p => esc(p.job_title || '') },
                 { key: 'company', title: 'Company', width: 190, render: p => esc(p.company || '') + (p.company2 ? `<span class="sub">also ${esc(p.company2)}</span>` : '') },
                 { key: 'manager_id', title: 'Reports to', width: 180, default: false, render: p => (p.manager_id ? C.personHtml(p.manager_id, { link: false }) : '') },
-                { key: 'employee_code', title: 'Code', width: 100, default: false, render: p => esc(p.employee_code || '') },
+
                 { key: 'status', title: 'Status', width: 140, default: false, render: p => C.statusBadge(EMP_STATUS, p.status || 'active') + (p.is_wfh ? ' ' + C.badge('info', 'WFH') : '') },
                 { key: 'joining_date', title: 'Joined', width: 120, default: false, render: p => esc(L.fmtDate(p.joining_date) || '') },
             ],
@@ -402,7 +403,7 @@
                         <div class="emp-pcard">
                             <div class="emp-pcard-head"><h2>Employment</h2></div>
                             <dl class="emp-fields">
-                                ${field('Employee code', esc(p.employee_code || ''))}
+                                ${field('Employee ID', esc(p.employee_code || ''))}
                                 ${field('Status', C.statusBadge(EMP_STATUS, p.status || 'active'))}
                                 ${field('Joining date', esc(L.fmtDate(p.joining_date) || ''))}
                                 ${field('Work location', p.is_wfh ? 'Work from home' : 'Office')}

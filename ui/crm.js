@@ -207,6 +207,19 @@
     /* ---------------------------------------------------------- people */
     function person(id) { return id ? state.peopleById.get(id) || null : null; }
     function personName(id, fallback) { const p = person(id); return p ? p.name : (fallback || (id ? 'Former employee' : 'Unassigned')); }
+    /** How a person is picked and listed: employee ID first ("GL-PIS-CSM-IC-001 · Kemi Ade"), the name alone without one. */
+    function personLabel(p) {
+        const who = typeof p === 'string' ? person(p) : p;
+        if (!who) return '';
+        const code = String(who.employee_code || '').trim();
+        return code ? `${code} · ${who.name}` : who.name;
+    }
+    /** People with an employee ID first, in ID order; the rest by name. */
+    function byEmployeeId(a, b) {
+        const ac = String(a.employee_code || '').trim(), bc = String(b.employee_code || '').trim();
+        if (!ac !== !bc) return ac ? -1 : 1;
+        return (ac && bc ? ac.localeCompare(bc, 'en', { numeric: true }) : 0) || String(a.name).localeCompare(String(b.name));
+    }
     function activePeople() { return state.people.filter(p => (p.status || 'active') !== 'inactive'); }
     function avatarHtml(p, cls) {
         const who = typeof p === 'string' ? person(p) : p;
@@ -218,7 +231,10 @@
     function personHtml(id, opts) {
         const p = person(id);
         if (!p) return `<span class="crm-person muted"><span class="ws-avatar">?</span><span class="nm">${esc(id ? 'Former employee' : (opts && opts.none) || 'Unassigned')}</span></span>`;
-        const inner = `${avatarHtml(p)}<span class="nm">${esc(p.name)}</span>`;
+        const code = String(p.employee_code || '').trim();
+        const inner = code
+            ? `${avatarHtml(p)}<span class="nm emp"><span class="code">${esc(code)}</span><span class="who">${esc(p.name)}</span></span>`
+            : `${avatarHtml(p)}<span class="nm">${esc(p.name)}</span>`;
         return opts && opts.link === false ? `<span class="crm-person">${inner}</span>` : `<a class="crm-person link" href="/employees/?id=${esc(p.id)}">${inner}</a>`;
     }
     function avatarsHtml(ids, max) {
@@ -230,14 +246,14 @@
     /** <option>s for a single-person select. */
     function peopleOptions(selected, opts) {
         const none = opts && opts.none !== undefined ? opts.none : 'Unassigned';
-        const list = (opts && opts.people) || activePeople();
+        const list = ((opts && opts.people) || activePeople()).slice().sort(byEmployeeId);
         const groups = new Map();
         list.forEach(p => { const g = p.company || 'Other'; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(p); });
         let html = none === null ? '' : `<option value="">${esc(none)}</option>`;
         const one = groups.size <= 1;
         for (const [g, ps] of groups) {
             if (!one) html += `<optgroup label="${esc(g)}">`;
-            html += ps.map(p => `<option value="${esc(p.id)}"${p.id === selected ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
+            html += ps.map(p => `<option value="${esc(p.id)}"${p.id === selected ? ' selected' : ''}>${esc(personLabel(p))}</option>`).join('');
             if (!one) html += '</optgroup>';
         }
         return html;
@@ -248,8 +264,8 @@
         const el = h('<div class="crm-people-pick"></div>');
         function render() {
             const exclude = new Set(ids);
-            el.innerHTML = ids.map(id => `<span class="crm-tag">${esc(personName(id))}<button type="button" data-rm="${esc(id)}" aria-label="Remove">×</button></span>`).join('') +
-                `<select aria-label="${esc((opts && opts.label) || 'Add person')}"><option value="">${esc((opts && opts.placeholder) || '+ Add person…')}</option>${activePeople().filter(p => !exclude.has(p.id)).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select>`;
+            el.innerHTML = ids.map(id => `<span class="crm-tag">${esc(personLabel(id) || personName(id))}<button type="button" data-rm="${esc(id)}" aria-label="Remove">×</button></span>`).join('') +
+                `<select aria-label="${esc((opts && opts.label) || 'Add person')}"><option value="">${esc((opts && opts.placeholder) || '+ Add person…')}</option>${activePeople().filter(p => !exclude.has(p.id)).sort(byEmployeeId).map(p => `<option value="${esc(p.id)}">${esc(personLabel(p))}</option>`).join('')}</select>`;
         }
         el.addEventListener('click', e => { const b = e.target.closest('[data-rm]'); if (b) { ids = ids.filter(x => x !== b.dataset.rm); render(); el.dispatchEvent(new Event('change')); } });
         el.addEventListener('change', e => { if (e.target.tagName === 'SELECT' && e.target.value) { ids.push(e.target.value); render(); el.dispatchEvent(new Event('change')); } });
@@ -1101,7 +1117,7 @@
     window.WSCrm = {
         boot, ctx, client, lookups, q, friendly, isMissingSchema, migrationNoticeHtml,
         esc, h, $, $$, uid, debounce, param, setParam, toast, icon, nl2br, linkify,
-        person, personName, activePeople, avatarHtml, personHtml, avatarsHtml, peopleOptions, peoplePicker,
+        person, personName, personLabel, activePeople, avatarHtml, personHtml, avatarsHtml, peopleOptions, peoplePicker,
         badge, statusBadge, priorityBadge, dueHtml, tagsHtml, entityUrl, entityChip, ENTITY_META,
         loading, skeletonRows, empty, errorState,
         confirm, alert, modal, form, formModal, entityPicker, searchEntities, entityLabel,

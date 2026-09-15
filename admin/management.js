@@ -99,7 +99,7 @@
   window.addEventListener('admin-refresh',()=>{if(active==='company')loadCompany();if(active==='email'){loadHealth();loadMail();}});
 
   const ROLE_LABELS={employee:'Employee — own company records, edits what they own or are assigned',manager:'Manager — edit and delete across the company, invoices, team attendance and leave',admin:'Admin — the same across every company'};
-  const fieldSpec=[['email','Login / notification email','email'],['company','Company','company'],['app_role','Workspace role (CRM & work modules)','role'],['employee_code','Biometric employee code','text'],['department','Department','text'],['job_title','Job title','text'],['phone','Phone','tel'],['joining_date','Joining date','date'],['manager_id','Reports to','manager'],['shift_id','Primary shift','shift'],['company2','Secondary company','company2'],['shift2_id','Secondary shift','shift2']];
+  const fieldSpec=[['email','Login / notification email','email'],['company','Company','company'],['app_role','Workspace role (CRM & work modules)','role'],['employee_code','Employee ID (also the biometric code)','text'],['department','Department','text'],['job_title','Job title','text'],['phone','Phone','tel'],['joining_date','Joining date','date'],['manager_id','Reports to','manager'],['shift_id','Primary shift','shift'],['company2','Secondary company','company2'],['shift2_id','Secondary shift','shift2']];
   window.WSAdminPeople={
     async open(emp) {
       editorEmployee=emp; $('edit-emp-save').disabled=true; $('mg-edit-fields').textContent='Loading account settings…';
