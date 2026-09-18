@@ -3,10 +3,10 @@
 --
 -- The reset truncates EVERY public table - including the ones that hold
 -- configuration rather than history: leave types, each company's weekly
--- offs, and the per-company Bitrix mapping rows. Their migration files
--- create the tables (already there) and then seed them; this file is just
--- those seeds in one place, so a reset is followed by one run of this
--- instead of hunting through four files.
+-- offs, the per-company Bitrix mapping rows, and the attendance scheduler's
+-- row. Their migration files create the tables (already there) and then
+-- seed them; this file is just those seeds in one place, so a reset is
+-- followed by one run of this instead of hunting through five files.
 --
 -- Every insert is ON CONFLICT DO NOTHING: re-running never overwrites a
 -- change made later in Admin. Shifts are not re-seeded here because they
@@ -46,6 +46,22 @@ insert into public.bitrix_targets (company, label) values
   ('Navyug Raise A Player Foundation', null),
   ('Raise a Player',                   null)
 on conflict (company) do nothing;
+
+-- ---------- The attendance scheduler's row (supabase-attendance-scheduler-migration.sql) ----------
+-- The 5-minute job reads its secret and site address from this row; with
+-- the row gone it calls nobody - no shift-end Logouts, no dual-shift
+-- switches, no Bitrix retries - while cron.job_run_details still says
+-- 'succeeded'. The new row gets a new secret, which the job sends from its
+-- next run and the webhook re-reads when it sees it: nothing to paste.
+-- Skipped where the scheduler migration was never run (no table to fill);
+-- run that file instead. Five minutes later,
+-- select public.worksuite_scheduler_status(); should list no problems.
+do $$
+begin
+  if to_regclass('public.worksuite_scheduler') is not null then
+    insert into public.worksuite_scheduler (id) values (1) on conflict (id) do nothing;
+  end if;
+end $$;
 
 -- ---------- What is there now ----------
 select 'leave_types' as tbl, count(*) as rows from public.leave_types

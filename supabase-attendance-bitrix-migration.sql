@@ -13,11 +13,12 @@
 --                                   exactly once.
 --   bitrix_log.kind                 also allows shift_switch and auto_logout.
 --
--- The job runs through the scheduler the dual-shift migration set up
--- (worksuite-shift-switch, every 5 minutes): that call now also retries
--- undelivered punches and closes shifts nobody logged out of. Check it is
--- there with:   select jobname, schedule from cron.job;
--- If it is missing, schedule it as supabase-dual-shift-migration.sql shows.
+-- The job runs through the scheduler (worksuite-shift-switch, every 5
+-- minutes): that call also retries undelivered punches and closes shifts
+-- nobody logged out of. supabase-attendance-scheduler-migration.sql sets the
+-- scheduler up - with no key to paste - and includes everything in this file,
+-- so running that one is enough. Check it with:
+--   select public.worksuite_scheduler_status();
 --
 -- Safe to run more than once. Run in Supabase → SQL Editor.
 -- ============================================================

@@ -14,6 +14,10 @@
 -- company's Bitrix chat and "Login" to the second's, as the person.
 -- shift_switch_posts records one row per person per day so it happens once.
 --
+-- This file only adds the columns and that table. The scheduler itself is set
+-- up by supabase-attendance-scheduler-migration.sql, which also re-states
+-- everything here, so running that one file is enough.
+--
 -- Run once in the Supabase SQL editor. Safe to re-run.
 -- ============================================================================
 
@@ -34,27 +38,9 @@ create table if not exists public.shift_switch_posts (
 alter table public.shift_switch_posts enable row level security;   -- service key only, like salaries
 
 -- ---------------------------------------------------------------------------
--- The scheduler: pg_cron + pg_net, every 5 minutes, calling the webhook with
--- the same key the biometric device uses (BIOMETRIC_API_KEY in Vercel).
--- Paste your key in place of PASTE-YOUR-BIOMETRIC_API_KEY before running.
--- The job is idempotent, so "every 5 minutes" is safe; the switch itself
--- happens once per person per day, within 5 minutes of the shift start.
+-- The scheduler that makes the switch happen is not set up here any more.
+-- This file used to schedule it with a key to paste by hand; left unedited,
+-- every call was refused, and re-running this file would replace a working
+-- job with that one again. Run supabase-attendance-scheduler-migration.sql:
+-- it creates the job with a secret the database generates, nothing to paste.
 -- ---------------------------------------------------------------------------
-create extension if not exists pg_cron;
-create extension if not exists pg_net;
-
-select cron.unschedule(jobid) from cron.job where jobname = 'worksuite-shift-switch';
-select cron.schedule(
-  'worksuite-shift-switch',
-  '*/5 * * * *',
-  $$
-  select net.http_post(
-    url     := 'https://work-suite-mauve.vercel.app/api/attendance-webhook?job=shift_switch',
-    headers := '{"Content-Type":"application/json","Authorization":"Bearer PASTE-YOUR-BIOMETRIC_API_KEY"}'::jsonb,
-    body    := '{}'::jsonb
-  );
-  $$
-);
-
--- To check it is running:   select * from cron.job_run_details order by start_time desc limit 10;
--- To stop it:               select cron.unschedule('worksuite-shift-switch');

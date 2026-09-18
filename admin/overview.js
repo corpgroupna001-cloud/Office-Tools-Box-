@@ -69,7 +69,9 @@
         $('ov-emp-sub').textContent = wfh ? `${wfh} work from home` : 'Across all companies';
         const present = (T.present || 0) + (T.no_checkout || 0);
         $('ov-present').innerHTML = `${present}<small>/ ${T.employees || total}</small>`;
-        $('ov-present-sub').textContent = T.no_checkout ? `${T.no_checkout} still on the clock` : (T.punches ? `${T.punches} punches so far` : 'No punches yet today');
+        // on_clock: in, no Out yet, shift still on (no_checkout also holds overtime nobody closed).
+        const onClock = T.on_clock ?? T.no_checkout;
+        $('ov-present-sub').textContent = onClock ? `${onClock} still on the clock` : (T.punches ? `${T.punches} punches so far` : 'No punches yet today');
         $('ov-late').textContent = T.late || 0;
         $('ov-late-sub').textContent = T.early_out ? `${T.early_out} left early` : (T.late ? 'Past shift start + grace' : 'Nobody late so far');
         $('ov-absent').textContent = T.absent || 0;

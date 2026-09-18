@@ -112,7 +112,10 @@
                 const note = e.notes[dt];
                 const title = [
                     dt + ' · ' + meta.label,
-                    t ? `In ${t[0] || '—'} · Out ${t[1] || '—'}` + (t[2] ? ` · ${t[2]} min late` : '') : null,
+                    // t[3]: the Out is the automatic shift-end logout; t[4]: no login was punched.
+                    t ? `In ${t[0] || (t[4] ? '— (login not punched)' : '—')}` +
+                        ` · Out ${t[1] ? t[1] + (t[3] ? ' (auto, shift end)' : '') : '—'}` +
+                        (t[2] ? ` · ${t[2]} min late` : '') : null,
                     note || null,
                 ].filter(Boolean).join('\n');
                 const faded = key === 'future' ? ' style="opacity:.25"' : '';

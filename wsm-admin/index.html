@@ -682,6 +682,10 @@
 
             <!-- ATTENDANCE TAB -->
             <div id="attendance-panel" class="hidden">
+                <!-- The scheduled job behind shift-end logouts, dual-shift switches and Bitrix retries.
+                     px/py rather than p-4: admin/console.js puts its Export CSV button in the first .p-4 card, the toolbar below. -->
+                <div id="att-scheduler" class="glass rounded-2xl px-4 py-3 mb-6"><span class="text-slate-400 text-xs font-bold animate-pulse">Checking the shift-end job…</span></div>
+
                 <div class="glass rounded-2xl p-4 mb-6 flex flex-wrap gap-3 items-center">
                     <div class="flex items-center gap-2">
                         <span class="text-[10px] uppercase tracking-widest text-slate-400 font-black">Date</span>
@@ -772,6 +776,10 @@
                         <span class="text-[10px] uppercase tracking-widest text-slate-400 font-black">To</span>
                         <input id="recompute-to" type="date" class="glass px-3 py-2 rounded-xl text-sm font-bold focus:outline-none">
                     </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] uppercase tracking-widest text-slate-400 font-black">Biometric ID</span>
+                        <input id="recompute-code" type="text" inputmode="numeric" placeholder="Everyone" autocomplete="off" class="glass px-3 py-2 rounded-xl text-sm font-bold focus:outline-none" style="width:9rem">
+                    </div>
                     <button id="recompute-check" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/10">Check</button>
                     <button id="recompute-apply" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm" disabled style="opacity:.4">Apply changes</button>
                     <span id="recompute-result" class="text-xs font-bold"></span>
@@ -785,9 +793,13 @@
                     </div>
                 </div>
                 <p class="text-slate-400 text-xs font-bold max-w-3xl leading-relaxed">
-                    A working day is cut where there is a gap of 8 hours or more between a person's punches, not at midnight &mdash;
-                    so the 6pm&ndash;3am shift is one day, and its 1am break is a break. New punches are labelled this way as they
-                    arrive; use this after changing someone's shift, or to relabel punches that arrived before the rules did.
+                    A working day belongs to the person's shift, not the calendar &mdash; the 6pm&ndash;3am shift is one day, its 1am
+                    break is a break and its 3am punch is the Logout. The first punch is the Login (or, at the shift end, a Logout whose
+                    login was not punched), punches then alternate, and a second tap within two minutes is a repeat. Someone with no
+                    shift yet has days cut by an 8-hour gap between punches. New punches are labelled this way as they arrive; use this
+                    to relabel punches that arrived before the rules did, or after correcting a shift that was wrong. It re-judges
+                    <b>everyone</b> in the range against their shift today unless you give a Biometric ID: for one person's wrong shift,
+                    give theirs; after someone's hours really changed, start the range on the first day of the new hours.
                     <b>Check</b> only shows what would change; nothing is written until you <b>Apply</b>.
                 </p>
             </div>
@@ -1330,6 +1342,8 @@
         let attReport = null;
         let attFeed = [];
         let attUnmapped = null;
+        let attScheduler = null;      // att_scheduler_status, or null when it could not be read
+        let attSchedulerRan = null;   // what the last "Run now" reported, shown in the banner
         let shiftData = null;
         let selfieData = null;
         let empWho = 'all';
@@ -2795,8 +2809,17 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ...payload, action: 'att_' + payload.action })
             });
-            const data = await r.json();
-            if (!r.ok) throw new Error(data.error || data.detail || 'Request failed');
+            // A platform error page (the function cut off at its time limit, a
+            // gateway error) is not JSON: say what came back, not a JSON syntax error.
+            const text = await r.text().catch(() => '');
+            let data = null;
+            try { data = JSON.parse(text); } catch { data = null; }
+            if (!data || typeof data !== 'object') {
+                const snippet = String(text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+                const timeout = r.status === 504 || /TIMEOUT/i.test(snippet);
+                throw new Error(`${timeout ? 'The server timed out' : 'The server answered'} (${r.status})` + (snippet ? `: ${snippet}` : '.'));
+            }
+            if (!r.ok) throw new Error(data.error || data.detail || `Request failed (${r.status})`);
             return data;
         }
 
@@ -2809,14 +2832,17 @@
             document.getElementById('att-tbody').innerHTML =
                 '<tr><td colspan="9" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading attendance…</td></tr>';
             try {
-                const [report, feed, unmapped] = await Promise.all([
+                const [report, feed, unmapped, scheduler] = await Promise.all([
                     attApi({ action: 'daily_report', date }),
                     attApi({ action: 'logs', date, limit: 500 }),
-                    attApi({ action: 'unmapped' })
+                    attApi({ action: 'unmapped' }),
+                    // The banner is advice, not the report: if it cannot be read the report still shows.
+                    attApi({ action: 'scheduler_status' }).catch(() => null)
                 ]);
                 attReport = report;
                 attFeed = feed.logs || [];
                 attUnmapped = unmapped;
+                attScheduler = scheduler;
                 renderAttendance();
             } catch (e) {
                 document.getElementById('att-tbody').innerHTML =
@@ -2840,14 +2866,183 @@
             return '<span class="text-rose-300 font-black">❌ Absent</span>';
         }
 
+        const ATT_CLOCK = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true });
+        function attClock(iso) {
+            const d = new Date(iso);
+            return iso && !isNaN(d.getTime()) ? ATT_CLOCK.format(d) : '—';
+        }
+
+        // Is the scheduled job (pg_cron -> /api/attendance-webhook?job=shift_switch,
+        // every 5 minutes) actually running? It records its own last run, so a
+        // run within 15 minutes means yes; anything else means shift-end
+        // logouts, dual-shift switches and Bitrix retries are not happening.
+        function attSchedulerState() {
+            const s = attScheduler;
+            if (!s) return { known: false, running: null };
+            const sch = s.scheduler || null;
+            const at = sch && sch.last_run_at ? new Date(sch.last_run_at) : null;
+            const mins = at && !isNaN(at.getTime()) ? Math.max(0, Math.round((Date.now() - at.getTime()) / 60000)) : null;
+            const running = mins != null && mins < 15;
+            return { known: true, running, healthy: running && sch.last_ok === true, mins, sch, s };
+        }
+
+        function renderAttScheduler() {
+            const box = document.getElementById('att-scheduler');
+            if (!box) return;
+            const st = attSchedulerState();
+            if (!st.known) {
+                box.style.borderLeft = '4px solid var(--ws-warning)';
+                box.innerHTML = `<div class="flex flex-wrap items-center gap-3"><span class="ws-chip warn">Shift-end logouts: status unknown</span>` +
+                    `<span class="text-slate-400 text-xs font-bold">Could not read the scheduler status.</span>${attRunNowBtn()}</div>`;
+                return;
+            }
+            const s = st.s, sch = st.sch;
+            const status = s.status || null;
+            const problems = (status && Array.isArray(status.problems)) ? status.problems : [];
+            const http = (status && Array.isArray(status.http)) ? status.http : [];
+            const lastHttp = http[0] || null;
+            const result = (sch && sch.last_result) || {};
+            const att = result.attendance || {};
+
+            let tone, head;
+            const why = [];
+            if (s.migration_needed || !sch || !sch.last_run_at) {
+                tone = 'bad';
+                head = s.migration_needed || !sch ? 'Shift-end logouts are not set up' : 'Shift-end logouts have not run yet';
+                why.push('Run <b>supabase-attendance-scheduler-migration.sql</b> in Supabase.');
+            } else if (st.healthy) {
+                tone = 'ok';
+                head = `Shift-end logouts: last run ${st.mins < 1 ? 'just now' : st.mins + ' min ago'}`;
+            } else if (st.running) {
+                tone = 'warn';
+                head = `Shift-end logouts: the run ${st.mins < 1 ? 'just now' : st.mins + ' min ago'} reported a problem`;
+            } else {
+                tone = 'bad';
+                head = `No scheduled run for ${attMins(st.mins)}`;
+            }
+            if (tone !== 'ok' && lastHttp) {
+                why.push(lastHttp.timed_out ? 'The last scheduled call timed out.'
+                    : lastHttp.error_msg ? `The last scheduled call failed: ${escapeHtml(String(lastHttp.error_msg).slice(0, 160))}`
+                    : `The last scheduled call was answered <b>${escapeHtml(String(lastHttp.status_code ?? '?'))}</b>` +
+                      (lastHttp.status_code === 401 ? ' (the key it sends is wrong).' : '.'));
+            }
+            // The database's own findings (worksuite_scheduler_status), e.g. 'pg_cron is not installed'.
+            if (tone !== 'ok') problems.forEach(p => { const t = String(p); why.push(escapeHtml(t.charAt(0).toUpperCase() + t.slice(1))); });
+
+            // The last run's own report: what it did and anything it could not.
+            const did = [];
+            if (att.auto_logouts) did.push(`${att.auto_logouts} automatic logout${att.auto_logouts === 1 ? '' : 's'}`);
+            if (att.retried) did.push(`${att.retry_sent || 0} of ${att.retried} Bitrix line${att.retried === 1 ? '' : 's'} re-sent`);
+            if (result.shift_switch && result.shift_switch.posted) did.push(`${result.shift_switch.posted} shift switch${result.shift_switch.posted === 1 ? '' : 'es'}`);
+            const notes = [].concat(att.notes || [],
+                att.error ? [att.error] : [],
+                result.shift_switch && result.shift_switch.error ? [result.shift_switch.error] : []);
+
+            // Today's (and last night's) automatic logouts and dual-shift switches, with the Bitrix outcome.
+            const bx = (ok, attempts) => ok === true ? '<span class="ws-chip ok">Bitrix sent</span>'
+                : ok === false ? `<span class="ws-chip bad">Bitrix failed${attempts ? ` · ${attempts} tr${attempts === 1 ? 'y' : 'ies'}` : ''}</span>`
+                : '<span class="ws-chip">Bitrix pending</span>';
+            const autos = Array.isArray(s.auto_logouts) ? s.auto_logouts : [];
+            const switches = Array.isArray(s.switch_posts) ? s.switch_posts : [];
+            const list = autos.map(a => `
+                <div class="flex flex-wrap items-center gap-2 text-xs" title="${escapeHtml(a.detail || '')}">
+                    <b class="text-white">${empNameHtml(a.employee_id, a.full_name || 'Unknown')}</b>
+                    <span class="text-slate-300 font-bold">Logout ${escapeHtml(attClock(a.logout_at))}${a.log_date !== attIstToday() ? ' · ' + escapeHtml(a.log_date) : ''}</span>
+                    <span class="text-slate-400 font-bold">${a.kind === 'break_not_returned' ? 'did not return from break' : 'no punch-out'}</span>
+                    ${bx(a.bitrix_ok, a.attempts)}
+                </div>`).concat(switches.map(x => `
+                <div class="flex flex-wrap items-center gap-2 text-xs" title="${escapeHtml(x.detail || '')}">
+                    <b class="text-white">${empNameHtml(x.employee_id, x.full_name || 'Unknown')}</b>
+                    <span class="text-slate-300 font-bold">Shift switch${x.posted_at ? ' ' + escapeHtml(attClock(x.posted_at)) : ''}</span>
+                    ${x.first_ok === true && x.second_ok === true ? '<span class="ws-chip ok">Bitrix sent</span>'
+                        : x.posted_at ? `<span class="ws-chip bad">Bitrix ${[x.first_ok ? null : 'logout', x.second_ok ? null : 'login'].filter(Boolean).join(' + ')} failed</span>`
+                        : '<span class="ws-chip">Bitrix pending</span>'}
+                </div>`)).join('');
+
+            const TONE = { ok: 'var(--ws-success)', warn: 'var(--ws-warning)', bad: 'var(--ws-danger)' };
+            // The last "Run now" line: done, done with a step skipped, failed
+            // (or a step failed), still running on its own.
+            const ATT_RAN_TONE = { ok: 'text-emerald-300', warn: 'text-amber-300', bad: 'text-rose-300', info: 'text-sky-300' };
+            box.style.borderLeft = `4px solid ${TONE[tone]}`;
+            box.innerHTML =
+                `<div class="flex flex-wrap items-center gap-3">` +
+                    `<span class="ws-chip ${tone}">${escapeHtml(head)}</span>` +
+                    (did.length ? `<span class="text-slate-400 text-xs font-bold">Last run: ${escapeHtml(did.join(' · '))}</span>` : '') +
+                    attRunNowBtn() +
+                `</div>` +
+                (why.length ? `<ul class="text-xs font-bold mt-2 ${tone === 'bad' ? 'text-rose-300' : 'text-amber-300'}">${why.map(w => `<li>${w}</li>`).join('')}</ul>` : '') +
+                (notes.length ? `<p class="text-slate-400 text-xs font-bold mt-2">Notes: ${notes.map(n => escapeHtml(String(n))).join(' · ')}</p>` : '') +
+                (attSchedulerRan && Date.now() - attSchedulerRan.at < 10 * 60000
+                    ? `<p class="text-xs font-bold mt-2 ${ATT_RAN_TONE[attSchedulerRan.tone] || ATT_RAN_TONE.bad}">${escapeHtml(attSchedulerRan.text)}</p>` : '') +
+                (list ? `<div class="flex flex-col gap-1.5 mt-3 pt-3" style="border-top:1px solid var(--ws-border-2);">` +
+                        `<span class="text-[10px] uppercase tracking-widest text-slate-400 font-black">Automatic logouts &amp; shift switches</span>${list}</div>` : '');
+        }
+
+        function attRunNowBtn() {
+            return `<button type="button" data-att-sched-run class="glass px-3 py-1.5 rounded-xl text-xs font-bold ml-auto inline-flex items-center gap-2 hover:bg-white/10"><span class="ic ic-refresh sm"></span>Run now</button>`;
+        }
+
+        // Run the job now (the same call pg_cron makes), then reload everything it may have changed.
+        document.getElementById('att-scheduler').addEventListener('click', async (ev) => {
+            const btn = ev.target.closest('[data-att-sched-run]');
+            if (!btn) return;
+            btn.disabled = true; btn.textContent = 'Running…';
+            try {
+                const r = await attApi({ action: 'scheduler_run' });
+                if (r.running) {
+                    // 202: the job outlasted the wait but carries on by itself.
+                    attSchedulerRan = { at: Date.now(), tone: 'info', text: r.message || 'Still running - check the list below in a minute' };
+                } else {
+                    const a = r.attendance || {};
+                    const sw = r.shift_switch || {};
+                    const bits = [
+                        `${a.auto_logouts || 0} automatic logout${a.auto_logouts === 1 ? '' : 's'}`,
+                        `${a.retry_sent || 0} of ${a.retried || 0} Bitrix retries sent`,
+                    ];
+                    if (sw.posted) bits.push(`${sw.posted} shift switch${sw.posted === 1 ? '' : 'es'}`);
+                    const errs = [a.error, sw.error].filter(Boolean).map(String);
+                    // The job's own notes, as the scheduled-run banner shows them. A step
+                    // it skipped or failed is not a clean run (the rule the job uses for
+                    // its heartbeat); 'stopped at the time budget' is only a note.
+                    const notes = (Array.isArray(a.notes) ? a.notes : []).map(String);
+                    const tone = errs.length || notes.some(n => /failed/i.test(n)) ? 'bad'
+                        : notes.some(n => /skipped|supabase-/i.test(n)) ? 'warn' : 'ok';
+                    attSchedulerRan = { at: Date.now(), tone, text: `Ran just now: ${bits.join(' · ')}` +
+                        (errs.length ? ` — ${errs.join(' · ')}` : '.') +
+                        (notes.length ? ` Notes: ${notes.join(' · ')}` : '') };
+                }
+            } catch (e) {
+                attSchedulerRan = { at: Date.now(), tone: 'bad', text: `Run now failed: ${e.message}` };
+            }
+            attReport = null;
+            await loadAttendance();
+        });
+
+        // The Out as the calendar and pay sheet count it: a shift-end logout
+        // nobody punched is marked auto, a break not yet returned from is not
+        // the end of the day, and someone still inside their shift has none.
+        function attOutCell(r) {
+            if (!r.last_out_time) {
+                return r.on_clock ? '<span class="text-sky-300 text-xs font-black">still on the clock</span>' : '—';
+            }
+            const tail = r.auto_logout ? 'auto'
+                : r.auto_logout_kind === 'break_not_returned' ? 'no return from break'
+                : r.on_break ? 'on a break' : '';
+            return escapeHtml(r.last_out_time) +
+                (tail ? ` <span class="text-slate-400 text-xs font-black" title="${r.auto_logout ? 'Nobody punched out: logged out at the shift end' : ''}">· ${tail}</span>` : '');
+        }
+
         function renderAttendance() {
             if (!attReport) return;
+            renderAttScheduler();
             const t = attReport.totals || {};
 
             const tiles = [
                 { label: 'Employees',    value: t.employees ?? 0,      cls: 'slate'   },
                 { label: 'Present',      value: t.present ?? 0,        cls: 'emerald' },
                 { label: 'No check-out', value: t.no_checkout ?? 0,    cls: 'rose'    },
+                // Closed at the shift end because nobody punched out (already counted as Present).
+                { label: 'Auto logout',  value: t.auto_logout ?? 0,    cls: (t.auto_logout ? 'rose' : 'slate') },
                 { label: 'Absent',       value: t.absent ?? 0,         cls: 'rose'    },
                 { label: 'Late in',      value: t.late ?? 0,           cls: (t.late ? 'rose' : 'emerald') },
                 { label: 'Early out',    value: t.early_out ?? 0,      cls: (t.early_out ? 'rose' : 'emerald') },
@@ -2908,9 +3103,11 @@
                         <td>${attBadge(r.status)}
                             ${r.status === 'Holiday' && r.holiday_name ? `<br><span class="text-slate-500 text-xs font-bold">${escapeHtml(r.holiday_name)}</span>` : ''}
                             ${(r.status === 'On leave' || r.status === 'Half day leave') && r.leave_type ? `<br><span class="text-slate-500 text-xs font-bold">${escapeHtml(r.leave_type)}</span>` : ''}</td>
-                        <td class="text-emerald-200 font-bold">${escapeHtml(r.first_in_time || '—')}
+                        <td class="text-emerald-200 font-bold">${r.missing_login
+                                ? '<span class="text-amber-300 text-xs font-black">login not punched</span>'
+                                : escapeHtml(r.first_in_time || '—')}
                             ${r.is_late ? `<br><span class="text-rose-300 text-xs font-black">▲ ${attMins(r.late_minutes)} late</span>` : ''}</td>
-                        <td class="text-rose-200 font-bold">${escapeHtml(r.last_out_time || '—')}
+                        <td class="text-rose-200 font-bold">${attOutCell(r)}
                             ${r.is_early_out ? `<br><span class="text-amber-300 text-xs font-black">▼ ${attMins(r.early_out_minutes)} early</span>` : ''}</td>
                         <td class="text-white font-black">${escapeHtml(r.duration || '—')}</td>
                         <td class="text-slate-300 font-bold">${r.punches ?? 0}</td>
@@ -2923,13 +3120,24 @@
             // ---- punch feed ----
             // Group message delivery (supabase-attendance-bitrix-migration.sql); failed and
             // deferred ones are sent again by the attendance job.
+            // "Retrying" only while it is true: the job is running, the punch
+            // has attempts left (4) and is inside the 6-hour retry window.
+            const sched = attSchedulerState();
+            const retrying = l => sched.running !== false && (Number(l.bitrix_attempts) || 0) < 4 &&
+                Date.now() - new Date(l.log_datetime).getTime() < 6 * 3600 * 1000;
             const BX = {
-                sent:     '<span class="text-emerald-300 font-black">✅ Sent</span>',
-                failed:   '<span class="text-rose-300 font-black">❌ Failed · retrying</span>',
-                deferred: '<span class="text-amber-300 font-black">⏳ Retrying</span>',
-                no_group: '<span class="text-amber-300 font-black">⚠️ No group mapped</span>',
-                skipped:  '<span class="text-slate-400 font-bold">— Skipped</span>',
+                sent:     () => '<span class="text-emerald-300 font-black">✅ Sent</span>',
+                failed:   l => retrying(l) ? '<span class="text-rose-300 font-black">❌ Failed · retrying</span>'
+                                           : '<span class="text-rose-300 font-black">❌ Failed</span>',
+                deferred: l => retrying(l) ? '<span class="text-amber-300 font-black">⏳ Retrying</span>'
+                                           : '<span class="text-amber-300 font-black">⏳ Not sent</span>',
+                no_group: () => '<span class="text-amber-300 font-black">⚠️ No group mapped</span>',
+                skipped:  () => '<span class="text-slate-400 font-bold">— Skipped</span>',
             };
+            // A second touch within two minutes repeats the punch before it:
+            // same labels, no email and no Bitrix line of its own.
+            const repeatTap = l => l.email_status === 'skipped' && /^repeat tap/i.test(String(l.email_error || ''));
+            const EV = { LOGIN: 'Login', BREAK_OUT: 'Break out', BREAK_IN: 'Break in', LOGOUT: 'Logout' };
             const MAIL = {
                 sent:     '<span class="text-emerald-300 font-black">✅ Sent</span>',
                 failed:   '<span class="text-rose-300 font-black">❌ Failed</span>',
@@ -2947,10 +3155,13 @@
                             ? '<span class="text-emerald-300 font-black">→ IN</span>'
                             : l.direction === 'OUT'
                                 ? '<span class="text-rose-300 font-black">← OUT</span>'
-                                : '<span class="text-slate-400 font-bold">• Punch</span>'}</td>
+                                : '<span class="text-slate-400 font-bold">• Punch</span>'}${EV[l.event_type]
+                            ? `<br><span class="text-slate-400 text-xs font-bold">${EV[l.event_type]}</span>` : ''}</td>
                         <td class="text-slate-300 font-bold">${escapeHtml(l.device_name || l.device_sn || '—')}</td>
-                        <td title="${escapeHtml(l.email_error || '')}">${MAIL[l.email_status] || escapeHtml(l.email_status || '—')}</td>
-                        <td title="${escapeHtml(l.bitrix_error || '')}">${BX[l.bitrix_status] || (l.email_status === 'unmapped' ? '<span class="text-amber-300 font-black">⚠️ Not sent: unmapped</span>' : '<span class="text-slate-500">—</span>')}${l.bitrix_error ? `<br><span class="text-slate-400 text-xs">${escapeHtml(l.bitrix_error.slice(0, 80))}</span>` : ''}</td>
+                        <td title="${escapeHtml(l.email_error || '')}">${repeatTap(l)
+                            ? '<span class="text-slate-400 font-bold">Repeat tap · not announced</span>'
+                            : MAIL[l.email_status] || escapeHtml(l.email_status || '—')}</td>
+                        <td title="${escapeHtml(l.bitrix_error || '')}">${BX[l.bitrix_status] ? BX[l.bitrix_status](l) : (l.email_status === 'unmapped' ? '<span class="text-amber-300 font-black">⚠️ Not sent: unmapped</span>' : '<span class="text-slate-500">—</span>')}${l.bitrix_error ? `<br><span class="text-slate-400 text-xs">${escapeHtml(l.bitrix_error.slice(0, 80))}</span>` : ''}</td>
                     </tr>`).join('')
                 : '<tr><td colspan="6" class="p-8 text-center text-slate-400 font-bold">No punches on this date.</td></tr>';
         }
@@ -3016,19 +3227,23 @@
             }
             const rows = [
                 ['Date', 'Employee', 'Email', 'Company', 'Employee Code', 'Shift', 'Shift Window', 'Status', 'Reason',
-                 'First IN', 'Late By (min)', 'Last OUT', 'Early Out By (min)', 'Hours', 'Punches', 'Devices', 'Mail Sent', 'Mail Issues'],
+                 'First IN', 'Late By (min)', 'Last OUT', 'Early Out By (min)', 'Hours', 'Punches', 'Devices', 'Mail Sent', 'Mail Issues',
+                 'Auto Logout', 'Login Not Punched'],
                 ...(attReport.rows || []).map(r => [
                     attReport.date, r.full_name || '', r.email || '', r.company || '', r.employee_code || '',
                     r.shift_name || '', r.shift_window || '', r.status, r.holiday_name || r.leave_type || '',
                     r.first_in_time || '', r.is_late ? (r.late_minutes ?? '') : '',
                     r.last_out_time || '', r.is_early_out ? (r.early_out_minutes ?? '') : '',
-                    r.duration || '', r.punches ?? 0, (r.devices || []).join(' | '), r.mail_sent ?? 0, r.mail_problem ?? 0
+                    r.duration || '', r.punches ?? 0, (r.devices || []).join(' | '), r.mail_sent ?? 0, r.mail_problem ?? 0,
+                    r.auto_logout ? 'Yes (shift end)' : r.auto_logout_kind === 'break_not_returned' ? 'Yes (left at break)' : '',
+                    r.missing_login ? 'Yes' : ''
                 ]),
                 ...(attReport.unknown || []).map(u => [
                     attReport.date, u.employee_name || '', '', '', u.employee_code,
                     '', '', 'Unmapped', '',
                     u.first_in_time || '', '', u.last_out_time || '', '',
-                    u.duration || '', u.punches ?? 0, (u.devices || []).join(' | '), u.mail_sent ?? 0, u.mail_problem ?? 0
+                    u.duration || '', u.punches ?? 0, (u.devices || []).join(' | '), u.mail_sent ?? 0, u.mail_problem ?? 0,
+                    '', u.missing_login ? 'Yes' : ''
                 ])
             ];
             const csv = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');

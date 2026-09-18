@@ -126,8 +126,10 @@ end $$;
 -- SECTION 2b — ALTERNATIVE: wipe the data, KEEP the configuration.
 --
 -- Use this INSTEAD of Section 2 if you would rather not rebuild shifts, leave
--- types, week-off rules and the Bitrix mapping by hand. Everything about
--- people and their activity still goes.
+-- types, week-off rules and the Bitrix mapping by hand. The attendance
+-- scheduler's row (worksuite_scheduler) stays too, so the 5-minute job keeps
+-- posting shift-end Logouts without a re-run. Everything about people and
+-- their activity still goes.
 -- ----------------------------------------------------------------------------
 -- do $$
 -- declare victims text;
@@ -137,7 +139,7 @@ end $$;
 --     from pg_tables t
 --    where t.schemaname = 'public'
 --      and t.tablename not in ('shifts', 'leave_types', 'company_policies',
---                              'bitrix_targets', 'holidays')
+--                              'bitrix_targets', 'holidays', 'worksuite_scheduler')
 --      and not exists (select 1 from pg_depend d join pg_class c on c.oid = d.objid
 --                       where c.relname = t.tablename
 --                         and c.relnamespace = 'public'::regnamespace
@@ -228,7 +230,7 @@ select b.id as bucket,
 -- ============================================================================
 -- SECTION 6 — PUT THE CONFIGURATION BACK.  Do not skip this.
 --
--- Section 2 empties DATA and CONFIGURATION alike, and four tables are seeded
+-- Section 2 empties DATA and CONFIGURATION alike, and five tables are seeded
 -- by migrations rather than entered by hand. Until you re-run these, WorkSuite
 -- is missing things it depends on:
 --
@@ -249,9 +251,18 @@ select b.id as bucket,
 --        The seven companies and their group labels. The Bitrix panel shows
 --        no rows to map until this runs.
 --
+--   supabase-attendance-scheduler-migration.sql → worksuite_scheduler
+--        The one row the 5-minute job reads its secret and site address
+--        from. Without it the job selects nothing and calls nobody: no
+--        shift-end Logouts, no dual-shift switches, no Bitrix retries — and
+--        cron.job_run_details still says 'succeeded'. Re-running it makes a
+--        new secret, which the job and the webhook both pick up by
+--        themselves; nothing to paste.
+--
 -- Re-run them in that order in the SQL Editor. They are all idempotent, so
 -- running one twice is harmless. Or run supabase-reseed-after-reset.sql,
--- which is those seeds (except shifts) in one file.
+-- which is those seeds (except shifts) in one file, the scheduler's row
+-- included.
 --
 -- Then, still to do by hand:
 --   * your 2026 holiday list   → Admin → 🌴 Leave

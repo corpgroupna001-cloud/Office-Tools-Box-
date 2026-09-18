@@ -45,19 +45,20 @@ const { resolveShift } = require('../company-config');
 //   ATTENDANCE_EMAIL_MAX_AGE_HOURS  optional, default 12 — see BACKFILL below
 // ============================================================
 
+const crypto = require('crypto');
 const { sendMail } = require('../lib/mailer');
 const bitrix = require('../lib/bitrix');
 const {
   parseDeviceDateTime, istParts, normalizeDirection,
   matchProfileByName, buildPunchEmail,
-  evaluateShift, timeToMinutes, offsetFromBoundary,
+  evaluateShift, timeToMinutes,
   istToday, monthDates, buildMonth, classifyDay,
   weekOffsFor, holidayOn, DAY_STATUS,
-  assignDays, attendanceDateFor, NEW_DAY_GAP_MS,
+  assignDays, NEW_DAY_GAP_MS,
   computeMonthlyPay, computePay,
-  effectiveShift, shiftPartAt, shiftDays, istIsoWeekday,
+  effectiveShift, shiftPartAt, shiftDays, istIsoWeekday, shiftForDay,
   buildPunchChatLine, buildLeaveChatLine,
-  shiftEndAt, autoLogoutFor,
+  shiftEndAt, autoLogoutFor, AUTO_LOGOUT_GRACE_MS, isRepeatRow,
 } = require('../lib/attendance');
 
 // Vercel Hobby kills the function at 10s. Stop starting new sends at 7.5s and
@@ -107,15 +108,20 @@ function yesterdayOf(isoDate) {
 
 /**
  * The punches that count as "today" for each person, from a set covering
- * today and yesterday. A day is still open while its last punch is less than
- * NEW_DAY_GAP_MS old, so somebody two hours into a night shift that began
- * yesterday evening is working today, not absent today. Returns a Map of
- * user_id -> punches.
+ * today and yesterday. Yesterday's attendance day is still today's while it
+ * is open - somebody two hours into a night shift that began yesterday
+ * evening is working today, not absent today - and only while it is open:
+ * once it ended with a Logout, or its shift ended (plus the half hour the
+ * automatic Logout waits), today starts fresh. Without a shift to go by, a
+ * day stays open while its last punch is under NEW_DAY_GAP_MS old. Returns a
+ * Map of user_id -> punches.
+ *
+ * @param dayShiftOf (userId, date, firstPunchAt) -> that day's shift, or null
  */
-function currentDayPunches(logs, today) {
+function currentDayPunches(logs, today, dayShiftOf) {
   const byUser = new Map();
   for (const r of logs || []) {
-    if (!r.user_id) continue;
+    if (!r.user_id || isRepeatRow(r)) continue;
     if (!byUser.has(r.user_id)) byUser.set(r.user_id, new Map());
     const days = byUser.get(r.user_id);
     if (!days.has(r.log_date)) days.set(r.log_date, []);
@@ -127,9 +133,16 @@ function currentDayPunches(logs, today) {
     if (days.has(today)) { out.set(uid, days.get(today)); continue; }
     const dates = [...days.keys()].sort();
     const latest = dates[dates.length - 1];
-    const punches = days.get(latest) || [];
-    const last = punches.reduce((m, p) => Math.max(m, new Date(p.log_datetime).getTime()), 0);
-    if (latest < today && now - last < NEW_DAY_GAP_MS) out.set(uid, punches);
+    if (!(latest < today)) continue;
+    const punches = (days.get(latest) || []).slice().sort((a, b) => new Date(a.log_datetime) - new Date(b.log_datetime));
+    const last = punches[punches.length - 1];
+    if (!last) continue;
+    const shift = typeof dayShiftOf === 'function' ? dayShiftOf(uid, latest, punches[0].log_datetime) : null;
+    const end = shift ? shiftEndAt(latest, shift) : null;
+    const open = end
+      ? last.event_type !== 'LOGOUT' && now < end.getTime() + AUTO_LOGOUT_GRACE_MS
+      : now - new Date(last.log_datetime).getTime() < NEW_DAY_GAP_MS;
+    if (open) out.set(uid, punches);
   }
   return out;
 }
@@ -162,6 +175,47 @@ async function runBounded(items, limit, deadlineAt, worker, onSkipped) {
   await Promise.all(runners);
 }
 
+/** Constant-time comparison; hashing first makes the lengths equal. */
+function safeEqual(a, b) {
+  const h = v => crypto.createHash('sha256').update(String(v)).digest();
+  return crypto.timingSafeEqual(h(a), h(b));
+}
+
+/*
+ * The scheduler's secret, read with the service key and kept for a few
+ * minutes so a call every 5 minutes costs at most one extra read. A mismatch
+ * against a copy more than a minute old is checked once more, in case the
+ * secret was changed in the database.
+ */
+const SCHEDULER_SECRET_TTL_MS = 10 * 60 * 1000;
+let schedulerSecretCache = { value: null, at: 0 };
+async function schedulerSecretMatches({ SUPABASE_URL, SERVICE_KEY, supplied }) {
+  const read = async () => {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/worksuite_scheduler?id=eq.1&select=secret&limit=1`,
+        { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } });
+      const row = r.ok ? (await r.json())[0] : null;
+      schedulerSecretCache = { value: row && row.secret ? String(row.secret) : null, at: Date.now() };
+    } catch { schedulerSecretCache = { value: null, at: Date.now() }; }
+  };
+  if (!schedulerSecretCache.at || Date.now() - schedulerSecretCache.at > SCHEDULER_SECRET_TTL_MS) await read();
+  const ok = () => !!schedulerSecretCache.value && schedulerSecretCache.value.length >= 32 && safeEqual(supplied, schedulerSecretCache.value);
+  if (ok()) return true;
+  if (Date.now() - schedulerSecretCache.at > 60 * 1000) { await read(); return ok(); }
+  return false;
+}
+
+/** Record the scheduled run for the admin console. Fail-soft: before the scheduler migration there is no row to write. */
+async function recordHeartbeat({ SUPABASE_URL, SERVICE_KEY, job, ok, out }) {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/worksuite_scheduler?id=eq.1`, {
+      method: 'PATCH',
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ last_run_at: new Date().toISOString(), last_job: job, last_ok: !!ok, last_result: out, updated_at: new Date().toISOString() }),
+    });
+  } catch { /* bookkeeping only */ }
+}
+
 module.exports = async function handler(req, res) {
   const startedAt = Date.now();
 
@@ -184,11 +238,17 @@ module.exports = async function handler(req, res) {
 
   if (!API_KEY) return res.status(500).json({ error: 'BIOMETRIC_API_KEY not configured on server.' });
 
-  // The scheduler that fires the dual-shift switch may carry its own secret
-  // (CRON_SECRET) instead of the device key; nothing else accepts it.
+  // The scheduler (pg_cron, every 5 minutes) authenticates with a secret the
+  // database generated for itself (worksuite_scheduler.secret, which its own
+  // cron command reads), so nobody has to paste a Vercel key into SQL - the
+  // old instructions did, and a job left with the placeholder 401'd forever.
+  // CRON_SECRET and the device key still work. Nothing else accepts these.
   const CRON_SECRET = process.env.CRON_SECRET || '';
   const JOB = String(req.query && req.query.job || '');
-  const isJobCall = (JOB === 'shift_switch' || JOB === 'attendance_tick') && CRON_SECRET && supplied === CRON_SECRET;
+  const isJob = JOB === 'shift_switch' || JOB === 'attendance_tick';
+  const isJobCall = isJob && !!supplied && supplied !== API_KEY && (
+    (CRON_SECRET && safeEqual(supplied, CRON_SECRET))
+    || (SUPABASE_URL && SERVICE_KEY && await schedulerSecretMatches({ SUPABASE_URL, SERVICE_KEY, supplied })));
 
   if (supplied !== API_KEY && !isJobCall) {
     // Not the device key — the only other accepted caller is a signed-in
@@ -214,7 +274,7 @@ module.exports = async function handler(req, res) {
   // at the moment the second shift starts, for people who are on site.
   // The same scheduled call also retries punches Bitrix did not take and posts
   // the Logout for shifts that ended with nobody punched out.
-  if (JOB === 'shift_switch' || JOB === 'attendance_tick') {
+  if (isJob) {
     if (!SUPABASE_URL || !SERVICE_KEY) return res.status(500).json({ error: 'Supabase server config missing.' });
     const out = {};
     if (JOB === 'shift_switch') {
@@ -224,6 +284,16 @@ module.exports = async function handler(req, res) {
     }
     try { out.attendance = await runAttendanceTick({ SUPABASE_URL, SERVICE_KEY, startedAt }); }
     catch (e) { out.attendance = { error: String(e && e.message || e).slice(0, 200) }; }
+    // The heartbeat the admin console reads: when the job last ran and what it
+    // found. A job whose tables are missing still answers 200 (pg_net would
+    // only record a status nobody reads), so it is reported here instead.
+    // The admin's "Run now" (manual=1) is not a heartbeat: it would make a
+    // scheduler that never calls look alive.
+    const problems = [out.shift_switch && out.shift_switch.error, out.attendance && out.attendance.error]
+      .filter(Boolean).concat(((out.attendance && out.attendance.notes) || []).filter(n => /supabase-|failed/.test(n)));
+    if (String(req.query.manual || '') !== '1') {
+      await recordHeartbeat({ SUPABASE_URL, SERVICE_KEY, job: JOB, ok: !problems.length, out });
+    }
     return res.status(200).json({ ok: true, ...out });
   }
 
@@ -280,12 +350,17 @@ module.exports = async function handler(req, res) {
     const shift2Of = p => (p && p.shift2_id && shiftById.get(p.shift2_id)) || null;
     // The shift that applies to a person at an instant: a dual-shift person's
     // merged window on the days both shifts cover, else whichever covers it.
+    // A punch nobody is mapped to has no shift; its days are cut by the gap
+    // between punches until the code is bound.
     const shiftFor = (p, when) => {
+      if (!p) return null;
       const s2 = shift2Of(p);
       if (!s2) return shift1Of(p);
       const d = when ? new Date(when) : new Date();
       return effectiveShift(shift1Of(p), s2, istIsoWeekday(d));
     };
+    // The shift one attendance day is judged against (see lib shiftForDay).
+    const dayShiftOf = (p, date, firstPunchAt) => (p ? shiftForDay(shift1Of(p), shift2Of(p), date, firstPunchAt) : null);
     // Which company's chat a punch belongs to: the second one once its window
     // has begun (the 7pm logout is a Jobways logout), the first before that.
     const companyFor = (p, when) => {
@@ -406,17 +481,22 @@ module.exports = async function handler(req, res) {
 
     // ---- 2b. Which day, which direction, which event ----
     // The reader sends a bare timestamp. Everything else - the attendance
-    // date, IN/OUT, Login/Break/Logout - is derived from the punch's place
-    // among the person's OTHER punches, stored and in this batch. A working
-    // day is not a calendar day here (the night shift runs 6pm-3am), so days
-    // are cut where there is a long gap between punches; see assignDays in
-    // lib/attendance.js, which is the single place those rules live.
+    // date, IN/OUT, Login/Break/Logout - is derived from the punch's time
+    // against the person's shift and its place among their OTHER punches,
+    // stored and in this batch; see assignDays in lib/attendance.js, which is
+    // the single place those rules live.
     //
     // The stored punches around the batch are re-derived along with it, and
     // any whose day, direction or event changed in hindsight are patched -
     // a 22:00 "Logout" becomes a "Break out" the moment a 23:00 punch shows
     // it was not the last of the day. That is a handful of rows at most.
+    //
+    // The read reaches 60 hours either side, but only rows within 30 hours
+    // of the batch are patched: a day spans at most 30 hours, so every day
+    // those rows belong to is read whole. (Patching from a window cut through
+    // the middle of a day relabelled its later half as if it were a new day.)
     const storedPatches = [];
+    const CONTEXT_MS = 60 * 3600 * 1000, PATCH_MS = 30 * 3600 * 1000;
     {
       const byCode = new Map();
       for (const r of rows) {
@@ -427,8 +507,9 @@ module.exports = async function handler(req, res) {
 
       await Promise.all([...byCode.entries()].map(async ([code, list]) => {
         const times = list.map(r => new Date(r.insert.log_datetime).getTime());
-        const from = new Date(Math.min(...times) - 36 * 3600 * 1000).toISOString();
-        const to   = new Date(Math.max(...times) + 36 * 3600 * 1000).toISOString();
+        const lo = Math.min(...times), hi = Math.max(...times);
+        const from = new Date(lo - CONTEXT_MS).toISOString();
+        const to   = new Date(hi + CONTEXT_MS).toISOString();
         let stored = [];
         try {
           const r = await fetch(
@@ -449,6 +530,13 @@ module.exports = async function handler(req, res) {
           r.isReplay = storedAt.has(new Date(r.insert.log_datetime).getTime());
           return !r.isReplay;
         });
+        // Stored punches before a silence of NEW_DAY_GAP_HOURS or more ahead of
+        // this batch belong to days it cannot change - days run forward. Only a
+        // change of shift since could make them re-derive differently, and
+        // that must not rewrite days already worked: for those rows only the
+        // hindsight "that break was the Logout" is written.
+        const before = stored.map(x => new Date(x.log_datetime).getTime()).filter(x => x < lo).sort((a, b) => a - b);
+        const sealedUntil = before.length && lo - before[before.length - 1] >= NEW_DAY_GAP_MS ? before[before.length - 1] : -Infinity;
         const who = list[0].profile;
         const merged = assignDays(
           stored.map(s => ({ ...s, _stored: true }))
@@ -466,9 +554,34 @@ module.exports = async function handler(req, res) {
             item.priorsToday = m.priors;
             item.isFirstOfDay = m.priors === 0;
             item.dayStartedAt = m.day_started_at;
+            item.missingLogin = !!m.missing_login;
+            // A second touch within two minutes: stored, never announced.
+            if (m.duplicate) {
+              item.duplicate = true;
+              if (item.insert.email_status === 'pending') {
+                item.insert.email_status = 'skipped';
+                item.insert.email_error = 'Repeat tap within 2 minutes of the previous punch: stored, not announced.';
+              }
+            }
+            // Reached us after a later punch of the same day was already in:
+            // the reader held it back. Its label is the settled one; the note
+            // explains why it arrives out of order.
+            const t = new Date(m.log_datetime).getTime();
+            item.syncedLate = merged.some(o => o._stored && o.log_date === m.log_date && new Date(o.log_datetime).getTime() > t);
           } else if (m._stored) {
             const s = stored.find(x => x.id === m.id);
-            if (s && (s.log_date !== m.log_date || s.direction !== m.direction || s.event_type !== m.event_type)) {
+            const t = new Date(m.log_datetime).getTime();
+            const sealed = t <= sealedUntil;
+            if (s && sealed) {
+              // Only the punch right before the silence: its day is over, so a
+              // Break out there was the Logout.
+              if (t === sealedUntil && s.log_date === m.log_date && s.direction === m.direction
+                  && s.event_type === 'BREAK_OUT' && m.event_type === 'LOGOUT') {
+                storedPatches.push({ id: s.id, log_date: s.log_date, direction: s.direction,
+                                     direction_derived: s.direction_derived, event_type: 'LOGOUT' });
+              }
+            } else if (s && t >= lo - PATCH_MS && t <= hi + PATCH_MS &&
+                (s.log_date !== m.log_date || s.direction !== m.direction || s.event_type !== m.event_type)) {
               storedPatches.push({ id: s.id, log_date: m.log_date, direction: m.direction,
                                    direction_derived: m.direction_derived, event_type: m.event_type });
             }
@@ -593,9 +706,16 @@ module.exports = async function handler(req, res) {
     // enroll numbers of colleagues whose hook can carry their line instead.
     const bx = await loadBitrixContext({ SUPABASE_URL, H, profiles, byCode });
 
+    // Repeat taps are marked as not announced in the Bitrix column too.
+    await Promise.all(inserted.filter(row => { const m = metaByKey.get(keyOf(row)); return m && m.duplicate; })
+      .map(row => fetch(`${SUPABASE_URL}/rest/v1/attendance_logs?id=eq.${row.id}`, {
+        method: 'PATCH', headers: { ...H, Prefer: 'return=minimal' },
+        body: JSON.stringify({ bitrix_status: 'skipped', bitrix_error: 'repeat tap: not announced' }),
+      }).catch(() => {})));
+
     const notifications = toNotify.map(({ row, meta }) => {
       const p = meta.profile;
-      const shift = shiftFor(p, meta.when);
+      const shift = dayShiftOf(p, row.log_date, meta.dayStartedAt || meta.when);
 
       // Only annotate a boundary we can actually stand behind:
       //  - lateness, only on the day's FIRST punch (a 2pm return from lunch
@@ -619,6 +739,7 @@ module.exports = async function handler(req, res) {
         message: buildPunchChatLine({
           fullName: p.full_name, eventType: row.event_type, direction: row.direction,
           when: meta.when, shift: shiftEval, source: row.source,
+          note: [meta.missingLogin ? 'login not punched' : null, meta.syncedLate ? 'synced late' : null].filter(Boolean).join(' · ') || null,
         }),
         skipReason,
       });
@@ -744,22 +865,58 @@ async function markBitrix({ SUPABASE_URL, H, id, out, attempts }) {
  *
  *   1. Punches whose group message failed or ran out of time are sent again,
  *      up to 4 attempts, for 6 hours after the punch.
- *   2. A shift that has ended with the person still logged in - or still on
- *      a break - gets its Logout: posted to the group once (attendance_auto_
- *      logouts claims the day first), and counted as a logout at the shift end
- *      by the calendar and pay sheet (lib/attendance autoLogoutFor).
+ *   2. Automatic Logouts whose own message failed are sent again the same
+ *      way, unless the person has punched since.
+ *   3. A shift that has ended with the person still logged in - or still on
+ *      a break that began before the end - gets its Logout, half an hour
+ *      after the end: posted to the group once (attendance_auto_logouts
+ *      claims the day first), and counted as a logout at the shift end by the
+ *      calendar and pay sheet (lib/attendance autoLogoutFor).
  * ------------------------------------------------------------------------- */
 const RETRY_WINDOW_MS = 6 * 3600 * 1000;
 const RETRY_MAX_ATTEMPTS = 4;
-const AUTO_LOGOUT_GRACE_MS = 10 * 60 * 1000;     // a late punch-out a few minutes after the end still counts
+// The Logout nobody punched is announced AUTO_LOGOUT_GRACE_MS (lib, 30 min)
+// after the shift end - the moment the calendar starts counting it too.
+// Plenty of people leave 10-20 minutes late; at 10 minutes they got an
+// automatic "Logout 6:00 PM" and then their real one.
 const AUTO_LOGOUT_WINDOW_MS = 12 * 3600 * 1000;  // after that, too stale to announce
-const TICK_BUDGET_MS = 8000;
+const AUTO_RETRY_MAX = 3;                        // sends after the first one, as for punches
+const CLAIM_SETTLE_MS = 2 * 60 * 1000;           // a claim younger than this may still be posting
+// The job stops starting new work this long before its budget: one person
+// costs a claim, a Bitrix post of up to 3 s, its log entry and a status write.
+// vercel.json gives this function 60 s; pg_net waits 30 s for the answer.
+const TICK_BUDGET_MS = 20000;
+const PER_PERSON_MS = 4000;
+
+const AUTO_LOGOUT_NOTE = {
+  no_punch_out: 'shift ended without a punch-out',
+  break_not_returned: 'did not return from break by shift end',
+};
+
+/** Every row a PostgREST read matches, page by page: Supabase hands back at most 1,000 a request. */
+async function readAllRows(sb, path, pageSize = 1000, maxRows = 20000) {
+  const out = [];
+  for (let offset = 0; offset < maxRows; offset += pageSize) {
+    const r = await sb(`${path}&limit=${pageSize}&offset=${offset}`).catch(() => null);
+    if (!r || !r.ok) return null;                 // part of the picture is no picture: skip, say so
+
+    const page = await r.json();
+    out.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return out;
+}
+
+/** A missing table or column, as PostgREST reports it: the migration has not been run. */
+const isMissingSchema = (status, detail) =>
+  status === 404 || /PGRST20[0-9]|42P01|42703|does not exist|Could not find/i.test(String(detail || ''));
 
 async function runAttendanceTick({ SUPABASE_URL, SERVICE_KEY, startedAt = Date.now() }) {
   const H = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' };
   const sb = (path, opts = {}) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...opts, headers: { ...H, ...(opts.headers || {}) } });
-  const report = { retried: 0, retry_sent: 0, auto_logouts: 0, auto_posted: 0, notes: [] };
-  const outOfTime = () => Date.now() - startedAt > TICK_BUDGET_MS;
+  const enc = encodeURIComponent;
+  const report = { retried: 0, retry_sent: 0, auto_retried: 0, auto_retry_sent: 0, auto_logouts: 0, auto_posted: 0, notes: [] };
+  const outOfTime = () => Date.now() - startedAt > TICK_BUDGET_MS - PER_PERSON_MS;
   const now = new Date(Date.now());
 
   const pRes = await fetchProfiles(SUPABASE_URL, H);
@@ -771,55 +928,120 @@ async function runAttendanceTick({ SUPABASE_URL, SERVICE_KEY, startedAt = Date.n
   const defaultShift = shiftList.find(x => x.is_default) || null;
   const shift1Of = p => resolveShift(p, shiftById, defaultShift);
   const shift2Of = p => (p && p.shift2_id && shiftById.get(p.shift2_id)) || null;
-  const shiftFor = (p, when) => { const s2 = shift2Of(p); return s2 ? effectiveShift(shift1Of(p), s2, istIsoWeekday(new Date(when))) : shift1Of(p); };
+  const dayShiftOf = (p, date, firstPunchAt) => shiftForDay(shift1Of(p), shift2Of(p), date, firstPunchAt);
   const companyFor = (p, when) => { const s2 = shift2Of(p); return s2 && p.company2 && shiftPartAt(shift1Of(p), s2, when) === 2 ? p.company2 : p.company; };
   const bx = await loadBitrixContext({ SUPABASE_URL, H, profiles });
 
+  // The automatic Logout line: dated at the shift end (or the break it never
+  // came back from), with how early that was when it was before the end.
+  const postAutoLogout = ({ p, kind, at, shift, company }) => postPunchToGroup({
+    SUPABASE_URL, H, bx, company, enroll: p.employee_code, kind: 'auto_logout',
+    message: buildPunchChatLine({ fullName: p.full_name, eventType: 'LOGOUT', direction: 'OUT', when: at, source: 'auto',
+      shift: shift ? evaluateShift({ shift, lastOut: at, date: at }) : null, note: AUTO_LOGOUT_NOTE[kind] || null }),
+  });
+
   // ---- 1. Send again what Bitrix did not take ----
   const since = new Date(now.getTime() - RETRY_WINDOW_MS).toISOString();
-  const rr = await sb(`attendance_logs?select=id,user_id,employee_code,direction,event_type,log_datetime,source,bitrix_attempts` +
+  const settled = new Date(now.getTime() - CLAIM_SETTLE_MS).toISOString();
+  // bitrix_at is the last attempt; one younger than CLAIM_SETTLE_MS may be
+  // another call's send still in flight.
+  const rr = await sb(`attendance_logs?select=id,user_id,employee_code,direction,event_type,log_datetime,log_date,source,bitrix_attempts` +
     `&bitrix_status=in.(failed,deferred)&bitrix_attempts=lt.${RETRY_MAX_ATTEMPTS}&user_id=not.is.null` +
-    `&log_datetime=gte.${encodeURIComponent(since)}&order=log_datetime.asc&limit=40`).catch(() => null);
-  if (!rr || !rr.ok) report.notes.push('retry skipped: run supabase-attendance-bitrix-migration.sql');
+    `&log_datetime=gte.${enc(since)}&bitrix_at=lt.${enc(settled)}&order=log_datetime.asc&limit=40`).catch(() => null);
+  if (!rr || !rr.ok) report.notes.push('retry skipped: run supabase-attendance-scheduler-migration.sql');
   else {
     for (const row of await rr.json()) {
       if (outOfTime()) { report.notes.push('retry stopped at the time budget'); break; }
       const p = byId.get(row.user_id); if (!p) continue;
       const when = new Date(row.log_datetime);
-      const shift = shiftFor(p, when);
+      const shift = dayShiftOf(p, row.log_date || istParts(when).isoDate, when);
       const shiftEval = shift ? evaluateShift({ shift, date: when,
         firstIn: row.event_type === 'LOGIN' ? when : null, lastOut: row.event_type === 'LOGOUT' ? when : null }) : null;
+      // Claim this attempt first, so an overlapping call (the admin's Run now
+      // during a scheduled run) cannot send the same punch again.
+      const n = Number(row.bitrix_attempts || 0);
+      const got = await sb(`attendance_logs?id=eq.${enc(row.id)}&bitrix_attempts=eq.${n}&bitrix_status=in.(failed,deferred)`, {
+        method: 'PATCH', headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({ bitrix_attempts: n + 1, bitrix_at: new Date().toISOString() }),
+      }).then(r => (r.ok ? r.json() : [])).catch(() => []);
+      if (!(got || []).length) continue;
       report.retried++;
       const out = await postPunchToGroup({ SUPABASE_URL, H, bx, company: companyFor(p, when), enroll: row.employee_code || p.employee_code,
         message: buildPunchChatLine({ fullName: p.full_name, eventType: row.event_type, direction: row.direction, when, shift: shiftEval, source: row.source }) });
       if (out.ok) report.retry_sent++;
-      await markBitrix({ SUPABASE_URL, H, id: row.id, out, attempts: (row.bitrix_attempts || 0) + 1 });
+      await markBitrix({ SUPABASE_URL, H, id: row.id, out });
     }
   }
 
-  // ---- 2. Shifts that ended with nobody logged out ----
+  // ---- 2. Automatic Logouts Bitrix did not take ----
+  // Claimed rows whose post failed, or whose call was cut off before it could
+  // record the result. Each re-send claims the next attempt number first, so
+  // two overlapping calls cannot both post it.
+  const ar = await sb(`attendance_auto_logouts?select=user_id,log_date,kind,logout_at,company,bitrix_ok,attempts,created_at` +
+    `&or=(bitrix_ok.is.null,bitrix_ok.is.false)&attempts=lt.${AUTO_RETRY_MAX}` +
+    `&created_at=gte.${enc(since)}&created_at=lte.${enc(settled)}&order=created_at.asc&limit=40`).catch(() => null);
+  if (!ar || !ar.ok) report.notes.push('automatic logout retry skipped: run supabase-attendance-scheduler-migration.sql');
+  else {
+    for (const row of await ar.json()) {
+      if (outOfTime()) { report.notes.push('automatic logout retry stopped at the time budget'); break; }
+      const p = byId.get(row.user_id); if (!p) continue;
+      const key = `attendance_auto_logouts?user_id=eq.${enc(row.user_id)}&log_date=eq.${row.log_date}`;
+      const tries = Number(row.attempts || 0);
+      // They punched after the automatic Logout's time - or a punch reached us
+      // after the claim was made (a reader that held it back): that punch
+      // posted its own line, and "shift ended without a punch-out" would
+      // contradict it.
+      // A repeat tap is not punching again.
+      const newer = q => sb(`attendance_logs?select=id,email_status,email_error&user_id=eq.${enc(row.user_id)}&${q}&limit=20`)
+        .then(r => (r.ok ? r.json() : [])).then(rows => rows.filter(x => !isRepeatRow(x))).catch(() => []);
+      const later = (await newer(`log_datetime=gt.${enc(row.logout_at)}`))
+        .concat(await newer(`created_at=gt.${enc(new Date(row.created_at).toISOString())}`));
+      if (later.length) {
+        await sb(`${key}&attempts=eq.${tries}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify({ attempts: AUTO_RETRY_MAX, detail: 'not re-sent: punched again after it' }) }).catch(() => {});
+        continue;
+      }
+      // The claim restamps created_at, so a call that reads the row while this
+      // attempt is still posting sees it as too fresh to retry.
+      const claim = await sb(`${key}&attempts=eq.${tries}`, { method: 'PATCH', headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({ attempts: tries + 1, created_at: new Date().toISOString() }) }).catch(() => null);
+      if (!claim || !claim.ok || !((await claim.json().catch(() => [])) || []).length) continue;   // another call has it
+      report.auto_retried++;
+      const at = new Date(row.logout_at);
+      const out = await postAutoLogout({ p, kind: row.kind, at, shift: dayShiftOf(p, row.log_date, at), company: row.company || companyFor(p, at) });
+      if (out.ok) report.auto_retry_sent++;
+      await sb(key, { method: 'PATCH', headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ bitrix_ok: !!out.ok, detail: out.ok ? null : `${out.reason || 'error'}: ${out.detail || ''}`.slice(0, 300) }) }).catch(() => {});
+    }
+  }
+
+  // ---- 3. Shifts that ended with nobody logged out ----
   const today = istParts(now).isoDate;
   const yesterday = istParts(new Date(now.getTime() - 86400000)).isoDate;
-  const lr = await sb(`attendance_logs?select=id,user_id,direction,event_type,log_datetime,log_date,source` +
-    `&log_date=in.(${yesterday},${today})&user_id=not.is.null&order=log_datetime.asc&limit=5000`).catch(() => null);
-  if (!lr || !lr.ok) return { ...report, notes: report.notes.concat('auto logout skipped: attendance read failed') };
+  const logs = await readAllRows(sb, `attendance_logs?select=id,user_id,direction,event_type,log_datetime,log_date,source,email_status,email_error` +
+    `&log_date=in.(${yesterday},${today})&user_id=not.is.null&order=log_datetime.asc,id.asc`);
+  if (!logs) return { ...report, notes: report.notes.concat('auto logout skipped: attendance read failed') };
   const days = new Map();
-  for (const l of await lr.json()) {
+  for (const l of logs) {
+    if (isRepeatRow(l)) continue;                      // a repeat tap neither opens nor closes a day
     const k = `${l.user_id}|${l.log_date}`;
     if (!days.has(k)) days.set(k, []);
     days.get(k).push(l);
   }
   const lastPunchOf = new Map();                       // user -> their latest punch across both days
-  for (const list of days.values()) for (const l of list) {
-    const cur = lastPunchOf.get(l.user_id);
-    if (!cur || new Date(l.log_datetime) > new Date(cur.log_datetime)) lastPunchOf.set(l.user_id, l);
+  for (const list of days.values()) {
+    list.sort((a, b) => new Date(a.log_datetime) - new Date(b.log_datetime));
+    for (const l of list) {
+      const cur = lastPunchOf.get(l.user_id);
+      if (!cur || new Date(l.log_datetime) > new Date(cur.log_datetime)) lastPunchOf.set(l.user_id, l);
+    }
   }
 
   for (const [k, list] of days) {
     if (outOfTime()) { report.notes.push('auto logout stopped at the time budget'); break; }
     const [userId, date] = k.split('|');
     const p = byId.get(userId); if (!p) continue;
-    const shift = shiftFor(p, list[0].log_datetime);
+    const shift = dayShiftOf(p, date, list[0].log_datetime);
     const end = shiftEndAt(date, shift);
     if (!end) continue;
     if (now - end < AUTO_LOGOUT_GRACE_MS || now - end > AUTO_LOGOUT_WINDOW_MS) continue;
@@ -829,11 +1051,18 @@ async function runAttendanceTick({ SUPABASE_URL, SERVICE_KEY, startedAt = Date.n
     if (!auto) continue;
 
     // Claim the day before posting, so a scheduler firing every few minutes posts once.
+    const company = companyFor(p, auto.at);
     const claim = await sb('attendance_auto_logouts?on_conflict=user_id,log_date', {
       method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
-      body: JSON.stringify({ user_id: userId, log_date: date, kind: auto.kind, logout_at: auto.at.toISOString(), company: companyFor(p, auto.at) }),
+      body: JSON.stringify({ user_id: userId, log_date: date, kind: auto.kind, logout_at: auto.at.toISOString(), company }),
     }).catch(() => null);
-    if (!claim || !claim.ok) { report.notes.push('auto logout skipped: run supabase-attendance-bitrix-migration.sql'); break; }
+    if (!claim) { report.notes.push(`auto logout for ${p.full_name || userId} failed: network`); continue; }
+    if (!claim.ok) {
+      const detail = (await claim.text().catch(() => '')).slice(0, 200);
+      if (isMissingSchema(claim.status, detail)) { report.notes.push('auto logout skipped: run supabase-attendance-scheduler-migration.sql'); break; }
+      report.notes.push(`auto logout for ${p.full_name || userId} failed: ${claim.status} ${detail}`);
+      continue;                                        // nothing claimed: the next call tries again
+    }
     if (!(await claim.json()).length) continue;        // already posted
     report.auto_logouts++;
 
@@ -842,11 +1071,9 @@ async function runAttendanceTick({ SUPABASE_URL, SERVICE_KEY, startedAt = Date.n
       await sb(`attendance_logs?id=eq.${auto.lastPunch.id}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' },
         body: JSON.stringify({ event_type: 'LOGOUT' }) }).catch(() => {});
     }
-    const out = await postPunchToGroup({ SUPABASE_URL, H, bx, company: companyFor(p, auto.at), enroll: p.employee_code, kind: 'auto_logout',
-      message: buildPunchChatLine({ fullName: p.full_name, eventType: 'LOGOUT', direction: 'OUT', when: auto.at, source: 'auto',
-        note: auto.kind === 'no_punch_out' ? 'shift ended without a punch-out' : 'did not return from break by shift end' }) });
+    const out = await postAutoLogout({ p, kind: auto.kind, at: auto.at, shift, company });
     if (out.ok) report.auto_posted++;
-    await sb(`attendance_auto_logouts?user_id=eq.${encodeURIComponent(userId)}&log_date=eq.${date}`, {
+    await sb(`attendance_auto_logouts?user_id=eq.${enc(userId)}&log_date=eq.${date}`, {
       method: 'PATCH', headers: { Prefer: 'return=minimal' },
       body: JSON.stringify({ bitrix_ok: !!out.ok, detail: out.ok ? null : `${out.reason || 'error'}: ${out.detail || ''}`.slice(0, 300) }),
     }).catch(() => {});
@@ -1009,14 +1236,19 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
         sb('leave_types?select=id,name').then(r => r.ok ? r.json() : []),
         // Today AND yesterday: a night shift that started at 6pm yesterday is
         // still "today" for the people on it until they log out.
-        sb(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type&log_date=gte.${yesterdayOf(today)}&limit=3000`).then(r => r.ok ? r.json() : []),
+        sb(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type,email_status,email_error&log_date=gte.${yesterdayOf(today)}&limit=3000`).then(r => r.ok ? r.json() : []),
       ]);
 
       const shiftById = new Map(shifts.map(s => [s.id, s]));
       const defaultShift = shifts.find(s => s.is_default) || null;
       const typeName = new Map(types.map(t => [t.id, t.name]));
       const leaveBy = new Map(leaves.map(l => [l.user_id, { ...l, type_name: typeName.get(l.leave_type_id) || 'Leave' }]));
-      const logsBy = currentDayPunches(logs, today);
+      const profById = new Map(profiles.map(p => [p.id, p]));
+      const logsBy = currentDayPunches(logs, today, (uid, date, first) => {
+        const p = profById.get(uid);
+        if (!p) return null;
+        return shiftForDay(resolveShift(p, shiftById, defaultShift), (p.shift2_id && shiftById.get(p.shift2_id)) || null, date, first);
+      });
 
       const people = profiles.map(p => {
         const shift = resolveShift(p, shiftById, defaultShift);
@@ -1061,7 +1293,7 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
       // happily return everyone's.
       sb(`leave_requests?select=user_id,leave_type_id,day_part,start_date,end_date&status=eq.approved&user_id=eq.${encodeURIComponent(userId)}&start_date=lte.${to}&end_date=gte.${from}`).then(r => r.ok ? r.json() : []),
       sb('leave_types?select=id,name').then(r => r.ok ? r.json() : []),
-      sb(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type,source&user_id=eq.${encodeURIComponent(userId)}&log_date=gte.${from}&log_date=lte.${to}&limit=2000`).then(r => r.ok ? r.json() : []),
+      sb(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type,source,email_status,email_error&user_id=eq.${encodeURIComponent(userId)}&log_date=gte.${from}&log_date=lte.${to}&limit=2000`).then(r => r.ok ? r.json() : []),
     ]);
 
     const profile = profileRows[0] || {};
@@ -1095,6 +1327,10 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
       days: mon.days.map(d => ({
         date: d.date, status: d.status,
         in: hhmm(d.firstIn), out: hhmm(d.lastOut),
+        // The Out is the automatic shift-end logout, not a punch; and a day
+        // whose only punch was the logout has no In.
+        auto: !!d.autoLogout,
+        missing_login: !!d.missingLogin,
         late: d.lateMinutes || 0,
         minutes: d.workedMinutes || 0,
         worked: !!d.worked,
@@ -1208,35 +1444,74 @@ async function runShiftSwitchJob({ res, SUPABASE_URL, SERVICE_KEY }) {
   });
   if (!due.length) return res.status(200).json({ ok: true, checked: people.length, due: 0, posted: 0 });
 
-  // On site = has punched today and the last punch is an IN.
+  // Each person's current attendance day: the day of their latest punch. It
+  // is read from yesterday too, because a second shift that starts after
+  // midnight belongs to a day that began the evening before.
   const ids = due.map(p => encodeURIComponent(p.id)).join(',');
-  const logs = await sb(`attendance_logs?select=user_id,direction,log_datetime&user_id=in.(${ids})&log_date=eq.${today}&order=log_datetime.asc&limit=2000`).then(r => r.ok ? r.json() : []);
-  const lastBy = new Map();
-  logs.forEach(l => lastBy.set(l.user_id, l));
+  const yesterday = istParts(new Date(now.getTime() - 86400000)).isoDate;
+  const logs = await sb(`attendance_logs?select=user_id,direction,event_type,log_datetime,log_date,email_status,email_error&user_id=in.(${ids})` +
+    `&log_date=in.(${yesterday},${today})&order=log_datetime.asc&limit=2000`).then(r => r.ok ? r.json() : []);
+  // Yesterday's day counts only while it is still open, exactly as for the
+  // team status: a forgotten punch-out yesterday must not make someone who is
+  // absent today look on site at 5 PM.
+  const dueById = new Map(due.map(p => [p.id, p]));
+  const byUser = currentDayPunches(logs, today, (uid, date, first) => {
+    const q = dueById.get(uid);
+    return q ? shiftForDay(resolveShift(q, byId, defaultShift), byId.get(q.shift2_id) || null, date, first) : null;
+  });
+  const companyAt = (p, when) => (shiftPartAt(resolveShift(p, byId, defaultShift), byId.get(p.shift2_id), when) === 2 ? p.company2 : p.company);
 
   const bx = await loadBitrixContext({ SUPABASE_URL, H, profiles: people });
   const results = [];
   for (const p of due) {
-    const last = lastBy.get(p.id);
+    const mine = (byUser.get(p.id) || []).slice().sort((a, b) => new Date(a.log_datetime) - new Date(b.log_datetime));
+    const last = mine[mine.length - 1];
+    // On site = the last punch is an IN.
     if (!last || last.direction !== 'IN') { results.push({ user: p.full_name, skipped: 'not on site' }); continue; }
+    // Only someone whose day began with the first company switches. A person
+    // who came just for the second shift already logged in there, and has
+    // nothing to log out of in the first company's chat.
+    const firstIn = mine.find(l => l.log_date === last.log_date && l.direction === 'IN');
+    if (!firstIn || companyAt(p, firstIn.log_datetime) !== p.company) {
+      results.push({ user: p.full_name, skipped: 'came for the second shift only' }); continue;
+    }
+
     // Claim today's switch for this person; a duplicate means another tick did it.
     const claim = await sb('shift_switch_posts?on_conflict=user_id,post_date', {
       method: 'POST', headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
       body: JSON.stringify({ user_id: p.id, post_date: today }),
     });
     if (!claim.ok) { results.push({ user: p.full_name, error: (await claim.text()).slice(0, 160) }); continue; }
-    const claimed = await claim.json();
-    if (!claimed.length) { results.push({ user: p.full_name, skipped: 'already posted' }); continue; }
+    let legs = { first: true, second: true };
+    if (!(await claim.json()).length) {
+      // An earlier tick claimed today. Send again only a half Bitrix did not
+      // take, claiming the next attempt number first so overlapping calls
+      // cannot both send it. Before the scheduler migration there is no
+      // attempts column, and nothing is sent again.
+      const key = `shift_switch_posts?user_id=eq.${encodeURIComponent(p.id)}&post_date=eq.${today}`;
+      const ex = await sb(`${key}&select=*`).then(r => (r.ok ? r.json() : [])).then(r => r[0]).catch(() => null);
+      const tries = ex && ex.attempts;
+      // created_at is restamped by every claim, retries included.
+      const inFlight = ex && Date.now() - new Date(ex.created_at).getTime() < CLAIM_SETTLE_MS;
+      if (!ex || (ex.first_ok && ex.second_ok) || inFlight || tries == null || tries >= AUTO_RETRY_MAX) {
+        results.push({ user: p.full_name, skipped: 'already posted' }); continue;
+      }
+      const again = await sb(`${key}&attempts=eq.${tries}`, { method: 'PATCH', headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({ attempts: tries + 1, created_at: new Date().toISOString() }) }).then(r => (r.ok ? r.json() : [])).catch(() => []);
+      if (!(again || []).length) { results.push({ user: p.full_name, skipped: 'already posted' }); continue; }
+      legs = { first: !ex.first_ok, second: !ex.second_ok };
+    }
 
     const s1 = resolveShift(p, byId, defaultShift);
     const s2 = byId.get(p.shift2_id);
     const at = new Date(`${today}T${String(s2.start_time).slice(0, 8)}+05:30`);
-    const first = p.company ? await postPunchToGroup({
+    const done = { ok: true, reason: 'sent before' };
+    const first = !legs.first ? done : p.company ? await postPunchToGroup({
       SUPABASE_URL, H, bx, company: p.company, enroll: p.employee_code, kind: 'shift_switch',
       message: buildPunchChatLine({ fullName: p.full_name, eventType: 'LOGOUT', direction: 'OUT', when: at, source: 'auto',
                                     note: `${s1 ? s1.name : 'first'} shift over · moving to ${p.company2}` }),
     }) : { ok: false, reason: 'no_group' };
-    const second = await postPunchToGroup({
+    const second = !legs.second ? done : await postPunchToGroup({
       SUPABASE_URL, H, bx, company: p.company2, enroll: p.employee_code, kind: 'shift_switch',
       message: buildPunchChatLine({ fullName: p.full_name, eventType: 'LOGIN', direction: 'IN', when: at, source: 'auto',
                                     note: `${s2.name} shift · auto` }),
@@ -1245,7 +1520,7 @@ async function runShiftSwitchJob({ res, SUPABASE_URL, SERVICE_KEY }) {
       method: 'PATCH', headers: { Prefer: 'return=minimal' },
       body: JSON.stringify({ posted_at: new Date().toISOString(), first_ok: !!first.ok, second_ok: !!second.ok, detail: `${first.reason || 'ok'} / ${second.reason || 'ok'}`.slice(0, 200) }),
     }).catch(() => {});
-    results.push({ user: p.full_name, first: first.ok ? 'sent' : first.reason, second: second.ok ? 'sent' : second.reason });
+    results.push({ user: p.full_name, first: legs.first ? (first.ok ? 'sent' : first.reason) : 'sent before', second: legs.second ? (second.ok ? 'sent' : second.reason) : 'sent before' });
   }
   return res.status(200).json({ ok: true, checked: people.length, due: due.length, posted: results.filter(r => r.second === 'sent').length, results });
 }
@@ -1350,11 +1625,9 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
     }
 
     // ---- 3. Eligibility ----
-    const pRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}` +
-      `&select=id,email,full_name,company,employee_code,shift_id,is_wfh&limit=1`,
-      { headers: H }
-    );
+    // With the dual-shift columns, so a second-shift punch is judged and
+    // routed like a biometric one.
+    const pRes = await fetchProfiles(SUPABASE_URL, H, `&id=eq.${encodeURIComponent(userId)}`);
     if (!pRes.ok) return res.status(502).json({ error: 'profile fetch failed' });
     const profile = (await pRes.json())[0];
     if (!profile) return res.status(404).json({ error: 'no_profile', detail: 'No profile found for your account.' });
@@ -1376,30 +1649,37 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
       return res.status(429).json({ error: 'too_soon', detail: `You already recorded ${EVENT_LABEL[eventType]} moments ago.` });
     }
 
-    // Which attendance day this punch belongs to - the same gap rule as a
-    // biometric punch (see lib/attendance attendanceDateFor), so a WFH night
-    // worker's 01:00 Logout lands on the day they logged in, not on tomorrow.
+    // The person's shifts, for the attendance day and the shift note.
+    let shift1 = null, shift2 = null;
+    try {
+      const shRes = await fetch(`${SUPABASE_URL}/rest/v1/shifts?select=*`, { headers: H });
+      if (shRes.ok) {
+        const list = await shRes.json();
+        shift1 = resolveShift(profile, list);
+        shift2 = (profile.shift2_id && list.find(x => x.id === profile.shift2_id)) || null;
+      }
+    } catch { /* no shifts table: calendar date, and no shift note */ }
+
+    // Which attendance day this punch belongs to, by exactly the rules a
+    // biometric punch goes through (lib/attendance assignDays), so a WFH
+    // night worker's 03:00 Logout lands on the evening they logged in.
     let logDate = t.isoDate;
     let priorToday = 0;
+    let dayStartedAt = when.toISOString();
     try {
-      const pRes2 = await fetch(
+      const recent = await fetch(
         `${SUPABASE_URL}/rest/v1/attendance_logs?user_id=eq.${encodeURIComponent(userId)}` +
-        `&select=log_datetime,log_date&order=log_datetime.desc&limit=1`,
+        `&log_datetime=gte.${encodeURIComponent(new Date(when.getTime() - 60 * 3600 * 1000).toISOString())}` +
+        `&select=id,log_datetime,log_date,direction,direction_derived,event_type,source&order=log_datetime.asc&limit=500`,
         { headers: H }
       );
-      const prev = pRes2.ok ? (await pRes2.json())[0] : null;
-      if (prev) {
-        // day_started_at: the first punch of the previous punch's day.
-        const fRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/attendance_logs?user_id=eq.${encodeURIComponent(userId)}` +
-          `&log_date=eq.${prev.log_date}&select=log_datetime&order=log_datetime.asc&limit=200`,
-          { headers: H }
-        );
-        const dayRows = fRes.ok ? await fRes.json() : [];
-        logDate = attendanceDateFor(when, { ...prev, day_started_at: dayRows[0] ? dayRows[0].log_datetime : prev.log_datetime });
-        if (logDate === prev.log_date) priorToday = dayRows.length;
-      }
-    } catch { /* worst case: calendar date, and no shift note */ }
+      const rows = recent.ok ? await recent.json() : [];
+      const shiftAt = punch => (shift2 ? effectiveShift(shift1, shift2, istIsoWeekday(new Date(punch.log_datetime))) : shift1);
+      const me = assignDays(rows.concat([{ id: '__new', log_datetime: when.toISOString(), source: 'selfie',
+                                           event_type: eventType, direction: EVENT_DIRECTION[eventType] }]),
+                            { shiftFor: shift1 || shift2 ? shiftAt : null }).find(r => r.id === '__new');
+      if (me) { logDate = me.log_date; priorToday = me.priors; dayStartedAt = me.day_started_at; }
+    } catch { /* worst case: calendar date, and no late note */ }
 
     // ---- 5. Store ----
     // The client sends its own lookup for the photo stamp; we do our own here
@@ -1453,28 +1733,19 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
     const row = (await insRes.json())[0];
 
     // ---- 6. Notify, using the same rules as a device punch ----
+    // Late is measured on the day's first Login; leaving early on every
+    // Logout, since the person chose Logout themselves.
     let shiftEval = null;
-    try {
-      const shRes = await fetch(`${SUPABASE_URL}/rest/v1/shifts?select=*`, { headers: H });
-      if (shRes.ok) {
-        const list = await shRes.json();
-        const shift1 = resolveShift(profile, list);
-        const shift2 = (profile.shift2_id && list.find(x => x.id === profile.shift2_id)) || null;
-        const shift = shift2 ? effectiveShift(shift1, shift2, istIsoWeekday(new Date(when))) : shift1;
-        if (shift) {
-          const st = timeToMinutes(shift.start_time), en = timeToMinutes(shift.end_time);
-          const span = (((en - st) % 1440) + 1440) % 1440 || 1440;
-          const mid  = (st + Math.floor(span / 2)) % 1440;
-          const past = offsetFromBoundary(timeToMinutes(t.isoTime), mid) >= 0;
-          shiftEval = evaluateShift({
-            shift,
-            firstIn: (eventType === 'LOGIN' && priorToday === 0) ? when : null,
-            lastOut: (eventType === 'LOGOUT' && past)            ? when : null,
-            date: when,
-          });
-        }
-      }
-    } catch { /* email still goes out, just without the shift note */ }
+    const dayShift = shift1 || shift2 ? shiftForDay(shift1, shift2, logDate, dayStartedAt) : null;
+    if (dayShift) {
+      shiftEval = evaluateShift({
+        shift: dayShift,
+        firstIn: (eventType === 'LOGIN' && priorToday === 0) ? when : null,
+        lastOut: eventType === 'LOGOUT' ? when : null,
+        date: when,
+      });
+    }
+    const groupCompany = shift2 && profile.company2 && shiftPartAt(shift1, shift2, when) === 2 ? profile.company2 : profile.company;
 
     // Email and the group message go out together: one waiting on the other
     // can run past Vercel's 10 seconds and lose the second one.
@@ -1496,7 +1767,7 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
     // as the person. Never allowed to fail the request: the photo is stored.
     const bitrixJob = (async () => {
       try {
-        const out = await postToCompanyGroup({ SUPABASE_URL, H, company: profile.company, enroll: profile.employee_code, message:
+        const out = await postToCompanyGroup({ SUPABASE_URL, H, company: groupCompany, enroll: profile.employee_code, message:
           buildPunchChatLine({
             fullName: profile.full_name, eventType, direction: insertRow.direction,
             when, shift: shiftEval, source: 'selfie',

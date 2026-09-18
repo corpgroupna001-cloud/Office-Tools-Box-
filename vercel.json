@@ -1,6 +1,14 @@
 {
   "cleanUrls": true,
   "trailingSlash": false,
+  "functions": {
+    "api/attendance-webhook.js": {
+      "maxDuration": 60
+    },
+    "api/admin.js": {
+      "maxDuration": 60
+    }
+  },
   "crons": [
     {
       "path": "/api/wfh-remind",

@@ -160,18 +160,117 @@ The Realtime "Third Party Api" export sends **six fields and no direction**:
 ```
 
 The In / Out boxes on their settings page produced no key in the payload, so
-the webhook **derives** the direction from the punch's position in that
-employee's IST day — 1st punch = IN, 2nd = OUT, 3rd = IN, and so on. Rows
-derived this way carry `direction_derived = true`.
+the webhook **derives** the direction from the gaps between punches and the
+person's shift. Rows derived this way carry `direction_derived = true`. The
+rules live in `lib/attendance.js` (`assignDays`), and
+`tests/attendance-days.test.js` spells them out case by case.
 
-Consequences worth knowing:
+**Which day a punch belongs to**
 
-- If someone forgets to punch once, every later punch that day flips. This is
-  the normal trade-off for devices that log punches without in/out mode, and
-  it is what the vendor's own reports do.
+- **The gap between punches decides first.** A punch less than 8 hours after
+  the one before is the same day: the person is still at work, however late
+  that runs. The one exception is a real pause: after 4 hours or more
+  without a punch, a punch from 2 hours before their next shift starts is
+  that shift's arrival and opens a new day.
+- **A silence of 8 hours or more starts a new day**, except inside the day's
+  own shift window. Each date's shift owns the 24 hours around it, half the
+  off-hours on either side, so a 6 PM – 3 AM shift owns 10:30 AM to 10:30 AM
+  the next morning. Inside that window the day carries on across a long
+  silence in two cases only:
+  - the end of a shift worked without break punches, up to 4 hours after the
+    shift end: 6 PM in and 3:02 AM out, nine hours apart, is one night;
+  - a return later the same calendar day: back from lunch at 2 PM, out at
+    10:30 PM.
+- **A new day is dated by the shift it could still be.** A 12:30 AM late
+  arrival for a 6 PM shift belongs to the evening before, and so does a
+  3:02 AM Logout whose Login was never punched. More than 4 hours past that
+  shift's end it cannot be that shift, and the day takes the calendar date.
+- **A wrong shift mostly costs labels, not dates** - the gaps decide, and the
+  shift only bridges a silence inside its own window - with one exception
+  that follows from the rule above: a day whose first punch comes within 4
+  hours after the shift's end is filed under that shift's day. On a night
+  shift, **the Jobways and Genie Lamp 6 PM – 3 AM default included**, a day
+  that starts between midnight and 7 AM therefore lands on the evening before.
+  Right for a late arrival or a logout with no login; wrong for someone who
+  really starts work before 7 AM. **Give anyone who does not work their
+  company's default hours a shift of their own** (Admin → Shifts), then
+  recompute them (see below).
+- **Without a shift** (a code not yet bound to anyone), the gap is all there
+  is, and punches simply alternate from IN. Binding the code re-derives them
+  with the person's real shift.
+
+**IN or OUT, and Login / Break / Logout**
+
+- **The day's first punch is the Login**, unless it is at the shift end (from
+  the end, less the early-out grace, up to 4 hours after it). Then it is the
+  **Logout**, and the day shows the login as missing rather than a Login
+  "9h late".
+- **After that, each punch is the opposite of the one before it**: after an IN
+  an OUT, after an OUT an IN. A missed punch costs one label; it does not flip
+  the rest of the day.
+- **An OUT before the shift end is a Break out, one at or after it (less the
+  early-out grace) the Logout.** A later punch the same day settles it as a
+  break after all; and once the person's next day has begun, their last OUT
+  was the Logout however early it was.
+- **A punch at or after the shift end, more than 2 hours after a Break out, is
+  the Logout**: the return from that break was never punched. It is not a
+  "Break in".
+- **Those two guesses at the shift end are taken back if the day would then
+  end on an IN.** Someone who came in at the end of the day and stayed on, or
+  whose "missed return" was a long errand after all, gets plain alternation
+  from the Login instead, so the day is not left without an Out.
+- **A second touch within 2 minutes is the same punch** (a double tap, or the
+  reader seeing someone linger). It is stored, with the labels of the punch it
+  repeats, and ignored everywhere else: it is not emailed or posted to Bitrix,
+  it neither opens nor closes a day, and the calendar, the reports, the pay
+  sheet and the automatic Logout all skip it.
+
+**A day nobody closed**
+
+- **From 30 minutes after the shift end**, someone still logged in counts as
+  logged out **at the shift end**, and someone still on a break that began
+  before the end counts as logged out **at that break**. The automatic Logout
+  posted to the group and the screens (the calendar, the daily report, the
+  pay sheet) all count it that way from that same moment, not before: plenty
+  of people leave 10–20 minutes late. The post comes from the scheduler; see
+  *The scheduler* under "Attendance → Bitrix24" below.
+- **Anything punched after the shift end is overtime** (a login, a return, a
+  break started late) and gets no automatic Logout. If such a day ends on an IN
+  and the person then goes 8 hours without a punch, the screens take that last
+  punch as the day's Out.
+
+**After deploying these rules**, relabel the punches already stored:
+Admin → 🕐 Attendance → **Attendance days**, pick the range, **Check** to see
+what would change, then **Apply changes**. Check reads the range page by page
+- up to about 20,000 punches, the day and a half either side included; past
+that it says where it stopped, and you run it again from that date. One
+press of **Apply changes** writes up to 300 changes; while some are left,
+press **Check** and then **Apply changes** again until Check finds nothing.
+It only relabels stored punches. Nothing is emailed or posted to Bitrix
+again.
+
+**Attendance days re-judges everyone in the range** against the shift each
+person has *today*, unless you type one person's **Biometric ID** into it.
+WorkSuite keeps each person's current shift, not a history of them. So:
+
+- **One person's shift on record was wrong**, and they always worked those
+  hours (a night worker left on the day shift, say): fix the shift, then
+  recompute the past weeks **with their Biometric ID**.
+- **Someone's hours really changed** (nights until the 14th, days from the
+  15th): recompute them only **from the first day they worked the new
+  hours**, never from the morning their last night ended - a range reaching
+  back before it judges the old shift's days against the new hours. New
+  punches do not rewrite the old days on their own: a punch after a silence
+  of 8 hours or more leaves the days before that silence as they were.
+- **The deploy relabel above** covers everyone: pick a range that starts
+  after the most recent real change of hours of anyone in it, and relabel
+  anyone whose hours changed inside it on their own, from their change date.
+
+Other things worth knowing:
+
 - Because direction is computed, it is deliberately **not** part of the
   dedupe key — that is `(employee_code, log_datetime, device_sn)`. Were
-  direction included, a recomputed parity would insert a second row for the
+  direction included, a recomputed direction would insert a second row for the
   same punch and email the employee twice.
 - An explicit direction from the device always wins. If Realtime support
   enables in/out mode (ask about the **In / Out** boxes), no code change is
@@ -219,8 +318,8 @@ not contact Supabase, SMTP, or Bitrix.
 
 - The endpoint always answers `200` once a punch is stored — the vendor logs
   any non-2xx as an error, and a mail failure is ours to retry, not theirs.
-- Replays are ignored: `(employee_code, log_datetime, direction, device_sn)`
-  is unique, so re-exporting a date range inserts nothing and emails nothing.
+- Replays are ignored: `(employee_code, log_datetime, device_sn)` is unique,
+  so re-exporting a date range inserts nothing and emails nothing.
 - Naive timestamps from the device are read as **IST**.
 
 ## Step 7 — Employee shift timings
@@ -264,6 +363,8 @@ longer read as 24 people failing to turn up.
 `end_time <= start_time` means the shift crosses midnight (22:00 → 07:00).
 Comparisons rotate the clock difference onto ±12 hours, so a 01:00 punch on a
 22:00 shift reads as **3 hours late**, not 21 hours early. No extra flag to set.
+The whole shift is one attendance day, dated by the evening it starts, and a
+punch at its end is the Logout, not the next day's Login (see §6.3a).
 
 ### When a late/early note is *not* shown on an email
 
@@ -485,7 +586,13 @@ functions fails the build with
 `No more than 12 Serverless Functions can be added to a Deployment on the Hobby plan.`
 
 Cron slots are similarly full: Hobby allows 2, and both are used by
-`/api/wfh-remind`.
+`/api/wfh-remind`. The attendance scheduler (shift-end Logouts, the dual-shift
+switch, Bitrix retries) runs from pg_cron inside Supabase instead, and calls
+the existing `/api/attendance-webhook`, so it needs neither a slot nor a
+function. `vercel.json` gives that function 60 seconds, and `/api/admin` too,
+whose **Run now** button waits on a run (`functions` → `maxDuration`, allowed
+on Hobby, adds no function), so a busy run is not cut off at the 10-second
+default.
 
 ## Admin session and URL
 
@@ -539,24 +646,93 @@ on the company name, so nothing is lost.
 
 ### Attendance → Bitrix24: delivery and shift-end logouts
 
-Run `supabase-attendance-bitrix-migration.sql` (after the dual-shift and Bitrix
-log migrations). Every punch then records whether its group message went
-(**Admin → Attendance**, Bitrix column, with the reason when it did not).
+Run `supabase-attendance-scheduler-migration.sql` (next section). It carries
+everything `supabase-attendance-bitrix-migration.sql` adds, so that file is
+optional now; running it as well does no harm. Every punch then records whether
+its group message went (**Admin → Attendance**, Bitrix column, with the reason
+when it did not).
 
-The scheduled call that the dual-shift migration set up
-(`worksuite-shift-switch`, every 5 minutes, `?job=shift_switch`) now also:
+The scheduled call (`worksuite-shift-switch`, every 5 minutes,
+`?job=shift_switch`) does three things:
 
+- at a dual-shift person's second shift start, if they are still at work on a
+  day they began with the first company, posts the Logout to the first
+  company's chat and the Login to the second's (once per person per day);
 - sends again the punches Bitrix did not take (failed or out of time) — up to
   4 attempts, within 6 hours of the punch;
-- closes a shift nobody logged out of: 10 minutes after the shift ends, someone
+- closes a shift nobody logged out of: 30 minutes after the shift ends, someone
   still logged in is posted as **Logout at the shift end** ("shift ended without
-  a punch-out"), and someone still on a break as **Logout at that break** ("did
-  not return from break by shift end"). Once per person per day. The calendar and
-  pay sheet count that day as ending at the shift end.
+  a punch-out"), and someone still on a break that began before the end as
+  **Logout at that break** ("did not return from break by shift end"). Once per
+  person per day, and only within 12 hours of the shift end; a post Bitrix
+  refused is sent again up to 3 times within 6 hours, unless the person has
+  punched since. Anyone who punched after the shift end is on overtime and is
+  left alone, and a repeat tap counts as neither a punch-out nor a return.
+  The calendar, the daily report and the pay sheet count the day the same way,
+  from the same moment: it ends at the shift end, or at that break, from 30
+  minutes after the end, whether or not the post went out (§6.3a, *A day
+  nobody closed*).
 
-Check the scheduler exists with `select jobname, schedule from cron.job;`. If it
-does not, schedule it as `supabase-dual-shift-migration.sql` shows (`?job=attendance_tick`
-works too). Its runs: `select * from cron.job_run_details order by start_time desc limit 10;`.
+#### The scheduler: run `supabase-attendance-scheduler-migration.sql` once
+
+All three ride on one pg_cron job inside Supabase, so it takes no Vercel cron
+slot and no function. Supabase → **SQL Editor** → paste all of
+`supabase-attendance-scheduler-migration.sql` → **Run**. As-is: **there is no
+key to paste.** The migration generates a secret inside the database (the
+single row of `worksuite_scheduler`, readable by the service key only); the job
+sends it with every call, and the webhook checks it against that same row. The
+file also adds anything the jobs need from the dual-shift and attendance-bitrix
+migrations, so it works whether or not those were run, and it is safe to run
+again — the secret is kept and the job is replaced, never doubled. Deploy the
+webhook that checks that secret first: until it is live, the new job's calls
+get 401, and the status below says so.
+
+Why this matters: `supabase-dual-shift-migration.sql` used to schedule this job
+with the header `Bearer PASTE-YOUR-BIOMETRIC_API_KEY`. Run without editing it,
+every call was refused with 401 — so no shift-end Logout was ever posted and no
+dual shift switched. That file no longer touches the scheduler, so re-running it
+cannot put the broken job back.
+
+**Checking it works.** Give it 5 minutes after running, then:
+
+- Admin → 🕐 Attendance shows the scheduler status: the job, its last runs, the
+  last answers from the webhook, and in plain words anything that is wrong, with
+  a button to run the job once straight away. No problems listed means the job
+  exists, sends the stored secret, and the webhook has recorded a scheduled run
+  in the last 15 minutes.
+- Or in the SQL Editor:
+
+  ```sql
+  select public.worksuite_scheduler_status();
+  select status_code, timed_out, error_msg, created
+    from net._http_response order by created desc limit 10;
+  ```
+
+  `200` is the webhook answering; `401` means the key it was sent is wrong.
+  The status (and so the admin panel) only counts answers that came after the
+  migration last scheduled the job (`worksuite_scheduler.scheduled_at`), so the
+  401s the old placeholder job collected are not blamed on the new one. In the
+  raw `net._http_response` list, rows from before you ran the file are the old
+  job's.
+- `select last_run_at, last_job, last_ok, last_result from public.worksuite_scheduler;`
+  is the webhook's own note of the last scheduled call and what it did
+  (switches, retries, automatic Logouts).
+- `cron.job_run_details` on its own is **not** proof. `succeeded` there only
+  means pg_cron queued the request; it said `succeeded` the whole time the
+  webhook was answering 401.
+
+If WorkSuite moves to another address:
+`update public.worksuite_scheduler set site_url = 'https://…' where id = 1;` —
+the next run uses it, nothing to reschedule. To stop the job:
+`select cron.unschedule('worksuite-shift-switch');`.
+
+After a full data reset (`supabase-full-reset.sql`, Section 2), the job is
+still scheduled but its row is gone, so it calls nobody while
+`cron.job_run_details` keeps saying `succeeded`. Run
+`supabase-reseed-after-reset.sql` (or this migration again) to put the row
+back; it gets a new secret, which the job and the webhook both pick up without
+anything to paste. The reset's Section 2b ("keep the configuration") leaves
+the row alone.
 
 ## Step 9 — Admin console: onboarding, offboarding, import and audit
 

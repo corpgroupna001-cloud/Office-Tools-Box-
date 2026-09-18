@@ -26,7 +26,7 @@ const BASE = [
   'supabase-bitrix-migration.sql', 'supabase-bitrix-log-migration.sql', 'supabase-device-enrolments-migration.sql',
   'supabase-admin-management-migration.sql', 'supabase-admin-console-migration.sql',
   'supabase-corpgroup-retire-migration.sql',
-  'supabase-attendance-bitrix-migration.sql',
+  'supabase-attendance-bitrix-migration.sql', 'supabase-attendance-scheduler-migration.sql',
 ];
 
 // The CRM set, in the order SETUP.md tells an administrator to run it.
@@ -42,11 +42,20 @@ const CRM = [
   'supabase-employee-id-migration.sql',
 ];
 
+// Files that end by scheduling a job with pg_cron + pg_net, which only exist on
+// the hosted database. Everything before that point is tables, columns and
+// functions, and is what runs here. Only a statement at the start of a line
+// cuts, so a comment that names the extension does not; a file without the
+// statement (the dual-shift one no longer has it) runs whole.
+const CRON_TAIL = new Set(['supabase-dual-shift-migration.sql', 'supabase-attendance-scheduler-migration.sql']);
+const CRON_START = /^create extension if not exists pg_cron\b/im;
+
 function sqlOf(file) {
   let sql = fs.readFileSync(path.join(ROOT, file), 'utf8');
-  // The dual-shift scheduler needs pg_cron + pg_net, which only exist on the
-  // hosted database; its table/column changes come before that point.
-  if (file === 'supabase-dual-shift-migration.sql') sql = sql.split(/create extension if not exists pg_cron/i)[0];
+  if (CRON_TAIL.has(file)) {
+    const at = sql.search(CRON_START);
+    if (at >= 0) sql = sql.slice(0, at);
+  }
   return sql;
 }
 
@@ -55,9 +64,10 @@ function pglite() {
 }
 
 /**
- * freshDb({ crm = true, twice = false, only }) -> PGlite | null
- * Throws with the file name when a migration fails, so a failing test says
- * which file to look at.
+ * freshDb({ crm = true, twice = false, without = [] }) -> PGlite | null
+ * `without` leaves those files out, for a database where an administrator
+ * never ran them. Throws with the file name when a migration fails, so a
+ * failing test says which file to look at.
  */
 async function freshDb(opts = {}) {
   const PGlite = pglite();
@@ -69,7 +79,8 @@ async function freshDb(opts = {}) {
     try { await db.exec(sqlOf(file)); }
     catch (e) { const err = new Error(`${file}: ${e.message}`); err.file = file; err.cause = e; throw err; }
   };
-  for (const f of BASE) await run(f);
+  const without = new Set(opts.without || []);
+  for (const f of BASE) if (!without.has(f)) await run(f);
   if (opts.crm !== false) {
     for (const f of CRM) await run(f);
     if (opts.twice) for (const f of CRM) await run(f);     // every CRM migration must be safe to re-run
@@ -99,4 +110,4 @@ async function makeUser(db, { email, name, company, role = 'employee', manager_i
   return id;
 }
 
-module.exports = { freshDb, as, makeUser, BASE, CRM, pglite };
+module.exports = { freshDb, as, makeUser, sqlOf, BASE, CRM, pglite };

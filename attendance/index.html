@@ -50,6 +50,7 @@
         .tag.late { background: rgba(244,63,94,0.16); color:#fda4af; }
         .tag.ontime { background: rgba(16,185,129,0.16); color:#6ee7b7; }
         .tag.early { background: rgba(245,158,11,0.16); color:#fcd34d; }
+        .tag.auto { background: rgba(148,163,184,0.16); color:#cbd5e1; }
 
         .prompt { padding: 15px 18px; margin-bottom: 16px; display:flex; align-items:center; gap:14px;
                   border-color: rgba(56,189,248,0.35); background: rgba(56,189,248,0.07); }
@@ -191,6 +192,7 @@
         tbody td { padding: 13px 16px; border-bottom: 1px solid rgba(255,255,255,0.06); font-weight: 700; }
         tbody tr:last-child td { border-bottom: 0; }
         tbody tr:hover { background: rgba(255,255,255,0.03); }
+        tbody tr.repeat td { opacity: 0.45; }
         .pill { display:inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 900; }
         .pill.in  { background: rgba(16,185,129,0.15); color: #6ee7b7; }
         .pill.out { background: rgba(244,63,94,0.15);  color: #fda4af; }
@@ -408,10 +410,321 @@
         const el = id => document.getElementById(id);
         const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
+        // ---- Shift maths ----------------------------------------------------
+        // What the Today card and the day list need from lib/attendance on the
+        // server: a dual-shift person's shift for the day, when an attendance
+        // day's shift ends, and which punch is the day's In and Out. This page
+        // is static HTML and cannot require() that file, so these few rules are
+        // mirrored here, and tests/attendance-page.test.js runs this block
+        // against the server's own answers so the two cannot drift apart
+        // unnoticed. Nothing in it touches the page.
+        const hhmm = t => String(t || '').slice(0, 5);
+        const toMins = t => { const m = /^(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? +m[1] * 60 + +m[2] : null; };
+        // Rotate onto (-720, +720] so an overnight shift reads sensibly:
+        // 01:00 against a 22:00 start is 3h late, not 21h early.
+        const offset = (t, b) => { const r = (((t - b) % 1440) + 1440) % 1440; return r <= 720 ? r : r - 1440; };
+        // Minutes going forward round the clock from one time of day to another.
+        const around = (from, to) => (((to - from) % 1440) + 1440) % 1440;
+        const fmtClock = new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', minute: '2-digit', hour12: false });
+        const fmtWkday = new Intl.DateTimeFormat('en-GB', { timeZone: IST, weekday: 'short' });
+        const clockOf = when => toMins(fmtClock.format(new Date(when)));
+        const weekdayOf = when => ({ Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 })[fmtWkday.format(new Date(when))] || null;
+        const atMs = r => new Date(r.log_datetime).getTime();
+        const byTime = (a, b) => atMs(a) - atMs(b);
+        const dayKey = r => r.log_date || fmtISO.format(new Date(r.log_datetime));
+        const hm = m => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+        const humanMins = m => m < 60 ? `${m}m` : hm(m);
+
+        /** A shift's working weekdays, 1 = Mon … 7 = Sun; none set means every day. */
+        function shiftDays(sh) {
+            const d = sh && Array.isArray(sh.working_days) ? sh.working_days.map(Number).filter(n => n >= 1 && n <= 7) : [];
+            return d.length ? d : [1, 2, 3, 4, 5, 6, 7];
+        }
+
+        // Dual shifts (10:00-17:00 for one company + 17:00-19:00 for another):
+        // on a weekday both cover, the reader sees one day from the first start
+        // to the last end, with the first shift's late grace and the last one's
+        // early-out grace. The order is whichever makes that window shortest -
+        // 10-17 then 17-19 is 9 hours, not 24.
+        function mergeShifts(a, b) {
+            const s1 = toMins(a.start_time), e1 = toMins(a.end_time);
+            const s2 = toMins(b.start_time), e2 = toMins(b.end_time);
+            const len1 = around(s1, e1) || 1440, len2 = around(s2, e2) || 1440;
+            const aFirst = Math.max(len1, around(s1, s2) + len2) <= Math.max(len2, around(s2, s1) + len1);
+            const first = aFirst ? a : b, last = aFirst ? b : a;
+            return {
+                ...a, name: `${a.name} + ${b.name}`,
+                start_time: first.start_time, end_time: last.end_time,
+                grace_minutes: first.grace_minutes, early_out_grace_minutes: last.early_out_grace_minutes,
+                working_days: [...new Set(shiftDays(a).concat(shiftDays(b)))].sort(),
+                dual: true, parts: [a, b],
+            };
+        }
+
+        /** The shift that applies on a weekday to someone holding one or two. */
+        function effectiveShift(sh, sh2, weekday) {
+            if (!sh2) return sh || null;
+            if (!sh) return shiftDays(sh2).includes(weekday) ? sh2 : null;
+            const in1 = shiftDays(sh).includes(weekday), in2 = shiftDays(sh2).includes(weekday);
+            if (in1 && in2) return mergeShifts(sh, sh2);
+            const days = [...new Set(shiftDays(sh).concat(shiftDays(sh2)))].sort();
+            return in2 ? { ...sh2, working_days: days, secondOnly: true } : { ...sh, working_days: days };
+        }
+
+        // Which of a dual-shift person's windows an instant is in: 2 inside the
+        // second shift's stretch (its hours plus the nearer half of the
+        // off-hours either side) on a day that shift covers, otherwise 1.
+        function shiftPartAt(sh, sh2, when) {
+            if (!sh2) return 1;
+            const days2 = shiftDays(sh2), weekday = weekdayOf(when);
+            if (!sh) return days2.includes(weekday) ? 2 : 1;
+            const t = clockOf(when);
+            const s1 = toMins(sh.start_time), e1 = toMins(sh.end_time);
+            const s2 = toMins(sh2.start_time), e2 = toMins(sh2.end_time);
+            const len1 = around(s1, e1), len2 = around(s2, e2), a = around(s1, s2);
+            const gapBefore = a >= len1 ? a - len1 : 0;
+            const gapAfter = a + len2 <= 1440 ? 1440 - a - len2 : 0;
+            const after = around(s2, t), before = 1440 - after;
+            let dayShift;
+            if (after < len2 + Math.floor(gapAfter / 2)) dayShift = s2 + after >= 1440 ? -1 : 0;
+            else if (before <= Math.floor(gapBefore / 2)) dayShift = t + before >= 1440 ? 1 : 0;
+            else return 1;
+            return days2.includes(((weekday - 1 + dayShift + 7) % 7) + 1) ? 2 : 1;
+        }
+
+        // A dual-shift day that begins in the second shift's stretch (they came
+        // only for the evening) is judged against that shift alone: late from
+        // 17:00, not from the morning shift's 10:00.
+        function partShift(sh, firstPunchAt) {
+            if (!sh || !sh.dual || !Array.isArray(sh.parts) || sh.parts.length !== 2 || !firstPunchAt) return sh || null;
+            return shiftPartAt(sh.parts[0], sh.parts[1], firstPunchAt) === 2
+                ? { ...sh.parts[1], working_days: sh.working_days, secondOnly: true }
+                : sh;
+        }
+
+        /** The shift one attendance day is judged against. */
+        function shiftForDay(sh, sh2, date, firstPunchAt) {
+            const s = sh2 ? effectiveShift(sh, sh2, weekdayOf(`${date}T12:00:00+05:30`)) : (sh || null);
+            return partShift(s, firstPunchAt);
+        }
+
+        /** When attendance day `date`'s shift ends (ms) - the next morning for an overnight shift. */
+        function shiftEndAt(date, sh) {
+            if (!date || !sh || !sh.end_time) return null;
+            const start = toMins(sh.start_time), end = toMins(sh.end_time);
+            if (end == null) return null;
+            const at = new Date(`${date}T${hhmm(sh.end_time)}:00+05:30`).getTime();
+            if (isNaN(at)) return null;
+            return start != null && end <= start ? at + 86400000 : at;
+        }
+
+        // A second touch within two minutes of a punch is the same punch (a
+        // double tap, or the face reader logging someone who lingered). The
+        // server gives it the same labels, never announces it, and marks it;
+        // it counts for nothing here either. The same test as lib/attendance
+        // isRepeatRow, so the page and the calendar skip the same rows.
+        const isRepeat = r => !!r && (r.duplicate === true
+            || (r.email_status === 'skipped' && /^repeat tap/i.test(String(r.email_error || ''))));
+        // The event names what a punch was; the bare direction is the fallback
+        // for rows from before events were derived.
+        const isOut = r => r.event_type ? r.event_type === 'LOGOUT' || r.event_type === 'BREAK_OUT' : r.direction === 'OUT';
+        const isIn  = r => r.event_type ? r.event_type === 'LOGIN' || r.event_type === 'BREAK_IN' : r.direction === 'IN';
+
+        function groupByDay(list) {
+            const days = new Map();
+            for (const r of list) {
+                const key = dayKey(r);
+                if (!days.has(key)) days.set(key, []);
+                days.get(key).push(r);
+            }
+            // Each day's punches oldest-first so first/last read naturally.
+            for (const v of days.values()) v.sort(byTime);
+            return days;
+        }
+
+        // Which rows are "today" on this page. log_date is the ATTENDANCE day
+        // (lib/attendance cuts days by the shift, so a 6pm-3am night is one day
+        // dated by its evening), so today is the rows dated today, plus the
+        // previous attendance day's while that day is still open: its last
+        // punch is not a Logout, and its shift has not been over for half an
+        // hour (overtime punched after the end keeps it open half an hour past
+        // the last punch). So at 1am a night worker sees the day they logged
+        // into at 6pm; at 8am they no longer see it as today; and a Logout at
+        // 3:05 closes it, rather than reading "attendance complete for today"
+        // until the next evening. Without a shift to go by, the old rule: a
+        // silence of eight hours ends a day. (This decides "on the clock" for
+        // the calendar, the pay table and the day list; the Today card shows
+        // a closed day a while longer - cardDayRows.)
+        // Both from lib/attendance: NEW_DAY_GAP_MS, and AUTO_LOGOUT_GRACE_MS -
+        // how long after the shift end a day nobody closed counts as logged
+        // out at the end (people leave a little late; the job waits too).
+        const NEW_DAY_GAP_MS = 8 * 3600 * 1000;
+        const AUTO_LOGOUT_GRACE_MS = 30 * 60 * 1000;
+        const LOGOUT_ZONE_MS = 4 * 3600 * 1000;
+        function currentDayRows(list, { shift, shift2, now } = {}) {
+            const t = now == null ? Date.now() : new Date(now).getTime();
+            const today = fmtISO.format(new Date(t));
+            const days = groupByDay(list);
+            const todays = days.get(today) || [];
+            const prevDate = [...days.keys()].filter(d => d < today).sort().pop();
+            const prev = prevDate ? days.get(prevDate) : [];
+            const kept = prev.filter(p => !isRepeat(p));
+            if (!kept.length) return todays;
+            const last = kept[kept.length - 1];
+            if (!shift) {
+                if (todays.length) return todays;
+                return t - atMs(last) < NEW_DAY_GAP_MS ? prev : [];
+            }
+            const end = shiftEndAt(prevDate, shiftForDay(shift, shift2, prevDate, kept[0].log_datetime));
+            const open = last.event_type !== 'LOGOUT' && end != null
+                && t < Math.max(end, atMs(last)) + AUTO_LOGOUT_GRACE_MS;
+            return open ? prev.concat(todays) : todays;
+        }
+
+        // The day the Today card shows: the one under way (currentDayRows),
+        // or - with nothing dated today - the latest day, closed or not, for
+        // as long as the server would still file a punch on it: eight hours
+        // after its last punch, or until four hours after its shift end
+        // (lib/attendance LOGOUT_ZONE_MS), whichever is later. A night worker
+        // who logged out at 3:05 sees "attendance complete" with the night's
+        // In and Out, not an empty card and "Login now" for a day that has
+        // just ended; one still at work past 3:30 is still offered Logout,
+        // which lands on that night. A day already dated after today (a login
+        // at 23:45 for a shift that starts at 00:30 is the next date's) is the
+        // newest there is, so it is the card's day.
+        function cardDayRows(list, opts = {}) {
+            const t = opts.now == null ? Date.now() : new Date(opts.now).getTime();
+            const today = fmtISO.format(new Date(t));
+            const days = groupByDay(list);
+            const ahead = [...days.keys()].filter(d => d > today).sort()[0];
+            if (ahead) return days.get(ahead);
+            const open = currentDayRows(list, opts);
+            if (open.length) return open;
+            const prevDate = [...days.keys()].filter(d => d < today).sort().pop();
+            const kept = prevDate ? days.get(prevDate).filter(p => !isRepeat(p)) : [];
+            if (!kept.length) return [];
+            const end = opts.shift ? shiftEndAt(prevDate, shiftForDay(opts.shift, opts.shift2, prevDate, kept[0].log_datetime)) : null;
+            return t - atMs(kept[kept.length - 1]) < NEW_DAY_GAP_MS || (end != null && t < end + LOGOUT_ZONE_MS)
+                ? days.get(prevDate) : [];
+        }
+
+        // One day's In, Out and time on site, the way lib/attendance
+        // classifyDay reads them for the calendar and the pay sheet.
+        //   In  - the first IN. A day whose only punch was at the shift end is
+        //         a Logout whose login was not punched: no In, and no hours of
+        //         "late".
+        //   Out - the last punch, and only when it is an OUT: after a break
+        //         and a return the person is back at work, still on the clock.
+        //         Half an hour after the shift end (AUTO_LOGOUT_GRACE_MS) with
+        //         nobody punched out, the server logs them out at the shift
+        //         end, and so does this; until then they are still on the
+        //         clock. Back after the shift end (overtime) and silent for
+        //         eight hours since: the last punch is the Out
+        //         (outIsLastPunch), as lib/attendance classifyDay has it.
+        // Pass { date, shift } (the day's own shift) for the automatic logout;
+        // `now` is for tests.
+        function dayStats(punches, { date, shift, now } = {}) {
+            const list = punches.filter(p => !isRepeat(p)).sort(byTime);
+            const ins = list.filter(isIn), outs = list.filter(isOut);
+            const last = list[list.length - 1] || null;
+            const firstIn = ins[0] || (last && !isOut(last) ? list[0] : null);
+            const missingLogin = !ins.length && outs.length > 0;
+            // Rows with no direction at all fall back to the last OUT, or the
+            // last of several punches, as they always did.
+            let lastOut = !last ? null : isOut(last) ? last : isIn(last) ? null
+                : outs[outs.length - 1] || (list.length > 1 ? last : null);
+            // A punch after the shift end is overtime still going on.
+            let auto = null, outIsLastPunch = false;
+            const end = shiftEndAt(date, shift);
+            const t = now == null ? Date.now() : new Date(now).getTime();
+            if (last && end != null && t >= end + AUTO_LOGOUT_GRACE_MS && atMs(last) <= end) {
+                if (isIn(last)) {
+                    auto = 'no_punch_out';
+                    lastOut = { log_datetime: new Date(end).toISOString(), auto: true };
+                } else if (last.event_type === 'BREAK_OUT') auto = 'break_not_returned';
+            }
+            if (!lastOut && last && isIn(last) && list.length > 1 && (end == null || atMs(last) > end)
+                && t - atMs(last) >= NEW_DAY_GAP_MS) {
+                lastOut = last;
+                outIsLastPunch = true;
+            }
+            let mins = null;
+            if (firstIn && lastOut) {
+                const d = atMs(lastOut) - atMs(firstIn);
+                if (d > 0) mins = Math.round(d / 60000);
+            }
+            return {
+                firstIn, lastOut, mins, missingLogin, auto, outIsLastPunch,
+                onClock: !!firstIn && !lastOut,
+                duration: mins == null ? null : hm(mins),
+                count: list.length
+            };
+        }
+
+        // The tag under the In (late / on time) or the Out (early / full
+        // shift), measured against the day's own shift. Only a Logout is
+        // compared with the shift end: a break-out says nothing about leaving
+        // early, and "3h early" on a lunch break was plainly wrong.
+        function shiftTag(punch, shift, kind) {
+            if (!shift || !punch) return null;
+            const t = clockOf(punch.log_datetime);
+            if (kind === 'in') {
+                const off = offset(t, toMins(shift.start_time));
+                const late = off > 0 ? off : 0;
+                return late > (shift.grace_minutes || 0)
+                    ? { cls: 'late', text: `${humanMins(late)} late` }
+                    : { cls: 'ontime', text: 'On time' };
+            }
+            if (punch.event_type !== 'LOGOUT') return null;
+            const off = offset(t, toMins(shift.end_time));
+            const early = off < 0 ? -off : 0;
+            return early > (shift.early_out_grace_minutes || 0)
+                ? { cls: 'early', text: `${humanMins(early)} early` }
+                : { cls: 'ontime', text: 'Full shift' };
+        }
+
+        // Where a WFH day stands, for the card above the tiles: 'done' once
+        // logged out, 'login' before any login, 'break' on a break, 'late'
+        // still logged in past the shift end, otherwise 'live'. Selfie
+        // punches only: biometric punches carry an event too, and an office
+        // punch must not drive the WFH card. FIRST login, LAST logout:
+        // someone who punches in twice started their day at the first one,
+        // and "logged in 17:45, logged out 13:00" is nonsense on the card.
+        // Whichever break event came last decides whether they are on a break.
+        function wfhState(punches, pastShiftEnd) {
+            const evs = punches.filter(r => r.source === 'selfie' && r.event_type && !isRepeat(r)).sort(byTime);
+            const login = evs.find(r => r.event_type === 'LOGIN') || null;
+            const logout = evs.filter(r => r.event_type === 'LOGOUT').pop() || null;
+            const lastBreak = evs.filter(r => r.event_type === 'BREAK_OUT' || r.event_type === 'BREAK_IN').pop() || null;
+            const state = logout ? 'done' : !login ? 'login'
+                : lastBreak && lastBreak.event_type === 'BREAK_OUT' ? 'break'
+                : pastShiftEnd ? 'late' : 'live';
+            return { state, login, logout, lastBreak };
+        }
+
+        // One day of the server's month (mode 'calendar') as the calendar and
+        // the pay table print it. `auto` (the Out is the automatic shift-end
+        // logout), `missing_login` and a null `out` while the person is still
+        // on the clock are newer fields: a response without them reads as it
+        // always did. `openDate` is the attendance day still under way, which
+        // for a night worker at 1am is yesterday's date.
+        function calendarTimes(day, today, openDate) {
+            const missingLogin = day.missing_login === true || (!day.in && !!day.out);
+            return {
+                in: missingLogin ? null : (day.in || null),
+                out: day.out || null,
+                auto: !!day.out && day.auto === true,
+                missingLogin,
+                onClock: !day.out && !!day.in && (day.date === today || day.date === openDate),
+            };
+        }
+        // ---- end of shift maths ----
+
         let view = 'days';
         let rows = [];       // this month's punches (newest first)
         let allRows = [];    // plus the day before the month, for the today card
         let myShift = null;
+        let myShift2 = null; // a second shift (dual), for the day's effective shift
         let myCompany = '';
         let isWfh = false;
         let myName = '', myEmpId = '';   // the selfie stamp shows the Employee ID above the name
@@ -432,11 +745,6 @@
 
         // ---- My shift (read-only; RLS lets any signed-in user read shifts) ----
         const DAY_NAMES = [null, 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-        const hhmm = t => String(t || '').slice(0, 5);
-        const toMins = t => { const m = /^(\d{1,2}):(\d{2})/.exec(String(t || '')); return m ? +m[1] * 60 + +m[2] : null; };
-        // Rotate onto (-720, +720] so an overnight shift reads sensibly:
-        // 01:00 against a 22:00 start is 3h late, not 21h early.
-        const offset = (t, b) => { const r = (((t - b) % 1440) + 1440) % 1440; return r <= 720 ? r : r - 1440; };
 
         // The holidays that apply to ME: my company's own rows, plus the shared
         // rows (company null) for dates my company has not set itself. Other
@@ -503,6 +811,7 @@
                     const { data: d2 } = await sb.from('profiles').select('shift2_id, company2').eq('id', session.user.id).maybeSingle();
                     if (d2 && d2.shift2_id) { shift2 = (shifts || []).find(s => s.id === d2.shift2_id) || null; company2 = d2.company2 || ''; }
                 } catch { /* before the migration */ }
+                myShift2 = shift2;
                 const dayLabel = sh => {
                     const days = (sh.working_days || []).map(Number);
                     return days.length === 7 ? 'All days'
@@ -537,12 +846,14 @@
             // past midnight - so the 1am punches of the 30th sit with the 30th.
             // One extra day before the month, so that on the 1st at 1am the
             // "today" card still sees the day that began on the 31st.
+            // email_status / email_error only to spot the server's repeat-tap
+            // marker (isRepeat); they are in the table from its first migration.
             const firstDate = `${ym}-01`;
             const prevDate  = fmtISO.format(new Date(start.getTime() - 12 * 3600 * 1000));
             const lastDate  = fmtISO.format(new Date(end.getTime() - 12 * 3600 * 1000));
             const { data, error } = await sb
                 .from('attendance_logs')
-                .select('id,direction,log_datetime,log_date,device_name,device_sn,employee_code,event_type,source')
+                .select('id,direction,log_datetime,log_date,device_name,device_sn,employee_code,event_type,source,email_status,email_error')
                 .gte('log_date', prevDate)
                 .lte('log_date', lastDate)
                 .order('log_datetime', { ascending: false })
@@ -560,69 +871,25 @@
             render();
         }
 
-        // A working day is cut by the gap between punches, not by midnight
-        // (see lib/attendance on the server). "Today" on this page is the
-        // most recent day that is still open: its last punch is under eight
-        // hours old, or it is literally today's date. So at 1am a night
-        // worker sees the day they logged into at 6pm, not an empty card.
-        const NEW_DAY_GAP_MS = 8 * 3600 * 1000;
-        function currentDayRows(list) {
-            const today = fmtISO.format(new Date());
-            const days = groupByDay(list);
-            if (days.has(today)) return days.get(today);
-            const dates = [...days.keys()].sort();
-            const latest = dates[dates.length - 1];
-            if (!latest || latest > today) return [];
-            const punches = days.get(latest);
-            const last = Math.max(...punches.map(p => new Date(p.log_datetime).getTime()));
-            return Date.now() - last < NEW_DAY_GAP_MS ? punches : [];
-        }
-
-        function groupByDay(list) {
-            const days = new Map();
-            for (const r of list) {
-                const key = r.log_date || fmtISO.format(new Date(r.log_datetime));
-                if (!days.has(key)) days.set(key, []);
-                days.get(key).push(r);
-            }
-            // Each day's punches oldest-first so first/last read naturally.
-            for (const v of days.values()) v.sort((a, b) => new Date(a.log_datetime) - new Date(b.log_datetime));
-            return days;
-        }
-
-        function dayStats(punches) {
-            const ins  = punches.filter(p => p.direction === 'IN');
-            const outs = punches.filter(p => p.direction === 'OUT');
-            const firstIn = ins[0] || (punches.length > 1 ? punches[0] : null);
-            const lastOut = outs[outs.length - 1] || (punches.length > 1 ? punches[punches.length - 1] : null);
-            let mins = null;
-            if (firstIn && lastOut) {
-                const d = new Date(lastOut.log_datetime) - new Date(firstIn.log_datetime);
-                if (d > 0) mins = Math.round(d / 60000);
-            }
-            return {
-                firstIn, lastOut, mins,
-                duration: mins == null ? null : `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`,
-                count: punches.length
-            };
+        // The attendance day under way now, its rows, and the shift it is
+        // judged against. currentDayRows and dayStats (shift maths, above)
+        // do the work; this only feeds them this person's shifts. { card:
+        // true } is the Today card's day instead (cardDayRows), which stays
+        // on a closed day a while; "on the clock" everywhere else is the
+        // day under way only.
+        function currentDay({ card = false } = {}) {
+            const mine = (card ? cardDayRows : currentDayRows)(allRows, { shift: myShift, shift2: myShift2 }).slice().sort(byTime);
+            const date = mine.length ? dayKey(mine[0]) : null;
+            const shift = date && myShift ? shiftForDay(myShift, myShift2, date, mine[0].log_datetime) : null;
+            return { rows: mine, date, shift };
         }
 
         // The daily card is the WFH person's whole attendance UI, so it always
         // shows where the day stands — including mid-day, when nothing is
         // outstanding. An empty space there reads as "the feature is broken".
-        function renderPrompt(todayPunches) {
+        function renderPrompt(todayPunches, shiftEnd, stats) {
             if (!isWfh) { el('prompt').style.display = 'none'; return; }
 
-            // Selfie events only. Biometric rows carry event_type null and say
-            // nothing about a WFH day.
-            const evs = todayPunches
-                // source, not event_type: biometric punches now carry an event
-                // too, and an office punch must not drive the WFH card.
-                .filter(r => r.source === 'selfie' && r.event_type)
-                .slice()
-                .sort((a, b) => new Date(a.log_datetime) - new Date(b.log_datetime));
-            const last  = t => { for (let i = evs.length - 1; i >= 0; i--) if (evs[i].event_type === t) return evs[i]; return null; };
-            const first = t => evs.find(e => e.event_type === t) || null;
             const at = r => r ? new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', minute: '2-digit', hour12: false })
                                     .format(new Date(r.log_datetime)) : '';
 
@@ -643,34 +910,34 @@
             };
 
             const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', hour12: false }).format(new Date()));
-            // "Still logged in" nags only once the shift has ended - for the
-            // 6pm-3am shift that is after 3am, not after 5pm.
-            const nowMins = toMins(new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()));
-            const pastShiftEnd = myShift && myShift.end_time
-                ? offset(nowMins, toMins(myShift.end_time)) >= 0
+            // "Still logged in" nags only once the day's shift has ended - for
+            // the 6pm-3am shift that is 3am the next morning, and on a dual
+            // 10-5 + 5-7 day it is 7pm, not 5pm.
+            const nowMins = clockOf(Date.now());
+            const pastShiftEnd = shiftEnd != null ? Date.now() >= shiftEnd
+                : myShift && myShift.end_time ? offset(nowMins, toMins(myShift.end_time)) >= 0
                 : hour >= 17;
-            // FIRST login, LAST logout: someone who punches in twice started
-            // their day at the first one, and "logged in 17:45, logged out
-            // 13:00" is nonsense on the card.
-            const login = first('LOGIN'), logout = last('LOGOUT');
-            // Whichever break event came last decides whether we're on a break.
-            const lastBreak = evs.filter(r => r.event_type === 'BREAK_OUT' || r.event_type === 'BREAK_IN').pop();
-            const onBreak = !!lastBreak && lastBreak.event_type === 'BREAK_OUT';
+            const { state, login, logout, lastBreak } = wfhState(todayPunches, pastShiftEnd);
 
-            if (logout) {
+            if (state === 'done') {
                 show('done', '✅', 'Attendance complete for today',
                      `Logged in ${at(login)} · logged out ${at(logout)}.`, null, null);
-            } else if (!login) {
+            } else if (state === 'login') {
                 show('', '🔔', "You haven't logged in today",
                      'Work-from-home attendance needs a selfie login.',
                      ['Login now', 'LOGIN'], null);
-            } else if (onBreak) {
+            } else if (state === 'break') {
                 show('brk', '☕', `On a break since ${at(lastBreak)}`,
                      'Break in when you are back so the day adds up.',
                      ['Break in', 'BREAK_IN'], null);
-            } else if (pastShiftEnd) {
+            } else if (state === 'late') {
+                // Half an hour past the end the day already counts as closed
+                // at the shift end (the Out tile says so); a Logout now still
+                // replaces that with the real time.
                 show('warn', '⏰', 'Still logged in',
-                     `Logged in at ${at(login)}. Log out when you finish, or today shows no check-out.`,
+                     stats && stats.auto === 'no_punch_out'
+                         ? `Logged in at ${at(login)}. The day was closed at your shift end, ${at(stats.lastOut)}. Still working? Log out when you finish.`
+                         : `Logged in at ${at(login)}. Log out when you finish, or the day is closed at your shift end.`,
                      ['Logout', 'LOGOUT'], ['Break out', 'BREAK_OUT']);
             } else {
                 show('live', '🟢', `Logged in at ${at(login)}`,
@@ -680,9 +947,14 @@
         }
 
         function renderToday() {
-            const mine = currentDayRows(allRows);
-            const s = dayStats(mine.slice().sort((a, b) => new Date(a.log_datetime) - new Date(b.log_datetime)));
-            renderPrompt(mine);
+            // The tags measure against the day's own shift: for a dual-shift
+            // person that is 10:00-19:00 on a day both shifts cover, or the
+            // evening shift alone on a day that began in it. The card's day
+            // stays on a closed night for a while (cardDayRows), so a 3:05
+            // Logout reads "complete", not "Login now".
+            const { rows: mine, date, shift } = currentDay({ card: true });
+            const s = dayStats(mine, { date, shift });
+            renderPrompt(mine, shiftEndAt(date, shift), s);
 
             const setTile = (id, value, cls, sub) => {
                 const v = el(id);
@@ -690,40 +962,40 @@
                 v.className = 'val ' + cls;
                 el(id + '-sub').textContent = sub;
             };
-
-            const tagFor = (punch, boundary, kind) => {
-                if (!myShift || !punch) return '';
-                const t = toMins(new Intl.DateTimeFormat('en-GB', { timeZone: IST, hour: '2-digit', minute: '2-digit', hour12: false })
-                    .format(new Date(punch.log_datetime)));
-                const off = offset(t, toMins(boundary));
-                if (kind === 'in') {
-                    const late = off > 0 ? off : 0;
-                    return late > (myShift.grace_minutes || 0)
-                        ? `<span class="tag late">${late < 60 ? late + 'm' : Math.floor(late / 60) + 'h ' + String(late % 60).padStart(2, '0') + 'm'} late</span>`
-                        : '<span class="tag ontime">On time</span>';
-                }
-                const early = off < 0 ? -off : 0;
-                return early > (myShift.early_out_grace_minutes || 0)
-                    ? `<span class="tag early">${early < 60 ? early + 'm' : Math.floor(early / 60) + 'h ' + String(early % 60).padStart(2, '0') + 'm'} early</span>`
-                    : '<span class="tag ontime">Full shift</span>';
-            };
+            const tagHtml = tag => tag ? `<span class="tag ${tag.cls}">${esc(tag.text)}</span>` : '';
+            const device = p => p.device_name || p.device_sn || 'Biometric device';
+            const plural = n => `${n} punch${n === 1 ? '' : 'es'}`;
 
             if (s.firstIn) {
-                setTile('t-in', fmtTime.format(new Date(s.firstIn.log_datetime)), 'in',
-                    s.firstIn.device_name || s.firstIn.device_sn || 'Biometric device');
-                el('t-in-sub').innerHTML = tagFor(s.firstIn, myShift && myShift.start_time, 'in')
-                    || esc(s.firstIn.device_name || s.firstIn.device_sn || 'Biometric device');
+                setTile('t-in', fmtTime.format(new Date(s.firstIn.log_datetime)), 'in', device(s.firstIn));
+                const tag = tagHtml(shiftTag(s.firstIn, shift, 'in'));
+                if (tag) el('t-in-sub').innerHTML = tag;
+            } else if (s.missingLogin) {
+                // Only the logout was punched: no In, rather than an In at the
+                // logout and hours of "late".
+                setTile('t-in', '—', 'none', '');
+                el('t-in-sub').innerHTML = tagHtml({ cls: 'early', text: 'Login not punched' });
             } else setTile('t-in', '—', 'none', 'No punch yet today');
 
-            if (s.lastOut && s.lastOut !== s.firstIn) {
-                setTile('t-out', fmtTime.format(new Date(s.lastOut.log_datetime)), 'out',
-                    s.lastOut.device_name || s.lastOut.device_sn || 'Biometric device');
-                el('t-out-sub').innerHTML = tagFor(s.lastOut, myShift && myShift.end_time, 'out')
-                    || esc(s.lastOut.device_name || s.lastOut.device_sn || 'Biometric device');
-            } else setTile('t-out', '—', 'none', 'Still on the clock');
+            if (s.lastOut) {
+                const o = s.lastOut;
+                setTile('t-out', fmtTime.format(new Date(o.log_datetime)), 'out', o.auto ? 'Shift end' : device(o));
+                // Early / full shift belongs to a Logout only. A break-out as the
+                // last punch is a break still going on, or - once the shift is
+                // over - one the person never came back from. Overtime never
+                // punched out ends at the last punch, eight hours on.
+                const tag = o.auto ? { cls: 'auto', text: 'Auto · no punch-out' }
+                          : s.outIsLastPunch ? { cls: 'auto', text: 'Last punch · no punch-out' }
+                          : o.event_type === 'BREAK_OUT' ? { cls: 'auto', text: s.auto === 'break_not_returned' ? 'Not back from break' : 'On a break' }
+                          : shiftTag(o, shift, 'out');
+                if (tag) el('t-out-sub').innerHTML = tagHtml(tag);
+            } else setTile('t-out', '—', 'none', s.count ? 'Still on the clock' : 'No punch yet today');
 
-            if (s.duration) setTile('t-dur', s.duration, 'dur', `${s.count} punch${s.count === 1 ? '' : 'es'} today`);
-            else setTile('t-dur', '—', 'none', 'Today');
+            if (s.duration) setTile('t-dur', s.duration, 'dur', `${plural(s.count)} today`);
+            else if (s.onClock) {
+                const m = Math.max(0, Math.round((Date.now() - atMs(s.firstIn)) / 60000));
+                setTile('t-dur', hm(m), 'dur', `So far · ${plural(s.count)}`);
+            } else setTile('t-dur', '—', 'none', 'Today');
         }
 
         // ---- Month calendar -------------------------------------------------
@@ -747,6 +1019,9 @@
                 const data = await r.json();
                 if (!r.ok) throw new Error(data.detail || data.error || 'Could not load the calendar.');
                 calData = data; calMonthLoaded = ym;
+                // The server knows the second shift too; if the page could not
+                // read it itself, the Today card's shift still comes out right.
+                if (!myShift2 && myShift && data.shift2 && data.shift2.end_time) { myShift2 = data.shift2; renderToday(); }
                 renderCalendar();
                 renderPay(data);
             } catch (e) {
@@ -804,9 +1079,16 @@
             const rows = days.map(x => { run += Number(x.earned || 0); return { ...x, run }; }).reverse();
             const hm = m => m ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : '—';
             const t12 = t => { if (!t) return null; const [h, m] = t.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+            const small = s => ` <span class="muted" style="font-size:11px">${s}</span>`;
+            const openDate = currentDay().date;
             el('pay-body').innerHTML = rows.map(x => {
                 const label = x.status === 'pending' ? 'Not in yet' : (x.note || (L[x.status] && L[x.status].label) || x.status);
-                const io = x.in ? `${esc(t12(x.in))}${x.out ? ' → ' + esc(t12(x.out)) : ' → …'}` : '<span class="muted">—</span>';
+                const t = calendarTimes(x, d.today, openDate);
+                const io = !t.in && !t.out ? '<span class="muted">—</span>'
+                    : `${t.in ? esc(t12(t.in)) : '<span class="muted">—</span>'} → ` +
+                      (t.out ? esc(t12(t.out)) + (t.auto ? small('· auto') : '')
+                             : t.onClock ? '<span class="muted">on the clock</span>' : '…') +
+                      (t.missingLogin ? small('· login not punched') : '');
                 return `<tr${x.date === d.today ? ' class="today"' : ''}>
                     <td style="white-space:nowrap;font-weight:800">${esc(fmtDay.format(new Date(x.date + 'T12:00:00+05:30')))}</td>
                     <td><span class="ws-badge ${BADGE[x.status] || 'mute'}">${esc(label)}</span>${x.late ? ` <span class="muted" style="font-size:11px">+${x.late}m late</span>` : ''}</td>
@@ -846,14 +1128,18 @@
             const lead = d.days.length ? iso(d.days[0].date) - 1 : 0;
             const blanks = Array.from({ length: lead }, () => '<div class="d blank"></div>').join('');
 
+            const openDate = currentDay().date;
             const cells = d.days.map(day => {
                 const meta = L[day.status] || { label: day.status, color: '#94a3b8' };
                 const dim = day.status === 'future' ? 0.28 : 1;
+                const io = calendarTimes(day, d.today, openDate);
                 const detail = day.status === 'present' || day.status === 'late'
-                    ? `${day.in || '—'}${day.out ? '–' + day.out : ''}`
+                    ? `${io.in || '—'}${io.out ? '–' + io.out + (io.auto ? ' auto' : '') : io.onClock ? ' · on the clock' : ''}`
                     : (day.note || meta.label);
                 const title = `${day.date} · ${meta.label}` +
-                    (day.in ? `\nIn ${day.in}${day.out ? ' · Out ' + day.out : ''}` : '') +
+                    (io.in || io.out ? `\nIn ${io.in || '—'}${io.missingLogin ? ' (login not punched)' : ''}` +
+                        (io.out ? ` · Out ${io.out}${io.auto ? ' (automatic: no punch-out by the shift end)' : ''}`
+                                : io.onClock ? ' · still on the clock' : '') : '') +
                     (day.late ? `\n${day.late} min late` : '') +
                     (day.note ? `\n${day.note}` : '');
                 return `<div class="d${day.date === d.today ? ' today' : ''}" title="${esc(title)}"` +
@@ -881,12 +1167,23 @@
             if (view === 'days') {
                 thead.innerHTML = '<tr><th>Day</th><th>First IN</th><th>Last OUT</th><th>Time on site</th><th>Punches</th></tr>';
                 const days = [...groupByDay(rows).entries()].sort((a, b) => b[0].localeCompare(a[0]));
+                const openDate = currentDay().date;
+                const note = t => ` <span class="muted" style="font-size:11px">${t}</span>`;
                 tbody.innerHTML = days.map(([day, punches]) => {
-                    const s = dayStats(punches);
+                    // Same In/Out as the calendar: the day's own shift, the
+                    // shift-end logout for a day nobody closed.
+                    const shift = myShift ? shiftForDay(myShift, myShift2, day, punches[0].log_datetime) : null;
+                    const s = dayStats(punches, { date: day, shift });
+                    const inCell = s.firstIn
+                        ? `<span style="color:#34d399">${esc(fmtTime.format(new Date(s.firstIn.log_datetime)))}</span>`
+                        : `<span class="muted">—</span>${s.missingLogin ? note('login not punched') : ''}`;
+                    const outCell = s.lastOut
+                        ? `<span style="color:#fb7185">${esc(fmtTime.format(new Date(s.lastOut.log_datetime)))}</span>${s.lastOut.auto ? note('· auto') : s.outIsLastPunch ? note('· last punch') : ''}`
+                        : s.onClock && day === openDate ? '<span class="muted">On the clock</span>' : '<span class="muted">—</span>';
                     return `<tr>
                         <td>${esc(fmtDay.format(new Date(day + 'T00:00:00+05:30')))}</td>
-                        <td>${s.firstIn ? `<span style="color:#34d399">${esc(fmtTime.format(new Date(s.firstIn.log_datetime)))}</span>` : '<span class="muted">—</span>'}</td>
-                        <td>${s.lastOut && s.lastOut !== s.firstIn ? `<span style="color:#fb7185">${esc(fmtTime.format(new Date(s.lastOut.log_datetime)))}</span>` : '<span class="muted">—</span>'}</td>
+                        <td>${inCell}</td>
+                        <td>${outCell}</td>
                         <td>${s.duration ? esc(s.duration) : '<span class="muted">—</span>'}</td>
                         <td class="muted">${s.count}</td>
                     </tr>`;
@@ -904,11 +1201,15 @@
                         BREAK_IN:  ['in',  '↩ Break in'],
                         LOGOUT:    ['out', '← Logout'],
                     }[r.event_type];
-                    const pill = EV ? `<span class="pill ${EV[0]}">${EV[1]}</span>`
+                    // A repeat tap carries the labels of the punch it repeats;
+                    // shown as a second Login it would read as two events.
+                    const repeat = isRepeat(r);
+                    const pill = repeat ? '<span class="pill unk">↻ Repeat tap</span>'
+                               : EV ? `<span class="pill ${EV[0]}">${EV[1]}</span>`
                                : r.direction === 'IN'  ? '<span class="pill in">→ IN</span>'
                                : r.direction === 'OUT' ? '<span class="pill out">← OUT</span>'
                                : '<span class="pill unk">• Punch</span>';
-                    return `<tr>
+                    return `<tr${repeat ? ' class="repeat" title="A second touch within two minutes of the punch before it. It counts as that one punch."' : ''}>
                         <td>${esc(fmtDay.format(d))}</td>
                         <td style="font-weight:900">${esc(fmtTime.format(d))}</td>
                         <td>${pill}</td>
@@ -1397,6 +1698,11 @@
               { event: 'INSERT', schema: 'public', table: 'attendance_logs', filter: `user_id=eq.${session.user.id}` },
               () => { calMonthLoaded = null; load(); loadCalendar(); })
           .subscribe();
+
+        // The Today card changes with the clock, not only with punches: the
+        // shift ends and the automatic logout shows, a finished night stops
+        // being "today", time on site keeps counting.
+        setInterval(() => { if (!document.hidden) renderToday(); }, 60 * 1000);
     })();
     </script>
 </body>

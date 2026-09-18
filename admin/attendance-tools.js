@@ -19,9 +19,18 @@
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action, ...extra }),
         });
-        const data = await r.json();
+        // A platform error page (the function cut off at its time limit) is
+        // not JSON: report the status rather than a JSON syntax error.
+        const text = await r.text().catch(() => '');
+        let data = null;
+        try { data = JSON.parse(text); } catch { data = null; }
+        if (!data || typeof data !== 'object') {
+            const snippet = String(text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+            const timeout = r.status === 504 || /TIMEOUT/i.test(snippet);
+            throw new Error(`${timeout ? 'The server timed out' : 'The server answered'} (${r.status})` + (snippet ? `: ${snippet}` : '.'));
+        }
         if (!r.ok) {
-            const err = new Error(data.detail || data.error || 'Request failed');
+            const err = new Error(data.detail || data.error || `Request failed (${r.status})`);
             err.code = data.error || '';
             throw err;
         }
@@ -121,10 +130,12 @@
         const out = $('recompute-result');
         const from = $('recompute-from').value || daysAgo(14);
         const to = $('recompute-to').value || istToday();
+        // One person (their Biometric ID), or everyone in the range.
+        const code = ($('recompute-code') && $('recompute-code').value || '').trim();
         $('recompute-check').disabled = true; $('recompute-apply').disabled = true;
         out.className = 'text-xs font-bold text-slate-400'; out.textContent = apply ? 'Applying…' : 'Checking…';
         try {
-            const r = await api('att_recompute', { from, to, apply });
+            const r = await api('att_recompute', { from, to, apply, ...(code ? { employee_code: code } : {}) });
             lastCheck = r;
             if (apply) {
                 out.className = 'text-xs font-bold ' + (r.failed ? 'text-rose-300' : 'text-emerald-300');
@@ -135,10 +146,21 @@
                 const refresh = $('att-refresh');
                 if (refresh) refresh.click();
             } else {
-                out.className = 'text-xs font-bold ' + (r.changes ? 'text-amber-300' : 'text-emerald-300');
+                // "All ... follow" only when the whole range was checked: a
+                // truncated pass stopped short of its newest punches.
+                out.className = 'text-xs font-bold ' + (r.changes || r.truncated ? 'text-amber-300' : 'text-emerald-300');
                 out.textContent = r.changes
                     ? `${r.changes} of ${r.scanned} punches (${r.people} people) would change.`
-                    : `All ${r.scanned} punches already follow the current rules.`;
+                    : r.truncated
+                        ? `None of the ${r.scanned} punches checked would change.`
+                        : `All ${r.scanned} punches already follow the current rules.`;
+            }
+            // The read is capped; past the cap the newest punches lack what
+            // follows them, so the server stops judging a little earlier.
+            if (r.truncated) {
+                out.textContent += r.judged_to
+                    ? ` Too many punches for one pass: only those up to ${IST_T.format(new Date(r.judged_to)).replace(',', '')} were checked — run again from that date.`
+                    : ' Too many punches for one pass — pick a shorter range.';
             }
             const wrap = $('recompute-sample'), tb = $('recompute-tbody');
             const sample = r.sample || [];
@@ -164,6 +186,15 @@
     $('recompute-apply').addEventListener('click', () => {
         if (!lastCheck || !lastCheck.changes) return;
         runRecompute(true);
+    });
+    // A new range or person needs a new Check before anything is applied.
+    ['recompute-from', 'recompute-to', 'recompute-code'].forEach(id => {
+        const el = $(id);
+        if (el) el.addEventListener('input', () => {
+            lastCheck = null;
+            $('recompute-apply').disabled = true;
+            $('recompute-apply').style.opacity = '.4';
+        });
     });
 
     /* ---- wiring ------------------------------------------------------- */

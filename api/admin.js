@@ -14,7 +14,9 @@ const { createSession, validSession, sessionCookie, sameOrigin } = require('../l
 const { auditWrap } = require('../lib/admin-audit');
 const { istParts, istToday, buildPunchEmail, evaluateShift, describeWorkingDays,
         weekOffsFor, buildMonth, computePay, computeMonthlyPay, monthDates, DAY_STATUS,
-        buildLeaveChatLine, assignDays, effectiveShift, istIsoWeekday, shiftDays } = require('../lib/attendance');
+        buildLeaveChatLine, assignDays, effectiveShift, istIsoWeekday, shiftDays,
+        classifyDay, shiftForDay, shiftEndAt, addDaysIso,
+        AUTO_LOGOUT_GRACE_MS, isRepeatRow } = require('../lib/attendance');
 
 /**
  * ',shift2_id,company2' once the dual-shift migration has run, '' before it —
@@ -24,6 +26,63 @@ const { istParts, istToday, buildPunchEmail, evaluateShift, describeWorkingDays,
 async function dualCols(sb) {
   try { const r = await sb('profiles?select=shift2_id&limit=1'); return r.ok ? ',shift2_id,company2' : ''; }
   catch { return ''; }
+}
+
+/**
+ * The origin this request came in on, for calling a sibling function of the
+ * same deployment. Vercel routes a Host only to the project it belongs to, so
+ * this is the deployment the admin is using; anything that does not look
+ * like a plain host name falls back to production.
+ */
+const PRODUCTION_ORIGIN = 'https://work-suite-mauve.vercel.app';
+function requestOrigin(req) {
+  const h = (req && req.headers) || {};
+  const host = String(h.host || '').trim();
+  const proto = String(h['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  if (!/^[a-z0-9.-]+(:\d{1,5})?$/i.test(host)) return PRODUCTION_ORIGIN;
+  const local = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host);
+  return `${proto === 'http' && local ? 'http' : 'https'}://${host}`;
+}
+
+// How long "Run now" (att_scheduler_run) waits for the attendance job before
+// answering 202 "still running". vercel.json gives api/admin.js 60 s.
+const RUN_NOW_WAIT_MS = 50000;
+
+/**
+ * Every row a PostgREST read matches, page by page. Supabase answers at most
+ * 1,000 rows a request whatever `limit` asks for, so a single read of a busy
+ * range silently loses its tail. `path` must already carry its filters and a
+ * stable order with a unique tie-breaker (…&order=log_datetime.asc,id.asc);
+ * pages of `pageSize` are read until a short one comes back. Rows are
+ * de-duplicated by id, because a punch synced late into the middle of the
+ * order shifts every later offset by one.
+ *
+ * Returns { rows, complete } - complete is false when maxRows stopped the
+ * read with more still to come - or { error, status, detail } when any page
+ * failed: part of the picture is no picture.
+ */
+const PAGE_ROWS = 1000;
+async function readPages(get, path, { pageSize = PAGE_ROWS, maxRows = 20000 } = {}) {
+  const rows = [], seen = new Set();
+  for (let offset = 0; offset < maxRows; offset += pageSize) {
+    const size = Math.min(pageSize, maxRows - offset);
+    let page;
+    try {
+      const r = await get(`${path}&limit=${size}&offset=${offset}`);
+      if (!r.ok) return { error: true, status: r.status, detail: (await r.text().catch(() => '')).slice(0, 200) };
+      page = await r.json();
+    } catch (e) {
+      return { error: true, status: 0, detail: String((e && e.message) || e).slice(0, 200) };
+    }
+    if (!Array.isArray(page)) return { error: true, status: 0, detail: 'not a list' };
+    for (const row of page) {
+      const id = row && row.id != null ? String(row.id) : null;
+      if (id != null) { if (seen.has(id)) continue; seen.add(id); }
+      rows.push(row);
+    }
+    if (page.length < size) return { rows, complete: true };
+  }
+  return { rows, complete: false };
 }
 
 /**
@@ -106,31 +165,78 @@ const HOLIDAY_COMPANIES = [
  * evening), or when a code is bound to a person and their shift becomes
  * known. Reads a window of punches, re-derives each person's days, and
  * patches only the rows that come out different. Dry run unless `apply`.
+ *
+ * A punch's labels depend on the punches around it, so the read reaches
+ * RECOMPUTE_CONTEXT_MS either side of the range asked for: a night shift that
+ * began the evening before `from` arrives with its login, and a day still
+ * running past `to` with what follows. Only rows inside [from 00:00, to
+ * 23:59:59] IST are reported or patched; the rest is context. (Without it, a
+ * 03:00 logout on the first date read as that date's Login, and roster_bind,
+ * which applies, wrote it.)
+ *
+ * The read is paged (readPages): Supabase answers 1,000 rows a request, and a
+ * single capped read used to judge only the oldest part of the range - the
+ * most recent days were never checked, and the pass still said everything
+ * followed the rules.
  * ------------------------------------------------------------------------- */
+// Longer than any attendance day can run (lib/attendance MAX_DAY_SPAN_MS is
+// 30 hours), so every day that touches the range is read whole.
+const RECOMPUTE_CONTEXT_MS = 36 * 3600 * 1000;
+// Rows one pass reads, over all its pages (context included). Past it the
+// pass is `truncated` and says how far it judged.
+const RECOMPUTE_ROW_LIMIT = 20000;
+
 async function recomputePunches({ sb, from, to, apply, employeeCode, deadlineAt }) {
+  const fromAt = new Date(`${from}T00:00:00+05:30`).getTime();
+  const toAt = new Date(`${to}T23:59:59+05:30`).getTime();
+  if (isNaN(fromAt) || isNaN(toAt)) return { error: 'bad range', detail: 'from and to must be YYYY-MM-DD.' };
   const dual = await dualCols(sb);
-  const [pRes, shiftsRes, logsRes] = await Promise.all([
+  const [pRes, shiftsRes, logsRead, autoRead] = await Promise.all([
     withEmployeeId(sb, `profiles?select=id,full_name,company,employee_code,shift_id${dual}&limit=2000`),
     sb('shifts?select=*'),
-    sb(`attendance_logs?select=id,user_id,employee_code,log_datetime,log_date,direction,direction_derived,event_type,source` +
+    readPages(sb, `attendance_logs?select=id,user_id,employee_code,log_datetime,log_date,direction,direction_derived,event_type,source` +
        (employeeCode ? `&employee_code=eq.${encodeURIComponent(employeeCode)}` : '') +
-       `&log_datetime=gte.${encodeURIComponent(new Date(`${from}T00:00:00+05:30`).toISOString())}` +
-       `&log_datetime=lte.${encodeURIComponent(new Date(`${to}T23:59:59+05:30`).toISOString())}` +
-       `&order=log_datetime.asc&limit=5000`),
+       `&log_datetime=gte.${encodeURIComponent(new Date(fromAt - RECOMPUTE_CONTEXT_MS).toISOString())}` +
+       `&log_datetime=lte.${encodeURIComponent(new Date(toAt + RECOMPUTE_CONTEXT_MS).toISOString())}` +
+       `&order=log_datetime.asc,id.asc`, { maxRows: RECOMPUTE_ROW_LIMIT }),
+    // The days the scheduled job closed at a break nobody came back from.
+    // Fail-soft: the table comes with supabase-attendance-scheduler-migration.sql.
+    readPages(sb, `attendance_auto_logouts?select=user_id,log_date,kind,logout_at&kind=eq.break_not_returned` +
+       `&log_date=gte.${addDaysIso(from, -1)}&log_date=lte.${addDaysIso(to, 1)}&order=user_id.asc,log_date.asc`),
   ]);
-  if (!logsRes.ok) return { error: 'logs fetch failed', detail: (await logsRes.text()).slice(0, 200) };
-  const logs = await logsRes.json();
+  if (logsRead.error) return { error: 'logs fetch failed', detail: logsRead.detail };
+  const logs = logsRead.rows;
   const profiles = pRes.ok ? await pRes.json() : [];
   const shifts = shiftsRes.ok ? await shiftsRes.json() : [];
   const shiftById = new Map(shifts.map(s => [s.id, s]));
   const defaultShift = shifts.find(s => s.is_default) || null;
   const profById = new Map(profiles.map(p => [p.id, p]));
+  // A code nobody holds has no shift - not the default one - so its days are
+  // cut by the gap between punches until it is bound (roster_bind reruns this).
   const shiftOf = (row, when) => {
     const p = row.user_id ? profById.get(row.user_id) : null;
+    if (!p) return null;
     const s1 = resolveShift(p, shiftById, defaultShift);
-    const s2 = (p && p.shift2_id && shiftById.get(p.shift2_id)) || null;
+    const s2 = (p.shift2_id && shiftById.get(p.shift2_id)) || null;
     return s2 ? effectiveShift(s1, s2, istIsoWeekday(new Date(when || row.log_datetime))) : s1;
   };
+
+  // The read is oldest first and capped at RECOMPUTE_ROW_LIMIT rows in all.
+  // When the cap cuts it short, the newest rows it did get are missing
+  // whatever follows them, so only rows a full context window before the last
+  // one read are judged; the admin runs the rest as a later range.
+  const truncated = !logsRead.complete;
+  const lastReadAt = logs.reduce((m, l) => Math.max(m, new Date(l.log_datetime).getTime()), -Infinity);
+  const judgedTo = truncated && logs.length ? Math.min(toAt, lastReadAt - RECOMPUTE_CONTEXT_MS) : toAt;
+  const inRange = l => { const t = new Date(l.log_datetime).getTime(); return t >= fromAt && t <= judgedTo; };
+
+  // The scheduled job closes a day at a break nobody came back from by
+  // relabelling that break-out LOGOUT (api/attendance-webhook, auto logout
+  // 'break_not_returned'). Until the next day starts the rules alone still
+  // read it as a break, so without this the check would offer to undo the job.
+  const leftAtBreak = new Set(((autoRead && !autoRead.error && autoRead.rows) || [])
+    .filter(a => a && a.kind === 'break_not_returned' && a.user_id && a.log_date && a.logout_at)
+    .map(a => `${a.user_id}|${a.log_date}|${new Date(a.logout_at).getTime()}`));
 
   // One person = one employee code (or, for selfie-only people, one user).
   const byPerson = new Map();
@@ -141,12 +247,28 @@ async function recomputePunches({ sb, from, to, apply, employeeCode, deadlineAt 
   });
 
   const changes = [];
-  for (const list of byPerson.values()) {
+  let scanned = 0;
+  const people = new Set();
+  for (const [key, list] of byPerson) {
     // The shift of whoever the punches belong to now - a row bound after the
     // fact carries the user_id, so this picks up their real shift.
     const owner = list.find(x => x.user_id) || list[0];
-    for (const m of assignDays(list, { shiftFor: punch => shiftOf(owner, punch && punch.log_datetime) })) {
-      const s = list.find(x => x.id === m.id);
+    const byId = new Map(list.map(x => [x.id, x]));
+    const labelled = assignDays(list, { shiftFor: punch => shiftOf(owner, punch && punch.log_datetime) });
+    // Each date's last counted punch: only that one can be the job's Logout
+    // (a later punch the same day means they did come back).
+    const counted = labelled.filter(x => !x.duplicate);
+    const lastOfDate = new Set(counted.filter((x, i) => !counted[i + 1] || counted[i + 1].log_date !== x.log_date).map(x => x.id));
+    for (let m of labelled) {
+      const s = byId.get(m.id);
+      if (!inRange(s)) continue;
+      scanned++;
+      people.add(key);
+      if (m.event_type === 'BREAK_OUT' && s.event_type === 'LOGOUT' && s.user_id && m.log_date === s.log_date
+          && lastOfDate.has(m.id)
+          && leftAtBreak.has(`${s.user_id}|${s.log_date}|${new Date(s.log_datetime).getTime()}`)) {
+        m = { ...m, event_type: 'LOGOUT' };
+      }
       if (s.log_date !== m.log_date || s.direction !== m.direction || s.event_type !== m.event_type) {
         const who = s.user_id ? profById.get(s.user_id) : null;
         changes.push({ id: s.id, employee_code: s.employee_code, log_datetime: s.log_datetime,
@@ -173,7 +295,11 @@ async function recomputePunches({ sb, from, to, apply, employeeCode, deadlineAt 
   }
   return {
     from, to, apply: !!apply,
-    scanned: logs.length, people: byPerson.size,
+    scanned, people: people.size,
+    // Rows read either side of the range only to label the ones inside it.
+    context: logs.length - scanned,
+    // The read hit its cap: rows after judged_to were left for another run.
+    truncated, judged_to: truncated ? new Date(Math.max(judgedTo, fromAt)).toISOString() : null,
     changes: changes.length, patched, failed,
     remaining: apply ? Math.max(0, changes.length - patched - failed) : changes.length,
     sample: changes.slice(0, 40),
@@ -1865,7 +1991,9 @@ module.exports = async function handler(req, res) {
         sb(`holidays?select=holiday_date,name,company&holiday_date=gte.${from}&holiday_date=lte.${to}`).then(r => r.ok ? r.json() : []),
         fetchAll(`leave_requests?select=user_id,leave_type_id,day_part,start_date,end_date&status=eq.approved&start_date=lte.${to}&end_date=gte.${from}`),
         sb('leave_types?select=id,name').then(r => r.ok ? r.json() : []),
-        fetchAll(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type,source&log_date=gte.${from}&log_date=lte.${to}&order=log_datetime.asc`),
+        // email_status / email_error mark a repeat tap (lib isRepeatRow), which
+        // the month's days must not count; id orders ties so pages never overlap.
+        fetchAll(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type,source,email_status,email_error&log_date=gte.${from}&log_date=lte.${to}&order=log_datetime.asc,id.asc`),
         sb('salaries?select=*').then(r => r.ok ? r.json() : []),
         sb('secondary_roles?select=user_id,label,shift_id,per_day_rate,currency,note').then(r => r.ok ? r.json() : []),
       ]);
@@ -1947,9 +2075,13 @@ module.exports = async function handler(req, res) {
           };
         }
 
+        // [in, out, late minutes, 1 = the Out is the automatic shift-end
+        // logout (nobody punched out), 1 = the login was never punched]. The
+        // flags ride at the end so an older page reading [0..2] is unaffected.
         const times = {}, notes = {};
         mon.days.forEach(d => {
-          if (d.worked) times[d.date] = [hhmm(d.firstIn), hhmm(d.lastOut), d.lateMinutes || 0];
+          if (d.worked) times[d.date] = [hhmm(d.firstIn), hhmm(d.lastOut), d.lateMinutes || 0,
+                                         d.autoLogout ? 1 : 0, d.missingLogin ? 1 : 0];
           if (d.status === 'holiday' && d.holidayName) notes[d.date] = d.holidayName;
           if (d.status === 'leave' && d.leaveType) notes[d.date] = d.leaveType + (d.dayPart && d.dayPart !== 'full' ? ' (half)' : '');
         });
@@ -2354,15 +2486,23 @@ module.exports = async function handler(req, res) {
     // ------------------------------------------------------------------
     if (action === 'att_daily_report') {
       const date = String(body.date || istToday()).slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'bad date', detail: 'date must be YYYY-MM-DD.' });
 
-      const [profiles, logsRes, shiftsRes, holRes, leaveRes] = await Promise.all([
+      const [profiles, logsRead, shiftsRes, holRes, leaveRes, postedAutos] = await Promise.all([
         loadProfiles(),
-        sb(`attendance_logs?log_date=eq.${date}&select=*&order=log_datetime.asc&limit=5000`),
+        // Paged: Supabase answers 1,000 rows a request. select=* carries
+        // email_status / email_error, which mark a repeat tap (lib isRepeatRow).
+        readPages(sb, `attendance_logs?log_date=eq.${date}&select=*&order=log_datetime.asc,id.asc`),
         sb('shifts?select=*'),
         sb(`holidays?holiday_date=eq.${date}&select=*`),
         // Approved leave whose range covers this date.
         sb(`leave_requests?status=eq.approved&start_date=lte.${date}&end_date=gte.${date}` +
            `&select=user_id,leave_type_id,day_part`),
+        // What the scheduled job did about each day that nobody closed.
+        // Fail-soft: before supabase-attendance-scheduler-migration.sql there
+        // is no table, and the rules alone decide.
+        sb(`attendance_auto_logouts?log_date=eq.${date}&select=user_id,log_date,kind,logout_at`)
+          .then(r => (r.ok ? r.json() : [])).catch(() => []),
       ]);
       // Shifts are optional — if the migration hasn't been run the report
       // still works, just without late/early flags.
@@ -2389,8 +2529,10 @@ module.exports = async function handler(req, res) {
       const holidayFor = (company) =>
         holidays.find(h => h.company && h.company === company) ||
         holidays.find(h => !h.company) || null;
-      if (!logsRes.ok) return res.status(502).json({ error: 'logs fetch failed', detail: (await logsRes.text()).slice(0, 200) });
-      const logs = await logsRes.json();
+      if (logsRead.error) return res.status(502).json({ error: 'logs fetch failed', detail: logsRead.detail });
+      const logs = logsRead.rows;
+      const postedByUser = new Map((Array.isArray(postedAutos) ? postedAutos : [])
+        .filter(a => a && a.user_id && a.logout_at).map(a => [a.user_id, a]));
 
       const byUser = new Map();     // user_id -> punches
       const orphans = new Map();    // employee_code -> punches (no profile)
@@ -2402,47 +2544,95 @@ module.exports = async function handler(req, res) {
         bucket.get(key).push(l);
       }
 
-      const summarize = (unordered) => {
+      // One person's day, by the rules the employee calendar, the team grid,
+      // the pay sheet and the Bitrix job use (lib/attendance classifyDay), so
+      // none of them can tell an admin a different story about the same day:
+      //   In   the first IN. A day whose first punch was the logout (the login
+      //        was never punched) has no In - missing_login - rather than an
+      //        In at the logout and hours of "late".
+      //   Out  the last punch, and only when it is an OUT: a break-out that a
+      //        return followed is not the Out. While the last punch is an IN
+      //        and the shift is still on there is no Out (on_clock). Once the
+      //        shift has ended with nobody punched out, the Out is the shift
+      //        end, flagged auto_logout - the Logout the scheduled job posts.
+      //        Both wait AUTO_LOGOUT_GRACE_MS (30 min) past the shift end, as
+      //        the calendar and the job do: until then the person is still
+      //        on the clock (or on their break).
+      // Early-out is measured only against a real Out, never against a break
+      // the person is on right now. Repeat taps count for nothing.
+      const now = new Date();
+      const hm = iso => (iso ? istParts(new Date(iso)).prettyTime : null);
+      const summarize = (unordered, shift1 = null, shift2 = null, posted = null) => {
         // Sort here rather than trusting the caller's query order — first-IN /
         // last-OUT are only meaningful on a chronological list, and that is
         // too important to leave depending on what the REST layer returns.
         const punches = unordered.slice()
           .sort((a, b) => new Date(a.log_datetime) - new Date(b.log_datetime));
-        const ins  = punches.filter(p => p.direction === 'IN');
-        const outs = punches.filter(p => p.direction === 'OUT');
-        // If the device never told us the direction, fall back to
-        // first-punch / last-punch for the day.
-        const firstIn  = ins.length  ? ins[0]                 : (punches.length > 1 ? punches[0] : null);
-        const lastOut  = outs.length ? outs[outs.length - 1]  : (punches.length > 1 ? punches[punches.length - 1] : null);
+        const counted = punches.filter(p => !isRepeatRow(p));
+        const first = counted[0] || null, last = counted[counted.length - 1] || null;
+        const day = classifyDay({ date, shift: shift1, shift2, punches, now });
+        // The shift classifyDay judged the day by (a dual-shift day that began
+        // in the second shift is that shift's day).
+        const shift = shiftForDay(shift1, shift2, date, first ? first.log_datetime : null);
+        const endAt = shiftEndAt(date, shift);
+        const shiftOn = !!(endAt && now.getTime() < endAt.getTime() + AUTO_LOGOUT_GRACE_MS);
 
-        let minutes = null;
-        if (firstIn && lastOut) {
-          const diff = new Date(lastOut.log_datetime) - new Date(firstIn.log_datetime);
-          if (diff > 0) minutes = Math.round(diff / 60000);
+        // What the scheduled job did (attendance_auto_logouts), when it did
+        // something and nothing was punched after it. Its break_not_returned
+        // relabels that break-out LOGOUT, which the rules can no longer tell
+        // from a real Logout; a no_punch_out it posted stands even when the
+        // rules would now read the day differently (a shift changed since).
+        let lastOut = day.lastOut, autoLogout = !!day.autoLogout, autoKind = day.autoLogoutKind || null;
+        if (posted && last) {
+          const at = new Date(posted.logout_at).getTime(), lastAt = new Date(last.log_datetime).getTime();
+          if (posted.kind === 'no_punch_out' && last.direction === 'IN' && lastAt <= at) {
+            autoKind = 'no_punch_out';
+            if (!autoLogout) { autoLogout = true; lastOut = new Date(at).toISOString(); }
+          } else if (posted.kind === 'break_not_returned' && last.direction === 'OUT' && lastAt === at) {
+            autoKind = 'break_not_returned';          // the Out is that break-out, as the rules read it
+          }
+        }
+        let worked = day.workedMinutes;
+        if (lastOut !== day.lastOut) {
+          worked = day.firstIn && lastOut ? Math.max(0, Math.round((new Date(lastOut) - new Date(day.firstIn)) / 60000)) : null;
         }
 
+        const onBreak = !!(last && last.direction === 'OUT' && last.event_type === 'BREAK_OUT' && shiftOn);
+        const sh = evaluateShift({ shift, firstIn: day.firstIn, lastOut: onBreak ? null : lastOut, date: dayAnchor });
+        const minutes = worked > 0 ? worked : null;
         return {
-          first_in:      firstIn ? firstIn.log_datetime : null,
-          first_in_time: firstIn ? istParts(new Date(firstIn.log_datetime)).prettyTime : null,
-          last_out:      lastOut ? lastOut.log_datetime : null,
-          last_out_time: lastOut ? istParts(new Date(lastOut.log_datetime)).prettyTime : null,
-          punches:       punches.length,
-          minutes,
-          duration:      minutes == null ? null : `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`,
-          mail_sent:     punches.filter(p => p.email_status === 'sent').length,
-          mail_problem:  punches.filter(p => ['failed', 'pending', 'unmapped'].includes(p.email_status)).length,
-          devices:       [...new Set(punches.map(p => p.device_name || p.device_sn).filter(Boolean))],
+          shift, sh,
+          fields: {
+            first_in:      day.firstIn,
+            first_in_time: hm(day.firstIn),
+            last_out:      lastOut,
+            last_out_time: hm(lastOut),
+            // The Out is the shift end, put there because nobody punched out.
+            auto_logout:   autoLogout,
+            // 'no_punch_out' | 'break_not_returned' (left at that break) | null
+            auto_logout_kind: autoKind,
+            // The day's first punch was at the shift end: a Logout with no login.
+            missing_login: !!day.missingLogin,
+            // Punched in, shift still on (or in its grace), no Out yet.
+            on_clock:      !!(counted.length && !lastOut && shiftOn),
+            // The Out shown is a break they have not come back from yet.
+            on_break:      onBreak,
+            punches:       punches.length,
+            minutes,
+            duration:      minutes == null ? null : `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`,
+            mail_sent:     punches.filter(p => p.email_status === 'sent').length,
+            mail_problem:  punches.filter(p => ['failed', 'pending', 'unmapped'].includes(p.email_status)).length,
+            devices:       [...new Set(punches.map(p => p.device_name || p.device_sn).filter(Boolean))],
+          },
         };
       };
 
       const rows = profiles
         .map(p => {
           const punches = byUser.get(p.id) || [];
-          const s = summarize(punches);
           const shift1 = resolveShift(p, shiftById, defaultShift);
           const shift2 = (p.shift2_id && shiftById.get(p.shift2_id)) || null;
-          const shift = shift2 ? effectiveShift(shift1, shift2, istIsoWeekday(dayAnchor)) : shift1;
-          const sh = evaluateShift({ shift, firstIn: s.first_in, lastOut: s.last_out, date: dayAnchor });
+          const { shift, sh, fields: s } = summarize(punches, shift1, shift2, postedByUser.get(p.id) || null);
 
           const holiday = holidayFor(p.company);
           const leave   = leaveByUser.get(p.id) || null;
@@ -2450,9 +2640,12 @@ module.exports = async function handler(req, res) {
 
           // Order matters. Someone who actually punched is Present even on a
           // holiday. Otherwise: holiday, then approved leave, then week-off,
-          // and only what is left over is a real absence.
+          // and only what is left over is a real absence. A day with punches
+          // and no Out is 'No check-out' (still on the clock, or overtime
+          // nobody closed); a day the shift end closed is Present, flagged
+          // auto_logout.
           let status = 'Absent';
-          if (punches.length)                    status = (s.first_in && !s.last_out) ? 'No check-out' : 'Present';
+          if (punches.length)                    status = s.last_out ? 'Present' : 'No check-out';
           else if (holiday && !holiday.is_optional) status = 'Holiday';
           else if (leave)                        status = leave.day_part === 'full' ? 'On leave' : 'Half day leave';
           else if (holiday)                      status = 'Holiday';
@@ -2482,11 +2675,12 @@ module.exports = async function handler(req, res) {
             || String(a.full_name || '').localeCompare(String(b.full_name || ''));
         });
 
+      // A code nobody holds has no shift: its day is only what was punched.
       const unknown = [...orphans.entries()].map(([code, punches]) => ({
         employee_code: code,
         employee_name: punches[0]?.employee_name || null,
         status: 'Unmapped',
-        ...summarize(punches),
+        ...summarize(punches).fields,
       }));
 
       return res.status(200).json({
@@ -2504,6 +2698,12 @@ module.exports = async function handler(req, res) {
           holiday:    rows.filter(r => r.status === 'Holiday').length,
           late:       rows.filter(r => r.is_late).length,
           early_out:  rows.filter(r => r.is_early_out).length,
+          // Days the shift end closed because nobody punched out. They are
+          // Present (and counted there), never 'No check-out'.
+          auto_logout: rows.filter(r => r.auto_logout).length,
+          // The part of no_checkout whose shift is still on.
+          on_clock:   rows.filter(r => r.on_clock).length,
+          missing_login: rows.filter(r => r.missing_login).length,
           no_shift:   rows.filter(r => !r.shift_assigned).length,
           punches:    logs.length,
           mail_sent:  logs.filter(l => l.email_status === 'sent').length,
@@ -2619,13 +2819,22 @@ module.exports = async function handler(req, res) {
     // Resend notifications that never made it out
     // ------------------------------------------------------------------
     if (action === 'att_resend') {
-      const profiles = await loadProfiles();
+      // The shifts, fail-soft like the daily report's: without them the mail
+      // still goes, just without the late / early note.
+      const [profiles, shiftList] = await Promise.all([
+        loadProfiles(),
+        sb('shifts?select=*').then(x => (x.ok ? x.json() : [])).catch(() => []),
+      ]);
       const byId = new Map(profiles.map(p => [p.id, p]));
+      const shiftById = new Map(shiftList.map(x => [x.id, x]));
+      const defaultShift = shiftList.find(x => x.is_default) || null;
 
       let q;
       if (body.id) {
         q = `attendance_logs?id=eq.${encodeURIComponent(String(body.id))}&select=*`;
       } else {
+        // 'skipped' rows (backfills, and repeat taps within two minutes of the
+        // punch they repeat) are not pending, so they are never picked up here.
         const date = String(body.date || istToday()).slice(0, 10);
         q = `attendance_logs?log_date=eq.${date}&email_status=in.(failed,pending)&user_id=not.is.null&select=*&order=log_datetime.asc&limit=200`;
       }
@@ -2640,11 +2849,33 @@ module.exports = async function handler(req, res) {
         if (Date.now() > deadlineAt) { skipped++; continue; }
         const p = l.user_id ? byId.get(l.user_id) : null;
         if (!p || !p.email) { skipped++; continue; }
+        // A repeat tap asked for by id is still the punch it repeats: that one
+        // carries the mail.
+        if (l.email_status === 'skipped' && /^repeat tap/i.test(String(l.email_error || ''))) { skipped++; continue; }
 
+        // The same mail the punch would have sent at the time: its event
+        // (Login / Break out / ...) and the shift note - late only on a Login,
+        // early only on a Logout - against the person's shift for that
+        // attendance day. The punch stands in for the day's first punch when
+        // narrowing a dual shift: for a Login it is the first punch, and for a
+        // Logout either reading ends at the same time.
         const when = new Date(l.log_datetime);
+        const shift1 = resolveShift(p, shiftById, defaultShift);
+        const shift2 = (p.shift2_id && shiftById.get(p.shift2_id)) || null;
+        const dayShift = shiftForDay(shift1, shift2, l.log_date || istParts(when).isoDate, when);
+        const shiftNote = dayShift ? evaluateShift({
+          shift: dayShift,
+          firstIn: l.event_type === 'LOGIN' ? when : null,
+          lastOut: l.event_type === 'LOGOUT' ? when : null,
+          date: when,
+        }) : null;
         const { subject, html, text } = buildPunchEmail({
           fullName: p.full_name, direction: l.direction, when,
+          // Rows from before events were stored have none; the mail then
+          // falls back to the bare direction, as it always did.
+          eventType: l.event_type || undefined,
           deviceName: l.device_name, employeeCode: l.employee_code,
+          shift: shiftNote,
         });
         const result = await sendMail({ company: p.company, to: p.email, subject, html, text });
         if (result.ok) sent++; else failed++;
@@ -2661,6 +2892,122 @@ module.exports = async function handler(req, res) {
       }
 
       return res.status(200).json({ success: true, candidates: logs.length, sent, failed, skipped });
+    }
+
+    // ------------------------------------------------------------------
+    // The scheduled attendance job: is it running?
+    //
+    // pg_cron calls /api/attendance-webhook?job=shift_switch every 5 minutes
+    // (supabase-attendance-scheduler-migration.sql). That call closes shifts
+    // nobody logged out of, posts the dual-shift Logout / Login, and sends
+    // again the Bitrix lines that failed. It used to be scheduled with a key
+    // pasted into the SQL by hand; left as the placeholder, every call was
+    // refused while cron.job_run_details still said 'succeeded'. So this reads
+    // what actually happened: the webhook's own note of its last run, pg_net's
+    // HTTP responses, and the logouts and switches it posted.
+    //
+    // Every part is optional - a missing table or function (a migration not
+    // run yet) comes back as null, never as a 500 for the whole tab.
+    // ------------------------------------------------------------------
+    if (action === 'att_scheduler_status') {
+      const today = istToday();
+      const yesterday = addDaysIso(today, -1);
+      const soft = promise => promise.catch(() => null);
+      const [schedRes, statusRes, autoRes, switchRes, profiles] = await Promise.all([
+        // Never the secret column.
+        soft(sb('worksuite_scheduler?id=eq.1&select=last_run_at,last_job,last_ok,last_result')),
+        soft(sb('rpc/worksuite_scheduler_status', { method: 'POST', body: '{}' })),
+        // select=* so the list still reads before the attempts column exists.
+        soft(sb(`attendance_auto_logouts?log_date=in.(${yesterday},${today})&select=*&order=logout_at.desc&limit=200`)),
+        soft(sb(`shift_switch_posts?post_date=eq.${today}&select=*&limit=200`)),
+        loadProfiles().catch(() => []),
+      ]);
+      const who = new Map(profiles.map(p => [p.id, p]));
+      const person = id => { const p = who.get(id); return { full_name: p ? (p.full_name || p.email) : null, employee_id: p ? (p.employee_id || null) : null }; };
+      const rowsOf = async r => (r && r.ok ? r.json().catch(() => null) : null);
+
+      let scheduler = null, migrationNeeded = false;
+      if (schedRes && schedRes.ok) {
+        const got = await rowsOf(schedRes);
+        scheduler = (got && got[0]) || null;
+      } else if (schedRes) {
+        // 404 / PGRST205 (not in the schema cache) or 42P01: the table is not there.
+        const detail = await schedRes.text().catch(() => '');
+        migrationNeeded = schedRes.status === 404 || /42P01|PGRST205|does not exist|schema cache/i.test(detail);
+      }
+      const status = await rowsOf(statusRes);
+      const autos = await rowsOf(autoRes);
+      const switches = await rowsOf(switchRes);
+
+      return res.status(200).json({
+        scheduler: scheduler ? {
+          last_run_at: scheduler.last_run_at || null,
+          last_job: scheduler.last_job || null,
+          last_ok: scheduler.last_ok == null ? null : !!scheduler.last_ok,
+          last_result: scheduler.last_result || null,
+        } : null,
+        status: status && typeof status === 'object' && !Array.isArray(status) ? status : null,
+        migration_needed: migrationNeeded,
+        auto_logouts: Array.isArray(autos) ? autos.map(a => ({
+          user_id: a.user_id, ...person(a.user_id),
+          log_date: a.log_date, kind: a.kind, logout_at: a.logout_at, company: a.company || null,
+          bitrix_ok: a.bitrix_ok == null ? null : !!a.bitrix_ok,
+          attempts: a.attempts == null ? null : Number(a.attempts),
+          detail: a.detail || null,
+        })) : null,
+        switch_posts: Array.isArray(switches) ? switches.map(x => ({
+          user_id: x.user_id, ...person(x.user_id),
+          post_date: x.post_date, posted_at: x.posted_at || null,
+          first_ok: x.first_ok == null ? null : !!x.first_ok,
+          second_ok: x.second_ok == null ? null : !!x.second_ok,
+          attempts: x.attempts == null ? null : Number(x.attempts),
+          detail: x.detail || null,
+        })) : null,
+        now: new Date().toISOString(),
+      });
+    }
+
+    // Run the scheduled job now, the way pg_cron would: the deployed webhook,
+    // server to server, with the device key, which it has always accepted.
+    // Same origin as this request - the deployment the admin is looking at.
+    // Marked manual, so it does not count as a heartbeat: a button press must
+    // not make a broken scheduler look alive.
+    //
+    // The job can take a while when there is a backlog - which is when an
+    // admin presses this: about 20 s of budget, one more person's 4 s and the
+    // shift switch before it. vercel.json gives this function 60 s, so it
+    // waits RUN_NOW_WAIT_MS. A run still going after that is not a failure:
+    // the webhook's own invocation carries on and posts, so the answer is 202
+    // "still running" and the list on the page shows what it did.
+    if (action === 'att_scheduler_run') {
+      const key = process.env.BIOMETRIC_API_KEY;
+      if (!key) return res.status(500).json({ error: 'BIOMETRIC_API_KEY not configured on server.' });
+      const origin = requestOrigin(req);
+      const stillRunning = () => res.status(202).json({ running: true, message: 'Still running - check the list below in a minute' });
+      const timedOut = e => !!e && (e.name === 'TimeoutError' || e.name === 'AbortError');
+      const signal = AbortSignal.timeout(RUN_NOW_WAIT_MS);
+      let r;
+      try {
+        r = await fetch(`${origin}/api/attendance-webhook?job=shift_switch&manual=1`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+          body: '{}',
+          signal,
+        });
+      } catch (e) {
+        if (timedOut(e)) return stillRunning();
+        return res.status(502).json({ error: 'The attendance job could not be reached', detail: String(e && e.message || e).slice(0, 200) });
+      }
+      let text = '';
+      try { text = await r.text(); }
+      catch (e) { if (timedOut(e) || signal.aborted) return stillRunning(); }
+      let result;
+      try { result = JSON.parse(text); } catch { result = { raw: text.slice(0, 300) }; }
+      if (!r.ok) {
+        return res.status(502).json({ error: `The attendance job answered ${r.status}`,
+          detail: (result && (result.error || result.detail)) || text.slice(0, 200), status: r.status });
+      }
+      return res.status(200).json({ success: true, status: r.status, ...result });
     }
 
       if (action === 'att_selfies') {
