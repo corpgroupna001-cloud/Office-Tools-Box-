@@ -104,7 +104,7 @@ function pageContext(jar) {
   function element(id) {
     if (!elements.has(id)) {
       const classes = new Set(id === 'dashboard' ? ['hidden'] : []);
-      elements.set(id, { value: '', textContent: '', disabled: false,
+      elements.set(id, { value: '', textContent: '', disabled: false, hidden: id === 'gate-pw', style: {}, focus() {},
         classList: { add: c => classes.add(c), remove: c => classes.delete(c),
           contains: c => classes.has(c), toggle(c, on) { on ? classes.add(c) : classes.delete(c); } },
         addEventListener: (event, fn) => handlers.set(id + ':' + event, fn),
