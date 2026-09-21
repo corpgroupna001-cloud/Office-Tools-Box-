@@ -265,6 +265,7 @@
     </style>
     <link rel="stylesheet" href="/ui/corporate.css">
     <link rel="stylesheet" href="/ui/b24.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body data-ws-page="admin" class="ws-app ws-corporate ws-b24">
 
@@ -273,11 +274,16 @@
         <form id="gate-form" class="w-full max-w-md rounded-[2.5rem] p-12 text-center" data-ws="panel">
             <div class="w-14 h-14 rounded-2xl mx-auto mb-6 flex items-center justify-center" data-ws="tile"><span class="ic ic-lock lg"></span></div>
             <h1 class="text-2xl font-black mb-2">Administration</h1>
-            <p class="text-slate-400 mb-8 text-sm">Sign in to manage your organization.</p>
-            <input id="gate-password" type="password" placeholder="Admin password" autocomplete="off"
-                class="glass w-full px-6 py-4 rounded-2xl mb-4 font-bold text-lg text-center focus:outline-none focus:ring-4 focus:ring-blue-400/20 focus:border-blue-400">
+            <p id="gate-lead" class="text-slate-400 mb-8 text-sm">Opening the admin console…</p>
+            <!-- Administrators get in with their WorkSuite account; the shared password is only a fallback. -->
+            <a id="gate-account" href="/" class="btn-primary w-full text-white font-black py-4 rounded-2xl hidden" style="display:none;text-decoration:none;text-align:center">Sign in to WorkSuite</a>
+            <div id="gate-pw" hidden>
+                <input id="gate-password" type="password" placeholder="Admin password" autocomplete="off"
+                    class="glass w-full px-6 py-4 rounded-2xl mb-4 font-bold text-lg text-center focus:outline-none focus:ring-4 focus:ring-blue-400/20 focus:border-blue-400">
+            </div>
             <p id="gate-error" class="text-rose-300 text-sm font-bold mb-4 hidden">Incorrect password.</p>
             <button type="submit" id="gate-submit" class="btn-primary w-full text-white font-black py-4 rounded-2xl">Sign in to administration</button>
+            <button type="button" id="gate-use-pw" class="mt-4 text-slate-400 text-sm font-bold" hidden>Use the admin password instead</button>
         </form>
     </div>
 
@@ -1373,8 +1379,25 @@
 
         // Cookies are sent automatically to the same-origin admin API. The
         // password is used only for login, then immediately cleared.
+        // The signed-in WorkSuite session (same browser storage as the main app): an admin
+        // account opens the console with it, no password needed.
+        let adminToken = null;
+        async function accountToken() {
+            try {
+                if (!window.supabase || !window.supabase.createClient) return null;
+                if (!window.__WS_ADMIN_SB__) {
+                    const cfg = await (await fetch('/api/config')).json();
+                    if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) return null;
+                    window.__WS_ADMIN_SB__ = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true } });
+                }
+                const { data: { session } } = await window.__WS_ADMIN_SB__.auth.getSession();
+                return session ? session.access_token : null;
+            } catch (e) { return null; }
+        }
         async function adminFetch(options) {
-            const response = await fetch('/api/admin', { ...options, credentials: 'same-origin' });
+            const headers = { ...(options.headers || {}) };
+            if (adminToken) headers.Authorization = 'Bearer ' + adminToken;
+            const response = await fetch('/api/admin', { ...options, headers, credentials: 'same-origin' });
             const action = JSON.parse(options.body || '{}').action;
             if (response.status === 401 && action !== 'login' && action !== 'session') {
                 showAdminGate('Your session expired. Please sign in again.');
@@ -1390,12 +1413,22 @@
             gate.classList.remove('hidden');
             gateSubmit.disabled = false;
             gateSubmit.textContent = 'Sign in to administration';
+            // Without an admin account session: say so, and keep the password behind a link.
+            const pwShown = !document.getElementById('gate-pw').hidden;
+            document.getElementById('gate-lead').textContent = pwShown ? 'Enter the admin password.'
+                : (adminToken ? 'Your WorkSuite account is not an administrator. Sign in with an administrator account.' : 'Sign in to WorkSuite with an administrator account to open the console.');
+            const acct = document.getElementById('gate-account');
+            acct.style.display = pwShown ? 'none' : 'block';
+            gateSubmit.style.display = pwShown ? '' : 'none';
+            document.getElementById('gate-use-pw').hidden = pwShown;
             gateError.textContent = message;
             gateError.classList.toggle('hidden', !message);
             if (window.WSShell) WSShell.setUser(null);
         }
 
         async function unlockAdmin() {
+            gateSubmit.textContent = 'Loading dashboard…';
+            document.getElementById('gate-lead').textContent = 'Loading the dashboard…';
             const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action: 'results' }) });
             const data = await r.json();
@@ -1447,9 +1480,15 @@
         });
 
         // Wait until every admin module has installed its unlock listener.
+        document.getElementById('gate-use-pw').addEventListener('click', () => {
+            document.getElementById('gate-pw').hidden = false;
+            showAdminGate();
+            gatePassword.focus();
+        });
         document.addEventListener('DOMContentLoaded', async () => {
             gateSubmit.disabled = true;
             gateSubmit.textContent = 'Checking session…';
+            adminToken = await accountToken();
             try {
                 const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action: 'session' }) });

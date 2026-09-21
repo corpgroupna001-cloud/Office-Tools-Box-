@@ -501,6 +501,8 @@
             const titleEl = document.getElementById('feedback-title');
             const msgEl = document.getElementById('feedback-message');
             const btnEl = document.getElementById('feedback-ok');
+            // It must show over the sign-in screen too, where the page (and the shell holding it) is hidden.
+            if (modal.parentElement !== document.body) document.body.appendChild(modal);
 
             iconEl.style.background = s.iconBg;
             iconEl.style.boxShadow = s.iconShadow;
@@ -1583,8 +1585,17 @@
             const ok = await initRootSupabase();
             if (!ok) { showAuthModal(); openInviteSignup(); return; }
             const { data: { session } } = await rootSb.auth.getSession();
-            if (session) onLoggedIn(session);
-            else { onLoggedOut(); openInviteSignup(); }
+            if (!session) { onLoggedOut(); openInviteSignup(); return; }
+            // A sign-in that stopped before its two-step code: ask for the code, as every other page's guard expects.
+            if (window.WSMfa) {
+                const mfa = await window.WSMfa.status(rootSb);
+                if (mfa.needs) {
+                    showAuthModal();
+                    showMfaCodeDialog({ factorId: (mfa.factors[0] || {}).id, onSuccess: () => { showToast('Signed in — welcome back!', 'success'); onLoggedIn(session); } });
+                    return;
+                }
+            }
+            onLoggedIn(session);
         });
     </script>
 </body>

@@ -42,7 +42,7 @@ const PAGES = [
   ['/quotes', 'quotes'], ['/quotes?id=Q1', 'quote-record'], ['/crm/forecast', 'forecast'],
   ['/crm/settings?section=lost', 'crm-lost-reasons'], ['/crm/settings?section=forms', 'crm-web-forms'], ['/form?f=smoke0000000000000000000000000001', 'web-form'],
   ['/chat', 'messenger'], [`/call?id=${F.CALL}`, 'call'], ['/attendance', 'attendance'],
-  ['/wsm-admin', 'admin'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/crm', 'themes'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
+  ['/wsm-admin', 'admin'], ['/wsm-admin?gate=1', 'admin-gate'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/crm', 'themes'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
 ];
 const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'leads-list', 'lead-record', 'lead-imported', 'deals', 'deals-list', 'deal-record', 'deal-imported', 'boards', 'board', 'projects',
   'project-record', 'tasks', 'task-record', 'task-new', 'task-people', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record', 'quotes', 'quote-record', 'forecast', 'crm-lost-reasons', 'crm-web-forms']);
@@ -193,6 +193,8 @@ function serveStatic(req, res, url) {
   if (p === '/api/config') return send(res, 200, { supabaseUrl: `${ORIGIN}/sb`, supabaseAnonKey: 'smoke-anon-key' });
   if (p === '/api/push' && req.method === 'GET') return send(res, 200, { publicKey: '' });
   // The admin console: a signed-in session and empty lists, enough to draw every tab's frame.
+  // /wsm-admin?gate=1: someone who is not an administrator sees the gate.
+  if (p === '/api/admin' && /[?&]gate=1/.test(String(req.headers.referer || ''))) return send(res, 401, { error: 'Admin session expired. Please sign in again.' });
   if (p === '/api/admin') return adminApi(req, res);
   if (p.startsWith('/api/')) return send(res, 404, { error: 'not available in the smoke test' });
   if (p === '/messenger' || p === '/messenger/') p = '/chat/';
@@ -254,7 +256,13 @@ async function visit(browser, route, name, [vpName, viewport]) {
         showOtpModal({ email: 'x@y.test', onVerify: async () => ({ ok: false }) });
         const host = document.getElementById('verify-code-modal');
         const el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
-        return host && host.contains(el) ? 'ok' : 'covered by ' + (el && (el.id || el.className));
+        if (!(host && host.contains(el))) return 'code dialog covered by ' + (el && (el.id || el.className));
+        // The "Verified - Continue" message that finishes the sign-in must show too.
+        document.getElementById('vc-cancel').click();
+        showDialog({ type: 'success', title: 'Verified', message: 'x', buttonText: 'Continue' });
+        const fm = document.getElementById('feedback-modal');
+        const el2 = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+        return fm && fm.contains(el2) ? 'ok' : 'success dialog covered by ' + (el2 && (el2.id || el2.className));
       });
       if (onTop !== 'ok') result.problems.push('sign-in dialog hidden: ' + onTop);
     }
@@ -285,7 +293,7 @@ async function visit(browser, route, name, [vpName, viewport]) {
       };
     });
     // The call window is full-screen and the public web form is for visitors: neither has the shell.
-    if (!info.shell && !['home', 'call', 'web-form', 'signin'].includes(name)) result.problems.push('app shell did not mount');
+    if (!info.shell && !['home', 'call', 'web-form', 'signin', 'admin-gate'].includes(name)) result.problems.push('app shell did not mount');
     if (name === 'web-form' && !/Talk to our sales team/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('web form did not render');
     if (vpName === 'phone' && info.overflow > 1) result.problems.push(`horizontal overflow ${info.overflow}px: ${info.offenders.join(', ')}`);
     if (CRM_PAGES.has(name) && info.errorText) result.problems.push(`error state on screen: "${info.errorText.slice(0, 90)}"`);

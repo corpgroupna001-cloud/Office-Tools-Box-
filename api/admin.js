@@ -1,4 +1,4 @@
-const { safeEqual } = require('../lib/request-auth');
+const { safeEqual, sessionUser, bearer } = require('../lib/request-auth');
 const { resolveShift } = require('../company-config');
 // Password login and signed-cookie admin API. Uses the Supabase service_role key to bypass RLS
 // and return every employee's test results for the dashboard.
@@ -336,7 +336,9 @@ module.exports = async function handler(req, res) {
   }
   const passwordOK = !!password && safeEqual(password, ADMIN_PASSWORD);
   const sessionOK = validSession(req.headers.cookie, process.env);
-  if (action === 'login' ? !passwordOK : !passwordOK && !sessionOK) {
+  // A person signed in to WorkSuite whose workspace role is admin needs no password.
+  const adminUser = !passwordOK && !sessionOK && action !== 'login' ? await workspaceAdmin(req, SUPABASE_URL, SERVICE_KEY) : null;
+  if (action === 'login' ? !passwordOK : !passwordOK && !sessionOK && !adminUser) {
     // Small delay to slow brute-force. Not a defense on its own — pick a strong password.
     await new Promise(r => setTimeout(r, 500));
     return res.status(401).json({ error: action === 'login' ? 'Invalid password' : 'Admin session expired. Please sign in again.' });
@@ -349,7 +351,7 @@ module.exports = async function handler(req, res) {
     res.setHeader('Set-Cookie', sessionCookie(createSession(process.env)));
     return res.status(200).json({ success: true });
   }
-  if (action === 'session') return res.status(200).json({ authenticated: true });
+  if (action === 'session') return res.status(200).json({ authenticated: true, via: adminUser ? 'account' : 'password', name: adminUser ? adminUser.name : null });
 
   // From here on every action that is not a read records what it did.
   res = auditWrap(res, req, action, body);
@@ -3110,3 +3112,29 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ error: e.message || 'Unknown error' });
   }
 };
+
+/**
+ * The WorkSuite account behind `Authorization: Bearer <access token>`, when its
+ * workspace role is admin and it is active: { id, name }, else null. Cached
+ * per warm function for a minute, so a page of admin calls asks Supabase once.
+ */
+const ADMIN_CACHE = new Map();
+async function workspaceAdmin(req, SUPABASE_URL, SERVICE_KEY) {
+  const token = bearer(req);
+  if (!token || !SUPABASE_URL || !SERVICE_KEY) return null;
+  const hit = ADMIN_CACHE.get(token);
+  if (hit && hit.until > Date.now()) return hit.admin;
+  let admin = null;
+  try {
+    const user = await sessionUser(req);
+    if (user) {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=full_name,app_role,status&limit=1`,
+        { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } });
+      const [p] = r.ok ? await r.json() : [];
+      if (p && p.app_role === 'admin' && (p.status || 'active') !== 'inactive') admin = { id: user.id, name: p.full_name || user.email };
+    }
+  } catch { admin = null; }
+  if (ADMIN_CACHE.size > 200) ADMIN_CACHE.clear();
+  ADMIN_CACHE.set(token, { admin, until: Date.now() + 60_000 });
+  return admin;
+}
