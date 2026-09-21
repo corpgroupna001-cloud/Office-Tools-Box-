@@ -86,7 +86,21 @@
     --wall-aurora:   radial-gradient(900px 500px at 20% 20%, rgba(120, 255, 200, 0.40), transparent 60%), radial-gradient(900px 600px at 80% 30%, rgba(140, 120, 255, 0.45), transparent 60%), linear-gradient(170deg, #050b1f 0%, #0d1b3d 60%, #1a2c5a 100%);
     --wall-sand:     linear-gradient(160deg, #6d4c2f 0%, #b07c4f 45%, #e2c08f 100%);
     --wall-light:    #eef2f4;
+    /* Live wallpapers: the still gradient under ui/live-wallpaper.js's canvas
+       (and all that shows with reduced motion). */
+    --wall-northern: radial-gradient(1100px 500px at 50% 0%, rgba(60, 200, 160, 0.25), transparent 70%), linear-gradient(180deg, #020813 0%, #071a2e 55%, #0c2a3c 100%);
+    --wall-starfall: radial-gradient(1200px 700px at 70% 110%, rgba(80, 60, 160, 0.45), transparent 70%), linear-gradient(180deg, #01030b 0%, #0a1030 60%, #1b1c4a 100%);
+    --wall-ocean:    linear-gradient(180deg, #7cc6e8 0%, #3f98cf 38%, #1a5f99 70%, #0a2f57 100%);
+    --wall-bokeh:    radial-gradient(900px 600px at 20% 80%, rgba(255, 150, 80, 0.30), transparent 70%), linear-gradient(170deg, #1a0f24 0%, #3a1c3e 50%, #6b2e3f 100%);
+    --wall-fireflies: radial-gradient(900px 500px at 50% 100%, rgba(60, 120, 60, 0.45), transparent 70%), linear-gradient(180deg, #030a08 0%, #0b1f16 60%, #14331f 100%);
 }
+:root[data-wallpaper="northern"] body.ws-b24  { --b24-wall: var(--wall-northern); }
+:root[data-wallpaper="starfall"] body.ws-b24  { --b24-wall: var(--wall-starfall); }
+:root[data-wallpaper="ocean"] body.ws-b24     { --b24-wall: var(--wall-ocean); }
+:root[data-wallpaper="bokeh"] body.ws-b24     { --b24-wall: var(--wall-bokeh); }
+:root[data-wallpaper="fireflies"] body.ws-b24 { --b24-wall: var(--wall-fireflies); }
+/* ui/live-wallpaper.js's canvas is fixed at z-index -1: above the body's
+   gradient (which paints on the root), below everything on the page. */
 :root[data-wallpaper="azure"] body.ws-b24    { --b24-wall: var(--wall-azure); }
 :root[data-wallpaper="lagoon"] body.ws-b24   { --b24-wall: var(--wall-lagoon); }
 :root[data-wallpaper="dusk"] body.ws-b24     { --b24-wall: var(--wall-dusk); }
@@ -94,14 +108,25 @@
 :root[data-wallpaper="graphite"] body.ws-b24 { --b24-wall: var(--wall-graphite); }
 :root[data-wallpaper="aurora"] body.ws-b24   { --b24-wall: var(--wall-aurora); }
 :root[data-wallpaper="sand"] body.ws-b24     { --b24-wall: var(--wall-sand); }
-.ws-theme-card .sw[data-w="azure"] { background: var(--wall-azure); }
-.ws-theme-card .sw[data-w="lagoon"] { background: var(--wall-lagoon); }
-.ws-theme-card .sw[data-w="dusk"] { background: var(--wall-dusk); }
-.ws-theme-card .sw[data-w="forest"] { background: var(--wall-forest); }
-.ws-theme-card .sw[data-w="graphite"] { background: var(--wall-graphite); }
-.ws-theme-card .sw[data-w="aurora"] { background: var(--wall-aurora); }
-.ws-theme-card .sw[data-w="sand"] { background: var(--wall-sand); }
-.ws-theme-card .sw[data-w="light"] { background: var(--wall-light); box-shadow: inset 0 0 0 1px #d5dadf; }
+/* A preview is the full-screen wallpaper scaled down, so its glows sit where they do on screen. */
+.ws-theme-card .sw { position: relative; overflow: hidden; }
+.ws-theme-card .sw::before { content: ''; position: absolute; left: 0; top: 0; width: 1440px; height: 860px; transform: scale(0.16); transform-origin: 0 0; background: var(--sw); }
+.ws-theme-card .sw .live { position: absolute; right: 8px; top: 8px; z-index: 1; font: 700 10px/1 var(--b24-font, system-ui); letter-spacing: .06em; text-transform: uppercase; font-style: normal;
+    color: #fff; background: rgba(0, 0, 0, 0.45); padding: 4px 6px; border-radius: 4px; }
+.ws-theme-card .sw[data-w="azure"] { --sw: var(--wall-azure); }
+.ws-theme-card .sw[data-w="lagoon"] { --sw: var(--wall-lagoon); }
+.ws-theme-card .sw[data-w="dusk"] { --sw: var(--wall-dusk); }
+.ws-theme-card .sw[data-w="forest"] { --sw: var(--wall-forest); }
+.ws-theme-card .sw[data-w="graphite"] { --sw: var(--wall-graphite); }
+.ws-theme-card .sw[data-w="aurora"] { --sw: var(--wall-aurora); }
+.ws-theme-card .sw[data-w="sand"] { --sw: var(--wall-sand); }
+.ws-theme-card .sw[data-w="northern"] { --sw: radial-gradient(900px 260px at 50% 30%, rgba(80, 230, 170, 0.55), transparent 70%), radial-gradient(700px 220px at 30% 22%, rgba(150, 110, 255, 0.35), transparent 70%), var(--wall-northern); }
+.ws-theme-card .sw[data-w="starfall"] { --sw: radial-gradient(2px 2px at 20% 30%, #fff 50%, transparent 51%), radial-gradient(2px 2px at 60% 20%, #fff 50%, transparent 51%), radial-gradient(3px 3px at 80% 45%, #fff 50%, transparent 51%), radial-gradient(2px 2px at 35% 60%, #fff 50%, transparent 51%), var(--wall-starfall); }
+.ws-theme-card .sw[data-w="ocean"] { --sw: radial-gradient(1600px 300px at 50% 100%, rgba(8, 60, 110, 0.9), transparent 70%), var(--wall-ocean); }
+.ws-theme-card .sw[data-w="bokeh"] { --sw: radial-gradient(120px 120px at 25% 40%, rgba(255, 180, 90, 0.55), transparent 70%), radial-gradient(160px 160px at 70% 60%, rgba(255, 90, 140, 0.45), transparent 70%), radial-gradient(90px 90px at 55% 25%, rgba(255, 210, 120, 0.5), transparent 70%), var(--wall-bokeh); }
+.ws-theme-card .sw[data-w="fireflies"] { --sw: radial-gradient(40px 40px at 30% 60%, rgba(220, 255, 140, 0.8), transparent 70%), radial-gradient(30px 30px at 65% 45%, rgba(220, 255, 140, 0.7), transparent 70%), radial-gradient(36px 36px at 80% 75%, rgba(220, 255, 140, 0.7), transparent 70%), var(--wall-fireflies); }
+.ws-theme-card .sw[data-w="light"] { --sw: var(--wall-light); box-shadow: inset 0 0 0 1px #d5dadf; }
+:root[data-theme="dark"] .ws-theme-card .sw[data-w="light"] { --sw: #121820; box-shadow: inset 0 0 0 1px #2b3542; }
 /* "Light": no wallpaper; the menu and header turn dark-on-light. */
 :root[data-wallpaper="light"] body.ws-b24 {
     --b24-wall: #eef2f4;
@@ -170,6 +195,11 @@ body.ws-b24 .ws-side-brand .burger:hover { background: var(--b24-menu-hover); }
 body.ws-b24 .ws-side-brand a.logo { display: flex; align-items: baseline; gap: 6px; color: inherit; text-decoration: none; min-width: 0; }
 body.ws-b24 .ws-side-brand .logo b { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; }
 body.ws-b24 .ws-side-brand .logo .mark { font-size: 19px; font-weight: 300; opacity: 0.85; }
+/* The brand's sub-title (e.g. "Admin console") is text, not corporate.css's 38px icon tile. */
+body.ws-b24 .ws-side-brand .logo { overflow: hidden; }
+body.ws-b24 .ws-side-brand .logo b { flex: none; }
+body.ws-b24 .ws-side-brand .logo .mark { width: auto; height: auto; border: 0; border-radius: 0; background: none; box-shadow: none;
+    display: inline; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; color: inherit; }
 body.ws-b24 .ws-side-nav { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 4px 0 12px; scrollbar-width: thin; }
 body.ws-b24 .ws-side-nav::-webkit-scrollbar-thumb { border-color: transparent; background: rgba(255, 255, 255, 0.25); }
 body.ws-b24 .ws-side-group { margin: 0; }
@@ -419,6 +449,8 @@ body.ws-b24 .ws-theme-card .sw { display: block; height: 88px; }
 body.ws-b24 .ws-theme-card b { display: block; padding: 8px 10px; font-size: 13px; font-weight: 500; }
 body.ws-b24 .ws-theme-card.on { border-color: var(--b24-blue-2); }
 body.ws-b24 .ws-theme-mode { display: flex; gap: 8px; margin: 0 0 16px; }
+body.ws-b24 .ws-themes-h { margin: 4px 0 10px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--b24-muted); }
+body.ws-b24 .ws-themes-grid + .ws-themes-h { margin-top: 20px; }
 
 /* ---------- 9. Slide-over panels ----------------------------------------- */
 .ws-slider-host { position: fixed; inset: 0; z-index: 200; pointer-events: none; }
@@ -1772,3 +1804,67 @@ span.b24-clientbox .nm, .b24-clientbox span.nm { color: var(--b24-text); }
     .b24-amount .sum { font-size: 22px; }
     .b24-stage-tip .hint { display: none; }
 }
+
+/* ---------- New task, Bitrix24 layout (tasks/tasks.js showCreate) ---------- */
+.b24-tnew { background: var(--b24-surface-3); border-radius: 14px; padding: 16px 16px 0; box-shadow: var(--b24-shadow); }
+.b24-tnew-cols { grid-template-columns: minmax(320px, 1fr) minmax(0, 1fr); gap: 16px; }
+.b24-tnew-form { gap: 12px; }
+body.ws-b24.ws-corporate #view .b24-tnew-title input { height: 50px; border: 2px solid #2fc6f6; border-radius: 8px; background: var(--b24-surface); padding: 0 14px; font-size: 22px; }
+body.ws-b24.ws-corporate #view .b24-tnew-title input:not(:focus) { border-color: var(--b24-line-2); }
+.b24-tnew-card { border-radius: 12px; box-shadow: none; }
+.b24-tnew-tools { align-items: center; gap: 4px; flex-wrap: wrap; }
+.b24-tnew-tools button { display: inline-flex; align-items: center; gap: 6px; height: 30px; color: var(--b24-muted); font-size: 14px; }
+.b24-tnew-tools button:hover { background: var(--b24-surface-2); color: var(--b24-text); }
+.b24-tnew-tools button.purple { color: #8b5cf6; font-weight: 500; }
+.b24-tnew-tools button.purple:hover { background: #f4f0ff; }
+.b24-tnew-tools .ic { width: 18px; height: 18px; }
+.b24-tnew-files { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0; }
+.b24-tnew-files .f { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px 0 10px; border-radius: 6px; background: var(--b24-surface-2); font-size: 13px; }
+.b24-tnew-files .f small { color: var(--b24-muted); }
+.b24-tnew-files .f button { border: 0; background: none; cursor: pointer; color: var(--b24-muted); font-size: 16px; }
+.b24-tnew-people { padding: 6px 22px; }
+.b24-trow { display: flex; align-items: center; gap: 12px; min-height: 50px; }
+.b24-trow + .b24-trow { border-top: 1px solid var(--b24-line); }
+.b24-trow .l { width: 110px; flex: none; color: var(--b24-muted); font-size: 14px; }
+.b24-trow .v { flex: 1; min-width: 0; }
+.b24-tperson, .b24-tdeadline { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 4px 8px; margin-left: -8px; border: 0; border-radius: 8px; background: none; color: var(--b24-text); font: inherit; cursor: pointer; }
+.b24-tperson:hover, .b24-tdeadline:hover { background: var(--b24-surface-2); }
+.b24-tdeadline .ic { width: 18px; height: 18px; color: #2067b0; }
+.b24-tplus { width: 32px; height: 32px; flex: none; border: 0; border-radius: 50%; background: #e5f3fd; color: #2067b0; font-size: 20px; line-height: 1; cursor: pointer; }
+.b24-tplus:hover { background: #cfe9fb; }
+.b24-tsummary { display: flex; align-items: center; gap: 12px; padding: 14px 22px; cursor: pointer; font-size: 15px; }
+.b24-tsummary .ic-box { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background: #e5f3fd; color: #2067b0; }
+.b24-tsummary .t { flex: 1; }
+.b24-tsummary input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.b24-tsummary .sw { width: 36px; height: 20px; border-radius: 10px; background: var(--b24-line-2); position: relative; transition: background .15s; }
+.b24-tsummary .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.b24-tsummary input:checked + .sw { background: #2fc6f6; }
+.b24-tsummary input:checked + .sw::after { transform: translateX(16px); }
+.b24-tsummary input:focus-visible + .sw { outline: 2px solid #2fc6f6; outline-offset: 2px; }
+.b24-tnew-chips { gap: 8px; }
+.b24-tnew-chips button { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border-radius: 8px; font-size: 14px; color: var(--b24-text-2); background: var(--b24-surface); }
+.b24-tnew-chips button .ic { width: 16px; height: 16px; opacity: .75; }
+.b24-tnew-chips button.on { background: #e5f6ff; }
+:root[data-theme="dark"] .b24-tnew-chips button.on { background: #1e3a52; color: #d5ecff; }
+.b24-tnew-chat { position: relative; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; min-height: 560px; padding: 0; overflow: hidden; border-radius: 12px; background: var(--b24-surface); }
+.b24-tnew-chat .head { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--b24-line); }
+.b24-tnew-chat .head > .ic { width: 34px; height: 34px; padding: 7px; border-radius: 50%; background: #e5f3fd; color: #2067b0; }
+.b24-tnew-chat .head b { display: block; font-size: 16px; font-weight: 500; }
+.b24-tnew-chat .head span { font-size: 13px; color: var(--b24-muted); }
+.b24-tnew-chat .body { flex: 1; display: flex; align-items: flex-end; justify-content: center; padding: 24px;
+    background: radial-gradient(circle at 20px 20px, rgba(59, 130, 246, .08) 2px, transparent 3px) 0 0 / 40px 40px, linear-gradient(180deg, #dfe8f7, #cdd9f0); }
+:root[data-theme="dark"] .b24-tnew-chat .body { background: radial-gradient(circle at 20px 20px, rgba(255,255,255,.05) 2px, transparent 3px) 0 0 / 40px 40px, linear-gradient(180deg, #1b2533, #16202c); }
+.b24-tnew-chat .info { max-width: 420px; padding: 20px 24px; border-radius: 14px; }
+.b24-tnew-chat .info ul { list-style: none; margin: 0; padding: 0; }
+.b24-tnew-chat .info li { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 14px; }
+.b24-tnew-chat .info li .ic { width: 16px; height: 16px; color: #7aa7e0; }
+.b24-tnew-chat .foot { margin: 12px; padding: 14px 16px; border-radius: 12px; background: var(--b24-surface); border: 1px solid var(--b24-line); color: var(--b24-muted); font-size: 14px; }
+.b24-tnew-foot { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: flex-start; gap: 12px; margin: 16px -16px 0; padding: 14px 24px; background: var(--b24-surface); border-radius: 0 0 14px 14px; border-top: 1px solid var(--b24-line); }
+.b24-tnew-foot .grow { flex: 1; }
+.b24-tnew-create { height: 42px; padding: 0 24px; border: 0; border-radius: 8px; background: #2067b0; color: #fff; font: 500 16px var(--b24-font); cursor: pointer; }
+.b24-tnew-create:hover { background: #1a5796; }
+.b24-tnew-create:disabled { opacity: .6; cursor: progress; }
+.b24-tnew-foot .b24-new-cancel { text-transform: none; font-size: 15px; letter-spacing: 0; }
+@media (max-width: 900px) { .b24-tnew-chat { min-height: 0; } .b24-tnew-chat .body { display: none; } .b24-trow .l { width: 88px; } }
+.b24-tnew-title .crm-field, body.ws-b24.ws-corporate #view .b24-tnew-title input { width: 100%; }
+body.ws-app .b24-tnew-title .crm-form { display: block; }

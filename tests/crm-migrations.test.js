@@ -17,15 +17,17 @@ const FILES = [
   'supabase-employee-id-migration.sql',
   'supabase-crm-sales-migration.sql',
   'supabase-security-hardening-migration.sql',
+  'supabase-crm-all-companies-migration.sql',
+  'supabase-task-summary-migration.sql',
 ];
-const ALTER_ONLY = new Set(['supabase-employee-id-migration.sql', 'supabase-security-hardening-migration.sql']);
+const ALTER_ONLY = new Set(['supabase-employee-id-migration.sql', 'supabase-security-hardening-migration.sql', 'supabase-crm-all-companies-migration.sql', 'supabase-task-summary-migration.sql']);
 const read = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 const stripComments = sql => sql.replace(/--[^\n]*/g, '');
 
 test('every CRM migration file exists and is non-trivial', () => {
   for (const f of FILES) {
     const sql = read(f);
-    assert.ok(sql.length > 2000, `${f} is suspiciously short`);
+    assert.ok(sql.length > (ALTER_ONLY.has(f) ? 300 : 2000), `${f} is suspiciously short`);
   }
 });
 

@@ -281,7 +281,34 @@ body.ws-app .crm-check { display: flex; align-items: center; gap: 8px; font-size
 body.ws-app .crm-check input { width: 18px; height: 18px; accent-color: var(--ws-primary); }
 body.ws-app .crm-people-pick { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; border: 1px solid var(--ws-border-2); border-radius: 6px; min-height: 40px; background: var(--ws-surface); }
 body.ws-app .crm-people-pick .crm-tag button { border: 0; background: none; cursor: pointer; padding: 0 0 0 2px; color: var(--ws-text-muted); line-height: 1; }
-body.ws-app .crm-people-pick select { flex: 1; min-width: 140px; border: 0; min-height: 26px; padding: 2px 4px; background: transparent; }
+body.ws-app .crm-people-pick { align-items: center; }
+/* Bitrix24-style people popup (C.pickPeople) and the fields that open it. */
+.crm-pp { position: fixed; z-index: 400; display: flex; flex-direction: column; padding: 14px; border-radius: 14px; background: var(--b24-surface, #fff); color: var(--b24-text, #333);
+    box-shadow: 0 12px 44px rgba(0, 0, 0, 0.24); font: 14px/1.4 var(--b24-font, Inter, system-ui, sans-serif); }
+.crm-pp-q { height: 42px; padding: 0 14px; border: 1px solid var(--b24-line-2, #d5d7db); border-radius: 10px; background: var(--b24-surface, #fff); color: inherit; font: inherit; margin-bottom: 10px; }
+.crm-pp-q:focus { outline: none; border-color: #2fc6f6; box-shadow: 0 0 0 3px rgba(47, 198, 246, 0.2); }
+.crm-pp-list { overflow: auto; min-height: 60px; display: flex; flex-direction: column; gap: 2px; }
+.crm-pp-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 7px 10px; border: 0; border-radius: 10px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.crm-pp-item:hover, .crm-pp-item:focus-visible { background: var(--b24-surface-2, #f1f4f6); outline: none; }
+.crm-pp-item.on { background: #e5f6ff; }
+:root[data-theme="dark"] .crm-pp-item.on { background: #1e3a52; }
+.crm-pp-item .ws-avatar { width: 30px; height: 30px; flex: none; font-size: 12px; }
+.crm-pp-item .nm { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.crm-pp-item .code { font-weight: 500; font-size: 15px; letter-spacing: .01em; }
+.crm-pp-item .who { font-size: 12px; color: var(--b24-muted, #80868e); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crm-pp-item .tick { color: #2fc6f6; font-weight: 700; }
+.crm-pp-empty { padding: 18px; text-align: center; color: var(--b24-muted, #80868e); }
+.crm-pp-foot { display: flex; justify-content: flex-end; padding-top: 10px; margin-top: 8px; border-top: 1px solid var(--b24-line, #e6e8eb); }
+.crm-pp-done { height: 34px; padding: 0 18px; border: 0; border-radius: 17px; background: #3bc8f5; color: #fff; font: 600 13px var(--b24-font, Inter, system-ui, sans-serif); cursor: pointer; }
+body.ws-app .crm-pp-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 40px; padding: 4px 10px; border: 1px solid var(--ws-border-2); border-radius: 6px;
+    background: var(--ws-surface); color: var(--ws-text); font: inherit; text-align: left; cursor: pointer; }
+body.ws-app .crm-pp-field:hover { border-color: #2fc6f6; }
+body.ws-app .crm-pp-field .caret { color: var(--ws-text-muted); font-size: 11px; }
+.crm-pp-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px 0 3px; border-radius: 15px; background: var(--b24-surface-2, #eef2f4); font-size: 13px; }
+.crm-pp-chip .ws-avatar { width: 24px; height: 24px; font-size: 10px; }
+.crm-pp-chip button { border: 0; background: none; cursor: pointer; color: var(--b24-muted, #80868e); font-size: 15px; padding: 0 4px; }
+.crm-pp-add { height: 30px; padding: 0 12px; border: 1px dashed var(--b24-line-2, #c9ced4); border-radius: 15px; background: none; color: #2067b0; font: 500 13px var(--b24-font, Inter, system-ui, sans-serif); cursor: pointer; }
+.crm-pp-add:hover { border-color: #2fc6f6; }
 body.ws-app .crm-warn { padding: 10px 12px; border-radius: 8px; background: var(--ws-warning-bg); color: var(--ws-warning-text); font-size: 13px; }
 body.ws-app .crm-warn a { color: inherit; font-weight: 600; }
 body.ws-app .crm-info { padding: 10px 12px; border-radius: 8px; background: var(--ws-info-bg); color: var(--ws-info-text); font-size: 13px; }

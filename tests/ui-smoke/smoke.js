@@ -33,7 +33,7 @@ const PAGES = [
   ['/deals', 'deals'], ['/deals?view=list', 'deals-list'], ['/deals?id=D1', 'deal-record'], ['/deals?id=D4', 'deal-imported'],
   ['/boards', 'boards'], ['/boards?id=B1', 'board'],
   ['/projects', 'projects'], ['/projects?id=P1', 'project-record'],
-  ['/tasks', 'tasks'], ['/tasks?id=T1', 'task-record'],
+  ['/tasks', 'tasks'], ['/tasks?id=T1', 'task-record'], ['/tasks?id=new', 'task-new'], ['/tasks?id=new', 'task-people'],
   ['/documents', 'documents'], ['/documents?id=DOC1', 'document-record'],
   ['/calendar', 'calendar'], ['/calendar?view=day', 'calendar-day'], ['/calendar?view=week', 'calendar-week'],
   ['/calendar?view=month', 'calendar-month'], ['/calendar?view=schedule', 'calendar-schedule'], ['/employees', 'employees'],
@@ -42,10 +42,10 @@ const PAGES = [
   ['/quotes', 'quotes'], ['/quotes?id=Q1', 'quote-record'], ['/crm/forecast', 'forecast'],
   ['/crm/settings?section=lost', 'crm-lost-reasons'], ['/crm/settings?section=forms', 'crm-web-forms'], ['/form?f=smoke0000000000000000000000000001', 'web-form'],
   ['/chat', 'messenger'], [`/call?id=${F.CALL}`, 'call'], ['/attendance', 'attendance'],
-  ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
+  ['/wsm-admin', 'admin'], ['/crm', 'themes'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
 ];
 const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'leads-list', 'lead-record', 'lead-imported', 'deals', 'deals-list', 'deal-record', 'deal-imported', 'boards', 'board', 'projects',
-  'project-record', 'tasks', 'task-record', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record', 'quotes', 'quote-record', 'forecast', 'crm-lost-reasons', 'crm-web-forms']);
+  'project-record', 'tasks', 'task-record', 'task-new', 'task-people', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record', 'quotes', 'quote-record', 'forecast', 'crm-lost-reasons', 'crm-web-forms']);
 const VIEWPORTS = [['desktop', { width: 1366, height: 900 }], ['phone', { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]];
 
 // SMOKE_BIG=1 fills every list with far more rows than fits on screen, so the
@@ -165,6 +165,8 @@ function serveStatic(req, res, url) {
   let p = decodeURIComponent(url.pathname);
   if (p === '/api/config') return send(res, 200, { supabaseUrl: `${ORIGIN}/sb`, supabaseAnonKey: 'smoke-anon-key' });
   if (p === '/api/push' && req.method === 'GET') return send(res, 200, { publicKey: '' });
+  // The admin console: a signed-in session and empty lists, enough to draw every tab's frame.
+  if (p === '/api/admin') return send(res, 200, { success: true, results: [], rows: [], items: [], employees: [], data: [] });
   if (p.startsWith('/api/')) return send(res, 404, { error: 'not available in the smoke test' });
   if (p === '/messenger' || p === '/messenger/') p = '/chat/';
   if (p === '/admin' || p.startsWith('/admin/') && !p.endsWith('.js') && !p.endsWith('.css')) p = '/wsm-admin';
@@ -205,16 +207,19 @@ async function visit(browser, route, name, [vpName, viewport]) {
     return r.respond({ status: 204, body: '' });
   });
   const key = `sb-${new URL(ORIGIN).hostname.split('.')[0]}-auth-token`;
-  await page.evaluateOnNewDocument((k, s) => {
+  await page.evaluateOnNewDocument((k, s, w) => {
     try {
-      localStorage.setItem(k, s); localStorage.setItem('ws-theme', 'light');
+      localStorage.setItem(k, s); localStorage.setItem('ws-theme', w.theme || 'light');
+      if (w.wallpaper) localStorage.setItem('ws-wallpaper', w.wallpaper);   // SMOKE_WALLPAPER=northern npm run smoke:ui
       localStorage.setItem('ws-rules-seen-chat', '1');      // Messenger's one-time rules dialog, already acknowledged
     } catch (e) { /* ignore */ }
-  }, key, JSON.stringify(F.session()));
+  }, key, JSON.stringify(F.session()), { wallpaper: process.env.SMOKE_WALLPAPER || '', theme: process.env.SMOKE_THEME || '' });
   const result = { route, name, viewport: vpName, errors, consoleErrors, problems: [], notes: [] };
   try {
     await page.goto(ORIGIN + route, { waitUntil: 'load', timeout: 30000 });
     await new Promise(r => setTimeout(r, 2600));
+    if (name === 'task-people') { await page.evaluate(() => document.querySelector('[data-assignee]').click()); await new Promise(r => setTimeout(r, 300)); }
+    if (name === 'themes') { await page.evaluate(() => window.WSShell.openThemes()); await new Promise(r => setTimeout(r, 400)); }
     const info = await page.evaluate(() => {
       const w = window.innerWidth;
       const text = (document.querySelector('#ws-page') || document.body).innerText || '';

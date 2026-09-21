@@ -1013,7 +1013,7 @@ module.exports = async function handler(req, res) {
       const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const ENTITIES = ['contact', 'company', 'lead', 'deal', 'invoice', 'settings'];
       const ACTIONS = ['read', 'add', 'edit', 'delete', 'export', 'import', 'move_stage', 'view_amounts', 'custom_form', 'automation'];
-      const LEVELS = ['none', 'own', 'department', 'subdepartments', 'all'];
+      const LEVELS = ['none', 'own', 'department', 'subdepartments', 'all', 'companies'];
       const id = v => (UUID.test(String(v || '')) ? String(v) : null);
       try {
         if (action === 'crm_perm_load') {

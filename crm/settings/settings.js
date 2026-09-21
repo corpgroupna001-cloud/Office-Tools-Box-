@@ -32,7 +32,7 @@
     const LEVELS = [
         { value: 'none', label: 'No access' }, { value: 'own', label: 'Personal' },
         { value: 'department', label: 'Personal and department' }, { value: 'subdepartments', label: 'Personal, department and sub-departments' },
-        { value: 'all', label: 'All' },
+        { value: 'all', label: 'All (their company)' }, { value: 'companies', label: 'All companies' },
     ];
     const ENTITIES = [
         { key: 'lead', title: 'Leads', actions: ['read', 'add', 'edit', 'delete', 'export', 'import', 'move_stage', 'automation'] },

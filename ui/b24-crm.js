@@ -129,7 +129,7 @@
     /** Can the caller do `level` things to this row? (own = responsible or creator). */
     function allowed(level, row, me, ownerKey) {
         if (!level || level === 'none') return false;
-        if (level === 'all' || level === 'department' || level === 'subdepartments') return true;   // the database narrows these precisely
+        if (level === 'companies' || level === 'all' || level === 'department' || level === 'subdepartments') return true;   // the database narrows these precisely
         return !row || row[ownerKey || 'owner_id'] === me.id || row.created_by === me.id;
     }
 

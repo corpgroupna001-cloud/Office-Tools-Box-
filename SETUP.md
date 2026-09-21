@@ -821,6 +821,8 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 9 | `supabase-employee-id-migration.sql` | `profiles.employee_id` — the Employee ID people are known by (GL-PIS-CSM-IC-001), unique whatever the case and set only by an administrator. Shown first across the CRM, chat mentions, the directory and the admin console. `employee_code` is unchanged and is labelled **Biometric ID** |
 | 10 | `supabase-crm-sales-migration.sql` | Sales: quotes (`crm_quotes`, `crm_quote_items`, `crm_quote_from_deal()`, `crm_quote_to_invoice()`), lost reasons (`crm_lost_reasons`, `crm_deals.lost_reason`), monthly sales targets (`crm_sales_targets`) and public web-to-lead forms (`crm_web_forms`, `crm_web_form_submit()`) — see [12. Sales: quotes, forecast and web forms](#12-sales-quotes-forecast-and-web-forms) |
 | 11 | `supabase-security-hardening-migration.sql` | Security guards, no data changes — see [13. Security hardening](#13-security-hardening). **Run it together with the deploy that carries it**: the sign-in page and the API were changed to match |
+| 12 | `supabase-crm-all-companies-migration.sql` | CRM access across companies: a sixth access level, **All companies**, and a role *Full CRM access (every company)* assigned to nobody. See [14. CRM access across companies](#14-crm-access-across-companies) |
+| 13 | `supabase-task-summary-migration.sql` | `tasks.result_required`: Bitrix24's *Task status summary is required* on the new-task page |
 
 **Ran migration 8 before 15 Sep 2026?** Run it again. Its first version made
 `external_ref`'s unique index partial, which `ON CONFLICT` cannot use, so every
@@ -1321,4 +1323,44 @@ it on: without it, someone on the network path could read `SMTP_PASS`.
 **Not changed:** the biometric device may still send its key as `?key=` in the
 URL, because the vendor's settings offer that shape. Prefer the header forms
 (`Authorization: Bearer`, `x-api-key`) where the device allows.
+
+# 14. CRM access across companies
+
+**Symptom:** someone given every CRM permission (for example the *Manager*
+role) still sees no deals or leads. **Cause:** the level *All* means every
+record **of that person's own company** (their company or second company).
+Records imported from Bitrix24 belong to the company of their responsible
+person, so a Nova employee sees none of Genie Lamp's or Jobways' records, and
+nobody but a workspace admin sees imported records whose company is empty.
+
+Run `supabase-crm-all-companies-migration.sql` (migration 12). It adds the
+level **All companies** (every record of every company, and records with no
+company) and a role **Full CRM access (every company)**. To give someone the
+whole CRM: **Admin → CRM permissions →** the *Full CRM access (every
+company)* column **→ +** → pick the person → **Save**. They also see every
+pipeline and its stages. You can instead pick *All companies* for single
+cells of any role. Nobody gains anything until you do.
+
+Re-running migration 6 (`supabase-b24-migration.sql`) keeps the new level.
+Re-run migration 12 after it anyway, because migration 1 resets the pipeline
+policies.
+
+# 15. Tasks, people pickers and wallpapers
+
+- **New task** (`/tasks/?id=new`) follows Bitrix24's layout:
+  - Task name; a description with attach, @mention and list tools; and a checklist.
+  - *Task owner*, *Assignee* (**+** adds participants) and *Deadline* rows.
+  - The *Task status summary is required* switch (migration 13). Completing
+    such a task asks for the summary and posts it on the task.
+  - Chips for files, checklists, project, participants, observers, tags,
+    reminders, CRM items, parent task, time planning, priority and status.
+  - The task chat panel.
+  - Attached files are uploaded to Documents and linked to the task.
+- **People pickers** everywhere in the CRM and work pages open a searchable
+  pop-up with photo, Employee ID, name and company, as in Bitrix24.
+- **Live wallpapers** (Themes): *Northern lights*, *Starfall*, *Ocean*,
+  *City lights* and *Fireflies* animate behind the app. They run at up to
+  30 frames a second, pause in hidden tabs, and stay still when the device
+  asks for reduced motion. Light/dark and the wallpaper follow the person
+  to every browser they sign in on.
 

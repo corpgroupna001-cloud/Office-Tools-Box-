@@ -116,8 +116,14 @@
         ],
     };
 
-    // WorkSuite's own wallpapers (ui/b24.css draws them).
+    // WorkSuite's own wallpapers (ui/b24.css draws them). "live" ones also
+    // animate on a canvas (ui/live-wallpaper.js, loaded only when chosen).
     var WALLPAPERS = [
+        { key: 'northern', title: 'Northern lights', live: true },
+        { key: 'starfall', title: 'Starfall', live: true },
+        { key: 'ocean',    title: 'Ocean', live: true },
+        { key: 'bokeh',    title: 'City lights', live: true },
+        { key: 'fireflies', title: 'Fireflies', live: true },
         { key: 'azure',    title: 'Azure' },
         { key: 'lagoon',   title: 'Lagoon' },
         { key: 'dusk',     title: 'Dusk' },
@@ -125,8 +131,9 @@
         { key: 'aurora',   title: 'Aurora' },
         { key: 'graphite', title: 'Graphite' },
         { key: 'sand',     title: 'Sand' },
-        { key: 'light',    title: 'Light (no wallpaper)' },
+        { key: 'light',    title: 'Plain (no wallpaper)' },
     ];
+    function isLive(key) { return WALLPAPERS.some(function (x) { return x.key === key && x.live; }); }
 
     var COLLAPSE_KEY = 'ws-side-collapsed', MENU_KEY = 'ws-menu', WALL_KEY = 'ws-wallpaper';
     var state = {
@@ -211,6 +218,8 @@
                     state.menu = normaliseMenu(row.value); store(MENU_KEY, state.menu); renderMenu();
                 }
                 if (row.key === 'theme' && row.value && row.value.wallpaper && row.value.wallpaper !== currentWallpaper()) applyWallpaper(row.value.wallpaper, false);
+                // The brightness follows the person to every browser, like the wallpaper.
+                if (row.key === 'theme' && row.value && (row.value.mode === 'light' || row.value.mode === 'dark') && window.WSTheme && row.value.mode !== WSTheme.current()) WSTheme.set(row.value.mode);
             });
         } catch (e) { /* optional */ }
     }
@@ -220,9 +229,21 @@
         var w = load(WALL_KEY);
         return WALLPAPERS.some(function (x) { return x.key === w; }) ? w : 'azure';
     }
+    var liveLoading = null;
+    function startLive(key) {
+        if (!isLive(key) || state.inSlider) { if (window.WSLiveWall) WSLiveWall.stop(); return; }
+        if (window.WSLiveWall) { WSLiveWall.start(key); return; }
+        if (!liveLoading) liveLoading = new Promise(function (resolve) {
+            var sc = document.createElement('script');
+            sc.src = '/ui/live-wallpaper.js'; sc.onload = resolve; sc.onerror = resolve;
+            document.head.appendChild(sc);
+        });
+        liveLoading.then(function () { if (window.WSLiveWall && currentWallpaper() === key) WSLiveWall.start(key); });
+    }
     function applyWallpaper(key, persist) {
         document.documentElement.setAttribute('data-wallpaper', key);
         store(WALL_KEY, key);
+        if (document.body) startLive(key);
         if (persist !== false) saveSetting('theme', { wallpaper: key, mode: window.WSTheme ? WSTheme.current() : 'light' });
     }
 
@@ -808,12 +829,14 @@
             '<div class="ws-lite-head"><b id="ws-themes-t">Themes</b><button type="button" class="x" aria-label="Close"><span class="ic ic-x"></span></button></div>' +
             '<div class="ws-lite-body"><div class="ws-theme-mode" role="group" aria-label="Brightness">' +
                 ['light', 'dark'].map(function (m) { return '<button type="button" class="ws-btn sm' + (m === mode ? ' primary' : '') + '" data-mode="' + m + '">' + (m === 'light' ? 'Light' : 'Dark') + '</button>'; }).join('') +
-            '</div><div class="ws-themes-grid">' +
-                WALLPAPERS.map(function (w) {
-                    return '<button type="button" class="ws-theme-card' + (w.key === cur ? ' on' : '') + '" data-w="' + w.key + '" aria-pressed="' + (w.key === cur) + '">' +
-                        '<span class="sw" data-w="' + w.key + '"></span><b>' + esc(w.title) + '</b></button>';
-                }).join('') +
-            '</div></div></div>';
+            '</div>' + [['Live wallpapers', true], ['Wallpapers', false]].map(function (g) {
+                return '<h4 class="ws-themes-h">' + g[0] + '</h4><div class="ws-themes-grid">' +
+                    WALLPAPERS.filter(function (w) { return !!w.live === g[1]; }).map(function (w) {
+                        return '<button type="button" class="ws-theme-card' + (w.key === cur ? ' on' : '') + '" data-w="' + w.key + '" aria-pressed="' + (w.key === cur) + '">' +
+                            '<span class="sw" data-w="' + w.key + '">' + (w.live ? '<i class="live">Live</i>' : '') + '</span><b>' + esc(w.title) + '</b></button>';
+                    }).join('') + '</div>';
+            }).join('') +
+            '</div></div>';
         document.body.appendChild(bd);
         var close = function () { bd.remove(); document.removeEventListener('keydown', onKey, true); };
         var onKey = function (e) { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
@@ -832,7 +855,7 @@
                 saveSetting('theme', { wallpaper: currentWallpaper(), mode: m.dataset.mode });
             }
         });
-        bd.querySelector('.ws-theme-card.on, .ws-theme-card').focus();
+        (bd.querySelector('.ws-theme-card.on') || bd.querySelector('.ws-theme-card')).focus();
     }
 
     // ----- slide-over panels -----

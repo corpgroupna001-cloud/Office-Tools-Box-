@@ -77,8 +77,21 @@
         if (expected && n < expected) C.toast(`${expected - n} task${expected - n > 1 ? 's were' : ' was'} skipped: no permission`, 'bad');
         return n;
     }
+    /** "Task status summary is required": ask what was done, and post it as the task's comment. Resolves false when cancelled. */
+    async function askSummary(t) {
+        const r = await sb.from('tasks').select('result_required').eq('id', t.id).maybeSingle();
+        if (r.error || !r.data || !r.data.result_required) return true;
+        const text = await C.formModal({ title: 'Task status summary', submitLabel: 'Complete task',
+            intro: `<div class="crm-info">${esc(t.title || 'This task')} needs a summary of what was done before it is completed.</div>`,
+            fields: [{ name: 'summary', label: 'Summary', type: 'textarea', rows: 5, required: true, full: true, placeholder: 'What was done, and the result' }],
+            onSubmit: v => String(v.summary || '').trim() });
+        if (!text || text === true) return false;
+        await C.q(sb.from('comments').insert({ entity_type: 'task', entity_id: t.id, body: `Task status summary:\n${text}`, mentions: [], author_id: me.id }));
+        return true;
+    }
     async function setDone(t, done, after) {
         try {
+            if (done && !await askSummary(t)) { if (after) after(); return; }
             await mustUpdate(sb.from('tasks').update({ status: done ? DONE_KEY : OPEN_KEY }).eq('id', t.id));
             C.toast(done ? 'Task completed' : 'Task reopened', 'ok');
             WSShell.refreshUnread();
@@ -620,14 +633,14 @@
         document.title = 'New task · WorkSuite';
         WSShell.setCrumb('New task');
         const p = k => C.param(k) || null;
+        // The summary flag arrives with supabase-task-summary-migration.sql.
+        const sumCol = await B.columns('tasks', 'id, result_required', 'id');
         // Optional parts, revealed by the chips under the form (as in Bitrix24).
-        const CHIPS = [['assignees', 'Participants', ['assignees']], ['watchers', 'Observers', ['watchers']], ['project', 'Project', ['project_id']], ['tags', 'Tags', ['tags']],
-            ['reminder', 'Reminder', ['reminder']], ['crm', 'CRM items', ['contact_id', 'deal_id']], ['parent', 'Parent task', ['parent_task_id']],
-            ['planning', 'Time planning', ['start_date', 'estimate_hours']], ['priority', 'Priority', ['priority']], ['status', 'Status', ['status']]];
+        const CHIPS = [['files', 'Files', [], 'clip'], ['checklist', 'Checklists', [], 'check'], ['project', 'Project', ['project_id'], 'folder'],
+            ['assignees', 'Participants', ['assignees'], 'users'], ['watchers', 'Observers', ['watchers'], 'eye'], ['tags', 'Tags', ['tags'], 'tag'],
+            ['reminder', 'Reminders', ['reminder'], 'bell'], ['crm', 'CRM items', ['contact_id', 'deal_id'], 'deal'], ['parent', 'Parent task', ['parent_task_id'], 'tasks'],
+            ['planning', 'Time planning', ['start_date', 'estimate_hours'], 'calendar'], ['priority', 'Priority', ['priority'], 'flag'], ['status', 'Status', ['status'], 'refresh']];
         const fields = [
-            { name: 'assignee_id', label: 'Assignee', type: 'people', none: 'Not assigned' },
-            { name: 'due_date', label: 'Deadline', type: 'date' },
-            { name: 'due_time', label: 'Time', type: 'time' },
             { name: 'assignees', label: 'Participants (also assigned)', type: 'peoples', full: true },
             { name: 'watchers', label: 'Observers', type: 'peoples', full: true },
             { name: 'project_id', label: 'Project', type: 'entity', entity: 'project', placeholder: 'Search projects', full: true },
@@ -641,58 +654,128 @@
             { name: 'priority', label: 'Priority', type: 'select', required: true, options: Object.entries(L.PRIORITY).map(([value, x]) => ({ value, label: x.label })) },
             { name: 'status', label: 'Status', type: 'select', required: true, options: lk.taskStatuses.map(s => ({ value: s.key, label: s.label })) },
         ];
-        const defaults = { assignee_id: p('assignee_id') || me.id, due_date: p('due_date'), project_id: p('project_id'), contact_id: p('contact_id'), deal_id: p('deal_id'), parent_task_id: p('parent_task_id'), priority: 'normal', status: OPEN_KEY, assignees: [], watchers: [], reminder: false };
+        const defaults = { project_id: p('project_id'), contact_id: p('contact_id'), deal_id: p('deal_id'), parent_task_id: p('parent_task_id'), priority: 'normal', status: OPEN_KEY, assignees: [], watchers: [], reminder: false };
+        // Owner, assignee and deadline are Bitrix24's three rows, kept outside the form.
+        const pick = { assignee: p('assignee_id') || me.id, due_date: p('due_date'), due_time: null };
+        const toolBtn = (act, icon, label, text) => `<button type="button" data-tool="${act}" title="${esc(label)}" aria-label="${esc(label)}">${icon ? C.icon(icon) : ''}${text ? `<span>${esc(text)}</span>` : ''}</button>`;
         view.innerHTML = `
             <div class="b24-tnew">
                 <div class="b24-tnew-cols">
                     <div class="b24-tnew-form">
+                        <div class="b24-tnew-title" data-title></div>
                         <div class="b24-tnew-card">
-                            <div class="b24-tnew-title" data-title></div>
                             <div class="b24-tnew-desc" data-desc></div>
-                            <div class="b24-tnew-tools"><button type="button" data-add-check>+ Checklist</button></div>
+                            <div class="b24-tnew-files" data-files hidden></div>
+                            <div class="b24-tnew-tools">${toolBtn('file', 'clip', 'Attach files')}${toolBtn('mention', '', 'Mention someone', '@')}${toolBtn('bullets', 'list', 'Bulleted list')}${toolBtn('numbers', 'olist', 'Numbered list', '1.')}<button type="button" class="purple" data-add-check>${C.icon('check')}<span>Checklist</span></button><input type="file" multiple hidden data-file-input></div>
                             <div class="b24-tnew-check" data-check></div>
                         </div>
                         <div class="b24-tnew-card b24-tnew-people">
-                            <div class="who"><span class="l">Task owner</span>${C.personHtml(me.id, { link: false })}</div>
-                            <div data-fields></div>
+                            <div class="b24-trow"><span class="l">Task owner:</span><span class="v">${C.personHtml(me.id, { link: false })}</span></div>
+                            <div class="b24-trow"><span class="l">Assignee:</span><span class="v"><button type="button" class="b24-tperson" data-assignee aria-haspopup="dialog"></button></span><button type="button" class="b24-tplus" data-more-people title="Add participants" aria-label="Add participants">+</button></div>
+                            <div class="b24-trow"><span class="l">Deadline:</span><span class="v"><button type="button" class="b24-tdeadline" data-deadline></button></span></div>
                         </div>
-                        <div class="b24-tnew-chips" data-chips role="group" aria-label="Add to the task">${CHIPS.map(([k, label]) => `<button type="button" data-chip="${k}" aria-pressed="false">+ ${esc(label)}</button>`).join('')}</div>
+                        ${sumCol.full ? `<label class="b24-tnew-card b24-tsummary"><span class="ic-box">${C.icon('doc')}</span><span class="t">Task status summary is required</span><input type="checkbox" data-summary role="switch" aria-label="Task status summary is required"><span class="sw" aria-hidden="true"></span></label>` : ''}
+                        <div class="b24-tnew-card b24-tnew-extra" data-extra-card hidden><div data-fields></div></div>
+                        <div class="b24-tnew-chips" data-chips role="group" aria-label="Add to the task">${CHIPS.map(([k, label, , icon]) => `<button type="button" data-chip="${k}" aria-pressed="false">${C.icon(icon)}<span>${esc(label)}</span></button>`).join('')}</div>
                     </div>
-                    <aside class="b24-tnew-chat" aria-label="Task chat"><div class="info"><b>Task chat</b>Once the task is created, everyone on it works together here:<ul><li>discuss progress and results</li><li>attach documents and files</li><li>follow every change to the task</li></ul></div></aside>
+                    <aside class="b24-tnew-chat" aria-label="Task chat">
+                        <div class="head">${C.icon('chat')}<div><b>Task chat</b><span data-members>1 member</span></div></div>
+                        <div class="body"><div class="info"><b>Task chat</b><ul><li>${C.icon('video')}Call chat members</li><li>${C.icon('clip')}Share documents and files</li><li>${C.icon('doc')}Discuss progress and results</li><li>${C.icon('arrow')}Track task updates</li></ul></div></div>
+                        <div class="foot"><span>Type @ or + to mention a person, a chat or AI</span></div>
+                    </aside>
                 </div>
-                <div class="b24-new-foot">
-                    <button type="button" class="b24-btn-create" data-save>Create</button>
+                <div class="b24-new-foot b24-tnew-foot">
+                    <button type="button" class="b24-tnew-create" data-save>Create</button>
                     <button type="button" class="b24-new-cancel" data-cancel>Cancel</button>
+                    <span class="grow"></span>
                     ${hasTemplates ? '<button type="button" class="b24-new-cancel" data-templates>Templates ▾</button>' : ''}
                     <span class="b24-new-err" data-err role="alert" hidden></span>
                 </div>
             </div>`;
         const titleForm = C.form([{ name: 'title', label: 'Task name', type: 'text', required: true, placeholder: 'Task name' }], { title: p('title') || '' });
-        const descForm = C.form([{ name: 'description', label: 'Description', type: 'textarea', rows: 4, placeholder: 'Description' }], {});
+        const descForm = C.form([{ name: 'description', label: 'Description', type: 'textarea', rows: 5, placeholder: 'Description' }], {});
         const mainForm = C.form(fields, defaults);
         view.querySelector('[data-title]').appendChild(titleForm.el);
         view.querySelector('[data-desc]').appendChild(descForm.el);
         view.querySelector('[data-fields]').appendChild(mainForm.el);
+        const descEl = descForm.field('description').el;
+
+        // ---- the three rows
+        const assigneeBtn = view.querySelector('[data-assignee]'), deadlineBtn = view.querySelector('[data-deadline]');
+        const members = () => new Set([me.id, pick.assignee, ...(mainForm.get().assignees || []), ...(mainForm.get().watchers || [])].filter(Boolean)).size;
+        function renderRows() {
+            assigneeBtn.innerHTML = pick.assignee ? C.personHtml(pick.assignee, { link: false }) : '<span class="muted">Not assigned</span>';
+            deadlineBtn.innerHTML = `${C.icon('calendar')}<span>${pick.due_date ? esc(L.fmtDate(pick.due_date) + (pick.due_time ? ', ' + String(pick.due_time).slice(0, 5) : '')) : 'No deadline'}</span>`;
+            const n = members(); view.querySelector('[data-members]').textContent = `${n} member${n === 1 ? '' : 's'}`;
+        }
+        assigneeBtn.addEventListener('click', () => C.pickPeople(assigneeBtn, { selected: pick.assignee ? [pick.assignee] : [], none: 'Not assigned', title: 'Assignee', onPick: ids => { pick.assignee = ids[0] || null; renderRows(); } }));
+        view.querySelector('[data-more-people]').addEventListener('click', e => {
+            showChip('assignees', true);
+            const w = mainForm.field('assignees');
+            C.pickPeople(e.currentTarget, { multiple: true, selected: w.get(), title: 'Participants', onPick: ids => { w.set(ids.filter(id => id !== pick.assignee)); renderRows(); } });
+        });
+        deadlineBtn.addEventListener('click', async () => {
+            const r = await C.formModal({ title: 'Deadline', submitLabel: 'Set deadline', size: 'narrow',
+                fields: [{ name: 'due_date', label: 'Date', type: 'date', required: true }, { name: 'due_time', label: 'Time', type: 'time' }],
+                values: { due_date: pick.due_date || L.addDays(today, 1), due_time: pick.due_time ? String(pick.due_time).slice(0, 5) : '' },
+                secondary: pick.due_date ? [{ label: 'No deadline', onClick: () => ({ due_date: null, due_time: null }) }] : [],
+                onSubmit: v => ({ due_date: v.due_date, due_time: v.due_time || null }) });
+            if (r && r !== true) { pick.due_date = r.due_date; pick.due_time = r.due_time; renderRows(); }
+        });
+        mainForm.el.addEventListener('change', renderRows);
+        renderRows();
+
+        // ---- chips
         const chipEl = k => view.querySelector(`[data-chip="${k}"]`);
+        const extraCard = view.querySelector('[data-extra-card]');
         function showChip(k, on) {
             const chip = CHIPS.find(c => c[0] === k); if (!chip) return;
             chip[2].forEach(n => { const w = mainForm.field(n); if (w) w.wrap.hidden = !on; });
             chipEl(k).classList.toggle('on', on); chipEl(k).setAttribute('aria-pressed', on ? 'true' : 'false');
+            extraCard.hidden = !CHIPS.some(c => c[2].length && chipEl(c[0]).classList.contains('on'));
         }
-        CHIPS.forEach(([k, , names]) => showChip(k, names.some(n => { const d = defaults[n]; return d != null && d !== '' && !(Array.isArray(d) && !d.length) && !['priority', 'status', 'reminder'].includes(n); })));
+        CHIPS.forEach(([k, , names]) => showChip(k, names.length > 0 && names.some(n => { const d = defaults[n]; return d != null && d !== '' && !(Array.isArray(d) && !d.length) && !['priority', 'status', 'reminder'].includes(n); })));
         view.querySelector('[data-chips]').addEventListener('click', e => {
             const b = e.target.closest('[data-chip]'); if (!b) return;
+            if (b.dataset.chip === 'files') return fileInput.click();
+            if (b.dataset.chip === 'checklist') return addItem('').querySelector('input[type=text]').focus();
             const on = !b.classList.contains('on'); showChip(b.dataset.chip, on);
-            if (on) { const chip = CHIPS.find(c => c[0] === b.dataset.chip); const w = mainForm.field(chip[2][0]); const f = w && w.wrap.querySelector('input, select, textarea'); if (f) f.focus(); }
+            if (on) { const chip = CHIPS.find(c => c[0] === b.dataset.chip); const w = mainForm.field(chip[2][0]); const f = w && w.wrap.querySelector('input, select, textarea, button'); if (f) f.focus(); }
+        });
+
+        // ---- description tools, files and the checklist
+        const files = [];
+        const fileInput = view.querySelector('[data-file-input]'), filesEl = view.querySelector('[data-files]');
+        function renderFiles() {
+            filesEl.hidden = !files.length;
+            filesEl.innerHTML = files.map((f, i) => `<span class="f">${C.icon('clip')}<span>${esc(f.name)}</span><small>${esc(L.fmtBytes(f.size))}</small><button type="button" data-rm-file="${i}" aria-label="Remove ${esc(f.name)}">×</button></span>`).join('');
+            chipEl('files').classList.toggle('on', files.length > 0);
+        }
+        fileInput.addEventListener('change', () => { [...fileInput.files].forEach(f => files.push(f)); fileInput.value = ''; renderFiles(); });
+        filesEl.addEventListener('click', e => { const b = e.target.closest('[data-rm-file]'); if (b) { files.splice(Number(b.dataset.rmFile), 1); renderFiles(); } });
+        function insert(text, lineStart) {
+            const el = descEl, a = el.selectionStart || 0, b = el.selectionEnd || 0, v = el.value;
+            const pre = lineStart && a > 0 && v[a - 1] !== '\n' ? '\n' : '';
+            el.value = v.slice(0, a) + pre + text + v.slice(b);
+            el.focus(); el.selectionStart = el.selectionEnd = a + pre.length + text.length;
+        }
+        view.querySelector('.b24-tnew-tools').addEventListener('click', e => {
+            const b = e.target.closest('[data-tool]'); if (!b) return;
+            const k = b.dataset.tool;
+            if (k === 'file') fileInput.click();
+            else if (k === 'mention') C.pickPeople(b, { title: 'Mention', onPick: ids => { if (ids[0]) { const who = C.person(ids[0]); insert('@' + (who ? who.name : '') + ' '); } } });
+            else if (k === 'bullets') insert('• ', true);
+            else if (k === 'numbers') { const n = (descEl.value.match(/^\d+\. /gm) || []).length + 1; insert(n + '. ', true); }
         });
         const checkEl = view.querySelector('[data-check]');
         function addItem(text) {
             const row = document.createElement('div'); row.className = 'item';
             row.innerHTML = '<input type="checkbox" disabled aria-hidden="true"><input type="text" placeholder="Checklist item" aria-label="Checklist item"><button type="button" aria-label="Remove item">×</button>';
             row.querySelector('input[type=text]').value = text || '';
-            row.querySelector('button').addEventListener('click', () => row.remove());
+            row.querySelector('button').addEventListener('click', () => { row.remove(); chipEl('checklist').classList.toggle('on', checkEl.children.length > 0); });
             row.querySelector('input[type=text]').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addItem('').querySelector('input[type=text]').focus(); } });
             checkEl.appendChild(row);
+            chipEl('checklist').classList.add('on');
             return row;
         }
         view.querySelector('[data-add-check]').addEventListener('click', () => addItem('').querySelector('input[type=text]').focus());
@@ -703,7 +786,8 @@
             if (!list.length) return C.toast('No templates yet. Save a task as a template from its card.', 'ok');
             C.menu(tb, list.map(tpl => ({ label: tpl.title, onClick: () => {
                 titleForm.set({ title: tpl.title }); descForm.set({ description: tpl.description || '' });
-                mainForm.set({ assignee_id: tpl.assignee_id || me.id, priority: tpl.priority || 'normal', estimate_hours: tpl.estimate_hours, tags: tpl.tags || [], due_date: tpl.deadline_days != null ? L.addDays(today, tpl.deadline_days) : null });
+                pick.assignee = tpl.assignee_id || me.id; pick.due_date = tpl.deadline_days != null ? L.addDays(today, tpl.deadline_days) : null; renderRows();
+                mainForm.set({ priority: tpl.priority || 'normal', estimate_hours: tpl.estimate_hours, tags: tpl.tags || [] });
                 if (tpl.priority && tpl.priority !== 'normal') showChip('priority', true);
                 if ((tpl.tags || []).length) showChip('tags', true);
                 if (tpl.estimate_hours) showChip('planning', true);
@@ -711,11 +795,14 @@
                 (Array.isArray(tpl.checklist) ? tpl.checklist : []).map(x => (typeof x === 'string' ? x : x.title)).filter(Boolean).forEach(addItem);
             } })));
         });
+
+        // ---- save
         const errEl = view.querySelector('[data-err]'), btn = view.querySelector('[data-save]');
+        const summaryEl = view.querySelector('[data-summary]');
         async function save() {
             errEl.hidden = true;
             if (![titleForm.validate(), mainForm.validate()].every(Boolean)) { errEl.textContent = 'Fill in the fields marked in red.'; errEl.hidden = false; return; }
-            const v = { ...titleForm.get(), ...descForm.get(), ...mainForm.get() };
+            const v = { ...titleForm.get(), ...descForm.get(), ...mainForm.get(), assignee_id: pick.assignee, due_date: pick.due_date, due_time: pick.due_time };
             if (v.due_date && v.start_date && L.dayNumber(v.due_date) < L.dayNumber(v.start_date)) { errEl.textContent = 'The deadline is before the start date.'; errEl.hidden = false; return; }
             const row = {
                 title: v.title.trim(), description: v.description || null, status: v.status || OPEN_KEY, priority: v.priority || 'normal',
@@ -723,6 +810,7 @@
                 estimate_hours: v.estimate_hours, tags: v.tags || [], reminder_at: v.reminder && v.due_date ? L.isoAtIST(L.addDays(v.due_date, -1), '09:00') : null,
                 project_id: v.project_id || null, contact_id: v.contact_id || null, deal_id: v.deal_id || null, parent_task_id: v.parent_task_id || null, created_by: me.id,
             };
+            if (sumCol.full && summaryEl) row.result_required = summaryEl.checked;
             if (p('lead_id')) row.lead_id = p('lead_id');
             btn.disabled = true; btn.textContent = 'Creating…';
             try {
@@ -735,6 +823,7 @@
                     if (obs.length) await C.q(sb.from('task_watchers').insert(obs.map(id => ({ task_id: saved.id, user_id: id }))));
                     const items = [...checkEl.querySelectorAll('input[type=text]')].map(i => i.value.trim()).filter(Boolean);
                     if (items.length) await C.q(sb.from('tasks').insert(items.map(title => ({ title, parent_task_id: saved.id, assignee_id: saved.assignee_id, project_id: saved.project_id, status: OPEN_KEY, created_by: me.id }))));
+                    for (const f of files) { btn.textContent = `Uploading ${f.name}…`; await C.uploadDocument(f, { links: [{ entity_type: 'task', entity_id: saved.id }] }); }
                     [saved.assignee_id, ...extra].filter(id => id && id !== me.id).forEach(id => C.pushNotify({ to: id, title: 'Task assigned to you', body: saved.title, url: `/tasks/?id=${saved.id}`, tag: 'task' }));
                     obs.filter(id => id !== me.id).forEach(id => C.pushNotify({ to: id, title: 'You are now watching a task', body: saved.title, url: `/tasks/?id=${saved.id}`, tag: 'task' }));
                 } catch (e) { C.toast(`Task created, but some details could not be saved: ${e.message}`, 'bad'); }

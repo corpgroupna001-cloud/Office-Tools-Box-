@@ -50,8 +50,9 @@ test.before(async () => {
 
 test('roles are seeded once, and every table the file adds has RLS', { skip }, async () => {
   const roles = await svc(`select name, is_system from crm_roles order by name`);
-  assert.deepEqual(roles.map(r => r.name), ['Employee', 'Manager'], 'two runs, one set of roles');
-  assert.equal((await svc(`select count(*)::int n from crm_role_permissions`))[0].n, 120);
+  // Employee and Manager (b24), plus the unassigned all-companies role (migration 12).
+  assert.deepEqual(roles.map(r => r.name), ['Employee', 'Full CRM access (every company)', 'Manager'], 'two runs, one set of roles');
+  assert.equal((await svc(`select count(*)::int n from crm_role_permissions`))[0].n, 170);
   assert.equal((await svc(`select count(*)::int n from crm_role_assignments`))[0].n, 2);
   const noRls = await svc(`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
                             where n.nspname = 'public' and c.relkind = 'r' and not c.relrowsecurity`);

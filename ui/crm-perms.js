@@ -30,7 +30,8 @@
     { value: 'own', label: 'Only their own items' },
     { value: 'department', label: "Their own and their department's items" },
     { value: 'subdepartments', label: "Their own, their department's and sub-departments' items" },
-    { value: 'all', label: 'All' },
+    { value: 'all', label: 'All (their company)' },
+    { value: 'companies', label: 'All companies' },
   ];
   const LEVEL_LABEL = Object.fromEntries(LEVELS.map(l => [l.value, l.label]));
   const ACTION_LABEL = { read: 'Read', add: 'Add', edit: 'Edit', delete: 'Delete', export: 'Export', import: 'Import', move_stage: 'Move to stage', automation: 'Automation rules' };

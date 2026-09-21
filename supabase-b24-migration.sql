@@ -575,7 +575,7 @@ alter table public.crm_role_permissions drop constraint if exists crm_role_permi
 alter table public.crm_role_permissions add constraint crm_role_permissions_ck check (
   entity in ('contact', 'company', 'lead', 'deal', 'invoice', 'settings')
   and action in ('read', 'add', 'edit', 'delete', 'export', 'import', 'move_stage', 'view_amounts', 'custom_form', 'automation')
-  and level in ('none', 'own', 'department', 'subdepartments', 'all'));
+  and level in ('none', 'own', 'department', 'subdepartments', 'all', 'companies'));   -- 'companies': supabase-crm-all-companies-migration.sql
 create unique index if not exists crm_role_permissions_uidx
   on public.crm_role_permissions (role_id, entity, coalesce(pipeline_id::text, '*'), action);
 create index if not exists crm_role_permissions_lookup_idx on public.crm_role_permissions (entity, action);
@@ -622,14 +622,14 @@ returns int
 language sql
 immutable
 as $$
-  select case p_level when 'all' then 4 when 'subdepartments' then 3 when 'department' then 2 when 'own' then 1 else 0 end;
+  select case p_level when 'companies' then 5 when 'all' then 4 when 'subdepartments' then 3 when 'department' then 2 when 'own' then 1 else 0 end;
 $$;
 create or replace function public.ws_crm_level_name(p_rank int)
 returns text
 language sql
 immutable
 as $$
-  select case p_rank when 4 then 'all' when 3 then 'subdepartments' when 2 then 'department' when 1 then 'own' else 'none' end;
+  select case p_rank when 5 then 'companies' when 4 then 'all' when 3 then 'subdepartments' when 2 then 'department' when 1 then 'own' else 'none' end;
 $$;
 
 /** {"*": level, "<pipeline id>": level} for the caller, computed once per statement.
@@ -681,7 +681,9 @@ returns boolean
 language sql
 stable
 as $$
-  select coalesce(p_admin, false) or coalesce(
+  select coalesce(p_admin, false)
+    or public.ws_crm_rank_for(p_levels, p_pipeline) >= 5        -- 'companies': every company (migration 12)
+    or coalesce(
     p_company = any(coalesce(p_companies, '{}'))
     and case public.ws_crm_rank_for(p_levels, p_pipeline)
       when 4 then true
@@ -812,8 +814,9 @@ begin
     execute format($p$create policy %I on public.%I for update to authenticated using (
         public.ws_crm_row_ok((select public.ws_crm_levels(%L, 'edit')), %s, company, %I, created_by,
           (select public.ws_dept_peers()), (select public.ws_subdept_peers()), (select public.ws_my_companies()), (select public.ws_is_admin())))
-        with check ((select public.ws_is_admin()) or company = any((select public.ws_my_companies())::text[]))$p$,
-      t.tbl || '_update', t.tbl, t.entity, t.pipe, t.owner);
+        with check ((select public.ws_is_admin()) or company = any((select public.ws_my_companies())::text[])
+                    or public.ws_crm_rank_for((select public.ws_crm_levels(%L, 'edit')), %s) >= 5)$p$,
+      t.tbl || '_update', t.tbl, t.entity, t.pipe, t.owner, t.entity, t.pipe);
     execute format('drop policy if exists %I on public.%I', t.tbl || '_delete', t.tbl);
     execute format($p$create policy %I on public.%I for delete to authenticated using (
         public.ws_crm_row_ok((select public.ws_crm_levels(%L, 'delete')), %s, company, %I, created_by,

@@ -268,19 +268,105 @@
         }
         return html;
     }
-    /** Multi-person picker: returns { el, get(), set(ids) }. */
+    /**
+     * The Bitrix24 people popup: a search box over everyone, with photo, Employee ID and name.
+     * pickPeople(anchor, { selected: [ids], multiple, none: 'Not assigned' | undefined, title, onPick(ids) })
+     * Single: a click picks and closes. Multiple: clicks toggle; closing (Done, Esc, outside) commits.
+     */
+    let peoplePop = null;
+    function pickPeople(anchor, o) {
+        o = o || {};
+        if (peoplePop) peoplePop.close(false);
+        const chosen = new Set((o.selected || []).filter(Boolean));
+        const all = activePeople().slice().sort(byEmployeeId);
+        const pop = h(`<div class="crm-pp" role="dialog" aria-label="${esc(o.title || 'Choose people')}">
+            <input type="search" class="crm-pp-q" placeholder="search" aria-label="Search people" autocomplete="off">
+            <div class="crm-pp-list" role="listbox"${o.multiple ? ' aria-multiselectable="true"' : ''}></div>
+            ${o.multiple ? '<div class="crm-pp-foot"><button type="button" class="crm-pp-done">Done</button></div>' : ''}
+        </div>`);
+        const list = pop.querySelector('.crm-pp-list'), qEl = pop.querySelector('.crm-pp-q');
+        function render() {
+            const t = qEl.value.trim().toLowerCase();
+            const hits = all.filter(p => !t || [p.employee_id, p.name, p.email, p.company, p.department, p.job_title].some(v => String(v || '').toLowerCase().includes(t))).slice(0, 200);
+            list.innerHTML = (o.none !== undefined && !o.multiple && !t ? `<button type="button" class="crm-pp-item none" role="option" data-id=""><span class="ws-avatar">–</span><span class="nm"><span class="code">${esc(o.none)}</span></span></button>` : '') +
+                hits.map(p => { const code = String(p.employee_id || '').trim(); return `<button type="button" class="crm-pp-item${chosen.has(p.id) ? ' on' : ''}" role="option" aria-selected="${chosen.has(p.id)}" data-id="${esc(p.id)}">${avatarHtml(p)}<span class="nm"><span class="code">${esc(code || p.name)}</span>${code ? `<span class="who">${esc(p.name)}${p.company ? ' · ' + esc(p.company) : ''}</span>` : (p.company ? `<span class="who">${esc(p.company)}</span>` : '')}</span>${chosen.has(p.id) ? '<span class="tick" aria-hidden="true">✓</span>' : ''}</button>`; }).join('') ||
+                '<div class="crm-pp-empty">Nobody matches</div>';
+        }
+        function place() {
+            const r = anchor.getBoundingClientRect(), W = Math.min(380, window.innerWidth - 16);
+            pop.style.width = W + 'px';
+            const left = Math.max(8, Math.min(r.left, window.innerWidth - W - 8));
+            const below = window.innerHeight - r.bottom, H = Math.min(440, Math.max(below, r.top) - 16);
+            pop.style.left = left + 'px'; pop.style.maxHeight = H + 'px';
+            if (below >= Math.min(300, r.top)) { pop.style.top = (r.bottom + 6) + 'px'; pop.style.bottom = ''; }
+            else { pop.style.bottom = (window.innerHeight - r.top + 6) + 'px'; pop.style.top = ''; }
+        }
+        let closed = false;
+        function close(commit) {
+            if (closed) return; closed = true;
+            pop.remove(); peoplePop = null;
+            document.removeEventListener('mousedown', outside, true); document.removeEventListener('keydown', key, true);
+            window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true);
+            if (commit !== false && o.multiple && o.onPick) o.onPick([...chosen]);
+            try { anchor.focus(); } catch (e) { /* gone */ }
+        }
+        function outside(e) { if (!pop.contains(e.target) && !anchor.contains(e.target)) close(true); }
+        function key(e) {
+            if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); close(true); return; }
+            if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+            const items = [...list.querySelectorAll('.crm-pp-item')]; if (!items.length) return;
+            e.preventDefault();
+            const i = items.indexOf(document.activeElement);
+            const next = e.key === 'ArrowDown' ? (i < 0 ? 0 : Math.min(items.length - 1, i + 1)) : (i <= 0 ? -1 : i - 1);
+            if (next < 0) qEl.focus(); else items[next].focus();
+        }
+        list.addEventListener('click', e => {
+            const b = e.target.closest('.crm-pp-item'); if (!b) return;
+            const id = b.dataset.id;
+            if (!o.multiple) { close(false); if (o.onPick) o.onPick(id ? [id] : []); return; }
+            if (chosen.has(id)) chosen.delete(id); else chosen.add(id);
+            render(); const again = list.querySelector(`[data-id="${CSS.escape(id)}"]`); if (again) again.focus();
+        });
+        qEl.addEventListener('input', render);
+        qEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); const first = list.querySelector('.crm-pp-item'); if (first) first.click(); } });
+        const done = pop.querySelector('.crm-pp-done'); if (done) done.addEventListener('click', () => close(true));
+        document.body.appendChild(pop);
+        render(); place(); qEl.focus();
+        document.addEventListener('mousedown', outside, true); document.addEventListener('keydown', key, true);
+        window.addEventListener('resize', place); window.addEventListener('scroll', place, true);
+        peoplePop = { close };
+        return peoplePop;
+    }
+    /** One person, chosen through the popup: returns { el, get(), set(id) }; el fires 'change'. */
+    function personField(value, opts) {
+        opts = opts || {};
+        let id = value || null;
+        const el = h(`<button type="button" class="crm-pp-field" aria-haspopup="dialog"${opts.id ? ` id="${esc(opts.id)}"` : ''}></button>`);
+        function render() { el.innerHTML = (id ? personHtml(id, { link: false }) : `<span class="muted">${esc(opts.none || 'Not assigned')}</span>`) + '<span class="caret" aria-hidden="true">▾</span>'; }
+        el.addEventListener('click', () => pickPeople(el, { selected: id ? [id] : [], none: opts.none === null ? undefined : (opts.none || 'Not assigned'), title: opts.label, onPick: ids => {
+            const nv = ids[0] || null; if (nv === id) return; id = nv; render(); el.dispatchEvent(new Event('change', { bubbles: true }));
+        } }));
+        render();
+        return { el, get: () => id, set: v => { id = v || null; render(); } };
+    }
+    /** Several people: chips plus "+ Add" opening the popup. Returns { el, get(), set(ids) }; el fires 'change'. */
     function peoplePicker(selectedIds, opts) {
         let ids = (selectedIds || []).filter(Boolean);
         const el = h('<div class="crm-people-pick"></div>');
         function render() {
-            const exclude = new Set(ids);
-            el.innerHTML = ids.map(id => `<span class="crm-tag">${esc(personLabel(id) || personName(id))}<button type="button" data-rm="${esc(id)}" aria-label="Remove">×</button></span>`).join('') +
-                `<select aria-label="${esc((opts && opts.label) || 'Add person')}"><option value="">${esc((opts && opts.placeholder) || '+ Add person…')}</option>${activePeople().filter(p => !exclude.has(p.id)).sort(byEmployeeId).map(p => `<option value="${esc(p.id)}">${esc(personLabel(p))}</option>`).join('')}</select>`;
+            el.innerHTML = ids.map(id => `<span class="crm-pp-chip">${avatarHtml(id)}<span>${esc(String((person(id) || {}).employee_id || '').trim() || personName(id))}</span><button type="button" data-rm="${esc(id)}" aria-label="Remove ${esc(personName(id))}">×</button></span>`).join('') +
+                `<button type="button" class="crm-pp-add" aria-haspopup="dialog">${esc((opts && opts.placeholder) || '+ Add')}</button>`;
         }
-        el.addEventListener('click', e => { const b = e.target.closest('[data-rm]'); if (b) { ids = ids.filter(x => x !== b.dataset.rm); render(); el.dispatchEvent(new Event('change')); } });
-        el.addEventListener('change', e => { if (e.target.tagName === 'SELECT' && e.target.value) { ids.push(e.target.value); render(); el.dispatchEvent(new Event('change')); } });
+        el.addEventListener('click', e => {
+            const b = e.target.closest('[data-rm]');
+            if (b) { ids = ids.filter(x => x !== b.dataset.rm); render(); el.dispatchEvent(new Event('change', { bubbles: true })); return; }
+            const add = e.target.closest('.crm-pp-add');
+            if (add) pickPeople(add, { multiple: true, selected: ids, title: opts && opts.label, onPick: next => {
+                if (next.join() === ids.join()) return; ids = next; render(); el.dispatchEvent(new Event('change', { bubbles: true }));
+            } });
+        });
         render();
-        return { el, get: () => ids.slice(), set: v => { ids = (v || []).slice(); render(); } };
+        return { el, get: () => ids.slice(), set: v => { ids = (v || []).filter(Boolean); render(); } };
     }
 
     /* ------------------------------------------------------ badges etc */
@@ -425,7 +511,7 @@
                         opts.map(o => `<option value="${esc(o.value)}"${String(o.value) === String(v) ? ' selected' : ''}>${esc(o.label)}</option>`).join('');
                     break;
                 }
-                case 'people': input = h(`<select ${common}></select>`); input.innerHTML = peopleOptions(v || '', { none: f.none !== undefined ? f.none : 'Unassigned' }); break;
+                case 'people': { const pf = personField(v || null, { id, label: f.label, none: f.none !== undefined ? f.none : 'Unassigned' }); input = pf.el; widgets[f.name] = { get: pf.get, set: pf.set, el: pf.el }; break; }
                 case 'peoples': { const pk = peoplePicker(v || [], { label: f.label }); input = pk.el; widgets[f.name] = { get: pk.get, set: pk.set, el: pk.el }; break; }
                 case 'check': input = h(`<label class="crm-check"><input type="checkbox" ${common}> <span>${esc(f.label)}</span></label>`); input.querySelector('input').checked = !!v; break;
                 case 'tags': input = h(`<input type="text" ${common}>`); input.value = Array.isArray(v) ? v.join(', ') : (v || ''); if (!f.hint) f.hint = 'Separate tags with commas'; break;
@@ -478,7 +564,7 @@
                     w.wrap.classList.toggle('invalid', !!m);
                     if (m) { ok = false; first = first || w; }
                 });
-                if (first) { const fo = $('input, select, textarea', first.wrap); if (fo) fo.focus(); }
+                if (first) { const fo = $('input, select, textarea, button', first.wrap); if (fo) fo.focus(); }
                 return ok;
             },
         };
@@ -1133,7 +1219,7 @@
     window.WSCrm = {
         boot, ctx, client, lookups, q, friendly, isMissingSchema, migrationNoticeHtml,
         esc, h, $, $$, uid, debounce, param, setParam, toast, icon, nl2br, linkify,
-        person, personName, personLabel, personText, personInline, activePeople, avatarHtml, personHtml, avatarsHtml, peopleOptions, peoplePicker,
+        person, personName, personLabel, personText, personInline, activePeople, avatarHtml, personHtml, avatarsHtml, peopleOptions, peoplePicker, pickPeople, personField,
         badge, statusBadge, priorityBadge, dueHtml, tagsHtml, entityUrl, entityChip, ENTITY_META,
         loading, skeletonRows, empty, errorState,
         confirm, alert, modal, form, formModal, entityPicker, searchEntities, entityLabel,
