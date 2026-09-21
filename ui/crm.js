@@ -307,6 +307,7 @@
         document: { icon: 'doc', path: '/documents/', label: 'Document' },
         event: { icon: 'calendar', path: '/calendar/', label: 'Meeting' },
         invoice: { icon: 'invoice', path: '/invoices/', label: 'Invoice' },
+        quote: { icon: 'doc', path: '/quotes/', label: 'Quote' },
         employee: { icon: 'users', path: '/employees/', label: 'Employee' },
         conversation: { icon: 'chat', path: '/chat/#group=', label: 'Group' },
     };

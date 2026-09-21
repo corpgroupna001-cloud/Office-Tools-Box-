@@ -64,7 +64,9 @@
             { key: 'deals',      title: 'Deals',              href: '/deals/',      icon: 'deal',    section: 'crm' },
             { key: 'leads',      title: 'Leads',              href: '/leads/',      icon: 'target',  section: 'crm' },
             { key: 'contacts',   title: 'Contacts',           href: '/contacts/',   icon: 'user',    section: 'crm' },
+            { key: 'quotes',     title: 'Quotes',             href: '/quotes/',     icon: 'doc',     menu: false, section: 'crm' },
             { key: 'invoices',   title: 'Invoices',           href: '/invoices/',   icon: 'invoice', section: 'crm' },
+            { key: 'forecast',   title: 'Sales forecast',     href: '/crm/forecast', icon: 'chart',  menu: false, section: 'crm' },
             { key: 'companies',  title: 'Companies',          href: '/companies/',  icon: 'building', menu: false, section: 'crm' },
             { key: 'crm-settings', title: 'CRM settings',     href: '/crm/settings', icon: 'gear',   menu: false, section: 'crm', role: 'manager' },
         ]},
@@ -94,7 +96,9 @@
             { key: 'leads',    title: 'Leads',     href: '/leads/' },
             { key: 'contacts', title: 'Contacts',  href: '/contacts/' },
             { key: 'companies', title: 'Companies', href: '/companies/' },
+            { key: 'quotes',   title: 'Quotes',    href: '/quotes/' },
             { key: 'invoices', title: 'Invoices',  href: '/invoices/' },
+            { key: 'forecast', title: 'Forecast',  href: '/crm/forecast' },
             { key: 'crm',      title: 'Analytics', href: '/crm/' },
             { key: 'crm-settings', title: 'Settings', href: '/crm/settings', role: 'manager' },
         ],
@@ -1110,10 +1114,15 @@
         if (s < 7 * 86400) return Math.round(s / 86400) + 'd ago';
         return d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' });
     }
+    /** A notification link, only if it stays on this site; otherwise null. */
+    function safeUrl(u) {
+        if (!u) return null;
+        try { var x = new URL(u, location.origin); return x.origin === location.origin && /^https?:$/.test(x.protocol) ? x.pathname + x.search + x.hash : null; } catch (e) { return null; }
+    }
     function renderNotifications() {
         if (!state.notifItems.length) { refs.notifList.innerHTML = '<div class="empty">You are all caught up.</div>'; return; }
         refs.notifList.innerHTML = state.notifItems.map(function (n) {
-            return '<a class="item' + (n.read_at ? ' read' : '') + '" href="' + esc(n.url || '#') + '" data-notif="' + esc(n.id) + '">' +
+            return '<a class="item' + (n.read_at ? ' read' : '') + '" href="' + esc(safeUrl(n.url) || '#') + '" data-notif="' + esc(n.id) + '">' +
                 '<span class="dot"></span><span class="t"><b>' + esc(n.title) + '</b>' + (n.body ? '<span>' + esc(n.body) + '</span>' : '') + '<small>' + esc(relTime(n.created_at)) + '</small></span></a>';
         }).join('');
     }
@@ -1125,7 +1134,8 @@
             setCounts(Object.assign({}, state.counts, { notifications: Math.max(0, state.counts.notifications - 1) }));
         }
         toggleNotif(false);
-        if (url && url !== '#') location.href = url;
+        url = safeUrl(url);
+        if (url) location.href = url;
     }
     async function markAllRead() {
         try { await state.sb.from('notifications').update({ read_at: new Date().toISOString() }).eq('user_id', state.uid).is('read_at', null); } catch (e) { /* best effort */ }

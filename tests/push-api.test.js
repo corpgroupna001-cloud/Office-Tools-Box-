@@ -166,3 +166,12 @@ test('the legacy free-form notify still works for CRM pages', async () => {
   assert.equal(sent[0].payload.title, 'Task assigned');
   assert.equal((await call({ token: 'tok-a', body: { action: 'notify', to: 'not-a-user' } })).statusCode, 400);
 });
+
+test('a free-form notify only links inside WorkSuite and cannot pose as a call', async () => {
+  reset();
+  for (const url of ['https://evil.test/login', '//evil.test', 'javascript:alert(1)', '/\\evil.test']) {
+    await call({ token: 'tok-a', body: { action: 'notify', to: C, title: 'Re-login', url, tag: 'task' } });
+  }
+  assert.deepEqual([...new Set(sent.map(s => s.payload.url))], ['/chat/']);
+  assert.equal((await call({ token: 'tok-a', body: { action: 'notify', to: C, title: 'Incoming call', tag: 'call' } })).statusCode, 400);
+});

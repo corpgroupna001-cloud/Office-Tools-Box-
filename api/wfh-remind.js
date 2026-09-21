@@ -7,6 +7,7 @@
 //   - Manually by admin tooling (x-worksuite-mail-key: MAIL_API_KEY, ?force=1
 //     skips the Friday check)
 
+const { safeEqual } = require('../lib/request-auth');
 const webpush = require('web-push');
 const { runAndPush } = require('../lib/crm-reminders');
 
@@ -19,8 +20,8 @@ module.exports = async function handler(req, res) {
 
   // ---- Auth: Vercel cron OR admin shared key ----
   const authz = String(req.headers.authorization || '');
-  const cronOk = process.env.CRON_SECRET && authz === `Bearer ${process.env.CRON_SECRET}`;
-  const keyOk = process.env.MAIL_API_KEY && req.headers['x-worksuite-mail-key'] === process.env.MAIL_API_KEY;
+  const cronOk = !!process.env.CRON_SECRET && safeEqual(authz, `Bearer ${process.env.CRON_SECRET}`);
+  const keyOk = !!process.env.MAIL_API_KEY && safeEqual(req.headers['x-worksuite-mail-key'] || '', process.env.MAIL_API_KEY);
   if (!cronOk && !keyOk) return res.status(401).json({ error: 'unauthorized' });
 
   if (!SUPABASE_URL || !SERVICE_KEY) return res.status(500).json({ error: 'supabase config missing' });

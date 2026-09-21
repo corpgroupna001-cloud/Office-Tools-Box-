@@ -103,7 +103,7 @@
         const sub = shared
             ? 'applies to every company without its own entry for that date'
             : `${list.length} holiday${list.length === 1 ? '' : 's'} in ${esc(data.year)}`;
-        const today = new Date().toISOString().slice(0, 10);
+        const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());   // IST, not UTC
         const body = list.length ? `
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">

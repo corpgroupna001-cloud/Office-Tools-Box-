@@ -460,10 +460,13 @@
         });
         await loadKanban();
     }
+    let kbSeq = 0;                         // a slower, older load must not overwrite a newer one (or a board that is gone)
     async function loadKanban() {
         if (!page.board) return;
+        const seq = ++kbSeq, board = page.board;
         try {
             const { data } = await C.q(scoped(sb.from('crm_leads').select(SELECT)).order('updated_at', { ascending: false }).limit(500));
+            if (seq !== kbSeq || page.board !== board) return;
             const rows = data || [];
             page.board.update({
                 columns: kanbanColumns(rows),
@@ -471,7 +474,7 @@
             });
             const total = rows.reduce((a, r) => a + (Number(r.estimated_value) || 0), 0);
             view.querySelector('#sum').innerHTML = `${rows.length}${rows.length >= 500 ? '+' : ''} leads · <b>${esc(L.money(total, 'INR'))}</b>`;
-        } catch (e) { C.errorState(view.querySelector('#kb'), e, loadKanban); }
+        } catch (e) { if (seq === kbSeq && page.board === board) C.errorState(view.querySelector('#kb'), e, loadKanban); }
     }
 
     /* ----- List ----- */

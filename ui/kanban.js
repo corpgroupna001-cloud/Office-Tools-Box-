@@ -9,7 +9,9 @@
            columns: [{ id, name, color, count?, sum?, wipLimit?, collapsed? }],
            cards:   [{ id, columnId, position, ...anything }],
            renderCard(card) -> html string (inner of .kb-card),
-           onMove({ card, fromColumnId, toColumnId, position, before, after }) -> Promise (throw to revert),
+           onMove({ card, fromColumnId, toColumnId, position, before, after, columnCards }) -> Promise (throw to revert),
+               columnCards = the target column's card ids in their new order (to renumber when
+               before/after share a position and `position` cannot sit between them),
            onCardClick(card, event), onAddCard(columnId), onColumnMenu(column, anchorEl),
            canDrag(card) -> bool, emptyText
        });
@@ -56,6 +58,11 @@
         }
         function cardEl(id) { return container.querySelector(`.kb-card[data-card="${CSS.escape(String(id))}"]`); }
         function card(id) { return st.cards.find(c => String(c.id) === String(id)); }
+        // Equal neighbours (every position 0 by default) leave no gap: show the new order by renumbering locally.
+        function settle(before, after, columnCards) {
+            if (before && after && !(Number(before.position) < Number(after.position))) { columnCards.forEach((id, i) => { const x = card(id); if (x) x.position = (i + 1) * 1024; }); return true; }
+            return false;
+        }
 
         /* ---- pointer drag (HTML5 DnD; works with mouse and most touch via pointer fallback below) ---- */
         let placeholder = null;
@@ -79,10 +86,11 @@
             const position = L.positionBetween(before ? before.position : null, after ? after.position : null);
             const from = c.columnId;
             if (from === toCol && before === null && after === null && cardsIn(toCol).length === 1) return cleanup();
+            const columnCards = Array.from(listEl.children).filter(el => el === ph || siblings.includes(el)).map(el => el === ph ? c.id : card(el.dataset.card).id);
             const snapshot = { columnId: c.columnId, position: c.position };
-            c.columnId = toCol; c.position = position;
+            c.columnId = toCol; c.position = position; settle(before, after, columnCards);
             cleanup(); render();
-            try { if (opts.onMove) await opts.onMove({ card: c, fromColumnId: from, toColumnId: toCol, position, before, after }); }
+            try { if (opts.onMove) await opts.onMove({ card: c, fromColumnId: from, toColumnId: toCol, position, before, after, columnCards }); }
             catch (e) { c.columnId = snapshot.columnId; c.position = snapshot.position; render(); if (window.WSShell) WSShell.toast(e.message || 'Could not move the card', 'bad'); }
         }
         function cleanup() {
@@ -162,10 +170,11 @@
                 const before = others[st.kb.index - 1] || null, after = others[st.kb.index] || null;
                 const position = L.positionBetween(before ? before.position : null, after ? after.position : null);
                 const from = c.columnId, to = st.kb.columnId;
+                const columnCards = others.map(x => x.id); columnCards.splice(st.kb.index, 0, c.id);
                 const snapshot = { columnId: c.columnId, position: c.position };
-                c.columnId = to; c.position = position; st.kb = null; render();
+                c.columnId = to; c.position = position; const renumbered = settle(before, after, columnCards); st.kb = null; render();
                 const back = cardEl(id); if (back) back.focus();
-                try { if (opts.onMove && (from !== to || snapshot.position !== position)) await opts.onMove({ card: c, fromColumnId: from, toColumnId: to, position, before, after }); }
+                try { if (opts.onMove && (from !== to || snapshot.position !== position || renumbered)) await opts.onMove({ card: c, fromColumnId: from, toColumnId: to, position, before, after, columnCards }); }
                 catch (err) { c.columnId = snapshot.columnId; c.position = snapshot.position; render(); if (window.WSShell) WSShell.toast(err.message || 'Could not move the card', 'bad'); }
             }
         });

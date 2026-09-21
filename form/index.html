@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Public web-to-lead form (CRM settings → Web forms). No sign-in: it only
+         calls crm_web_form_public / crm_web_form_submit, the two functions an
+         anonymous visitor may run. Works on its own page or inside an iframe. -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex">
+    <title>Contact us</title>
+    <link rel="icon" href="/icon-192.png">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg: #f5f7fa; --card: #fff; --text: #1f2937; --muted: #6b7280; --line: #d9dee5; --accent: #2fc6f6; --accent-ink: #0b4f6c; --bad: #d9363e; --ok: #1f9d55; }
+        @media (prefers-color-scheme: dark) {
+            :root { --bg: #0f1419; --card: #18202a; --text: #e6e9ee; --muted: #9aa4b2; --line: #2b3542; --accent: #2fc6f6; --accent-ink: #062634; --bad: #ff6b6b; --ok: #5ad48a; }
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 Inter, system-ui, -apple-system, Segoe UI, sans-serif; }
+        main { max-width: 560px; margin: 0 auto; padding: 24px 16px 40px; }
+        .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+        h1 { font-size: 22px; margin: 0 0 6px; }
+        p.intro { color: var(--muted); margin: 0 0 18px; white-space: pre-wrap; }
+        label { display: block; font-weight: 600; font-size: 13px; margin: 14px 0 6px; }
+        label .req { color: var(--bad); margin-left: 2px; }
+        input, textarea { width: 100%; font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+        input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+        textarea { min-height: 110px; resize: vertical; }
+        .hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+        button { margin-top: 20px; width: 100%; font: inherit; font-weight: 700; border: 0; border-radius: 8px; padding: 12px; background: var(--accent); color: var(--accent-ink); cursor: pointer; }
+        button[disabled] { opacity: .6; cursor: progress; }
+        .err { color: var(--bad); font-size: 14px; margin-top: 12px; min-height: 1em; }
+        .done { text-align: center; padding: 24px 8px; }
+        .done .tick { font-size: 40px; color: var(--ok); }
+        .muted { color: var(--muted); }
+        footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 14px; }
+    </style>
+</head>
+<body>
+<main>
+    <div class="card" id="card" aria-live="polite"><p class="muted">Loading…</p></div>
+    <footer id="foot"></footer>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(async function () {
+    'use strict';
+    const card = document.getElementById('card');
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const LABELS = { name: 'Your name', email: 'Email', phone: 'Phone', organization: 'Company', message: 'How can we help?' };
+    const TYPES = { name: 'text', email: 'email', phone: 'tel', organization: 'text' };
+    const AUTO = { name: 'name', email: 'email', phone: 'tel', organization: 'organization' };
+    const fail = msg => { card.innerHTML = `<h1>Form unavailable</h1><p class="muted">${esc(msg)}</p>`; };
+
+    const token = new URLSearchParams(location.search).get('f') || '';
+    if (token.length < 24) return fail('This link is incomplete. Ask whoever shared it for the full link.');
+    let sb;
+    try {
+        const cfg = await (await fetch('/api/config')).json();
+        sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+    } catch (e) { return fail('Could not reach the server. Check your connection and reload.'); }
+
+    const { data: form, error } = await sb.rpc('crm_web_form_public', { p_token: token });
+    if (error || !form) return fail('This form is no longer accepting submissions.');
+    document.title = form.title || 'Contact us';
+    document.getElementById('foot').textContent = form.company || '';
+    const fields = Array.isArray(form.fields) ? form.fields : ['name'];
+    const required = new Set(Array.isArray(form.required) ? form.required : ['name']);
+
+    card.innerHTML = `<h1>${esc(form.title)}</h1>${form.intro ? `<p class="intro">${esc(form.intro)}</p>` : ''}
+        <form id="f" novalidate>
+            ${fields.map(k => `<label for="in-${k}">${esc(LABELS[k] || k)}${required.has(k) ? '<span class="req" aria-hidden="true">*</span>' : ''}</label>` +
+                (k === 'message' ? `<textarea id="in-${k}" name="${k}" maxlength="4000"${required.has(k) ? ' required' : ''}></textarea>`
+                    : `<input id="in-${k}" name="${k}" type="${TYPES[k]}" autocomplete="${AUTO[k]}" maxlength="${k === 'email' ? 254 : k === 'phone' ? 40 : 200}"${required.has(k) ? ' required' : ''}>`)).join('')}
+            <div class="hp" aria-hidden="true"><label for="in-website">Website</label><input id="in-website" name="website" tabindex="-1" autocomplete="off"></div>
+            <button type="submit" id="go">Send</button>
+            <div class="err" id="err" role="alert"></div>
+        </form>`;
+
+    const f = document.getElementById('f'), err = document.getElementById('err'), go = document.getElementById('go');
+    f.addEventListener('submit', async e => {
+        e.preventDefault();
+        err.textContent = '';
+        const data = {};
+        new FormData(f).forEach((v, k) => { data[k] = String(v).trim(); });
+        for (const k of fields) if (required.has(k) && !data[k]) { err.textContent = `Please fill in: ${LABELS[k] || k}.`; f.elements[k].focus(); return; }
+        if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) { err.textContent = 'Please enter a valid email address.'; f.elements.email.focus(); return; }
+        go.disabled = true; go.textContent = 'Sending…';
+        const { data: res, error: e2 } = await sb.rpc('crm_web_form_submit', { p_token: token, p_data: data });
+        if (e2) {
+            go.disabled = false; go.textContent = 'Send';
+            err.textContent = /Failed to fetch|NetworkError|Load failed/i.test(e2.message || '') ? 'Could not reach the server. Try again.' : (e2.message || 'Something went wrong. Try again.');
+            return;
+        }
+        if (res && res.redirect_url && /^https:\/\//i.test(res.redirect_url)) {
+            try { window.top.location.href = res.redirect_url; return; } catch (x) { location.href = res.redirect_url; return; }
+        }
+        card.innerHTML = `<div class="done"><div class="tick" aria-hidden="true">✓</div><h1>Sent</h1><p class="muted">${esc((res && res.message) || 'Thank you. We will be in touch shortly.')}</p></div>`;
+    });
+})();
+</script>
+</body>
+</html>

@@ -15,8 +15,10 @@ const FILES = [
   'supabase-messenger-calls-migration.sql',
   'supabase-crm-import-migration.sql',
   'supabase-employee-id-migration.sql',
+  'supabase-crm-sales-migration.sql',
+  'supabase-security-hardening-migration.sql',
 ];
-const ALTER_ONLY = new Set(['supabase-employee-id-migration.sql']);
+const ALTER_ONLY = new Set(['supabase-employee-id-migration.sql', 'supabase-security-hardening-migration.sql']);
 const read = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 const stripComments = sql => sql.replace(/--[^\n]*/g, '');
 
@@ -34,8 +36,8 @@ test('migrations never drop the database, drop a schema, or truncate anything', 
     assert.doesNotMatch(sql, /drop\s+schema/, f);
     assert.doesNotMatch(sql, /\btruncate\b/, f);
     assert.doesNotMatch(sql, /drop\s+table/, f);
-    // The one delete allowed: the reminders job trimming its own bookkeeping table.
-    assert.doesNotMatch(sql.replace(/delete\s+from\s+public\.crm_reminder_log\b/g, ''), /delete\s+from\s+public\./, f);
+    // The only deletes allowed: jobs trimming their own bookkeeping tables.
+    assert.doesNotMatch(sql.replace(/delete\s+from\s+public\.(crm_reminder_log|crm_web_form_hits)\b/g, ''), /delete\s+from\s+public\./, f);
   }
 });
 

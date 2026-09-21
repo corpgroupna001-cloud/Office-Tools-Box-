@@ -1,12 +1,15 @@
 // AI quiz generator — POST { topic, difficulty } -> { questions: [...] }
 // Generates 10 fresh multiple-choice questions on any topic via Groq.
+const { readJson, sessionUser } = require('../lib/request-auth');
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  // Signed-in employees only: the Groq key is ours and has a quota.
+  if (!(await sessionUser(req))) return res.status(401).json({ error: 'not_signed_in', message: 'Sign in to use AI generation.' });
 
   const apiKey = process.env.GROQ_API_KEY || process.env.GROQ_API || process.env.GROQ_KEY;
   if (!apiKey) {
@@ -16,7 +19,8 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+  const body = readJson(req);
+  if (!body) return res.status(400).json({ error: 'Invalid JSON' });
   const topic = String(body.topic || 'general knowledge').slice(0, 200).trim() || 'general knowledge';
   const requested = String(body.difficulty || 'mixed').toLowerCase();
   const difficulty = ['easy', 'medium', 'hard', 'mixed'].includes(requested) ? requested : 'mixed';

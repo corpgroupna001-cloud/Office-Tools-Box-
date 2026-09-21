@@ -1440,8 +1440,21 @@
 
     async function switchCamera(deviceId) {
         const old = S.local.cam;
-        if (old) old.stop();                               // phones cannot open two cameras at once
-        const t = (await gum({ video: videoConstraints(deviceId) })).getVideoTracks()[0];
+        const open = async () => (await gum({ video: videoConstraints(deviceId) })).getVideoTracks()[0];
+        let t;
+        // The new camera first, so a failure keeps the old one working.
+        try { t = await open(); }
+        catch (e) {
+            if (!old) throw e;
+            old.stop();                                    // phones cannot open two cameras at once: free it and retry
+            try { t = await open(); }
+            catch (e2) {
+                // Both gone: show the camera as off rather than a dead track marked on.
+                if (S.local.cam === old) { S.local.cam = null; if (!S.local.screen) await setVideoTrack(null); renderSelf(); updateButtons(); trackPresence(); }
+                throw e2;
+            }
+        }
+        if (old && old.readyState !== 'ended') old.stop();
         watchCam(t);
         S.local.cam = t;
         if (!S.local.screen) await setVideoTrack(t);

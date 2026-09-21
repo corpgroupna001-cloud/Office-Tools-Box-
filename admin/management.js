@@ -13,7 +13,7 @@
   const time = t => { const [h,m] = String(t || '00:00').split(':').map(Number); return h * 60 + m; };
   const clock = t => { const h = Number(String(t).slice(0,2)); return `${h%12 || 12}:${String(t).slice(3,5)} ${h>=12?'PM':'AM'}`; };
   const range = s => s ? `${clock(s.start_time)} – ${clock(s.end_time)}${time(s.end_time)<=time(s.start_time)?' (+1 day)':''}` : 'No shift configured';
-  let people = [], shifts = [], mailPage = 0, mailMore = false, active = '', editorEmployee;
+  let people = [], shifts = [], mailPage = 0, mailMore = false, active = '', editorEmployee, editorSeq = 0;
   const companyPanel = document.createElement('section');
   companyPanel.id='company-panel'; companyPanel.className='hidden ws-management';
   companyPanel.innerHTML=`<h1>Company structure</h1><p>Company → department → employees. Scheduled shifts in IST; overnight shifts continue into the next day. This is a schedule, not a record of actual punches.</p>
@@ -102,9 +102,11 @@
   const fieldSpec=[['email','Login / notification email','email'],['company','Company','company'],['app_role','Workspace role (CRM & work modules)','role'],['employee_id','Employee ID','text'],['employee_code','Biometric ID','text'],['department','Department','text'],['job_title','Job title','text'],['phone','Phone','tel'],['joining_date','Joining date','date'],['manager_id','Reports to','manager'],['shift_id','Primary shift','shift'],['company2','Secondary company','company2'],['shift2_id','Secondary shift','shift2']];
   window.WSAdminPeople={
     async open(emp) {
+      const seq=++editorSeq;
       editorEmployee=emp; $('edit-emp-save').disabled=true; $('mg-edit-fields').textContent='Loading account settings…';
       try {
         const data=await api('shift_list');
+        if(seq!==editorSeq) return; // another employee was opened meanwhile
         const options=(items,selected)=>items.map(([v,label])=>`<option value="${esc(v)}" ${String(v)===String(selected??'')?'selected':''}>${esc(label)}</option>`).join('');
         const orgReady='department' in emp;
         const roleReady='app_role' in emp;
@@ -123,7 +125,7 @@
         }).join('')+['is_wfh','req_mobile','req_laptop','req_tab'].map((key,i)=>`<label class="mg-check"><input id="mg-edit-${key}" type="checkbox" ${emp[key]?'checked':''}>${['Work from home','Require mobile check-in','Require laptop check-in','Require tablet check-in'][i]}</label>`).join('');
         $('mg-edit-note').textContent=(orgReady?'':'Apply supabase-admin-management-migration.sql to enable employment details. ')+ (roleReady?'':'Apply supabase-crm-foundation-migration.sql to enable workspace roles. ')+ (emp.status==='inactive'?`This employee is offboarded${emp.exit_date?' as of '+emp.exit_date:''} and cannot sign in; use the ↩️ button in the employee list to bring them back. `:'')+ 'Changing email immediately changes the login address. Leave primary shift on Company default to use the company schedule. Changes apply to future punches; historical punches are not rewritten.';
         $('edit-emp-save').disabled=false;
-      } catch(e) { $('mg-edit-fields').textContent=e.message; }
+      } catch(e) { if(seq===editorSeq) $('mg-edit-fields').textContent=e.message; }
     },
     values() {
       if(!editorEmployee) return {};

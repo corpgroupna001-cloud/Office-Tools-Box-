@@ -201,6 +201,7 @@ function mailHandler(env, invoiceMail) {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../api/mail.js'), 'utf8'), {
     module, process: { env }, console,
     require(name) {
+      if (name === '../lib/request-auth') return require('../lib/request-auth');
       if (name === '../lib/mailer') return { sendMail: async m => { sent.push(m); return { ok: true, messageId: 'x' }; } };
       if (name === '../lib/mail-audit') return { recordMail: async () => true };
       if (name === '../lib/invoice-mail') return invoiceMail || { emailInvoice: async () => { throw new Error('should not be called'); } };

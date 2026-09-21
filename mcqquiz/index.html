@@ -1094,9 +1094,11 @@
             btn.disabled = true;
             btn.innerText = '⏳ Generating…';
             try {
+                let session = null;
+                try { session = supabaseClient && (await supabaseClient.auth.getSession()).data.session; } catch {}
                 const r = await fetch('/api/quiz', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: 'Bearer ' + session.access_token } : {}) },
                     body: JSON.stringify({ topic, difficulty: pendingStart.difficulty })
                 });
                 const data = await r.json();

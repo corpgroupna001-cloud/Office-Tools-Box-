@@ -819,6 +819,8 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 8 | `supabase-crm-import-migration.sql` | CRM import: `external_ref` (the Bitrix24 id, so importing a file again updates instead of duplicating), `source_row` (every filled-in cell of the record's row) on `crm_deals` and `crm_leads`, and `crm_import_layouts` (the file's columns, in order) — behind **Admin → CRM → Deals / Leads** |
 
 | 9 | `supabase-employee-id-migration.sql` | `profiles.employee_id` — the Employee ID people are known by (GL-PIS-CSM-IC-001), unique whatever the case and set only by an administrator. Shown first across the CRM, chat mentions, the directory and the admin console. `employee_code` is unchanged and is labelled **Biometric ID** |
+| 10 | `supabase-crm-sales-migration.sql` | Sales: quotes (`crm_quotes`, `crm_quote_items`, `crm_quote_from_deal()`, `crm_quote_to_invoice()`), lost reasons (`crm_lost_reasons`, `crm_deals.lost_reason`), monthly sales targets (`crm_sales_targets`) and public web-to-lead forms (`crm_web_forms`, `crm_web_form_submit()`) — see [12. Sales: quotes, forecast and web forms](#12-sales-quotes-forecast-and-web-forms) |
+| 11 | `supabase-security-hardening-migration.sql` | Security guards, no data changes — see [13. Security hardening](#13-security-hardening). **Run it together with the deploy that carries it**: the sign-in page and the API were changed to match |
 
 **Ran migration 8 before 15 Sep 2026?** Run it again. Its first version made
 `external_ref`'s unique index partial, which `ON CONFLICT` cannot use, so every
@@ -892,6 +894,9 @@ admin console, to nobody else.
 | `/employees/` · `/employees/?id=…` | Find employee and profiles (existing `profiles`) |
 | `/employees/structure/` | Company structure (org chart) |
 | `/invoices/` · `/invoices/?id=…` | Invoices (managers/admins) |
+| `/quotes/` · `/quotes/?id=…` | Quotes: every quote belongs to a deal; accepted quotes become invoices |
+| `/crm/forecast` | Sales forecast: closed / commit / best case / weighted pipeline per month, targets, win-loss and lost reasons |
+| `/form/?f=…` | A public web-to-lead form (no sign-in; CRM settings → Web forms) |
 
 Every existing URL keeps working. `/chat/` keeps its address and its deep
 links; `/messenger` is a rewrite to it in `vercel.json`. `?new=1` on a list page opens the create
@@ -940,7 +945,9 @@ every new table, idempotent DDL, no destructive statements).
 
 ## 6. Environment variables
 
-No new required variables. The modules use the existing `SUPABASE_URL`,
+No new required variables. Optional: `SMTP_TLS_STRICT=1` makes the mailer
+verify the SMTP server's certificate (set `SMTP_TLS_SERVERNAME` to the name on
+the certificate if it is not `SMTP_HOST`) — see [13. Security hardening](#13-security-hardening). The modules use the existing `SUPABASE_URL`,
 `SUPABASE_ANON_KEY` (via `/api/config`) and, for push notifications, the
 existing `VAPID_*` keys behind `/api/push`. The service-role key is still
 used only by the serverless functions. Calls work without anything new; a
@@ -1243,4 +1250,75 @@ read-only chart from the profiles.
    removed when they turn it off. WorkSuite documents are read through
    `ws_published_document()`, which returns nothing once the link is off or
    the document is in the Recycle bin.
+
+# 12. Sales: quotes, forecast and web forms
+
+Run `supabase-crm-sales-migration.sql` (migration 10). Until it runs, the
+new pages show a notice naming the file and the deal page works as before.
+
+**Quotes** (`/quotes/`, and **Create quote** / the **Quotes** tab on a deal).
+A quote always belongs to a deal, as in Salesforce, and follows the deal's
+access: whoever can read the deal reads its quotes, whoever can edit the deal
+writes them. **Create quote** copies the deal's customer, currency and
+product lines (or one line for the amount when it has no products). Numbers
+are `Q-<year>-<0001>` per company; totals are computed by the database with
+the invoice formulas. Draft → **Mark sent** (lines lock) → **Accepted** or
+**Declined**; a sent quote past its *valid until* date reads as *Expired*.
+**Accepted** can set the deal amount to the quote total, and **Create
+invoice** turns it into a draft invoice once (it needs *Invoices: add*).
+
+**Lost reasons.** Marking a deal lost (stage move, kanban drop or the card
+menu) asks why; the reason and a note are kept on the deal and cleared if it
+is reopened. Eight shared reasons come with the migration; add your own in
+**CRM settings → Lost reasons**.
+
+**Sales forecast** (`/crm/forecast`). Per month, from real deals in one
+currency: *Closed won* (won and closed that month), *Commit* (open, expected
+that month, probability ≥ 70%), *Best case* (every open deal expected that
+month) and *Weighted pipeline* (value × probability). Open deals with a past
+or no expected close date are counted separately so they are not lost.
+Managers set a monthly **target** per person (click *Set* in *This month by
+person*); attainment is closed ÷ target. *Win / loss* covers the last 90 days
+with the win rate, the average days to win and the lost reasons ranked.
+
+**Web-to-lead forms** (**CRM settings → Web forms**). Choose the fields, who
+the leads go to, the source and a thank-you message or an https redirect,
+then share the link or paste the embed code (an iframe) into your website.
+Each submission becomes a lead owned by that person, who gets the usual
+*Lead assigned* notification. The page is `/form/?f=<token>` (the token is
+32 random characters). It calls only `crm_web_form_public()` and
+`crm_web_form_submit()`, the two functions an anonymous visitor may run; the
+submit function keeps only the form's fields, trims and validates them,
+drops bots that fill a hidden field, and allows 5 submissions per visitor per
+10 minutes and 300 per form per hour.
+
+# 13. Security hardening
+
+A review of the API and the database found holes that `supabase-security-hardening-migration.sql`
+(migration 11) and the same deploy close. Run the migration right after deploying.
+
+| What could happen | Now |
+|---|---|
+| A notification (bell item, toast, push) could carry a `javascript:` or off-site link, so one click ran script in the victim's session | Links must be in-app paths (`/…`): the database blanks others, the pages and the service worker refuse them, `/api/push` replaces them |
+| Anyone could change their own `company2`, manager, shift, biometric ID, WFH flag, status, HR fields or email on their profile — `company2` shows another company's CRM data | A trigger allows those only through the admin console. The company is chosen once, at first sign-in; after that an administrator moves people. **My profile** no longer offers a company picker |
+| `/api/send-verify` and `/api/verify-code` trusted a `user_id` from the request: anyone could change someone's company or verify an email they do not own | Both need the caller's session and work only on that account; the company is read from the profile. Codes are sent at most once a minute |
+| Employees could approve their own WFH clip QC | A trigger keeps QC fields for reviewers; every new clip goes back to *pending* |
+| Anonymous visitors could call internal functions (`crm_log`, `ws_notify`, invoice numbering) and write into any company's timeline | Revoked; `crm_log` writes only into the caller's own company; invoice numbers are drawn only by the invoice trigger |
+| Signup codes were readable and resettable by the account | Server-only |
+| Someone removed from a group could re-share its files to themselves | A message may carry a file only if its sender can see that file now (forwarding still works) |
+| `/api/linkpreview` could be pointed at internal addresses (redirects, IPv6-mapped and DNS names) | Signed-in callers only; every connection, including redirects, refuses private, loopback, link-local and CGNAT addresses at connect time |
+| `/api/groq` and `/api/quiz` were open to the internet (our Groq quota) | Signed-in callers only |
+| `signup-complete` accepted any company; `signup-start` could mail any address in a loop | The company list is checked again; one code per address per minute |
+| Admin password, mail key and cron secrets were compared with `===` | Constant-time comparison |
+| Malformed JSON crashed several functions with a 500 | 400 *Invalid JSON* |
+
+**SMTP certificate.** The mailer still skips certificate checks by default,
+because cPanel mail servers often present a certificate for the server's own
+name and turning it on blindly would stop all email. Once a test mail goes
+through with `SMTP_TLS_STRICT=1` (and `SMTP_TLS_SERVERNAME` if needed), keep
+it on: without it, someone on the network path could read `SMTP_PASS`.
+
+**Not changed:** the biometric device may still send its key as `?key=` in the
+URL, because the vendor's settings offer that shape. Prefer the header forms
+(`Authorization: Bearer`, `x-api-key`) where the device allows.
 

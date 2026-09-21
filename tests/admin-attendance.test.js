@@ -80,6 +80,7 @@ function harness({ now = '2026-09-10T12:00:00+05:30', db = {}, env: envOverride,
     Date: class extends Date { constructor(...a) { super(...(a.length ? a : [clock])); } static now() { return clock; } },
     process: { env: envOverride || env },
     require(name) {
+      if (name === '../lib/request-auth') return require('../lib/request-auth');
       if (name === '../company-config') return require('../company-config');
       if (name === '../lib/attendance') return attendance;
       if (name === '../lib/admin-session') return sessions;
@@ -536,7 +537,7 @@ test('without a session or the password the scheduler actions stay locked', asyn
   const res = { code: 200, headers: {}, setHeader() {}, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } };
   const module = { exports: {} };
   vm.runInNewContext(source, { module, console, URL, setTimeout: cb => cb(), fetch: async () => { throw new Error('no'); }, AbortSignal, Date,
-    process: { env }, require: n => (n === '../company-config' ? require('../company-config') : n === '../lib/attendance' ? attendance
+    process: { env }, require: n => (n === '../lib/request-auth' ? require('../lib/request-auth') : n === '../company-config' ? require('../company-config') : n === '../lib/attendance' ? attendance
       : n === '../lib/admin-session' ? sessions : n === '../lib/admin-audit' ? { auditWrap: r => r } : {}) });
   await module.exports({ method: 'POST', headers: { host: 'work-suite.example.test' }, body: { action: 'att_scheduler_run' } }, res);
   assert.equal(res.code, 401);

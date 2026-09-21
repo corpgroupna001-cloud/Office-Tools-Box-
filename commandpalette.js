@@ -42,6 +42,8 @@
         { key: 'calendar', title: 'Calendar', href: '/calendar/', icon: 'calendar' },
         { key: 'employees', title: 'Employees', href: '/employees/', icon: 'users' },
         { key: 'invoices', title: 'Invoices', href: '/invoices/', icon: 'invoice', role: 'manager' },
+        { key: 'quotes', title: 'Quotes', href: '/quotes/', icon: 'doc' },
+        { key: 'forecast', title: 'Sales forecast', href: '/crm/forecast', icon: 'chart' },
         { key: 'attendance', title: 'My Attendance', href: '/attendance/', icon: 'attend' },
         { key: 'leave', title: 'Leave & Holidays', href: '/attendance/#leave', icon: 'leave' },
         { key: 'recordings', title: 'Friday Check-in', href: '/recordings/', icon: 'video' },
@@ -84,7 +86,7 @@
         overlay = document.createElement('div');
         overlay.id = 'ws-cmdk-overlay';
         overlay.innerHTML = `
-            <div class="ws-cmdk-panel" role="dialog" aria-label="Quick actions">
+            <div class="ws-cmdk-panel" role="dialog" aria-modal="true" aria-label="Quick actions">
                 <div class="ws-cmdk-input-row">
                     <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                     <input id="ws-cmdk-input" type="text" placeholder="Search records, pages, teammates, or actions…" autocomplete="off" spellcheck="false" aria-label="Search workspace">
@@ -280,12 +282,14 @@
             results.innerHTML = `<div class="ws-cmdk-empty">No matches for "<b>${esc(q)}</b>"</div>`;
             return;
         }
-        // Group items in original score order
+        // Group items in original score order, then renumber in on-screen order so the arrows follow the list
         const groups = new Map();
-        items.forEach((it, idx) => {
+        items.forEach(it => {
             if (!groups.has(it.group)) groups.set(it.group, []);
-            groups.get(it.group).push({ it, idx });
+            groups.get(it.group).push(it);
         });
+        items = [];
+        groups.forEach((arr, group) => groups.set(group, arr.map(it => ({ it, idx: items.push(it) - 1 }))));
         let html = searching ? `<div class="ws-cmdk-group-head">Searching records…</div>` : '';
         for (const [group, arr] of groups) {
             html += `<div class="ws-cmdk-group-head">${esc(group)}</div>`;

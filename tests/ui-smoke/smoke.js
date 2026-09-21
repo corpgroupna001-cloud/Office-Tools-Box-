@@ -39,11 +39,13 @@ const PAGES = [
   ['/calendar?view=month', 'calendar-month'], ['/calendar?view=schedule', 'calendar-schedule'], ['/employees', 'employees'],
   ['/employees?view=tiles', 'employees-tiles'], ['/employees/structure/', 'org-chart'], ['/employees?id=22222222-2222-4222-8222-222222222222', 'employee-record'],
   ['/invoices', 'invoices'], ['/invoices?id=I1', 'invoice-record'],
+  ['/quotes', 'quotes'], ['/quotes?id=Q1', 'quote-record'], ['/crm/forecast', 'forecast'],
+  ['/crm/settings?section=lost', 'crm-lost-reasons'], ['/crm/settings?section=forms', 'crm-web-forms'], ['/form?f=smoke0000000000000000000000000001', 'web-form'],
   ['/chat', 'messenger'], [`/call?id=${F.CALL}`, 'call'], ['/attendance', 'attendance'],
   ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
 ];
 const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'leads-list', 'lead-record', 'lead-imported', 'deals', 'deals-list', 'deal-record', 'deal-imported', 'boards', 'board', 'projects',
-  'project-record', 'tasks', 'task-record', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record']);
+  'project-record', 'tasks', 'task-record', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record', 'quotes', 'quote-record', 'forecast', 'crm-lost-reasons', 'crm-web-forms']);
 const VIEWPORTS = [['desktop', { width: 1366, height: 900 }], ['phone', { width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]];
 
 // SMOKE_BIG=1 fills every list with far more rows than fits on screen, so the
@@ -237,7 +239,9 @@ async function visit(browser, route, name, [vpName, viewport]) {
         title: document.title,
       };
     });
-    if (!info.shell && name !== 'home' && name !== 'call') result.problems.push('app shell did not mount');   // the call window is full-screen, no shell
+    // The call window is full-screen and the public web form is for visitors: neither has the shell.
+    if (!info.shell && !['home', 'call', 'web-form'].includes(name)) result.problems.push('app shell did not mount');
+    if (name === 'web-form' && !/Talk to our sales team/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('web form did not render');
     if (vpName === 'phone' && info.overflow > 1) result.problems.push(`horizontal overflow ${info.overflow}px: ${info.offenders.join(', ')}`);
     if (CRM_PAGES.has(name) && info.errorText) result.problems.push(`error state on screen: "${info.errorText.slice(0, 90)}"`);
     if (info.signedOut) result.problems.push('ended on the sign-in screen');

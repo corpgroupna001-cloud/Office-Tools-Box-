@@ -13,6 +13,9 @@
 const crypto = require('crypto');
 function sha256(s) { return crypto.createHash('sha256').update(s).digest('hex'); }
 
+const { readJson } = require('../lib/request-auth');
+const { ALLOWED_COMPANIES } = require('./signup-start');
+
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
@@ -20,7 +23,8 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
-  const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+  const body = readJson(req);
+  if (!body) return res.status(400).json({ error: 'Invalid JSON' });
   const email      = String(body.email || '').trim().toLowerCase();
   const code       = String(body.code || '');
   const password   = String(body.password || '');
@@ -31,6 +35,8 @@ module.exports = async function handler(req, res) {
   if (!email || !code)            return res.status(400).json({ error: 'email and code are required' });
   if (!/^\d{6}$/.test(code))      return res.status(400).json({ error: 'bad_code', message: 'Code must be 6 digits.' });
   if (password.length < 6)        return res.status(400).json({ error: 'weak_password', message: 'Password must be at least 6 characters.' });
+  // The same companies sign-up starts with; the code is not tied to one, so check again here.
+  if (!ALLOWED_COMPANIES.includes(company)) return res.status(400).json({ error: 'invalid_company', message: 'Please select a valid company.' });
 
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY;

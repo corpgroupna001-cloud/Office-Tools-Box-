@@ -21,13 +21,15 @@
     const CURRENCIES = ['INR', 'USD', 'EUR', 'GBP', 'AED'];
     const COLORS = ['pending', 'late', 'leave', 'holiday', 'present', 'absent', 'weekoff'];
     const BASE = 'id, company, title, contact_id, organization, owner_id, pipeline_id, stage_id, value, currency, probability, expected_close_date, actual_close_date, status, source, description, lead_id, tags, position, archived_at, created_by, created_at, updated_at, contact:crm_contacts(id, full_name, organization)';
-    const [cols, invLv, imp] = await Promise.all([
+    const [cols, invLv, imp, sales] = await Promise.all([
         B.columns('crm_deals', BASE + ', number, custom, company_id, amount_from_products, company_rec:crm_companies(id, title)', BASE),
         B.levels('invoice'),
         // Imported deals (supabase-crm-import-migration.sql) carry their export row; the list shows it.
         B.columns('crm_deals', 'id, external_ref, source_row', 'id'),
+        // Lost reasons and quotes (supabase-crm-sales-migration.sql).
+        B.columns('crm_deals', 'id, lost_reason, lost_reason_note', 'id'),
     ]);
-    const SELECT = cols.select;
+    const SELECT = cols.select + (sales.full ? ', lost_reason, lost_reason_note' : '');
     const LIST_SELECT = SELECT + (imp.full ? ', external_ref, source_row' : '');
     const ALL = 'all';   // "All pipelines" in the list view
     let lk = await C.lookups();
@@ -153,15 +155,40 @@
     }
 
     /* ------------------------------------------------------- stage moves */
+    let lostReasons = null;
+    async function loadLostReasons() {
+        if (lostReasons) return lostReasons;
+        const r = await sb.from('crm_lost_reasons').select('label, company, sort').eq('active', true).order('sort').order('label');
+        lostReasons = r.error ? [] : [...new Set((r.data || []).map(x => x.label))];
+        return lostReasons;
+    }
+    /** Why was it lost? Resolves { lost_reason, lost_reason_note }, or null when cancelled. */
+    async function askLostReason(deal) {
+        const reasons = await loadLostReasons();
+        return C.formModal({
+            title: 'Mark this deal as lost?',
+            intro: `<div class="crm-info">${esc(deal.title)} · ${esc(L.money(deal.value, deal.currency))} will be closed as lost today. You can move it back to an open stage later.</div>`,
+            fields: [
+                { name: 'lost_reason', label: 'Why was it lost?', type: 'select', options: reasons, required: true, placeholder: 'Choose a reason' },
+                { name: 'lost_reason_note', label: 'Details (optional)', type: 'textarea', rows: 3, full: true, placeholder: 'Competitor, price asked, what would have won it…' },
+            ],
+            submitLabel: 'Deal lost',
+            onSubmit: v => ({ lost_reason: v.lost_reason, lost_reason_note: (v.lost_reason_note || '').trim() || null }),
+        });
+    }
     async function moveToStage(deal, stage, position) {
         if (!stage) return false;
-        if ((stage.is_won || stage.is_lost) && deal.stage_id !== stage.id) {
+        let reason = null;
+        if (stage.is_lost && deal.stage_id !== stage.id && sales.full) {
+            reason = await askLostReason(deal);
+            if (!reason || reason === true) return false;
+        } else if ((stage.is_won || stage.is_lost) && deal.stage_id !== stage.id) {
             const ok = await C.confirm({ title: stage.is_won ? 'Mark this deal as won?' : 'Mark this deal as lost?', message: `${deal.title} · ${L.money(deal.value, deal.currency)} will be closed as ${stage.is_won ? 'won' : 'lost'} today. You can move it back to an open stage later.`, okText: stage.is_won ? 'Deal won' : 'Deal lost', danger: stage.is_lost });
             if (!ok) return false;
         }
-        const patch = { stage_id: stage.id };
+        const patch = { stage_id: stage.id, ...(reason || {}) };
         if (position != null) patch.position = position;
-        const { data } = await C.q(sb.from('crm_deals').update(patch).eq('id', deal.id).select('id, status, stage_id, probability, actual_close_date').single());
+        const { data } = await C.q(sb.from('crm_deals').update(patch).eq('id', deal.id).select('id, status, stage_id, probability, actual_close_date' + (sales.full ? ', lost_reason, lost_reason_note' : '')).single());
         Object.assign(deal, data);
         if (data.status === 'won') C.toast(`${deal.title} won`, 'ok');
         else if (data.status === 'lost') C.toast(`${deal.title} marked as lost`, '');
@@ -375,9 +402,13 @@
             canDrag: c => canEditDeal(c.deal),
             onCardClick: (c, e) => { if (e) e.preventDefault(); openDeal(c.deal.id); },
             onAddCard: page.lv.add !== 'none' ? stageId => openDealEditor({ pipeline_id: page.pipeline, stage_id: stageId }, d => { loadKanban(); openDeal(d.id); }) : null,
-            onMove: async ({ card, toColumnId, position }) => {
-                const ok = await moveToStage(card.deal, lk.stageById[toColumnId], position);
+            onMove: async ({ card, toColumnId, position, before, after, columnCards }) => {
+                // New deals all sit at position 0: renumber the column so the drop sticks.
+                const renumber = !!(columnCards && before && after && !(Number(before.position) < Number(after.position)));
+                const slot = id => (columnCards.indexOf(id) + 1) * 1024;
+                const ok = await moveToStage(card.deal, lk.stageById[toColumnId], renumber ? slot(card.id) : position);
                 if (ok === false) { loadKanban(); return; }
+                if (renumber) await Promise.all(columnCards.filter(id => id !== card.id).map(id => sb.from('crm_deals').update({ position: slot(id) }).eq('id', id).then(() => {}, () => {})));
                 loadCounters();
                 if (card.deal.status !== 'open') loadKanban();
             },
@@ -649,19 +680,20 @@
         catch (e) { return C.errorState(view, e, () => showRecord(id)); }
         if (!d) { view.innerHTML = '<div class="b24-area pad"></div>'; C.empty(view.firstElementChild, 'Deal not found', 'It may have been deleted, or you may not have access to it.', '<a class="ws-btn" href="/deals/">All deals</a>'); return; }
         lk = await C.lookups();
-        const [lv, cf] = await Promise.all([B.levels('deal', d.pipeline_id), B.customFields('deal', d.pipeline_id)]);
+        const [lv, cf] = await Promise.all([B.levels('deal', d.pipeline_id), B.customFields('deal', d.pipeline_id), sales.full && d.status === 'lost' ? loadLostReasons() : null]);
         const edit = canEditDeal(d, lv);
         const stages = stagesFor(d.pipeline_id);
         const pipeline = pipelineOf(d.pipeline_id) || {};
         document.title = `${d.title} · Deals · WorkSuite`;
         WSShell.setCrumb(d.title);
-        const [tasks, events, invoices, projects, clientRows, layout] = await Promise.all([
+        const [tasks, events, invoices, projects, clientRows, layout, quotes] = await Promise.all([
             C.related('tasks', 'deal_id', id, 'id, title, status, priority, assignee_id, due_date, completed_at, archived_at, created_at', b => b.is('archived_at', null)),
             C.related('calendar_events', 'deal_id', id, 'id, title, starts_at, ends_at, event_type, status, owner_id', b => b.order('starts_at', { ascending: false })),
             invLv.read !== 'none' ? C.related('invoices', 'deal_id', id, 'id, invoice_number, invoice_date, due_date, status, total, amount_paid, balance, currency') : Promise.resolve([]),
             C.related('projects', 'deal_id', id, 'id, name, status, due_date'),
             d.contact_id ? C.related('crm_contacts', 'id', d.contact_id, 'id, full_name, organization, job_title, phone, email') : Promise.resolve([]),
             imp.full ? B.importLayout('deal') : Promise.resolve([]),
+            sales.full ? C.related('crm_quotes', 'deal_id', id, 'id, quote_number, quote_date, valid_until, status, total, currency, invoice_id', b => b.order('created_at', { ascending: false })) : Promise.resolve([]),
         ]);
         const client = clientRows[0] || null;
         const refresh = () => showRecord(id);
@@ -673,6 +705,7 @@
         const menu = [];
         if (lv.add !== 'none') menu.push({ label: 'Copy deal', icon: 'plus', onClick: () => duplicateDeal(d) });
         if (invLv.add !== 'none') menu.push({ label: 'Create invoice', icon: 'invoice', onClick: () => { window.top.location.href = `/invoices/?new=1&deal_id=${d.id}${d.contact_id ? '&contact_id=' + d.contact_id : ''}`; } });
+        if (sales.full && edit) menu.push({ label: 'Create quote', icon: 'doc', onClick: () => createQuote(d) });
         menu.push({ label: 'Create project', icon: 'folder', onClick: () => { window.top.location.href = `/projects/?new=1&deal_id=${d.id}${d.contact_id ? '&contact_id=' + d.contact_id : ''}`; } });
         menu.push({ label: 'Log a call', icon: 'phone', onClick: () => logInteraction(d, 'call.logged', 'Log a call', refresh) });
         if (edit) {
@@ -714,6 +747,11 @@
                   display: () => `<div class="b24-paybox"><span>${invoices.length ? `${invoices.length} invoice${invoices.length === 1 ? '' : 's'} · paid ${esc(B.moneyShort(paid, d.currency))}` : 'This box will show information about payments, deliveries and sales.'}</span>
                       <div class="foot">${canInvoice ? `<a target="_top" href="${esc(invoiceUrl)}">Add</a>` : '<span></span>'}<span>Deal total <b>${esc(B.moneyShort(d.value, d.currency))}</b></span></div></div>` },
                 { key: 'owner_id', title: 'Responsible', type: 'people', none: 'Not assigned', value: d.owner_id, display: v => B.personBox(v, B.src(d, 'Responsible')), save: save('owner_id') },
+                ...(sales.full && d.status === 'lost' ? [{ key: 'lost_reason', title: 'Lost reason',
+                    form: [{ name: 'lost_reason', label: 'Why was it lost?', type: 'select', options: lostReasons || [], required: true }, { name: 'lost_reason_note', label: 'Details', type: 'textarea', rows: 3 }],
+                    value: { lost_reason: d.lost_reason, lost_reason_note: d.lost_reason_note },
+                    display: () => d.lost_reason ? `<b>${esc(d.lost_reason)}</b>${d.lost_reason_note ? `<span class="b24-lines">${C.nl2br(d.lost_reason_note)}</span>` : ''}` : '<span class="muted">Not recorded</span>',
+                    save: async v => { await updateDeal(d, { lost_reason: v.lost_reason || null, lost_reason_note: (v.lost_reason_note || '').trim() || null }); } }] : []),
                 ...(dealType ? [{ key: 'type', title: 'Type', edit: false, value: dealType, display: v => esc(v) }] : []),
                 { key: 'description', title: 'Comment', type: 'textarea', value: d.description || srcComment, display: v => v ? `<span class="b24-lines">${C.linkify(C.nl2br(v))}</span>` : '', save: save('description') },
             ] },
@@ -757,6 +795,17 @@
             ], empty: { title: 'No meetings', sub: 'Schedule a meeting or call for this deal.' } });
         } });
         tabs.push({ key: 'documents', title: 'Documents', render: el => C.documents(el, { entity_type: 'deal', entity_id: id, canEdit: true }) });
+        if (sales.full) tabs.push({ key: 'quotes', title: 'Quotes', count: quotes.length, render: el => {
+            el.innerHTML = `${edit ? `<div class="b24-tabbar"><button type="button" class="ws-btn sm primary" data-new>${C.icon('plus')}<span>New quote</span></button></div>` : ''}<div data-list></div>`;
+            const nb = el.querySelector('[data-new]'); if (nb) nb.addEventListener('click', () => createQuote(d));
+            C.table(el.querySelector('[data-list]'), { rows: quotes, onRow: x => B.openRecord(`/quotes/?id=${x.id}`, refresh), sort: { key: 'quote_date', dir: 'desc' }, columns: [
+                { key: 'quote_number', label: 'Quote', lead: true, render: x => `<span class="primary-text">${esc(x.quote_number)}</span>` },
+                { key: 'quote_date', label: 'Date', render: x => esc(L.fmtDate(x.quote_date)) },
+                { key: 'valid_until', label: 'Valid until', render: x => esc(L.fmtDate(x.valid_until) || '—') },
+                { key: 'status', label: 'Status', render: x => { const st = L.quoteStatus(x); return C.badge(L.QUOTE_STATUS[st].color, L.QUOTE_STATUS[st].label) + (x.invoice_id ? ' ' + C.badge('present', 'Invoiced') : ''); } },
+                { key: 'total', label: 'Total', num: true, render: x => esc(L.money(x.total, x.currency)) },
+            ], empty: { title: 'No quotes', sub: edit ? 'Send the customer a quote built from this deal’s products.' : 'Quotes for this deal appear here.' } });
+        } });
         if (invLv.read !== 'none') tabs.push({ key: 'invoices', title: 'Invoices', count: invoices.length, render: el => {
             el.innerHTML = `${invLv.add !== 'none' ? `<div class="b24-tabbar"><a class="ws-btn sm primary" target="_top" href="/invoices/?new=1&deal_id=${esc(d.id)}${d.contact_id ? '&contact_id=' + esc(d.contact_id) : ''}">${C.icon('plus')}<span>New invoice</span></a></div>` : ''}<div data-list></div>`;
             C.table(el.querySelector('[data-list]'), { rows: invoices, onRow: i => B.openRecord(`/invoices/?id=${i.id}`, refresh), sort: { key: 'invoice_date', dir: 'desc' }, columns: [
@@ -805,6 +854,16 @@
             },
         });
         page.unsub = C.subscribe('deal', [{ table: 'crm_deals', filter: `id=eq.${id}` }], C.debounce(() => { if (C.param('id') === id && !document.querySelector('.b24-field.editing')) refresh(); }, 800));
+    }
+
+    /** A draft quote from the deal (its customer and products), opened for editing. */
+    async function createQuote(d) {
+        try {
+            const r = await sb.rpc('crm_quote_from_deal', { p_deal: d.id });
+            if (r.error) throw new Error(C.friendly(r.error));
+            C.toast('Draft quote created', 'ok');
+            window.top.location.href = `/quotes/?id=${r.data}&edit=1`;
+        } catch (e) { C.toast(e.message, 'bad'); }
     }
 
     /** The pipeline menu on the deal card: the deal goes to the first open stage of the other pipeline. */

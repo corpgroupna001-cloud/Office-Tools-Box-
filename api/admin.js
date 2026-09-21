@@ -1,3 +1,4 @@
+const { safeEqual } = require('../lib/request-auth');
 const { resolveShift } = require('../company-config');
 // Password login and signed-cookie admin API. Uses the Supabase service_role key to bypass RLS
 // and return every employee's test results for the dashboard.
@@ -333,7 +334,7 @@ module.exports = async function handler(req, res) {
   if (!ADMIN_PASSWORD) {
     return res.status(500).json({ error: 'ADMIN_PASSWORD not configured on server.' });
   }
-  const passwordOK = !!password && password === ADMIN_PASSWORD;
+  const passwordOK = !!password && safeEqual(password, ADMIN_PASSWORD);
   const sessionOK = validSession(req.headers.cookie, process.env);
   if (action === 'login' ? !passwordOK : !passwordOK && !sessionOK) {
     // Small delay to slow brute-force. Not a defense on its own — pick a strong password.

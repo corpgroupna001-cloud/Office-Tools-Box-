@@ -145,10 +145,14 @@
   }
 
   /* ---------------------------------------------------------------- money */
-  /** Half-up rounding to 2 places without binary drift (0.125 -> 0.13). */
+  /** Half-up rounding to 2 places without binary drift (0.125 -> 0.13, 4.725 -> 4.73), like Postgres round(numeric, 2).
+      Shifting the decimal point in the string form avoids 4.725 * 100 = 472.49999999999994. */
   function round2(n) {
-    const x = Number(n) || 0;
-    return Math.round((Math.abs(x) + Number.EPSILON) * 100) / 100 * Math.sign(x || 1);
+    const x = Number(n) || 0, a = Math.abs(x);
+    let r = Math.round(Number(a + 'e2'));
+    if (!isFinite(r)) r = Math.round(a * 100);      // exponent forms like 1e-7
+    r /= 100;
+    return x < 0 ? -r : r;
   }
   function money(n, currency, opts) {
     const cur = currency || 'INR';
@@ -232,6 +236,117 @@
       revertToDraft: s === 'sent' || s === 'overdue',
     };
   }
+
+  /* --------------------------------------------------------------- quotes */
+  /** The status a reader should see: a sent quote past its valid-until date reads as expired. */
+  function quoteStatus(q, today) {
+    if (!q) return 'draft';
+    if (q.status === 'sent' && q.valid_until && dayNumber(q.valid_until) < dayNumber(today || todayIST())) return 'expired';
+    return q.status || 'draft';
+  }
+  const QUOTE_STATUS = {
+    draft: { label: 'Draft', color: 'weekoff' },
+    sent: { label: 'Sent', color: 'pending' },
+    accepted: { label: 'Accepted', color: 'present' },
+    declined: { label: 'Declined', color: 'absent' },
+    expired: { label: 'Expired', color: 'late' },
+  };
+  /** Which quote actions make sense (the database enforces the same transitions). */
+  function quoteActions(q, today) {
+    const s = quoteStatus(q, today), stored = (q && q.status) || 'draft', invoiced = !!(q && q.invoice_id);
+    return {
+      edit: stored === 'draft',
+      send: stored === 'draft',
+      accept: stored === 'draft' || stored === 'sent',
+      decline: stored === 'draft' || stored === 'sent',
+      revise: (stored === 'sent' || stored === 'declined' || (stored === 'accepted' && !invoiced)),
+      invoice: stored === 'accepted' && !invoiced,
+      remove: stored === 'draft',
+      expired: s === 'expired',
+    };
+  }
+
+  /* ------------------------------------------------------------- forecast */
+  /** 'YYYY-MM' of a 'YYYY-MM-DD' date (or null). */
+  function monthKey(d) { return d && /^\d{4}-\d{2}/.test(String(d)) ? String(d).slice(0, 7) : null; }
+  /** n consecutive 'YYYY-MM' keys starting at the month of `from`. */
+  function monthKeys(from, n) {
+    let [y, m] = String(from).slice(0, 7).split('-').map(Number);
+    const out = [];
+    for (let i = 0; i < n; i++) { out.push(`${y}-${String(m).padStart(2, '0')}`); m++; if (m > 12) { m = 1; y++; } }
+    return out;
+  }
+  const COMMIT_PROBABILITY = 70;
+  /**
+   * Salesforce-style forecast categories per month, in one currency.
+   *   closed    won deals closed that month (actual_close_date)
+   *   commit    open deals expected to close that month at >= 70% probability
+   *   bestCase  every open deal expected that month
+   *   pipeline  probability-weighted open value expected that month
+   * Open deals with no expected close date, or one before the first month,
+   * are counted as `overdue` so they are not silently dropped.
+   */
+  function forecast(deals, months, opts) {
+    opts = opts || {};
+    const cur = opts.currency || 'INR';
+    const commitAt = opts.commitAt == null ? COMMIT_PROBABILITY : opts.commitAt;
+    const rows = {};
+    months.forEach(k => { rows[k] = { month: k, closed: 0, commit: 0, bestCase: 0, pipeline: 0, won_count: 0, open_count: 0 }; });
+    const overdue = { count: 0, value: 0 };
+    (deals || []).forEach(d => {
+      if (d.archived_at || (d.currency || 'INR') !== cur) return;
+      const v = Number(d.value) || 0;
+      if (d.status === 'won') {
+        const r = rows[monthKey(d.actual_close_date)];
+        if (r) { r.closed += v; r.won_count++; }
+      } else if (d.status === 'open') {
+        const k = monthKey(d.expected_close_date);
+        const r = rows[k];
+        if (!r) { if (!k || k < months[0]) { overdue.count++; overdue.value += v; } return; }
+        const p = Math.min(100, Math.max(0, Number(d.probability) || 0));
+        r.open_count++;
+        r.bestCase += v;
+        r.pipeline += v * p / 100;
+        if (p >= commitAt) r.commit += v;
+      }
+    });
+    const list = months.map(k => { const r = rows[k]; ['closed', 'commit', 'bestCase', 'pipeline'].forEach(x => { r[x] = round2(r[x]); }); return r; });
+    const sum = k => round2(list.reduce((a, r) => a + r[k], 0));
+    return { months: list, totals: { closed: sum('closed'), commit: sum('commit'), bestCase: sum('bestCase'), pipeline: sum('pipeline') },
+             overdue: { count: overdue.count, value: round2(overdue.value) } };
+  }
+  /** Won vs lost among deals closed in a period, why deals were lost, and how long winning took. */
+  function winLoss(deals, opts) {
+    opts = opts || {};
+    const cur = opts.currency || 'INR';
+    const out = { won: 0, lost: 0, won_value: 0, lost_value: 0, win_rate: null, avg_cycle_days: null, reasons: [] };
+    const reasons = new Map();
+    let cycle = 0, cycleN = 0;
+    (deals || []).forEach(d => {
+      if (d.archived_at || (d.status !== 'won' && d.status !== 'lost')) return;
+      const v = (d.currency || 'INR') === cur ? Number(d.value) || 0 : 0;
+      if (d.status === 'won') {
+        out.won++; out.won_value += v;
+        const start = d.created_at ? istDate(d.created_at) : null;
+        const days = start && d.actual_close_date ? daysBetween(start, d.actual_close_date) : null;
+        if (days != null && days >= 0) { cycle += days; cycleN++; }
+      } else {
+        out.lost++; out.lost_value += v;
+        const k = d.lost_reason || 'No reason given';
+        const r = reasons.get(k) || { reason: k, count: 0, value: 0 };
+        r.count++; r.value += v; reasons.set(k, r);
+      }
+    });
+    const closed = out.won + out.lost;
+    out.win_rate = closed ? Math.round(out.won / closed * 100) : null;
+    out.avg_cycle_days = cycleN ? Math.round(cycle / cycleN) : null;
+    out.won_value = round2(out.won_value); out.lost_value = round2(out.lost_value);
+    out.reasons = [...reasons.values()].map(r => ({ ...r, value: round2(r.value), share: Math.round(r.count / out.lost * 100) }))
+      .sort((a, b) => b.count - a.count || b.value - a.value || a.reason.localeCompare(b.reason));
+    return out;
+  }
+  /** Percent of a target reached (null without a target). */
+  function attainment(actual, target) { const t = Number(target) || 0; return t > 0 ? Math.round((Number(actual) || 0) / t * 100) : null; }
 
   /* ---------------------------------------------------------------- deals */
   /** Pipeline numbers from real deals: counts, open value, weighted value, win rate. */
@@ -542,6 +657,8 @@
     'invoice.created': 'created an invoice', 'invoice.status_changed': 'changed invoice status', 'invoice.payment_recorded': 'recorded a payment',
     'note.added': 'added a note', 'call.logged': 'logged a call', 'email.logged': 'logged an email', 'meeting.logged': 'logged a meeting',
     'lead.follow_up_set': 'set a follow-up', 'invoice.sent': 'sent the invoice', 'invoice.cancelled': 'cancelled the invoice',
+    'quote.created': 'created a quote', 'quote.sent': 'sent the quote', 'quote.accepted': 'marked the quote accepted',
+    'quote.declined': 'marked the quote declined', 'quote.draft': 'reopened the quote as a draft', 'quote.invoiced': 'invoiced the quote',
     'board.created': 'created the board', 'board.column_added': 'added a column', 'conversation.created': 'created a group',
   };
   /** A sentence for one activity row, with the meaningful bit of meta. */
@@ -600,6 +717,7 @@
     dateRange, rangeToIso, fmtDate, fmtDateTime, fmtTime, fmtRelative,
     round2, money, moneyShort,
     invoiceLine, invoiceTotals, invoiceStatus, invoiceActions, INVOICE_STATUS,
+    quoteStatus, quoteActions, QUOTE_STATUS, monthKey, monthKeys, forecast, winLoss, attainment, COMMIT_PROBABILITY,
     pipelineMetrics, stagesOf, firstOpenStage, positionBetween,
     leadMetrics, normalizeEmail, normalizePhone, findDuplicateContacts, splitName, planLeadConversion,
     taskDueState, taskCounts, taskBadgeCount, projectProgress, PRIORITY, PROJECT_STATUS, DEAL_STATUS, EVENT_TYPE,

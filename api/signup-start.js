@@ -10,6 +10,7 @@
 // ============================================================
 
 const crypto = require('crypto');
+const { readJson } = require('../lib/request-auth');
 function sha256(s) { return crypto.createHash('sha256').update(s).digest('hex'); }
 function sixDigits() { return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0'); }
 
@@ -28,7 +29,8 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
-  const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+  const body = readJson(req);
+  if (!body) return res.status(400).json({ error: 'Invalid JSON' });
   const email     = String(body.email || '').trim().toLowerCase();
   const company   = String(body.company || '');
   const full_name = String(body.full_name || '').trim();
@@ -55,6 +57,15 @@ module.exports = async function handler(req, res) {
     if (pr.ok) {
       const rows = await pr.json();
       if (rows.length) return res.status(409).json({ error: 'already_registered', message: 'An account with this email already exists. Try logging in instead.' });
+    }
+  } catch {}
+
+  // One code a minute per address, so this cannot be used to flood a mailbox.
+  try {
+    const pr = await fetch(`${SUPABASE_URL}/rest/v1/pending_signups?select=sent_at&email=eq.${encodeURIComponent(email)}&limit=1`, { headers: H });
+    const [row] = pr.ok ? await pr.json() : [];
+    if (row && row.sent_at && Date.now() - new Date(row.sent_at).getTime() < 60_000) {
+      return res.status(429).json({ error: 'too_soon', message: 'A code was sent less than a minute ago. Check your inbox, or try again in a minute.' });
     }
   } catch {}
 
@@ -123,3 +134,5 @@ function renderOtpEmail({ name, code, company }) {
   </table>
 </body></html>`;
 }
+
+module.exports.ALLOWED_COMPANIES = ALLOWED_COMPANIES;

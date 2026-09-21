@@ -1,3 +1,4 @@
+const { safeEqual } = require('../lib/request-auth');
 const { sendMail } = require('../lib/mailer');
 const { recordMail } = require('../lib/mail-audit');
 
@@ -54,7 +55,7 @@ module.exports = async function handler(req, res) {
   if (!process.env.MAIL_API_KEY) {
     return res.status(500).json({ error: 'MAIL_API_KEY not configured on server.' });
   }
-  if (key !== process.env.MAIL_API_KEY) {
+  if (!safeEqual(key, process.env.MAIL_API_KEY)) {
     return res.status(401).json({ error: 'Invalid mail key' });
   }
 

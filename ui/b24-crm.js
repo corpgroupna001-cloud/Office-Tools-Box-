@@ -135,7 +135,8 @@
 
     const HEX = { pending: '#2fc6f6', late: '#ffa900', present: '#7bd500', weekoff: '#a8adb4', leave: '#9b7cf5', absent: '#ff5752', holiday: '#f76fa6', mute: '#a8adb4', info: '#39a8ef', ok: '#7bd500', warn: '#ffa900', bad: '#ff5752' };
     const PALETTE = ['#39a8ef', '#2fc6f6', '#55d0e0', '#47e4c2', '#ffa900', '#f7a700', '#9b7cf5', '#7bd500', '#f76fa6', '#ff5752'];
-    function hex(token, i) { return (token && token[0] === '#') ? token : (HEX[token] || PALETTE[(i || 0) % PALETTE.length]); }
+    // Only a real colour reaches a style attribute; anything else falls back to the palette.
+    function hex(token, i) { return (token && /^#[0-9a-f]{3,8}$/i.test(token)) ? token : (HEX[token] || PALETTE[(i || 0) % PALETTE.length]); }
 
     /** Filter options for a person: employee ID first, those with one listed first. */
     function peopleOptions() {

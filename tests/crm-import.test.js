@@ -293,6 +293,7 @@ test('the endpoint creates missing lead stages and finds contacts past the first
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../api/admin.js'), 'utf8'), {
     module: mod, process: { env }, console, URL, Date, setTimeout: cb => cb(), fetch: fakeFetch,
     require(name) {
+      if (name === '../lib/request-auth') return require('../lib/request-auth');
       if (name === '../lib/admin-session') return sessions;
       if (name === '../lib/admin-audit') return { auditWrap: r => r };
       if (name === '../lib/crm-import' || name === '../company-config') return require(name);
@@ -436,6 +437,7 @@ test('the console counts CRM records nobody can see and gives them to a company'
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../api/admin.js'), 'utf8'), {
     module: mod, process: { env }, console, URL, Date, setTimeout: cb => cb(), fetch: fakeFetch,
     require(name) {
+      if (name === '../lib/request-auth') return require('../lib/request-auth');
       if (name === '../lib/admin-session') return sessions;
       if (name === '../lib/admin-audit') return { auditWrap: r => r };
       if (name === '../lib/crm-import' || name === '../company-config') return require(name);

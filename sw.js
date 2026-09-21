@@ -83,7 +83,9 @@ self.addEventListener('notificationclick', (event) => {
         event.waitUntil(openCall(data.callId, event.action));
         return;
     }
-    const url = data.url || '/chat/';
+    // Only ever open WorkSuite's own pages.
+    let url = data.url || '/chat/';
+    try { if (new URL(url, self.location.origin).origin !== self.location.origin) url = '/chat/'; } catch (e) { url = '/chat/'; }
     event.waitUntil(
         self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
             // Prefer a tab already on the target page, then any WorkSuite tab (not a call window); open a new one otherwise.

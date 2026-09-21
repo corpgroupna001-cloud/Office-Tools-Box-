@@ -1,13 +1,13 @@
 /* ============================================================================
    CRM settings — access permissions (roles), custom fields, lead stages,
-   automation rules and the product catalogue.
+   automation rules, the product catalogue, lost reasons and web forms.
 
    Everything here is enforced by the database: roles by RLS on the CRM
    tables (only workspace admins may change them), custom fields and the
    catalogue by the "CRM settings" permission, automation rules by the
    "Automation rules" permission. The page only shows what a person may do.
 
-   URLs: /crm/settings?section=permissions|fields|stages|automation|products
+   URLs: /crm/settings?section=permissions|fields|stages|automation|products|lost|forms
    ============================================================================ */
 (async function () {
     'use strict';
@@ -22,7 +22,13 @@
         { key: 'stages', title: 'Lead stages', icon: 'target' },
         { key: 'automation', title: 'Automation rules', icon: 'refresh' },
         { key: 'products', title: 'Product catalogue', icon: 'tag' },
+        { key: 'lost', title: 'Lost reasons', icon: 'x' },
+        { key: 'forms', title: 'Web forms', icon: 'link' },
     ];
+    const SOURCES = ['Website', 'Referral', 'Cold call', 'Email campaign', 'Social media', 'Event', 'Partner', 'Walk-in', 'Web form', 'Other'];
+    // Lost reasons and web forms arrive with supabase-crm-sales-migration.sql.
+    const salesProbe = await sb.from('crm_web_forms').select('id').limit(1);
+    const hasSales = !(salesProbe.error && C.isMissingSchema(salesProbe.error));
     const LEVELS = [
         { value: 'none', label: 'No access' }, { value: 'own', label: 'Personal' },
         { value: 'department', label: 'Personal and department' }, { value: 'subdepartments', label: 'Personal, department and sub-departments' },
@@ -64,8 +70,8 @@
         });
     }
     window.addEventListener('popstate', () => show());
-    function migrationNotice(what) {
-        return `<div class="b24-area pad"><div class="crm-notice">${C.icon('lock')}<div><b>${esc(what)} need the latest database update.</b><br>An administrator needs to run <code>supabase-b24-migration.sql</code> in Supabase → SQL Editor. Existing records are not affected.</div></div></div>`;
+    function migrationNotice(what, file) {
+        return `<div class="b24-area pad"><div class="crm-notice">${C.icon('lock')}<div><b>${esc(what)} need the latest database update.</b><br>An administrator needs to run <code>${esc(file || 'supabase-b24-migration.sql')}</code> in Supabase → SQL Editor. Existing records are not affected.</div></div></div>`;
     }
     function show() {
         const key = current();
@@ -73,7 +79,7 @@
         const body = view.querySelector('#body');
         WSShell.setCrumb(SECTIONS.find(s => s.key === key).title);
         body.innerHTML = '<div class="b24-area pad"><div class="ws-empty">Loading…</div></div>';
-        const run = { permissions: showPermissions, fields: showFields, stages: showStages, automation: showAutomation, products: showProducts }[key];
+        const run = { permissions: showPermissions, fields: showFields, stages: showStages, automation: showAutomation, products: showProducts, lost: showLostReasons, forms: showWebForms }[key];
         run(body).catch(e => C.errorState(body, e, show));
     }
 
@@ -408,6 +414,94 @@
             rowMenu: p => ctx.isManager ? [{ label: 'Edit', icon: 'edit', onClick: () => edit(p) }, { label: p.active ? 'Hide from new deals' : 'Make available', icon: 'refresh', onClick: async () => { await C.q(sb.from('crm_products').update({ active: !p.active }).eq('id', p.id)); grid.reload(); } }] : [],
             empty: { title: 'No products yet', sub: ctx.isManager ? 'Add what you sell to use it in deals.' : 'Managers add products here.' },
         });
+    }
+
+    /* ======================================================= lost reasons */
+    // Offered when a deal is marked lost; the forecast page ranks them.
+    async function showLostReasons(body) {
+        if (!hasSales) { body.innerHTML = migrationNotice('Lost reasons', 'supabase-crm-sales-migration.sql'); return; }
+        const render = async () => {
+            const rows = (await C.q(sb.from('crm_lost_reasons').select('*').order('sort').order('label'))).data || [];
+            body.innerHTML = `<div class="b24-area pad"><p class="b24-hint">Asked for whenever a deal is marked lost, so the forecast can show why deals are lost. Reasons shared by every company come with WorkSuite; add your own below.</p>
+                ${canSettings ? `<div class="b24-tabbar"><button type="button" class="ws-btn sm primary" data-new>${C.icon('plus')}<span>Add reason</span></button></div>` : ''}</div><div class="b24-area" data-list style="margin-top:12px;overflow:auto"></div>`;
+            C.table(body.querySelector('[data-list]'), { rows, columns: [
+                { key: 'label', label: 'Reason', lead: true, render: r => `<span class="primary-text">${esc(r.label)}</span>` },
+                { key: 'company', label: 'Company', render: r => r.company ? esc(r.company) : '<span class="muted">Every company</span>' },
+                { key: 'active', label: 'Status', render: r => r.active ? C.badge('ok', 'Offered') : C.badge('mute', 'Hidden') },
+                ...(canSettings ? [{ key: 'actions', label: '', sort: false, cls: 'actions', render: r => (r.company || ctx.isAdmin) ? `<button type="button" class="ws-btn sm" data-toggle="${esc(r.id)}">${r.active ? 'Hide' : 'Offer'}</button>` : '' }] : []),
+            ], empty: { title: 'No reasons yet' } });
+            const nb = body.querySelector('[data-new]');
+            if (nb) nb.addEventListener('click', () => C.formModal({
+                title: 'Add lost reason', submitLabel: 'Add',
+                fields: [{ name: 'label', label: 'Reason', type: 'text', required: true, full: true, validate: v => v && v.trim().length > 80 ? 'At most 80 characters' : '' }],
+                onSubmit: async v => { await C.q(sb.from('crm_lost_reasons').insert({ company: me.company, label: v.label.trim(), sort: 50, created_by: me.id })); C.toast('Reason added', 'ok'); render(); },
+            }));
+            body.querySelectorAll('[data-toggle]').forEach(b => b.addEventListener('click', async () => {
+                const r = rows.find(x => x.id === b.dataset.toggle);
+                try { const { data } = await C.q(sb.from('crm_lost_reasons').update({ active: !r.active }).eq('id', r.id).select('id')); if (!data || !data.length) throw new Error('Only an administrator changes the shared reasons.'); render(); }
+                catch (e) { C.toast(e.message, 'bad'); }
+            }));
+        };
+        await render();
+    }
+
+    /* ========================================================== web forms */
+    // Public web-to-lead forms: /form/?f=<token>. A submission becomes a lead
+    // owned by the form's responsible person (crm_web_form_submit, rate limited).
+    const FORM_FIELDS = [['email', 'Email'], ['phone', 'Phone'], ['organization', 'Company'], ['message', 'Message']];
+    async function showWebForms(body) {
+        if (!hasSales) { body.innerHTML = migrationNotice('Web forms', 'supabase-crm-sales-migration.sql'); return; }
+        const link = f => `${location.origin}/form/?f=${encodeURIComponent(f.public_token)}`;
+        const embed = f => `<iframe src="${link(f)}" title="${(f.title || f.name).replace(/"/g, '&quot;')}" style="width:100%;min-height:620px;border:0" loading="lazy"></iframe>`;
+        const copy = async (text, what) => { try { await navigator.clipboard.writeText(text); C.toast(`${what} copied`, 'ok'); } catch (e) { C.alert({ title: what, message: text }); } };
+        const edit = f => C.formModal({
+            title: f ? `Edit ${f.name}` : 'New web form', submitLabel: 'Save', size: 'wide',
+            fields: [
+                { name: 'name', label: 'Name (internal)', type: 'text', required: true, placeholder: 'Website contact form' },
+                { name: 'title', label: 'Heading visitors see', type: 'text', placeholder: 'Talk to our sales team' },
+                { name: 'intro', label: 'Introduction', type: 'textarea', full: true, rows: 2 },
+                { name: 'owner_id', label: 'New leads go to', type: 'people', none: 'Nobody (unassigned)' },
+                { name: 'source', label: 'Lead source', type: 'select', options: SOURCES, required: true },
+                ...FORM_FIELDS.map(([k, label]) => ({ name: 'show_' + k, label: `Ask for ${label.toLowerCase()}`, type: 'check' })),
+                ...FORM_FIELDS.map(([k, label]) => ({ name: 'req_' + k, label: `${label} is required`, type: 'check' })),
+                { name: 'success_message', label: 'Thank-you message', type: 'textarea', full: true, rows: 2, placeholder: 'Thank you. We will be in touch shortly.' },
+                { name: 'redirect_url', label: 'Then go to (optional)', type: 'url', full: true, placeholder: 'https://…', validate: v => v && !/^https:\/\//i.test(v) ? 'Use an https:// address' : '' },
+                { name: 'active', label: 'Accepting submissions', type: 'check' },
+            ],
+            values: f ? { ...f, ...Object.fromEntries(FORM_FIELDS.flatMap(([k]) => [['show_' + k, f.fields.includes(k)], ['req_' + k, f.required.includes(k)]])) }
+                : { source: 'Web form', owner_id: me.id, active: true, show_email: true, show_phone: true, show_organization: true, show_message: true, req_email: true },
+            onSubmit: async v => {
+                const fields = ['name', ...FORM_FIELDS.map(([k]) => k).filter(k => v['show_' + k])];
+                const required = ['name', ...FORM_FIELDS.map(([k]) => k).filter(k => v['req_' + k] && fields.includes(k))];
+                const row = { name: v.name.trim(), title: v.title || null, intro: v.intro || null, owner_id: v.owner_id || null, source: v.source || 'Web form',
+                    fields, required, success_message: v.success_message || null, redirect_url: v.redirect_url || null, active: !!v.active };
+                if (f) await C.q(sb.from('crm_web_forms').update(row).eq('id', f.id));
+                else await C.q(sb.from('crm_web_forms').insert({ ...row, company: me.company, created_by: me.id }));
+                C.toast('Form saved', 'ok'); render();
+            },
+        });
+        const render = async () => {
+            const rows = (await C.q(sb.from('crm_web_forms').select('*').order('created_at', { ascending: false }))).data || [];
+            body.innerHTML = `<div class="b24-area pad"><p class="b24-hint">Put a form on your website or share its link. Every submission becomes a lead for the person you choose, with the form's name as the source detail. Submissions are rate-limited and a hidden field turns away bots.</p>
+                ${canSettings ? `<div class="b24-tabbar"><button type="button" class="ws-btn sm primary" data-new>${C.icon('plus')}<span>New form</span></button></div>` : ''}</div><div class="b24-area" data-list style="margin-top:12px;overflow:auto"></div>`;
+            C.table(body.querySelector('[data-list]'), { rows, columns: [
+                { key: 'name', label: 'Form', lead: true, render: f => `<span class="primary-text">${esc(f.name)}</span><span class="sub">${esc(f.title || '')}</span>` },
+                { key: 'owner_id', label: 'Leads go to', value: f => C.personName(f.owner_id), render: f => f.owner_id ? C.personHtml(f.owner_id, { link: false }) : '<span class="muted">Unassigned</span>' },
+                { key: 'submissions', label: 'Submissions', num: true, render: f => `${esc(f.submissions)}${f.last_submission_at ? `<span class="sub">${esc(L.fmtRelative(f.last_submission_at))}</span>` : ''}` },
+                { key: 'active', label: 'Status', render: f => f.active ? C.badge('ok', 'Live') : C.badge('mute', 'Paused') },
+                { key: 'actions', label: '', sort: false, cls: 'actions', render: f => `<button type="button" class="ws-btn sm" data-act="link" data-id="${esc(f.id)}">Copy link</button> <button type="button" class="ws-btn sm" data-act="embed" data-id="${esc(f.id)}">Embed code</button> <a class="ws-btn sm ghost" target="_blank" rel="noopener" href="${esc(link(f))}">Open</a>${canSettings ? ` <button type="button" class="ws-btn sm" data-act="edit" data-id="${esc(f.id)}">Edit</button>` : ''}` },
+            ], empty: { title: 'No web forms yet', sub: canSettings ? 'Create one and add it to your website.' : 'People with CRM settings access create forms here.' } });
+            const nb = body.querySelector('[data-new]'); if (nb) nb.addEventListener('click', () => edit(null));
+            body.querySelector('[data-list]').addEventListener('click', e => {
+                const b = e.target.closest('[data-act]'); if (!b) return;
+                e.stopPropagation();
+                const f = rows.find(x => x.id === b.dataset.id); if (!f) return;
+                if (b.dataset.act === 'link') copy(link(f), 'Link');
+                else if (b.dataset.act === 'embed') copy(embed(f), 'Embed code');
+                else if (b.dataset.act === 'edit') edit(f);
+            });
+        };
+        await render();
     }
 
     frame();

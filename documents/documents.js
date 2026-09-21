@@ -966,7 +966,7 @@
         if (rn) rn.addEventListener('click', () => renameDoc(d, () => { view.querySelector('[data-name]').textContent = d.name; WSShell.setCrumb(d.name); document.title = `${d.name} · Documents · WorkSuite`; }));
         const sh = view.querySelector('[data-share]'); if (sh) sh.addEventListener('click', () => shareDoc(d));
         const pb = view.querySelector('[data-publish]'); if (pb) pb.addEventListener('click', () => publishDoc(d, () => { pb.querySelector('[data-publabel]').textContent = publishLabel(); }));
-        const rs = view.querySelector('[data-restore]'); if (rs) rs.addEventListener('click', () => restoreDoc(d, () => openDoc(d.id)));
+        const rs = view.querySelector('[data-restore]'); if (rs) rs.addEventListener('click', () => restoreDoc(d, () => { cleanup(); openDoc(d.id); }));   // cleanup first: the reopen subscribes again
         const ex = view.querySelector('[data-export]');
         ex.addEventListener('click', () => {
             const E = (label, fmt) => ({ label, icon: 'download', onClick: () => dv.editor.exportAs(fmt) });

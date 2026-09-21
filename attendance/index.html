@@ -722,7 +722,9 @@
 
         let view = 'days';
         let rows = [];       // this month's punches (newest first)
-        let allRows = [];    // plus the day before the month, for the today card
+        let allRows = [];    // plus the day before the month
+        let todayRows = [];  // yesterday..tomorrow (IST) whatever month is picked: the today card and "on the clock"
+        let loadSeq = 0, calSeq = 0;   // a late response for an older month never overwrites a newer one
         let myShift = null;
         let myShift2 = null; // a second shift (dual), for the day's effective shift
         let myCompany = '';
@@ -844,20 +846,30 @@
             // RLS restricts this to the signed-in user's own rows. Keyed on
             // log_date - the ATTENDANCE day, which for the night shift runs
             // past midnight - so the 1am punches of the 30th sit with the 30th.
-            // One extra day before the month, so that on the 1st at 1am the
-            // "today" card still sees the day that began on the 31st.
+            // One extra day before the month (the Today card has its own
+            // yesterday..tomorrow rows, todayRows, whatever month is picked).
             // email_status / email_error only to spot the server's repeat-tap
             // marker (isRepeat); they are in the table from its first migration.
             const firstDate = `${ym}-01`;
             const prevDate  = fmtISO.format(new Date(start.getTime() - 12 * 3600 * 1000));
             const lastDate  = fmtISO.format(new Date(end.getTime() - 12 * 3600 * 1000));
-            const { data, error } = await sb
-                .from('attendance_logs')
-                .select('id,direction,log_datetime,log_date,device_name,device_sn,employee_code,event_type,source,email_status,email_error')
-                .gte('log_date', prevDate)
-                .lte('log_date', lastDate)
-                .order('log_datetime', { ascending: false })
-                .limit(2000);
+            const cols = 'id,direction,log_datetime,log_date,device_name,device_sn,employee_code,event_type,source,email_status,email_error';
+            const seq = ++loadSeq, now = Date.now();
+            const [{ data, error }, near] = await Promise.all([
+                sb.from('attendance_logs').select(cols)
+                    .gte('log_date', prevDate)
+                    .lte('log_date', lastDate)
+                    .order('log_datetime', { ascending: false })
+                    .limit(2000),
+                // The Today card never reads the picked month: a past month would offer "Login now".
+                sb.from('attendance_logs').select(cols)
+                    .gte('log_date', fmtISO.format(new Date(now - 86400000)))
+                    .lte('log_date', fmtISO.format(new Date(now + 86400000)))
+                    .order('log_datetime', { ascending: false })
+                    .limit(200),
+            ]);
+            if (seq !== loadSeq) return;
+            if (!near.error) { todayRows = near.data || []; renderToday(); }
 
             if (error) {
                 el('tbody').innerHTML = '';
@@ -867,7 +879,6 @@
             }
             allRows = data || [];
             rows = allRows.filter(r => (r.log_date || fmtISO.format(new Date(r.log_datetime))) >= firstDate);
-            renderToday();
             render();
         }
 
@@ -878,7 +889,7 @@
         // on a closed day a while; "on the clock" everywhere else is the
         // day under way only.
         function currentDay({ card = false } = {}) {
-            const mine = (card ? cardDayRows : currentDayRows)(allRows, { shift: myShift, shift2: myShift2 }).slice().sort(byTime);
+            const mine = (card ? cardDayRows : currentDayRows)(todayRows, { shift: myShift, shift2: myShift2 }).slice().sort(byTime);
             const date = mine.length ? dayKey(mine[0]) : null;
             const shift = date && myShift ? shiftForDay(myShift, myShift2, date, mine[0].log_datetime) : null;
             return { rows: mine, date, shift };
@@ -1006,17 +1017,20 @@
 
         async function loadCalendar() {
             const ym = el('month').value || fmtISO.format(new Date()).slice(0, 7);
+            const seq = ++calSeq;
             if (calMonthLoaded === ym && calData) { renderCalendar(); renderPay(calData); return; }
             el('mcal').innerHTML = '<div class="h" style="grid-column:1/-1;padding:26px 0;">Loading…</div>';
             el('cal-tot').innerHTML = ''; el('cal-legend').innerHTML = '';
             try {
                 const { data: { session: fresh } } = await sb.auth.getSession();
+                if (seq !== calSeq) return;
                 const r = await fetch('/api/attendance-webhook', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${(fresh || session).access_token}` },
                     body: JSON.stringify({ mode: 'calendar', month: ym })
                 });
                 const data = await r.json();
+                if (seq !== calSeq) return;
                 if (!r.ok) throw new Error(data.detail || data.error || 'Could not load the calendar.');
                 calData = data; calMonthLoaded = ym;
                 // The server knows the second shift too; if the page could not
@@ -1025,6 +1039,7 @@
                 renderCalendar();
                 renderPay(data);
             } catch (e) {
+                if (seq !== calSeq) return;
                 el('mcal').innerHTML = `<div class="h" style="grid-column:1/-1;padding:26px 0;color:#fda4af;">${esc(e.message)}</div>`;
             }
         }

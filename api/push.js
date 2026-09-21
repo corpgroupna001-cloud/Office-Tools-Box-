@@ -227,14 +227,17 @@ module.exports = async function handler(req, res) {
       // Push a notification to another employee's subscribed devices.
       const to = String(body.to || '');
       if (!P.isUuid(to)) return res.status(400).json({ error: 'to (user id) required' });
+      // Calls ring through the 'call' action; a plain notify may not look like one.
       const tag = String(body.tag || 'worksuite').slice(0, 60);
+      if (/^call/i.test(tag)) return res.status(400).json({ error: 'Use the call action to ring someone' });
+      const url = String(body.url || '/chat/').slice(0, 200);
       const payload = {
         title: String(body.title || 'WorkSuite').slice(0, 100),
         body: String(body.body || '').slice(0, 300),
-        url: String(body.url || '/chat/').slice(0, 200),
+        url: /^\/([^/\\]|$)/.test(url) ? url : '/chat/',     // in-app paths only
         tag,
       };
-      const r = await pushTo([to], () => payload, { ttl: tag === 'call' ? 40 : 3600, urgency: tag === 'call' ? 'high' : 'normal' });
+      const r = await pushTo([to], () => payload, { ttl: 3600, urgency: 'normal' });
       return res.status(200).json({ success: true, ...r, ...(r.sent ? {} : { reason: 'no_subscriptions' }) });
     }
 

@@ -565,18 +565,20 @@
         autosize(); updateSendButton();
         paintHeader();
 
-        let view = S.cache.get(key);
+        let view = S.cache.get(key), loaded;
         if (view) {
             S.cache.delete(key); S.cache.set(key, view);          // most recently used last
             S.view = view; view.unseen = 0;
-            if (view.detached) loadLatest(view);
+            // Never shown yet (the first load failed or is still out): load it instead of showing an empty thread.
+            if (!view.ready) $('mx-msgs').innerHTML = '<div class="mx-thread-empty">Loading messages…</div>';
+            if (view.detached || !view.ready) loaded = loadLatest(view);
             else { renderView({ toBottom: true }); fetchLatest(view); }
         } else {
             view = newView(key);
             S.cache.set(key, view); trimCache();
             S.view = view;
             $('mx-msgs').innerHTML = '<div class="mx-thread-empty">Loading messages…</div>';
-            loadLatest(view);
+            loaded = loadLatest(view);
         }
         joinThreadChannel(t);
         loadPinned();
@@ -584,6 +586,7 @@
         renderSidebar();
         scheduleMarkRead();
         if (!isPhone()) focusComposer();
+        return loaded;                                        // callers that jump to a message wait for the first page
     }
     function closeThread() {
         if (S.activeKey) S.drafts.set(S.activeKey, S.editing ? '' : $('mx-input').value);
@@ -688,7 +691,7 @@
 
     // ---------------------------------------------------------------- loading
     function newView(key) {
-        return { key, list: [], byId: new Map(), byClient: new Map(), els: new Map(), hasOlder: false, loading: false, detached: false, ready: false, unseen: 0 };
+        return { key, list: [], byId: new Map(), byClient: new Map(), els: new Map(), hasOlder: false, loading: false, detached: false, ready: false, unseen: 0, loadSeq: 0 };
     }
     function resetView(view) { view.list = []; view.byId.clear(); view.byClient.clear(); }
     function sortView(view) { view.list.sort(L.compareMessages); }
@@ -725,9 +728,10 @@
     async function loadLatest(view) {
         const t = S.threads.get(view.key);
         if (!t) return;
+        const seq = ++view.loadSeq;                           // a newer load or a jump replaces this window
         let r;
         try { r = await threadQuery(t).order('id', { ascending: false }).limit(PAGE); } catch (e) { r = { error: e }; }
-        if (S.cache.get(view.key) !== view) return;
+        if (S.cache.get(view.key) !== view || seq !== view.loadSeq) return;
         if (r.error) {
             if (S.view === view && !view.list.length) $('mx-msgs').innerHTML = '<div class="mx-thread-empty"><b>Messages are unavailable right now</b>They will load when the connection is back.</div>';
             return;
@@ -749,10 +753,10 @@
         const t = S.threads.get(view.key);
         if (!t) return;
         const known = view.list.filter(m => m.id != null).map(m => Number(m.id));
-        const snap = { maxId: known.length ? Math.max(...known) : 0, at: Date.now() };
+        const snap = { maxId: known.length ? Math.max(...known) : 0, at: Date.now() }, seq = view.loadSeq;
         let r;
         try { r = await threadQuery(t).order('id', { ascending: false }).limit(PAGE); } catch (e) { return; }
-        if (r.error || S.cache.get(view.key) !== view || view.detached) return;
+        if (r.error || S.cache.get(view.key) !== view || view.detached || seq !== view.loadSeq) return;
         const rows = (r.data || []).filter(m => belongsTo(t, m));
         const oldestGot = rows.length ? Math.min(...rows.map(m => Number(m.id))) : Infinity;
         if (rows.length >= PAGE && snap.maxId && oldestGot > snap.maxId) return loadLatest(view);   // too much was missed: start over
@@ -770,14 +774,14 @@
         if (!view || view.loading || !view.hasOlder) return;
         const oldest = view.list.find(m => m.id != null);
         if (!oldest) { view.hasOlder = false; return; }
-        const t = activeThread();
+        const t = activeThread(), seq = view.loadSeq;
         view.loading = true;
         $('mx-older').hidden = false;
         let r;
         try { r = await threadQuery(t).lt('id', oldest.id).order('id', { ascending: false }).limit(PAGE); } catch (e) { r = { error: e }; }
         view.loading = false;
         $('mx-older').hidden = true;
-        if (S.view !== view || r.error) return;
+        if (S.view !== view || r.error || seq !== view.loadSeq) return;
         const rows = (r.data || []).filter(m => belongsTo(t, m));
         view.hasOlder = (r.data || []).length >= PAGE;
         rows.forEach(m => upsertMessage(view, m));
@@ -790,12 +794,13 @@
         const view = S.view, t = activeThread();
         if (!view || !t || id == null) return;
         if (view.byId.has(sid(id))) return flashMessage(id);
+        const seq = ++view.loadSeq;                           // a late loadLatest must not replace this window
         const [older, newer] = await Promise.all([
             threadQuery(t).lte('id', id).order('id', { ascending: false }).limit(25),
             threadQuery(t).gt('id', id).order('id', { ascending: true }).limit(25),
         ]);
-        if (S.view !== view) return;
-        if (older.error || !(older.data || []).some(m => sid(m.id) === sid(id))) { toast('That message is no longer available.', 'bad'); return; }
+        if (S.view !== view || seq !== view.loadSeq) return;
+        if (older.error || !(older.data || []).some(m => sid(m.id) === sid(id))) { toast('That message is no longer available.', 'bad'); if (!view.ready) loadLatest(view); return; }
         const rows = [].concat((older.data || []).slice().reverse(), newer.data || []).filter(m => belongsTo(t, m));
         const pending = unsentIn(view);
         resetView(view);
@@ -1036,7 +1041,12 @@
         if (!bubble) return;
         let p = previews.get(url);
         if (!p) {
-            p = fetch('/api/linkpreview?url=' + encodeURIComponent(url)).then(r => (r.ok ? r.json() : null)).catch(() => null);
+            // The endpoint needs the signed-in user's token; without a session there is simply no preview (tried again later).
+            p = S.sb.auth.getSession().then(({ data }) => {
+                const token = data && data.session && data.session.access_token;
+                if (!token) { previews.delete(url); return null; }
+                return fetch('/api/linkpreview?url=' + encodeURIComponent(url), { headers: { Authorization: 'Bearer ' + token } }).then(r => (r.ok ? r.json() : null));
+            }).catch(() => null);
             previews.set(url, p);
         }
         p.then(d => {
@@ -1144,6 +1154,8 @@
         const ids = [...S.groups.keys()].sort();
         const sig = ids.join(',');
         if (S.ch.groups && S.ch.groupSig === sig) return;
+        // Replacing the channel leaves a gap with no group events: resync once the new one is live.
+        const replacing = !!S.ch.groups;
         if (S.ch.groups) { try { S.sb.removeChannel(S.ch.groups); } catch (e) { /* gone */ } }
         S.ch.groupSig = sig;
         const me = S.me.id;
@@ -1156,7 +1168,8 @@
                 ch.on('postgres_changes', Object.assign({ event: 'INSERT', schema: 'public', table: 'messages' }, filter), p => { if (p.new && p.new.conversation_id) onInsert(p.new); })
                   .on('postgres_changes', Object.assign({ event: 'UPDATE', schema: 'public', table: 'messages' }, filter), p => { if (p.new && p.new.conversation_id) onUpdate(p.new); });
             }
-            ch.subscribe((status) => { if (status === 'SUBSCRIBED' && ch.__wasDown) resync(); if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') ch.__wasDown = true; });
+            ch.__wasDown = replacing;
+            ch.subscribe((status) => { if (status === 'SUBSCRIBED' && ch.__wasDown) { ch.__wasDown = false; resync(); } if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') ch.__wasDown = true; });
             S.ch.groups = ch;
         } catch (e) { S.ch.groups = null; }
     }

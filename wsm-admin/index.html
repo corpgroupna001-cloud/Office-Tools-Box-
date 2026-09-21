@@ -1648,16 +1648,18 @@
             const ctx = document.getElementById('quiz-trend-chart');
             if (!ctx || !window.Chart) return;
             const days = [];
-            const today = new Date(); today.setHours(0, 0, 0, 0);
-            for (let i = 29; i >= 0; i--) days.push(new Date(today.getTime() - i * 86400000));
-            const dayKey = d => d.toISOString().slice(0, 10);
+            const now = Date.now();
+            for (let i = 29; i >= 0; i--) days.push(new Date(now - i * 86400000));
+            // IST calendar days (UTC dates are a day off before 05:30 and dropped today).
+            const istDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' });
+            const dayKey = d => istDay.format(d);
             const counts = new Map(days.map(d => [dayKey(d), 0]));
             allQuizzes.forEach(r => {
                 if (!r.created_at) return;
-                const k = new Date(r.created_at).toISOString().slice(0, 10);
+                const k = dayKey(new Date(r.created_at));
                 if (counts.has(k)) counts.set(k, counts.get(k) + 1);
             });
-            const labels = days.map(d => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }));
+            const labels = days.map(d => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' }));
             const data = days.map(d => counts.get(dayKey(d)));
             if (quizTrendChart) quizTrendChart.destroy();
             quizTrendChart = new Chart(ctx, {
@@ -1730,19 +1732,18 @@
             if (!ctx || !window.Chart) return;
             // Build the last 30 days axis
             const days = [];
-            const today = new Date(); today.setHours(0, 0, 0, 0);
-            for (let i = 29; i >= 0; i--) {
-                const d = new Date(today.getTime() - i * 86400000);
-                days.push(d);
-            }
-            const dayKey = d => d.toISOString().slice(0, 10);
+            const now = Date.now();
+            for (let i = 29; i >= 0; i--) days.push(new Date(now - i * 86400000));
+            // IST calendar days (UTC dates are a day off before 05:30 and dropped today).
+            const istDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' });
+            const dayKey = d => istDay.format(d);
             const counts = new Map(days.map(d => [dayKey(d), 0]));
             allResults.forEach(r => {
                 if (!r.created_at) return;
-                const k = new Date(r.created_at).toISOString().slice(0, 10);
+                const k = dayKey(new Date(r.created_at));
                 if (counts.has(k)) counts.set(k, counts.get(k) + 1);
             });
-            const labels = days.map(d => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }));
+            const labels = days.map(d => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' }));
             const data = days.map(d => counts.get(dayKey(d)));
 
             if (trendChart) trendChart.destroy();
@@ -3465,7 +3466,7 @@
                 const sh = (shiftData.shifts || []).find(x => String(x.id) === del.dataset.shiftDel);
                 if (!sh) return;
                 const ok = await wsDialog.confirm({
-                    icon: '⏰', danger: true, title: `Delete "${escapeHtml(sh.name)}"?`,
+                    icon: '⏰', danger: true, title: `Delete "${sh.name}"?`,   // the title is set as text: escaping would show &amp;
                     message: sh.assigned_count
                         ? `<b>${sh.assigned_count}</b> employee${sh.assigned_count === 1 ? '' : 's'} on this shift will be left without one. Attendance history is not affected.`
                         : 'Attendance history is not affected.',

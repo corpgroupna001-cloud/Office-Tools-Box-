@@ -519,7 +519,11 @@
                                 const it = live[i];
                                 const row = { position: i + 1, description: it.description.trim(), quantity: num(it.quantity), unit_price: num(it.unit_price), discount_pct: num(it.discount_pct), tax_rate: num(it.tax_rate) };
                                 if (it.id) await C.q(sb.from('invoice_items').update(row).eq('id', it.id));
-                                else await C.q(sb.from('invoice_items').insert({ ...row, invoice_id: id }));
+                                else {
+                                    // Remember the new row so a retry after a later failure updates it instead of inserting it twice.
+                                    const r = await C.q(sb.from('invoice_items').insert({ ...row, invoice_id: id }).select('id').single());
+                                    it.id = r.data.id; origIds.add(it.id);
+                                }
                             }
                         }
                         const preview = L.invoiceTotals(live, []);

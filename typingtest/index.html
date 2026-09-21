@@ -1174,9 +1174,11 @@
         async function fetchAIPassage(wpm, acc) {
             const categorySel = document.getElementById('category-selector');
             const category = categorySel ? categorySel.value : '';
+            let session = null;
+            try { session = sb && (await sb.auth.getSession()).data.session; } catch {}
             const response = await fetch('/api/groq', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: 'Bearer ' + session.access_token } : {}) },
                 body: JSON.stringify({
                     wpm,
                     acc,

@@ -37,12 +37,14 @@
         return ({ Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6, Sun:7 })[n] || 1;
     }
 
+    let loadSeq = 0;   // a slower answer for an earlier month never replaces the newer one
     async function loadPayroll(month) {
         if (!adminAuthenticated) return;
+        const seq = ++loadSeq;
         const m = month
             || document.getElementById('cal-month').value
             || document.getElementById('pay-month').value
-            || new Date().toISOString().slice(0, 7);
+            || new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date()).slice(0, 7);   // IST month
         document.getElementById('cal-body').innerHTML =
             '<tr><td colspan="40" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading…</td></tr>';
         document.getElementById('pay-tbody').innerHTML =
@@ -53,6 +55,7 @@
                 body: JSON.stringify({ action: 'pay_list', month: m })
             });
             const data = await r.json();
+            if (seq !== loadSeq) return;
             if (!r.ok) throw new Error(data.detail || data.error || 'Load failed');
             payrollData = data;
             document.getElementById('cal-month').value = data.month;
@@ -61,6 +64,7 @@
             renderCalendar();
             renderSalary();
         } catch (e) {
+            if (seq !== loadSeq) return;
             const msg = `<tr><td colspan="40" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
             document.getElementById('cal-body').innerHTML = msg;
             document.getElementById('pay-tbody').innerHTML = msg.replace('40', '9');

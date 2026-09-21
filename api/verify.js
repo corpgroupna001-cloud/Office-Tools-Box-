@@ -11,18 +11,21 @@
 //   1) Client signs the user up via supabase-js (existing signup form).
 //      Because "Confirm email" is OFF in Supabase Auth, the user is
 //      immediately logged in, but profiles.email_verified is false.
-//   2) Client POSTs { user_id, email, company, full_name } to /api/send-verify.
-//      Server generates a 6-digit code, sha256-hashes it, upserts into
-//      public.signup_verifications with a 15-minute expiry, then calls
+//   2) Client POSTs { full_name } to /api/send-verify with its session
+//      (Authorization: Bearer <access token>). The user, their email and
+//      their company come from that session and their profile, never from
+//      the body. Server generates a 6-digit code, sha256-hashes it, upserts
+//      into public.signup_verifications with a 15-minute expiry, then calls
 //      /api/mail with the company-mapped sender.
-//   3) Client shows an "Enter the 6-digit code" step and POSTs
-//      { user_id, code } to /api/verify-code, which flips
+//   3) Client shows an "Enter the 6-digit code" step and POSTs { code } to
+//      /api/verify-code (same header), which flips
 //      profiles.email_verified = true and deletes the code.
 //
 // Env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, MAIL_API_KEY.
 // ============================================================
 
 const crypto = require('crypto');
+const { readJson, sessionUser } = require('../lib/request-auth');
 
 function sha256(s) { return crypto.createHash('sha256').update(s).digest('hex'); }
 function sixDigits() {
@@ -33,34 +36,61 @@ function sixDigits() {
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST')    return res.status(405).json({ error: 'Method not allowed' });
 
-  const parsed = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
+  const parsed = readJson(req);
+  if (!parsed) return res.status(400).json({ error: 'Invalid JSON' });
+  // Whose code: the signed-in caller, never a user_id from the body.
+  const user = await sessionUser(req);
+  if (!user) return res.status(401).json({ error: 'not_signed_in', message: 'Your session has expired. Sign in again.' });
 
   // Which half? The rewrite supplies ?fn=, but fall back to the payload shape
   // so a direct POST to /api/verify still does the right thing.
   const fn = String(req.query?.fn || '')
     || (parsed && parsed.code !== undefined ? 'check' : 'send');
 
-  return fn === 'check' ? verifyCode(req, res, parsed) : sendCode(req, res, parsed);
+  return fn === 'check' ? verifyCode(req, res, parsed, user) : sendCode(req, res, parsed, user);
 };
 
 // ------------------------------------------------------------------
 // Issue a code  (was /api/send-verify)
 // ------------------------------------------------------------------
-async function sendCode(req, res, body) {
-  const { user_id, email, company, full_name } = body;
-  if (!user_id || !email || !company) {
-    return res.status(400).json({ error: 'user_id, email, and company are required' });
-  }
+async function sendCode(req, res, body, user) {
+  const user_id = encodeURIComponent(user.id);
+  const email = user.email;
+  const full_name = typeof body.full_name === 'string' ? body.full_name.slice(0, 150) : '';
+  if (!email) return res.status(400).json({ error: 'This account has no email address.' });
 
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const MAIL_KEY     = process.env.MAIL_API_KEY;
   if (!SUPABASE_URL || !SERVICE_KEY) return res.status(500).json({ error: 'Supabase server config missing.' });
   if (!MAIL_KEY)                     return res.status(500).json({ error: 'MAIL_API_KEY not configured.' });
+
+  // The company (which mailbox sends the code) is the one on the profile.
+  let company = '';
+  try {
+    const pr = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${user_id}&select=company,email_verified&limit=1`, {
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` }
+    });
+    const [p] = pr.ok ? await pr.json() : [];
+    if (p && p.email_verified) return res.status(200).json({ success: true, skipped: 'already_verified' });
+    company = (p && p.company) || (user.user_metadata && user.user_metadata.company) || '';
+  } catch {}
+  if (!company) return res.status(400).json({ error: 'Choose your company first.' });
+
+  // One code a minute at most, so the endpoint cannot be used to flood a mailbox.
+  try {
+    const last = await fetch(`${SUPABASE_URL}/rest/v1/signup_verifications?user_id=eq.${user_id}&select=sent_at&limit=1`, {
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` }
+    });
+    const [row] = last.ok ? await last.json() : [];
+    if (row && row.sent_at && Date.now() - new Date(row.sent_at).getTime() < 60_000) {
+      return res.status(429).json({ error: 'too_soon', message: 'A code was sent less than a minute ago. Check your inbox.' });
+    }
+  } catch {}
 
   // Navyug Raise A Player Foundation — email is not wired up yet. Auto-verify so
   // signup isn't blocked, but tell the client so the UI can show a friendly
@@ -71,7 +101,7 @@ async function sendCode(req, res, body) {
       await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${user_id}`, {
         method: 'PATCH',
         headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email_verified: true, company })
+        body: JSON.stringify({ email_verified: true })
       });
     } catch {}
     return res.status(200).json({ success: true, skipped: 'email_coming_soon', message: 'Verification email is coming soon for Raise a Player. Your account is active.' });
@@ -91,7 +121,7 @@ async function sendCode(req, res, body) {
       Prefer: 'resolution=merge-duplicates,return=minimal',
     },
     body: JSON.stringify({
-      user_id, code_hash: codeHash, attempts: 0,
+      user_id: user.id, code_hash: codeHash, attempts: 0,
       sent_at: new Date().toISOString(), expires_at: expiresAt,
     })
   });
@@ -99,16 +129,6 @@ async function sendCode(req, res, body) {
     const detail = (await upRes.text()).slice(0, 300);
     return res.status(502).json({ error: 'store_code_failed', detail });
   }
-
-  // Also stamp the chosen company on the profile so admin dashboards + future
-  // routing decisions have it.
-  try {
-    await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${user_id}`, {
-      method: 'PATCH',
-      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ company })
-    });
-  } catch {}
 
   // Send the code via the company-routed mail endpoint.
   const proto = req.headers['x-forwarded-proto'] || 'https';
@@ -134,9 +154,10 @@ async function sendCode(req, res, body) {
 // ------------------------------------------------------------------
 // Check a code  (was /api/verify-code)
 // ------------------------------------------------------------------
-async function verifyCode(req, res, body) {
-  const { user_id, code } = body;
-  if (!user_id || !code) return res.status(400).json({ error: 'user_id and code are required' });
+async function verifyCode(req, res, body, user) {
+  const user_id = encodeURIComponent(user.id);
+  const code = body.code;
+  if (!code) return res.status(400).json({ error: 'code is required' });
   if (!/^\d{6}$/.test(String(code))) return res.status(400).json({ error: 'Code must be 6 digits.' });
 
   const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -158,7 +179,7 @@ async function verifyCode(req, res, body) {
   if ((row.attempts || 0) >= 6) {
     return res.status(429).json({ error: 'too_many_attempts', message: 'Too many wrong codes — request a new one.' });
   }
-  if (sha256(String(code)) !== row.code_hash) {
+  if (!crypto.timingSafeEqual(Buffer.from(sha256(String(code))), Buffer.from(String(row.code_hash || '').padEnd(64).slice(0, 64)))) {
     // bump attempts
     await fetch(`${SUPABASE_URL}/rest/v1/signup_verifications?user_id=eq.${user_id}`, {
       method: 'PATCH',

@@ -650,14 +650,12 @@
             } catch (err) { C.toast(C.friendly(err), 'bad'); }
         });
 
-        // Contact information: name and company.
+        // Contact information: the name. The company is set by an administrator.
         $('#me-edit').addEventListener('click', () => {
             const box = $('#me-contact');
-            const companies = (window.WSCompanies && WSCompanies.companies) || [p.company].filter(Boolean);
             box.outerHTML = `<form class="emp-edit" id="me-contact-form">
                 <label><span>Full name</span><input name="full_name" required minlength="2" maxlength="150" value="${esc(p.full_name || '')}"></label>
-                <label><span>Company</span><select name="company">${companies.map(c => `<option${c === p.company ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
-                <p class="muted">Email, position, department and IDs: email is changed from its own field; the rest is kept by an administrator.</p>
+                <p class="muted">Email, company, position, department and IDs: email is changed from its own field; the rest is kept by an administrator.</p>
                 <div class="emp-edit-do"><button type="submit" class="ws-btn primary">Save</button><button type="button" class="ws-btn" data-cancel>Cancel</button></div>
             </form>`;
             const form = $('#me-contact-form');
@@ -665,7 +663,7 @@
             form.full_name.focus();
             form.addEventListener('submit', async e => {
                 e.preventDefault();
-                const patch = { full_name: form.full_name.value.trim(), company: form.company.value };
+                const patch = { full_name: form.full_name.value.trim() };
                 if (patch.full_name.length < 2) return C.toast('Your name needs at least 2 characters', 'bad');
                 const btn = form.querySelector('[type=submit]'); btn.disabled = true;
                 try {

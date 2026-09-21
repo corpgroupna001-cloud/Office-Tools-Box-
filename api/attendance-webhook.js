@@ -246,11 +246,12 @@ module.exports = async function handler(req, res) {
   const CRON_SECRET = process.env.CRON_SECRET || '';
   const JOB = String(req.query && req.query.job || '');
   const isJob = JOB === 'shift_switch' || JOB === 'attendance_tick';
-  const isJobCall = isJob && !!supplied && supplied !== API_KEY && (
+  const isDevice = safeEqual(supplied, API_KEY);
+  const isJobCall = isJob && !!supplied && !isDevice && (
     (CRON_SECRET && safeEqual(supplied, CRON_SECRET))
     || (SUPABASE_URL && SERVICE_KEY && await schedulerSecretMatches({ SUPABASE_URL, SERVICE_KEY, supplied })));
 
-  if (supplied !== API_KEY && !isJobCall) {
+  if (!isDevice && !isJobCall) {
     // Not the device key — the only other accepted caller is a signed-in
     // employee filing their own selfie punch.
     let maybe = req.body;

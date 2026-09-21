@@ -46,6 +46,7 @@ function harness({ now, logs, profiles, bitrixResult, shifts = [DAY_SHIFT], targ
     Date: class extends Date { constructor(...a) { super(...(a.length ? a : [clock])); } static now() { return clock; } },
     process: { env: { SUPABASE_URL: 'https://db.example.test', SUPABASE_SERVICE_ROLE_KEY: 's', BIOMETRIC_API_KEY: 'test-device' } },
     require(name) {
+      if (name === '../lib/request-auth') return require('../lib/request-auth');
       if (name === '../company-config') return require('../company-config');
       if (name === 'crypto') return require('crypto');
       if (name === '../lib/attendance') return attendance;

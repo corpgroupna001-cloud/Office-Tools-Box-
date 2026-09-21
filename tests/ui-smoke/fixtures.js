@@ -114,6 +114,21 @@ function db(opts = {}) {
       { id: 'II1', invoice_id: 'I1', position: 1, description: 'Training jerseys', quantity: 2, unit_price: 500, discount_pct: 0, tax_rate: 18, line_subtotal: 1000, line_discount: 0, line_tax: 180, line_total: 1180 },
       { id: 'II2', invoice_id: 'I1', position: 2, description: 'Setup and fitting', quantity: 1, unit_price: 1000, discount_pct: 50, tax_rate: 0, line_subtotal: 1000, line_discount: 500, line_tax: 0, line_total: 500 },
     ],
+    crm_quotes: [
+      { id: 'Q1', company: NOVA, quote_number: 'Q-2026-0001', deal_id: 'D1', contact_id: 'C1', company_id: null, subject: 'Academy kit, season 2026', bill_to_name: 'Acme Sports Academy', bill_to_email: 'accounts@acme.test', bill_to_address: '12 Stadium Road, Hyderabad', quote_date: ist(-2), valid_until: ist(28), status: 'sent', currency: 'INR', subtotal: 2000, discount_total: 0, tax_total: 360, total: 2360, notes: null, terms: 'Valid for 30 days.', sent_at: at(-2), accepted_at: null, declined_at: null, invoice_id: null, responsible_id: ME, created_by: ME, ...base },
+      { id: 'Q2', company: NOVA, quote_number: 'Q-2026-0002', deal_id: 'D2', contact_id: null, company_id: null, subject: 'Bluewave trial order', bill_to_name: 'Bluewave Swim Club', quote_date: ist(-1), valid_until: ist(29), status: 'draft', currency: 'INR', subtotal: 900, discount_total: 0, tax_total: 0, total: 900, sent_at: null, invoice_id: null, responsible_id: ME, created_by: ME, ...base },
+    ],
+    crm_quote_items: [
+      { id: 'QI1', quote_id: 'Q1', position: 1, description: 'Training jerseys', quantity: 4, unit_price: 500, discount_pct: 0, tax_rate: 18, line_subtotal: 2000, line_discount: 0, line_tax: 360, line_total: 2360 },
+      { id: 'QI2', quote_id: 'Q2', position: 1, description: 'Swim caps', quantity: 30, unit_price: 30, discount_pct: 0, tax_rate: 0, line_subtotal: 900, line_discount: 0, line_tax: 0, line_total: 900 },
+    ],
+    crm_sales_targets: [{ id: 'ST1', company: NOVA, owner_id: ME, period_start: ist(0).slice(0, 7) + '-01', amount: 500000, currency: 'INR', created_by: ME, ...base }],
+    crm_lost_reasons: [
+      { id: 'LR1', company: null, label: 'Price too high', sort: 10, active: true, created_at: at(-30) },
+      { id: 'LR2', company: null, label: 'Chose a competitor', sort: 20, active: true, created_at: at(-30) },
+      { id: 'LR3', company: NOVA, label: 'Went with in-house team', sort: 50, active: true, created_at: at(-3) },
+    ],
+    crm_web_forms: [{ id: 'WF1', company: NOVA, name: 'Website contact', public_token: 'smoke0000000000000000000000000001', title: 'Talk to our sales team', intro: 'Tell us what you need and we will call you back.', fields: ['name', 'email', 'phone', 'organization', 'message'], required: ['name', 'email'], owner_id: ME, source: 'Website', success_message: null, redirect_url: null, active: true, submissions: 12, last_submission_at: at(-1), created_by: ME, ...base }],
     invoice_payments: [{ id: 'IP1', invoice_id: 'I1', amount: 680, paid_on: ist(-1), method: 'UPI', reference: 'UTR123', created_by: ME, created_at: at(-1) }],
     notifications: [
       { id: 'N1', user_id: ME, actor_id: U2, kind: 'task.assigned', title: 'Task assigned to you', body: 'Chase Bluewave for measurements', url: '/tasks/?id=T2', entity_type: 'task', entity_id: 'T2', read_at: null, created_at: at(0, '09:05') },
@@ -206,6 +221,11 @@ const RPC = {
   crm_log: () => null,
   crm_convert_lead: () => ({ contact_id: 'C1', deal_id: 'D1', existing_contact: true }),
   invoice_duplicate: () => 'I1',
+  ws_deal_editable: () => true,
+  crm_quote_from_deal: () => 'Q2',
+  crm_quote_to_invoice: () => 'I1',
+  crm_web_form_public: (body, DB) => { const f = (DB.crm_web_forms || []).find(x => x.public_token === body.p_token && x.active); return f ? { title: f.title || f.name, intro: f.intro, fields: f.fields, required: f.required, company: f.company } : null; },
+  crm_web_form_submit: () => ({ ok: true, message: 'Thank you. We will be in touch shortly.', redirect_url: null }),
   // Messenger & calls v2. Stubs get (body, DB) and throw to answer an error.
   ws_chat_inbox: (_body, DB) => inbox(DB),
   ws_call_live: (_body, DB) => (DB.call_participants || [])

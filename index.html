@@ -633,6 +633,13 @@
             });
         }
 
+        // The verify endpoints identify the person from their session, not from the body.
+        async function verifyHeaders() {
+            const h = { 'Content-Type': 'application/json' };
+            try { const { data: { session } } = await rootSb.auth.getSession(); if (session) h.Authorization = 'Bearer ' + session.access_token; } catch {}
+            return h;
+        }
+
         // Legacy wrapper — used at login for accounts created under the old flow
         // that never finished verification (/api/verify-code + /api/send-verify).
         function showVerifyCodeDialog({ email, userId, firstName, company, onSuccess }) {
@@ -644,8 +651,8 @@
                 onVerify: async (code) => {
                     const r = await fetch('/api/verify-code', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_id: userId, code })
+                        headers: await verifyHeaders(),
+                        body: JSON.stringify({ code })
                     });
                     const j = await r.json().catch(() => ({}));
                     return { ok: r.ok, message: j.message || j.error };
@@ -653,8 +660,8 @@
                 onResend: async () => {
                     const r = await fetch('/api/send-verify', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_id: userId, email, company, full_name: firstName })
+                        headers: await verifyHeaders(),
+                        body: JSON.stringify({ full_name: firstName })
                     });
                     return r.ok;
                 },
@@ -1342,11 +1349,8 @@
                     try {
                         await fetch('/api/send-verify', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                user_id: data.session.user.id, email,
-                                full_name: prof.full_name || ''
-                            })
+                            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + data.session.access_token },
+                            body: JSON.stringify({ full_name: prof.full_name || '' })
                         });
                     } catch {}
                     showVerifyCodeDialog({

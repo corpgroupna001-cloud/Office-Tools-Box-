@@ -234,8 +234,11 @@
         el.innerHTML = page.onlyIds ? `<div class="b24-area pad b24-only">Showing ${page.onlyIds.length} task${page.onlyIds.length === 1 ? '' : 's'} with new comments. <button type="button" class="b24-link" data-clear-only>Show all</button></div>` : '';
         const b = el.querySelector('[data-clear-only]'); if (b) b.addEventListener('click', () => { page.onlyIds = null; showOnly(); refreshList(); });
     }
+    // Every view mount and reload takes a token; a load that finishes after a newer one (or a view switch) is dropped.
+    let viewSeq = 0;
+    const viewToken = () => { const s = ++viewSeq; return () => s !== viewSeq; };
     function mountView(kind) {
-        page.view = kind;
+        page.view = kind; viewSeq++;
         view.querySelectorAll('[data-view]').forEach(b => { b.classList.toggle('on', b.dataset.view === kind); b.setAttribute('aria-selected', String(b.dataset.view === kind)); });
         if (page.grid) { page.grid.destroy(); page.grid = null; }
         if (page.board) { page.board.destroy(); page.board = null; }
@@ -384,13 +387,19 @@
             },
         });
         page.reloadView = async () => {
+            const stale = viewToken();
             try {
                 const rows = await loadRows(b => b.is('completed_at', null));
+                if (stale()) return;
                 page.board.update({ columns: DEADLINES, cards: rows.map((t, i) => ({ id: t.id, columnId: bucketOf(t), position: i, task: t })) });
-            } catch (e) { C.errorState(body, e, page.reloadView); }
+            } catch (e) { if (!stale()) C.errorState(body, e, page.reloadView); }
         };
         page.reloadView();
     }
+
+    // Dropped between cards with the same position (all 0 by default): the column is renumbered to keep the order.
+    const renumberNeeded = ({ before, after, columnCards }) => !!(columnCards && before && after && !(Number(before.position) < Number(after.position)));
+    const slot = (columnCards, id) => (columnCards.indexOf(id) + 1) * 1024;
 
     /* ----- Planner: my own board (task_planner) ----- */
     const PLANNER = [{ id: 'new', name: 'New tasks', hex: '#2fc6f6' }, { id: 'today', name: 'Do today', hex: '#ffa900' }, { id: 'week', name: 'This week', hex: '#7bd500' }, { id: 'later', name: 'Later', hex: '#9b7cf5' }];
@@ -400,21 +409,26 @@
         page.board = WSKanban.mount(body.querySelector('#kb'), {
             columns: [], cards: [], renderCard: c => taskCard(c.task), emptyText: 'Drop tasks here',
             onCardClick: (c, e) => { if (e) e.preventDefault(); openTask(c.task.id); },
-            onMove: async ({ card, toColumnId, position }) => {
-                await C.q(sb.from('task_planner').upsert({ user_id: me.id, task_id: card.task.id, stage: toColumnId, position, updated_at: new Date().toISOString() }, { onConflict: 'user_id,task_id' }));
-                plan.set(card.task.id, { stage: toColumnId, position });
+            onMove: async m => {
+                const { card, toColumnId, columnCards } = m, at = new Date().toISOString();
+                const moves = renumberNeeded(m) ? columnCards.map(id => ({ id, position: slot(columnCards, id) })) : [{ id: card.task.id, position: m.position }];
+                await C.q(sb.from('task_planner').upsert(moves.map(x => ({ user_id: me.id, task_id: x.id, stage: toColumnId, position: x.position, updated_at: at })), { onConflict: 'user_id,task_id' }));
+                moves.forEach(x => plan.set(x.id, { stage: toColumnId, position: x.position }));
             },
         });
         page.reloadView = async () => {
+            const stale = viewToken();
             try {
                 const p = await sb.from('task_planner').select('task_id, stage, position').eq('user_id', me.id);
+                if (stale()) return;
                 if (p.error) { body.innerHTML = `<div class="b24-area pad"><div class="crm-notice">${C.icon('lock')}<div><b>The planner needs the latest database update.</b><br>An administrator needs to run <code>supabase-b24-migration.sql</code>.</div></div></div>`; return; }
                 plan = new Map((p.data || []).map(x => [x.task_id, x]));
                 // The planner is personal: open tasks I am responsible for or assisting on.
                 const rows = await loadRows(b => b.is('completed_at', null));
+                if (stale()) return;
                 const mineRows = rows.filter(t => t.assignee_id === me.id || roleIds.assisting.includes(t.id) || page.role !== 'ongoing');
                 page.board.update({ columns: PLANNER, cards: mineRows.map((t, i) => { const x = plan.get(t.id); return { id: t.id, columnId: x ? x.stage : 'new', position: x ? Number(x.position) : i, task: t }; }) });
-            } catch (e) { C.errorState(body, e, page.reloadView); }
+            } catch (e) { if (!stale()) C.errorState(body, e, page.reloadView); }
         };
         page.reloadView();
     }
@@ -423,6 +437,7 @@
     function mountCalendar(body) {
         if (!page.month) page.month = today.slice(0, 7);
         page.reloadView = async () => {
+            const stale = viewToken();
             const [y, m] = page.month.split('-').map(Number);
             const first = `${page.month}-01`;
             const startDow = (new Date(first + 'T00:00:00Z').getUTCDay() + 6) % 7;
@@ -431,6 +446,7 @@
             body.innerHTML = '<div class="b24-area pad"><div class="ws-empty">Loading…</div></div>';
             try {
                 const rows = await loadRows(b => b.gte('due_date', days[0]).lte('due_date', days[41]));
+                if (stale()) return;
                 const byDay = new Map(); rows.forEach(t => { if (!byDay.has(t.due_date)) byDay.set(t.due_date, []); byDay.get(t.due_date).push(t); });
                 const label = new Intl.DateTimeFormat('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, 1)));
                 body.innerHTML = `<div class="b24-area b24-cal">
@@ -444,7 +460,7 @@
                     else { const d = new Date(Date.UTC(y, m - 1 + k, 1)); page.month = d.toISOString().slice(0, 7); }
                     page.reloadView();
                 }));
-            } catch (e) { C.errorState(body, e, page.reloadView); }
+            } catch (e) { if (!stale()) C.errorState(body, e, page.reloadView); }
         };
         page.reloadView();
     }
@@ -454,10 +470,12 @@
         const DAY = 30, SPAN = 42;
         if (!page.ganttStart) { const dow = (new Date(today + 'T00:00:00Z').getUTCDay() + 6) % 7; page.ganttStart = L.addDays(today, -dow - 7); }
         page.reloadView = async () => {
+            const stale = viewToken();
             const start = page.ganttStart, end = L.addDays(start, SPAN - 1);
             body.innerHTML = '<div class="b24-area pad"><div class="ws-empty">Loading…</div></div>';
             try {
                 const rows = (await loadRows(b => b.or(`due_date.gte.${start},start_date.gte.${start}`))).filter(t => (t.start_date || t.due_date) && (t.start_date || t.due_date) <= end);
+                if (stale()) return;
                 const days = Array.from({ length: SPAN }, (_, i) => L.addDays(start, i));
                 const off = d => L.daysBetween(start, d);
                 body.innerHTML = `<div class="b24-area b24-gantt">
@@ -493,7 +511,7 @@
                     };
                     bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', up); bar.addEventListener('pointercancel', cancel);
                 }));
-            } catch (e) { C.errorState(body, e, page.reloadView); }
+            } catch (e) { if (!stale()) C.errorState(body, e, page.reloadView); }
         };
         page.reloadView();
     }
@@ -505,13 +523,21 @@
             columns: [], cards: [], renderCard: c => taskCard(c.task), emptyText: 'No tasks',
             onCardClick: (c, e) => { if (e) e.preventDefault(); openTask(c.task.id); },
             onAddCard: colId => C.openTaskEditor({ defaults: { assignee_id: me.id, status: colId }, onSaved: async s => { if (s && s.status !== colId) await sb.from('tasks').update({ status: colId }).eq('id', s.id); page.reloadView(); } }),
-            onMove: async ({ card, toColumnId, position }) => { await mustUpdate(sb.from('tasks').update({ status: toColumnId, position }).eq('id', card.task.id)); WSShell.refreshUnread(); page.reloadView(); },
+            onMove: async m => {
+                const { card, toColumnId, columnCards } = m, renumber = renumberNeeded(m);
+                await mustUpdate(sb.from('tasks').update({ status: toColumnId, position: renumber ? slot(columnCards, card.id) : m.position }).eq('id', card.task.id));
+                // Best effort: tasks I cannot edit keep their old position.
+                if (renumber) await Promise.all(columnCards.filter(id => id !== card.id).map(id => sb.from('tasks').update({ position: slot(columnCards, id) }).eq('id', id).then(() => {}, () => {})));
+                WSShell.refreshUnread(); page.reloadView();
+            },
         });
         page.reloadView = async () => {
+            const stale = viewToken();
             try {
                 const rows = await loadRows();
+                if (stale()) return;
                 page.board.update({ columns: lk.taskStatuses.map((s, i) => ({ id: s.key, name: s.label, hex: B.hex(s.color, i) })), cards: rows.map(t => ({ id: t.id, columnId: t.status, position: Number(t.position) || 0, task: t })) });
-            } catch (e) { C.errorState(body, e, page.reloadView); }
+            } catch (e) { if (!stale()) C.errorState(body, e, page.reloadView); }
         };
         page.reloadView();
     }
@@ -730,10 +756,10 @@
         if (page.board) { page.board.destroy(); page.board = null; }
         page.reloadView = null;
         C.loading(view, 'Loading task…');
-        const mySeq = recordSeq;
+        const mySeq = ++recordSeq;                           // realtime/reload re-renders overlap too: only the latest one finishes
         let t;
         try { t = (await C.q(sb.from('tasks').select(SELECT).eq('id', id).maybeSingle())).data; }
-        catch (e) { return C.errorState(view, e, () => showRecord(id)); }
+        catch (e) { if (mySeq === recordSeq) C.errorState(view, e, () => showRecord(id)); return; }
         if (mySeq !== recordSeq) return;                     // navigated away while it loaded
         if (!t) { view.innerHTML = `<a class="crm-back" href="/tasks/">${C.icon('arrow')}All tasks</a>`; C.empty(view.appendChild(document.createElement('div')), 'Task not found', 'It may have been deleted, or you may not have access to it.'); return; }
         document.title = `${t.title} · Tasks · WorkSuite`;
@@ -874,6 +900,7 @@
         const feed = C.activityFeed(view.querySelector('#activity'), { entity_type: 'task', entity_id: id, limit: 100 });
         C.comments(view.querySelector('#composer'), { entity_type: 'task', entity_id: id, onPosted: () => feed.reload() });
         // Someone else edits the task: refresh (a bit later so their save has landed).
+        if (unsubscribe) unsubscribe();
         unsubscribe = C.subscribe('task', { event: 'UPDATE', table: 'tasks', filter: `id=eq.${id}` }, C.debounce(() => { if (!document.querySelector('.crm-modal')) showRecord(id); }, 600));
     }
     async function onProject(projectId) {

@@ -154,13 +154,18 @@
             if (Notification.permission === 'default') Notification.requestPermission().catch(() => {});
         } catch {}
     }
+    /** A notification link, only if it stays on this site; otherwise null. */
+    function safeUrl(u) {
+        if (!u) return null;
+        try { const x = new URL(u, location.origin); return x.origin === location.origin && /^https?:$/.test(x.protocol) ? x.pathname + x.search + x.hash : null; } catch { return null; }
+    }
     function browserNotify(title, body, tag, url) {
         try {
             if (!('Notification' in window)) return;
             if (Notification.permission !== 'granted') return;
             if (document.visibilityState === 'visible') return; // don't nag when tab is active
             const n = new Notification(title, { body, tag, icon: '/icon-192.png' });
-            n.onclick = () => { window.focus(); if (url) location.href = url; n.close(); };
+            n.onclick = () => { window.focus(); const u = safeUrl(url); if (u) location.href = u; n.close(); };
         } catch {}
     }
 
@@ -296,7 +301,7 @@
                         ({ new: n }) => {
                             if (!n || !n.title) return;
                             const icon = /^call/.test(n.kind) ? '📞' : /task/.test(n.kind) ? '✅' : /mention/.test(n.kind) ? '💬' : /event/.test(n.kind) ? '📅' : /deal|lead|contact/.test(n.kind) ? '🎯' : /project/.test(n.kind) ? '📁' : '🔔';
-                            showToast({ icon, title: n.title, message: n.body || '', onClick: () => { if (n.url) location.href = n.url; } });
+                            showToast({ icon, title: n.title, message: n.body || '', onClick: () => { const u = safeUrl(n.url); if (u) location.href = u; } });
                             playPing();
                             browserNotify(n.title, n.body || '', `ws-notif-${n.kind}`, n.url);
                         })
