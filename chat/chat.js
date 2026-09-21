@@ -51,7 +51,7 @@
         features: { inbox: null, clientId: null, groups: null, calls: null, pins: null, flags: null },
         typing: new Map(), typingTimer: null, lastTypingSent: 0,
         replyTo: null, editing: null, mention: null, emojiFor: null, menuPick: null, suppressClick: false,
-        pins: [], searchQ: '', searchSeq: 0, searchTimer: null,
+        pins: [], pinIdx: 0, pinsKey: null, searchQ: '', searchSeq: 0, searchTimer: null, aboutFiles: [], aboutSeq: 0,
         tab: 'chats', calls: [], callsLoaded: false,
         conn: 'connecting', connTimer: null, wasLive: null, lastSync: 0, syncing: false, syncAgain: false,
         ch: { main: null, groups: null, groupSig: null, presence: null, thread: null, threadTopic: null },
@@ -581,7 +581,9 @@
             loaded = loadLatest(view);
         }
         joinThreadChannel(t);
+        S.pins = []; S.pinIdx = 0; S.aboutFiles = [];
         loadPinned();
+        if (!$('mx-about').hidden) { paintAbout(); loadAboutFiles(); }
         refreshCallBar(); startCallBarPolling();
         renderSidebar();
         scheduleMarkRead();
@@ -594,6 +596,7 @@
         closeFloating(); resetCompose(); closeSearch();
         S.typing.clear();
         S.activeKey = null; S.view = null; S.ch.thread = null; S.ch.threadTopic = null;
+        toggleAbout(false);
         stopCallBarPolling();
         $('mx-thread').hidden = true;
         $('mx-empty').hidden = false;
@@ -639,7 +642,9 @@
         const s = $('mx-head-sub');
         s.textContent = sub;
         s.className = cls;
-        $('mx-head-who').setAttribute('aria-label', t.kind === 'group' ? 'Group info' : 'View profile');
+        $('mx-head-who').setAttribute('aria-label', t.kind === 'group' ? 'About this group' : 'View profile');
+        const st = $('mx-about').querySelector('.mx-about-st');
+        if (st && t.kind === 'dm') { const on = isOnline(t.id); st.textContent = on ? 'Online now' : L.fmtLastSeen(S.lastSeen.get(t.id)); st.classList.toggle('on', on); }
     }
 
     // Per-thread channel: typing (broadcast) and, for groups, members' read markers.
@@ -930,21 +935,26 @@
         }
 
         const group = !!m.conversation_id;
-        el.className = `mx-msg ${mine ? 'mine' : 'theirs'}${f.first ? ' first' : ''}${f.last ? ' last' : ''}${m._state ? ' pending' : ''}`;
+        el.className = `mx-msg ${mine ? 'mine' : 'theirs'}${group ? ' grp' : ''}${f.first ? ' first' : ''}${f.last ? ' last' : ''}${m._state ? ' pending' : ''}`;
         const bubbleCls = ['mx-bubble'];
         let content;
         if (sp.kind === 'deleted') { bubbleCls.push('deleted'); content = '<span class="mx-text">🚫 This message was deleted</span>'; }
         else if (sp.kind === 'file') { if (sp.isImage || sp.isAudio || sp.isVideo) bubbleCls.push('media'); content = fileHtml(m, sp); }
         else {
             if (L.isEmojiOnly(sp.text) && !m.reply_to_id) bubbleCls.push('emoji');
-            content = `<div class="mx-text">${L.formatBody(sp.text, { names: mentionNames(), meName: S.me.name, codes: mentionNames.codes })}</div>`;
+            content = `<div class="mx-text">${L.formatBody(sp.text, formatOpts())}</div>`;
         }
         const live = sp.kind !== 'deleted';
         const meta = `<span class="mx-meta">${m.pinned_at && live ? '<span class="mx-pin-mark" title="Pinned">📌</span>' : ''}${m.edited_at && live ? '<span class="mx-edited">edited</span>' : ''}<time datetime="${esc(m.created_at || '')}" title="${esc(fullDate(m.created_at))}">${esc(L.fmtTime(m.created_at))}</time>${mine ? receiptHtml(m) : ''}</span>`;
+        // In a group, like Bitrix24: the sender's Employee ID in colour at the top of the first bubble, their photo beside the last.
+        const p = person(m.sender_id);
+        const sender = group && !mine && f.first && !bubbleCls.includes('emoji')
+            ? `<button type="button" class="mx-sender" data-act="profile" style="--who:${L.colorFor(m.sender_id)}" title="${esc(fullName(m.sender_id) || 'Profile')}">${empId(p) ? `<b class="mx-emp-id">${esc(empId(p))}</b> <span class="mx-emp-name">${esc(fullName(m.sender_id))}</span>` : esc(nameOf(m.sender_id))}</button>` : '';
+        const av = group && !mine ? (f.last ? `<button type="button" class="mx-msg-av" data-act="profile" aria-label="${esc('Profile of ' + nameText(m.sender_id))}">${personAvatar(m.sender_id, 'sm')}</button>` : '<span class="mx-msg-av" aria-hidden="true"></span>') : '';
         let html = '';
-        if (group && !mine && f.first) html += `<div class="mx-sender" style="color:${L.colorFor(m.sender_id)}">${nameHtml(m.sender_id)}</div>`;
-        html += `<div class="mx-line"><div class="${bubbleCls.join(' ')}" tabindex="0">${quoteHtml(m, parent)}${content}${meta}</div>` +
-            `<button type="button" class="mx-more" data-act="menu" aria-label="Message actions" data-icon="chev"></button></div>`;
+        if (group && !mine && f.first && bubbleCls.includes('emoji')) html += `<div class="mx-sender-out"><button type="button" class="mx-sender" data-act="profile" style="--who:${L.colorFor(m.sender_id)}">${nameHtml(m.sender_id)}</button></div>`;
+        html += `<div class="mx-line">${av}<div class="${bubbleCls.join(' ')}" tabindex="0">${sender}${quoteHtml(m, parent)}${content}${meta}</div>` +
+            `<button type="button" class="mx-more" data-act="menu" aria-label="Message actions" aria-haspopup="menu" data-icon="chev"></button></div>`;
         if (m._state === 'failed') html += `<div class="mx-failed">Not sent${m._err ? ' — ' + esc(m._err) : ''} · <button type="button" data-act="retry">Retry</button> · <button type="button" data-act="discard">Delete</button></div>`;
         else if (m._state === 'uploading' && m._job) html += '<div class="mx-failed mx-up">Uploading… · <button type="button" data-act="cancel">Cancel</button></div>';
         html += '<div class="mx-reacts" hidden></div>';
@@ -1106,14 +1116,21 @@
         el.title = seen.map(nameText).join(', ');
         return { key: mKey(m), el };
     }
+    // What formatBody highlights: "@Full Name" (with the ID shown before it) and "@<Employee ID>" (the name in its tooltip).
     function mentionNames() {
         if (!mentionNames.cache || mentionNames.size !== S.people.size) {
             mentionNames.cache = [...S.people.values()].map(p => p.full_name).filter(Boolean);
-            mentionNames.codes = {};
-            S.people.forEach(p => { if (p.full_name && empId(p) && !mentionNames.codes[p.full_name]) mentionNames.codes[p.full_name] = empId(p); });
+            mentionNames.codes = {}; mentionNames.ids = {};
+            S.people.forEach(p => {
+                if (p.full_name && empId(p) && !mentionNames.codes[p.full_name]) mentionNames.codes[p.full_name] = empId(p);
+                if (empId(p)) mentionNames.ids[empId(p)] = p.full_name || p.email || empId(p);
+            });
             mentionNames.size = S.people.size;
         }
         return mentionNames.cache;
+    }
+    function formatOpts() {
+        return { names: mentionNames(), meName: S.me.name, codes: mentionNames.codes, ids: mentionNames.ids, meCode: empId(person(S.me.id)) || null };
     }
     function updateNewPill() {
         const view = S.view, pill = $('mx-newpill');
@@ -1339,14 +1356,18 @@
         document.title = (total ? `(${total > 99 ? '99+' : total}) ` : '') + 'Messenger · WorkSuite';
         try { if (window.WSShell && WSShell.setUnread) WSShell.setUnread(total); } catch (e) { /* shell optional */ }
     }
+    function mentionsMe(m) { return !!(m && Array.isArray(m.mentions) && m.mentions.indexOf(S.me.id) !== -1); }
     function notifyIncoming(t, m) {
-        if (isMuted(t)) return;
-        const title = t.kind === 'group' ? `${threadName(t)} · ${firstName(m.sender_id)}` : nameOf(m.sender_id);
+        const named = mentionsMe(m);
+        if (isMuted(t) && !named) return;                     // a mention cuts through mute, as the push does
+        const who = nameText(m.sender_id);
+        const title = named ? `${who} mentioned you${t.kind === 'group' ? ' in ' + threadName(t) : ''}`
+            : t.kind === 'group' ? `${threadName(t)} · ${who}` : who;
         const body = L.previewText(m.body);
         const tag = t.kind === 'group' ? 'grp-' + t.id : 'dm-' + m.sender_id;
         if (document.visibilityState === 'visible') {
             toastCard({ avatar: t.kind === 'group' ? threadAvatar(t) : personAvatar(m.sender_id), title, text: body, onClick: () => openThread(t.key) });
-            ping();
+            if (soundOn()) ping();
         } else if ('Notification' in window && Notification.permission === 'granted') {
             try {
                 const n = new Notification(title, { body, tag, icon: '/icon-192.png', renotify: true });
@@ -1369,6 +1390,9 @@
             o.start(t0); o.stop(t0 + 0.28);
         } catch (e) { /* sound is optional */ }
     }
+    // The "Sound" switch in the About panel, remembered on this device.
+    function soundOn() { try { return localStorage.getItem('ws-chat-sound') !== 'off'; } catch (e) { return true; } }
+    function setSound(on) { try { localStorage.setItem('ws-chat-sound', on ? 'on' : 'off'); } catch (e) { /* private mode */ } }
     // Browsers only allow audio after the person has interacted with the page.
     function unlockAudio() {
         if (S.audioCtx) { if (S.audioCtx.state === 'suspended') S.audioCtx.resume().catch(() => {}); return; }
@@ -1826,19 +1850,24 @@
         autosize(); updateSendButton();
     }
 
+    /** Who can be @mentioned here: the chat partner or the group's members first, then every other colleague (never me). */
     function mentionCandidates(t) {
         t = t || activeThread();
         if (!t) return [];
         const one = id => ({ id, name: fullName(id), code: empId(person(id)) });
-        if (t.kind === 'group') return (S.members.get(t.id) || []).map(x => x.user_id).filter(id => id !== S.me.id).map(one).filter(x => x.name);
-        return [one(t.id)].filter(x => x.name);
+        const first = t.kind === 'group' ? (S.members.get(t.id) || []).map(x => x.user_id) : [t.id];
+        const seen = new Set([S.me.id]), out = [];
+        const add = id => { if (seen.has(id)) return; seen.add(id); const c = one(id); if (c.name || c.code) out.push(c); };
+        first.forEach(add);
+        colleagues('').forEach(p => add(p.id));
+        return out;
     }
     function updateMentions() {
         const el = $('mx-input');
         const q = L.mentionQuery(el.value, el.selectionStart);
         if (!q) return closeMentions();
         const term = q.term.toLowerCase();
-        const items = mentionCandidates().filter(c => c.name.toLowerCase().indexOf(term) !== -1 || c.code.toLowerCase().indexOf(term) !== -1).slice(0, 8);
+        const items = mentionCandidates().filter(c => c.code.toLowerCase().indexOf(term) !== -1 || c.name.toLowerCase().indexOf(term) !== -1).slice(0, 8);
         if (!items.length) return closeMentions();
         S.mention = { start: q.start, items, on: Math.min(S.mention ? S.mention.on : 0, items.length - 1) };
         paintMentions();
@@ -1855,8 +1884,9 @@
         if (!c) return;
         const el = $('mx-input');
         const before = el.value.slice(0, S.mention.start), after = el.value.slice(el.selectionStart);
-        el.value = `${before}@${c.name} ${after}`;
-        const p = before.length + c.name.length + 2;
+        const tag = c.code || c.name;                          // the Employee ID is how people are known; the name without one
+        el.value = `${before}@${tag} ${after}`;
+        const p = before.length + tag.length + 2;
         el.setSelectionRange(p, p); el.focus();
         closeMentions(); autosize(); updateSendButton();
     }
@@ -1873,13 +1903,15 @@
 
     // ------------------------------------------------------------------ menus
     // One floating menu for message actions, the header ⋮ and "new".
-    function openMenu(html, x, y, onPick) {
+    // above: y is the menu's bottom edge (the + menu opens upwards from the message box).
+    function openMenu(html, x, y, onPick, above) {
         const menu = $('mx-menu');
         menu.innerHTML = html;
         S.menuPick = onPick;
         S.restoreFocus = document.activeElement;
         menu.hidden = false;
         const w = menu.offsetWidth, h = menu.offsetHeight;
+        if (above) y -= h;
         menu.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, x)) + 'px';
         menu.style.top = Math.max(8, Math.min(window.innerHeight - h - 8, y)) + 'px';
         const first = menu.querySelector('button');
@@ -1890,7 +1922,7 @@
         if (menu.hidden) return;
         menu.hidden = true;
         S.menuPick = null;
-        document.querySelectorAll('.mx-more[aria-expanded="true"]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+        document.querySelectorAll('.mx-more[aria-expanded="true"], #mx-attach[aria-expanded="true"], #mx-h-more[aria-expanded="true"]').forEach(b => b.setAttribute('aria-expanded', 'false'));
         if (restore) restoreFocus();
     }
     function menuItems(items) {
@@ -2190,11 +2222,32 @@
         catch (e) { return; }
         if (activeThread() !== t) return;
         if (r.error) { if (isSchemaMissing(r.error)) S.features.pins = false; bar.hidden = true; return; }
+        // A resync keeps your place in the cycle; a new or removed pin starts again from the newest.
+        const was = S.pinsKey === t.key && S.pins[S.pinIdx] ? sid(S.pins[S.pinIdx].id) : null, count = S.pins.length;
         S.pins = (r.data || []).filter(m => belongsTo(t, m) && m.pinned_at && m.body !== L.DELETED);
-        if (!S.pins.length) { bar.hidden = true; return; }
-        const top = S.pins[0];
-        bar.innerHTML = `<span aria-hidden="true">📌</span><span class="txt"><b>${esc(firstName(top.sender_id))}:</b> ${esc(L.previewText(top.body))}</span><span class="n">${S.pins.length === 1 ? 'Pinned' : S.pins.length + ' pinned'}</span>`;
+        S.pinsKey = t.key;
+        S.pinIdx = S.pins.length === count ? Math.max(0, S.pins.findIndex(p => sid(p.id) === was)) : 0;
+        paintPinned();
+        if (!$('mx-about').hidden) paintAbout();
+    }
+    // Bitrix24's bar: one pinned message at a time; a click goes to it and the bar moves on to the next (older) one.
+    function paintPinned() {
+        const bar = $('mx-pinned'), n = S.pins.length;
+        if (!n) { bar.hidden = true; bar.innerHTML = ''; return; }
+        const i = S.pinIdx % n, p = S.pins[i];
+        const who = empId(person(p.sender_id)) || firstName(p.sender_id);
+        bar.innerHTML = `<button type="button" class="mx-pin-go" data-pin-go title="Go to the pinned message">
+                <span class="mx-pin-ticks" aria-hidden="true">${S.pins.slice(0, 5).map((x, k) => `<i class="${k === Math.min(i, 4) ? 'on' : ''}"></i>`).join('')}</span>
+                <span class="txt"><b>Pinned message${n > 1 ? ` ${i + 1} of ${n}` : ''}</b><span><b class="mx-emp-id">${esc(who)}</b>: ${esc(L.previewText(p.body))}</span></span>
+            </button>${n > 1 ? '<button type="button" class="mx-icon-btn sm" data-pin-list title="All pinned messages" aria-label="All pinned messages" data-icon="list"></button>' : ''}`;
         bar.hidden = false;
+    }
+    function goToPinned() {
+        const n = S.pins.length;
+        if (!n) return;
+        const p = S.pins[S.pinIdx % n];
+        jumpTo(p.id);
+        if (n > 1) { S.pinIdx = (S.pinIdx + 1) % n; paintPinned(); }
     }
     function openPins() {
         if (!S.pins.length) return;
@@ -2449,37 +2502,18 @@
             closeModal(); closeThread(); loadGroups();
         });
     }
+    /** A colleague's full profile: the shell's slide-over when there is one (Bitrix24 opens profiles that way), else the page. */
     function openProfile(id) {
-        const p = person(id) || {}, on = isOnline(id), st = S.dayStatus.get(id);
-        const role = [p.job_title, p.department].filter(Boolean).join(' · ');
-        const t = threadFor('dm:' + id);
-        openModal(`<button type="button" class="mx-icon-btn sm mx-x" data-close aria-label="Close" data-icon="x"></button>
-            <div class="mx-profile">${personAvatar(id, 'lg', true)}${empId(p) ? `<span class="mx-emp-id lg">${esc(empId(p))}</span>` : ''}<h3>${esc(p.full_name || p.email || 'Unknown')}</h3>
-                <span class="mx-muted"${on ? ' style="color:var(--mx-ok);font-weight:600"' : ''}>${esc(on ? 'Online now' : L.fmtLastSeen(S.lastSeen.get(id)))}</span>
-                <div class="mx-facts">
-                    ${p.email ? `<div><small>Email</small><span><a class="mx-link" href="mailto:${esc(p.email)}">${esc(p.email)}</a></span></div>` : ''}
-                    ${role ? `<div><small>Role</small><span>${esc(role)}</span></div>` : ''}
-                    ${p.company ? `<div><small>Company</small><span>${esc(p.company)}</span></div>` : ''}
-                    ${st ? `<div><small>Today</small><span>${esc(`${st.icon || ''} ${st.label || ''}`.trim() + (st.is_wfh ? ' · working from home' : ''))}</span></div>` : ''}
-                </div>
-                <div class="mx-actions stretch" style="width:100%">
-                    <button type="button" class="mx-btn primary" data-icon="phone" id="pf-voice">Voice call</button>
-                    <button type="button" class="mx-btn primary" data-icon="video" id="pf-video">Video call</button>
-                </div>
-                <div class="mx-actions stretch" style="width:100%;margin-top:0">
-                    ${S.activeKey !== t.key ? '<button type="button" class="mx-btn" id="pf-msg">Message</button>' : ''}
-                    <a class="mx-btn" href="/employees/?id=${encodeURIComponent(id)}">Full profile</a>
-                </div>
-            </div>`);
-        $('pf-voice').addEventListener('click', () => { closeModal(); startCall(t, false); });
-        $('pf-video').addEventListener('click', () => { closeModal(); startCall(t, true); });
-        const msg = $('pf-msg');
-        if (msg) msg.addEventListener('click', () => { closeModal(); openThread(t.key); });
+        if (!id) return;
+        const url = `/employees/?id=${encodeURIComponent(id)}`;
+        closeFloating();
+        try { if (window.WSShell && typeof WSShell.openSlider === 'function') { WSShell.openSlider(url, { width: 1100, title: 'Profile' }); return; } } catch (e) { /* fall back to the page */ }
+        location.href = url;
     }
     function openHeaderMore(anchor) {
         const t = activeThread();
         if (!t) return;
-        const items = [['search', '🔍', 'Search in chat']];
+        const items = [['search', '🔍', 'Search in chat'], ['about', 'ℹ️', 'About chat'], ['appearance', '🎨', 'Appearance']];
         if (t.kind === 'dm') items.push(['profile', '👤', 'View profile'], ['clear', '🧹', 'Clear chat', true]);
         else {
             const g = groupOf(t);
@@ -2490,6 +2524,8 @@
         const r = anchor.getBoundingClientRect();
         openMenu(menuItems(items), r.right - 220, r.bottom + 6, async (act) => {
             if (act === 'search') openSearch();
+            else if (act === 'about') toggleAbout(true);
+            else if (act === 'appearance') openAppearance();
             else if (act === 'profile') openProfile(t.id);
             else if (act === 'clear') clearChat();
             else if (act === 'info') openGroupInfo();
@@ -2506,6 +2542,157 @@
             }
         });
         anchor.setAttribute('aria-expanded', 'true');
+    }
+
+    // ------------------------------------------------------------- appearance
+    // Bitrix24's chat backgrounds: a soft colour with a doodle pattern (chat.css), picked once for every thread on this device.
+    const BGS = [['blue', 'Blue'], ['lavender', 'Lavender'], ['mint', 'Mint'], ['teal', 'Teal'], ['sky', 'Sky'], ['sand', 'Sand'], ['peach', 'Peach'], ['grey', 'Grey'], ['plain', 'Plain']];
+    function chatBg() { try { const v = localStorage.getItem('ws-chat-bg'); return BGS.some(b => b[0] === v) ? v : 'blue'; } catch (e) { return 'blue'; } }
+    function applyBg(v) { $('mx').dataset.bg = v || chatBg(); }
+    function openAppearance() {
+        const cur = chatBg();
+        openModal(`<h3>Appearance<button type="button" class="mx-icon-btn sm" data-close aria-label="Close" data-icon="x"></button></h3>
+            <p class="mx-note">Chat background for every conversation on this device.</p>
+            <div class="mx-bgs" id="ap-bgs" role="group" aria-label="Chat background">${BGS.map(([k, label]) => `<button type="button" class="mx-bg-opt" data-pick="${k}" aria-pressed="${k === cur}"><span class="mx-bgfill" data-bg="${k}" aria-hidden="true"></span><span>${esc(label)}</span></button>`).join('')}</div>
+            <div class="mx-actions"><button type="button" class="mx-btn primary" data-close>Done</button></div>`);
+        $('ap-bgs').addEventListener('click', (e) => {
+            const b = e.target.closest('[data-pick]');
+            if (!b) return;
+            try { localStorage.setItem('ws-chat-bg', b.dataset.pick); } catch (x) { /* this visit only */ }
+            applyBg(b.dataset.pick);
+            $('ap-bgs').querySelectorAll('[data-pick]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+        });
+    }
+
+    // ------------------------------------------------------------- the + menu
+    /** What a new task or meeting is called: the text selected in the thread, else what is typed, else the last message. */
+    function workTitle() {
+        let text = '';
+        try { const sel = window.getSelection(); if (sel && !sel.isCollapsed && $('mx-msgs').contains(sel.anchorNode)) text = String(sel); } catch (e) { /* no selection */ }
+        if (!text.trim()) text = $('mx-input').value;
+        if (!text.trim() && S.view) {
+            for (let i = S.view.list.length - 1; i >= 0; i--) { const sp = L.parseSpecial(S.view.list[i].body); if (sp.kind === 'text' && sp.text.trim()) { text = sp.text; break; } }
+        }
+        text = text.replace(/\s+/g, ' ').trim();
+        return text.length > 120 ? text.slice(0, 119) + '…' : text;
+    }
+    function openWork(url) {
+        try { if (window.WSShell && typeof WSShell.openSlider === 'function') { WSShell.openSlider(url, { width: 1100 }); return; } } catch (e) { /* a new tab instead */ }
+        window.open(url, '_blank', 'noopener');
+    }
+    function openPlusMenu(anchor) {
+        if (!activeThread()) return;
+        const r = anchor.getBoundingClientRect();
+        const items = [['file', '📎', 'File on this computer'], ['task', '☑️', 'Task'], ['event', '📅', 'Event or meeting']];
+        anchor.setAttribute('aria-expanded', 'true');
+        openMenu(menuItems(items), r.left, r.top - 6, (act) => {
+            anchor.setAttribute('aria-expanded', 'false');
+            if (act === 'file') $('mx-file').click();
+            else if (act === 'task') openWork(`/tasks/?id=new&title=${encodeURIComponent(workTitle())}`);
+            else if (act === 'event') openWork(`/calendar/?new=1&title=${encodeURIComponent(workTitle())}`);
+        }, true);
+    }
+
+    // ------------------------------------------------------------ about chat
+    function toggleAbout(open) {
+        const box = $('mx-about');
+        const on = open == null ? box.hidden : !!open;
+        if (!on) {
+            if (box.hidden) return;
+            box.hidden = true;
+            $('mx').classList.remove('about-open');
+            $('mx-h-info').setAttribute('aria-expanded', 'false');
+            if (box.contains(document.activeElement)) $('mx-h-info').focus({ preventScroll: true });
+            return;
+        }
+        if (!activeThread()) return;
+        box.hidden = false;
+        $('mx').classList.add('about-open');
+        $('mx-h-info').setAttribute('aria-expanded', 'true');
+        paintAbout();
+        loadAboutFiles();
+        const x = box.querySelector('[data-about-x]');
+        if (x) x.focus({ preventScroll: true });
+    }
+    function paintAbout() {
+        const t = activeThread(), box = $('mx-about');
+        if (!t || box.hidden) return;
+        const sound = soundOn();
+        const soundRow = `<div class="mx-about-row"><span>🔔 Sound</span><button type="button" class="mx-switch" role="switch" aria-checked="${sound}" data-about-sound aria-label="Sound"><i></i></button></div>`;
+        let card, facts = '', acts;
+        if (t.kind === 'dm') {
+            const p = person(t.id) || {}, on = isOnline(t.id);
+            const fact = (label, v) => `<div><dt>${esc(label)}</dt><dd>${v || '<span class="empty">field is empty</span>'}</dd></div>`;
+            card = `<button type="button" class="mx-about-av" data-about-profile aria-label="${esc('Full profile of ' + nameText(t.id))}">${personAvatar(t.id, 'lg', true)}</button>
+                ${empId(p) ? `<b class="mx-about-title mx-emp-id">${esc(empId(p))}</b><span class="mx-about-sub">${esc(p.full_name || p.email || '')}</span>` : `<b class="mx-about-title">${esc(p.full_name || p.email || 'Unknown')}</b>`}
+                <span class="mx-about-st${on ? ' on' : ''}">${esc(on ? 'Online now' : L.fmtLastSeen(S.lastSeen.get(t.id)))}</span>`;
+            facts = `<dl class="mx-about-facts">${fact('Employee ID', esc(empId(p)))}${fact('Name', esc(p.full_name || ''))}${fact('Email', p.email ? `<a class="mx-link" href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : '')}${fact('Company', esc(p.company || ''))}${p.job_title || p.department ? fact('Position', esc([p.job_title, p.department].filter(Boolean).join(' · '))) : ''}</dl>`;
+            acts = `<button type="button" class="mx-btn" data-about-chat data-icon="chat">Chat</button><button type="button" class="mx-btn" data-about-video data-icon="video">Video call</button><button type="button" class="mx-btn primary" data-about-profile>Full profile</button>`;
+        } else {
+            const g = groupOf(t) || {}, members = (S.members.get(t.id) || []).map(x => x.user_id);
+            const shown = members.slice(0, 7), more = members.length - shown.length;
+            card = `${avatarHtml({ name: threadName(t), group: true, cls: 'group lg' })}<b class="mx-about-title">${esc(threadName(t))}</b>
+                <span class="mx-about-sub">${members.length} member${members.length === 1 ? '' : 's'}${g.description ? ' · ' + esc(g.description) : ''}</span>`;
+            facts = `<div class="mx-about-sec"><h3>Members</h3><div class="mx-about-members">${shown.map(id => `<button type="button" class="mx-about-mem" data-about-person="${esc(id)}" title="${esc(nameText(id))}" aria-label="${esc(nameText(id))}">${personAvatar(id, 'sm', true)}</button>`).join('')}${more > 0 ? `<span class="mx-about-more">+${more}</span>` : ''}<button type="button" class="mx-btn sm" data-about-members>${isGroupAdmin(g) ? '＋ Add' : 'All'}</button></div></div>`;
+            acts = `<button type="button" class="mx-btn" data-about-video data-icon="video">Video call</button><button type="button" class="mx-btn primary" data-about-members>Group settings</button>`;
+        }
+        box.innerHTML = `<header class="mx-about-head"><h2>About chat</h2><button type="button" class="mx-icon-btn sm" data-about-x aria-label="Close" title="Close (Esc)" data-icon="x"></button></header>
+            <div class="mx-about-body">
+                <div class="mx-about-card">${card}<div class="mx-about-acts">${acts}</div></div>
+                ${facts}
+                ${soundRow}
+                ${S.pins.length ? `<button type="button" class="mx-about-row link" data-about-pins><span>📌 Pinned messages</span><b>${S.pins.length}</b></button>` : ''}
+                <div class="mx-about-sec"><h3>Files and media <span id="mx-about-n"></span></h3><div class="mx-about-files" id="mx-about-files">${aboutFilesHtml()}</div></div>
+            </div>`;
+        hydrateAboutFiles();
+    }
+    async function loadAboutFiles() {
+        const t = activeThread();
+        if (!t) return;
+        const seq = ++S.aboutSeq;
+        let r;
+        try { r = await threadQuery(t, 'id, sender_id, recipient_id, conversation_id, body, created_at').like('body', '\\_\\_FILE\\_\\_::%').order('id', { ascending: false }).limit(24); }
+        catch (e) { r = { error: e }; }
+        if (seq !== S.aboutSeq || activeThread() !== t) return;
+        S.aboutFiles = r.error ? null : (r.data || []).filter(m => belongsTo(t, m) && L.parseSpecial(m.body).kind === 'file').slice(0, 12);
+        const el = $('mx-about-files');
+        if (el) { el.innerHTML = aboutFilesHtml(); hydrateAboutFiles(); }
+    }
+    function aboutFilesHtml() {
+        const n = $('mx-about-n');
+        if (S.aboutFiles === null) return '<p class="mx-muted">Files are unavailable right now.</p>';
+        if (!S.aboutFiles.length) return '<p class="mx-muted">No files yet. Photos and documents sent here appear in this list.</p>';
+        return S.aboutFiles.map(m => {
+            const sp = L.parseSpecial(m.body);
+            if (sp.isImage) return `<button type="button" class="mx-about-thumb" data-about-file="${esc(sid(m.id))}" aria-label="${esc('Open ' + sp.name)}"><img alt="" data-path="${esc(sp.path)}"></button>`;
+            const ext = (sp.name.split('.').pop() || 'file').slice(0, 4);
+            return `<button type="button" class="mx-about-doc" data-about-file="${esc(sid(m.id))}" title="${esc(sp.name)}"><span class="ext">${esc(ext)}</span><span class="nm">${esc(sp.name)}</span><span class="sz">${esc(L.fmtBytes(sp.size) || L.fmtListTime(m.created_at))}</span></button>`;
+        }).join('');
+    }
+    function hydrateAboutFiles() {
+        const n = $('mx-about-n');
+        if (n) n.textContent = S.aboutFiles && S.aboutFiles.length ? String(S.aboutFiles.length) : '';
+        $('mx-about').querySelectorAll('img[data-path]').forEach(img => {
+            getFileUrl(img.dataset.path).then(u => { img.src = u; }).catch(() => { img.closest('button').classList.add('broken'); });
+            img.removeAttribute('data-path');
+        });
+    }
+    function onAboutClick(e) {
+        const t = activeThread(), b = e.target.closest('button');
+        if (!t || !b) return;
+        if (b.matches('[data-about-x]')) return toggleAbout(false);
+        if (b.matches('[data-about-sound]')) { const on = !soundOn(); setSound(on); b.setAttribute('aria-checked', String(on)); if (on) { unlockAudio(); ping(); } return; }
+        if (b.matches('[data-about-profile]')) return openProfile(t.id);
+        if (b.matches('[data-about-person]')) return openProfile(b.dataset.aboutPerson);
+        if (b.matches('[data-about-chat]')) { if (isPhone()) toggleAbout(false); return focusComposer(); }
+        if (b.matches('[data-about-video]')) return startCall(t, true);
+        if (b.matches('[data-about-members]')) return openGroupInfo();
+        if (b.matches('[data-about-pins]')) return openPins();
+        if (b.matches('[data-about-file]')) {
+            const m = (S.aboutFiles || []).find(x => sid(x.id) === b.dataset.aboutFile);
+            if (!m) return;
+            if (L.parseSpecial(m.body).isImage) openImage(m); else downloadFile(m);
+        }
     }
 
     // ------------------------------------------------------------------ calls
@@ -2732,16 +2919,19 @@
         // Header
         // On a phone the thread has its own history entry (openThread): going back pops it, and popstate closes the thread.
         $('mx-back').addEventListener('click', () => { if (isPhone() && history.state && history.state.mxThread) history.back(); else closeThread(); });
-        $('mx-head-who').addEventListener('click', () => { const t = activeThread(); if (!t) return; if (t.kind === 'group') openGroupInfo(); else openProfile(t.id); });
+        // A person's name opens their profile (in the slide-over); a group's opens About chat.
+        $('mx-head-who').addEventListener('click', () => { const t = activeThread(); if (!t) return; if (t.kind === 'group') toggleAbout(true); else openProfile(t.id); });
+        $('mx-h-info').addEventListener('click', () => toggleAbout());
+        $('mx-about').addEventListener('click', onAboutClick);
+        $('mx-bg-btn').addEventListener('click', openAppearance);
         $('mx-h-search').addEventListener('click', () => { if ($('mx-searchbar').hidden) openSearch(); else closeSearch(); });
         $('mx-h-voice').addEventListener('click', () => startCall(activeThread(), false));
         $('mx-h-video').addEventListener('click', () => startCall(activeThread(), true));
-        $('mx-h-more').addEventListener('click', (e) => { e.stopPropagation(); openHeaderMore(e.currentTarget); });
+        $('mx-h-more').addEventListener('click', (e) => { e.stopPropagation(); if (!$('mx-menu').hidden) return closeMenu(); openHeaderMore(e.currentTarget); });
         $('mx-msearch').addEventListener('input', onSearchInput);
         $('mx-msearch-x').addEventListener('click', closeSearch);
         $('mx-msearch-results').addEventListener('click', (e) => { const b = e.target.closest('[data-jump]'); if (b) jumpTo(b.dataset.jump); });
-        $('mx-pinned').addEventListener('click', openPins);
-        $('mx-pinned').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPins(); } });
+        $('mx-pinned').addEventListener('click', (e) => { if (e.target.closest('[data-pin-list]')) openPins(); else if (e.target.closest('[data-pin-go]')) goToPinned(); });
         $('mx-callbar').addEventListener('click', (e) => { const b = e.target.closest('[data-call]'); if (b) joinCall(b.dataset.call); });
 
         // Messages
@@ -2773,7 +2963,18 @@
             if (!a || !msgs.contains(a)) return;
             const row = a.closest('.mx-msg, .mx-callrow'), m = messageForRow(row);
             const act = a.dataset.act;
-            if (act === 'menu') { const r = a.getBoundingClientRect(); a.setAttribute('aria-expanded', 'true'); openMessageMenu(m, r.left - 180, r.bottom + 4); }
+            if (act === 'menu') {
+                // This click must not reach the document's "click outside closes the menu" handler, which would
+                // shut the menu again the moment it opened (the chevron sits outside the menu).
+                e.stopPropagation();
+                const open = a.getAttribute('aria-expanded') === 'true' && !$('mx-menu').hidden;
+                closeMenu();
+                if (open) return;                               // a second click on the same chevron closes it
+                const r = a.getBoundingClientRect();
+                openMessageMenu(m, r.left - 180, r.bottom + 4);
+                if (!$('mx-menu').hidden) a.setAttribute('aria-expanded', 'true');
+            }
+            else if (act === 'profile') { if (m) openProfile(m.sender_id); }
             else if (act === 'view') openImage(m);
             else if (act === 'download') downloadFile(m);
             else if (act === 'retry') retryMessage(m);
@@ -2810,6 +3011,10 @@
 
         // Composer
         const input = $('mx-input');
+        // Bitrix24's hint, shortened where it would wrap onto a second line.
+        const hint = () => { input.placeholder = input.clientWidth && input.clientWidth < 330 ? 'Type @ to mention a person' : 'Type @ or + to mention a person, a chat or AI'; };
+        hint();
+        if (window.ResizeObserver) new ResizeObserver(debounce(hint, 100)).observe(input);
         input.addEventListener('input', () => {
             autosize(); updateSendButton(); updateMentions();
             if (input.value.trim() && !S.editing) sendTyping();
@@ -2836,7 +3041,7 @@
         $('mx-mic').addEventListener('click', startRecording);
         $('mx-rec-cancel').addEventListener('click', () => stopRecording(false));
         $('mx-rec-send').addEventListener('click', () => stopRecording(true));
-        $('mx-attach').addEventListener('click', () => { if (!activeThread()) return; $('mx-file').click(); });
+        $('mx-attach').addEventListener('click', (e) => { e.stopPropagation(); if (!$('mx-menu').hidden) return closeMenu(); openPlusMenu(e.currentTarget); });
         $('mx-file').addEventListener('change', (e) => { const files = Array.from(e.target.files || []); e.target.value = ''; queueFiles(files); });
         $('mx-ctx-x').addEventListener('click', () => { resetCompose(); focusComposer(); });
         $('mx-emoji-btn').addEventListener('click', (e) => { e.stopPropagation(); if ($('mx-emoji').hidden) openEmoji(null); else closeEmoji(); });
@@ -2859,6 +3064,8 @@
         $('mx-menu').addEventListener('click', (e) => {
             const b = e.target.closest('button');
             if (!b) return;
+            // A pick may open another menu or the emoji panel ("Other", "＋"): the document handler must not close it.
+            e.stopPropagation();
             const pick = S.menuPick;
             closeMenu();
             if (pick) pick(b.dataset.act, b);
@@ -2886,6 +3093,8 @@
             if (!$('mx-emoji').hidden) { closeEmoji(); return focusComposer(); }
             if (!$('mx-modal').hidden) return closeModal();
             if (!$('mx-rules').hidden) return closeRules();
+            if (document.querySelector('.ws-slider')) return;                  // the shell closes its slide-over first
+            if (!$('mx-about').hidden) return toggleAbout(false);
             if (!$('mx-searchbar').hidden && $('mx-searchbar').contains(document.activeElement)) { closeSearch(); return focusComposer(); }
         });
         ['pointerdown', 'keydown'].forEach(ev => window.addEventListener(ev, unlockAudio, { passive: true }));
@@ -2911,6 +3120,7 @@
         window.addEventListener('pagehide', () => { if (S.rec) stopRecording(false); });
     }
 
+    applyBg();
     wire();
     updateSendButton();
     boot().catch(e => { console.error('[messenger] start', e); fatal('Messenger could not start. Reload the page to try again.'); });

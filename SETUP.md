@@ -823,6 +823,7 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 11 | `supabase-security-hardening-migration.sql` | Security guards, no data changes — see [13. Security hardening](#13-security-hardening). **Run it together with the deploy that carries it**: the sign-in page and the API were changed to match |
 | 12 | `supabase-crm-all-companies-migration.sql` | CRM access across companies: a sixth access level, **All companies**, and a role *Full CRM access (every company)* assigned to nobody. See [14. CRM access across companies](#14-crm-access-across-companies) |
 | 13 | `supabase-task-summary-migration.sql` | `tasks.result_required`: Bitrix24's *Task status summary is required* on the new-task page |
+| 14 | `supabase-crm-roles-migration.sql` | Ready-made CRM roles, assigned to nobody: *Super admin* (every company), *Admin*, *Team lead*, *Sales executive*, *Accounts* and *Read only*. Add people in Admin → CRM permissions |
 
 **Ran migration 8 before 15 Sep 2026?** Run it again. Its first version made
 `external_ref`'s unique index partial, which `ON CONFLICT` cannot use, so every

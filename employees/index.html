@@ -18,6 +18,53 @@
     <link rel="stylesheet" href="/ui/b24.css">
     <script src="/dialogs.js"></script>
     <script defer src="/commandpalette.js"></script>
+    <style>
+        /* Profile, Bitrix24-style: a purple header with the Employee ID as the title and the tabs under it,
+           a photo card on the left and the contact card on the right (the rest of the layout is in ui/b24.css). */
+        .emp-hero {
+            --hero-a: #5b3cc4; --hero-b: #9b59d0;
+            margin: 0 0 14px; padding: 14px 16px 10px; border-radius: 16px; color: #fff;
+            background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cg fill='none' stroke='%23fff' stroke-opacity='.07' stroke-width='1.5'%3E%3Ccircle cx='20' cy='20' r='9'/%3E%3Cpath d='M70 14l6 12 13 2-9 9 2 13-12-6-12 6 2-13-9-9 13-2z'/%3E%3Cpath d='M18 78h26a6 6 0 0 1 6 6v10a6 6 0 0 1-6 6H30l-8 7v-7h-4a6 6 0 0 1-6-6V84a6 6 0 0 1 6-6z'/%3E%3Ccircle cx='92' cy='92' r='14'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 120px 120px,
+                        linear-gradient(120deg, var(--hero-a), var(--hero-b));
+            box-shadow: 0 8px 24px rgba(60, 30, 120, .25);
+        }
+        :root[data-theme="dark"] .emp-hero { --hero-a: #3a2787; --hero-b: #62368a; }
+        body.ws-b24 .emp-hero .b24-titlebar.emp-bar { margin: 0 0 8px; min-height: 48px; flex-wrap: nowrap; }
+        .emp-hero .b24-btn-glass { background: rgba(255, 255, 255, .18); color: #fff; flex: 0 0 auto; }
+        .emp-hero .b24-btn-glass:hover { background: rgba(255, 255, 255, .28); }
+        .emp-hero-title { display: flex; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; min-width: 0; }
+        body.ws-b24 .emp-hero .b24-title { color: #fff; font-size: 28px; font-weight: 600; letter-spacing: .01em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+        .emp-hero-name { color: rgba(255, 255, 255, .85); font-size: 16px; }
+        .emp-hero .emp-tabs { margin: 0; }
+        body.ws-b24 .ws-page:not(.legacy) .emp-hero .crm-tabs { margin: 0; background: rgba(255, 255, 255, .14); }
+        body.ws-b24 .ws-page:not(.legacy) .emp-hero .crm-tab { color: #fff; }
+        body.ws-b24 .ws-page:not(.legacy) .emp-hero .crm-tab:hover { background: rgba(255, 255, 255, .18); }
+        body.ws-b24 .ws-page:not(.legacy) .emp-hero .crm-tab.active { background: #fff; color: #3a2787; }
+        body.ws-b24 .ws-page:not(.legacy) .emp-hero .crm-tab:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+        /* A large round photo. */
+        .emp-photo .shot { width: 180px; max-width: 70%; border-radius: 50%; box-shadow: 0 0 0 4px var(--b24-surface), 0 0 0 5px var(--b24-line); }
+        .emp-photo .shot .mono { font-size: 52px; }
+        .emp-photo .emp-idline { font-size: 17px; margin-top: 4px; }
+        .emp-photo .seen.on { color: #3f7a00; font-weight: 600; }
+        :root[data-theme="dark"] .emp-photo .seen.on { color: #b7ef61; }
+        .emp-talk { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; width: 100%; margin-top: 14px; }
+        .emp-talk .ws-btn { justify-content: center; }
+        /* Contact information: two columns of fields on wide screens. */
+        .emp-fields.emp-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; }
+        .emp-fields.emp-cols .f:last-child { padding-bottom: 9px; }
+        .emp-fields.emp-cols .f:nth-last-child(-n+2) { border-bottom: 0; }
+        .emp-code { font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+        /* Laptops and the slide-over from Messenger (about 1080px wide) keep the photo card beside the details. */
+        @media (min-width: 761px) and (max-width: 1100px) { .emp-prof { grid-template-columns: 260px minmax(0, 1fr); } }
+        @media (max-width: 760px) {
+            .emp-hero { padding: 10px 10px 8px; border-radius: 14px; }
+            body.ws-b24 .emp-hero .b24-titlebar.emp-bar { flex-wrap: wrap; }
+            body.ws-b24 .emp-hero .b24-title { font-size: 21px; }
+            .emp-hero-name { font-size: 14px; }
+            .emp-fields.emp-cols { grid-template-columns: minmax(0, 1fr); }
+            .emp-fields.emp-cols .f:nth-last-child(2) { border-bottom: 1px solid var(--b24-line); }
+        }
+    </style>
 </head>
 <body data-ws-page="employees" class="ws-app ws-corporate ws-b24">
     <main id="view" aria-live="polite">

@@ -30,6 +30,7 @@
                     <button type="button" role="tab" id="mx-tab-chats" data-tab="chats" aria-selected="true" aria-controls="mx-list">Chats<span class="mx-tab-n" id="mx-tab-chats-n" hidden></span></button>
                     <button type="button" role="tab" id="mx-tab-calls" data-tab="calls" aria-selected="false" aria-controls="mx-calls">Calls<span class="mx-tab-n miss" id="mx-tab-calls-n" hidden></span></button>
                 </div>
+                <button type="button" class="mx-icon-btn" id="mx-bg-btn" title="Appearance: chat background" aria-label="Appearance" aria-haspopup="dialog" data-icon="palette"></button>
                 <button type="button" class="mx-icon-btn" id="mx-new" title="New chat or group" aria-label="New chat or group" data-icon="compose"></button>
             </div>
             <label class="mx-search">
@@ -66,6 +67,7 @@
                         <button type="button" class="mx-icon-btn hide-phone" id="mx-h-search" title="Search in this conversation" aria-label="Search in this conversation" data-icon="search"></button>
                         <button type="button" class="mx-icon-btn call" id="mx-h-voice" title="Voice call" aria-label="Voice call" data-icon="phone"></button>
                         <button type="button" class="mx-icon-btn call" id="mx-h-video" title="Video call" aria-label="Video call" data-icon="video"></button>
+                        <button type="button" class="mx-icon-btn hide-phone" id="mx-h-info" title="About chat" aria-label="About chat" aria-controls="mx-about" aria-expanded="false" data-icon="panel"></button>
                         <button type="button" class="mx-icon-btn" id="mx-h-more" title="More" aria-label="More options" aria-haspopup="menu" data-icon="more"></button>
                     </div>
                 </header>
@@ -79,7 +81,7 @@
                     <div class="mx-searchbar-info" id="mx-msearch-info"></div>
                     <div class="mx-searchbar-results" id="mx-msearch-results" role="list"></div>
                 </div>
-                <div class="mx-pinned" id="mx-pinned" role="button" tabindex="0" title="Show pinned messages" hidden></div>
+                <div class="mx-pinned" id="mx-pinned" hidden></div>
                 <div class="mx-callbar" id="mx-callbar" hidden></div>
 
                 <div class="mx-scroll" id="mx-scroll">
@@ -96,15 +98,16 @@
                     </div>
                     <div class="mx-pop mx-mentions" id="mx-mentions" role="listbox" aria-label="Mention someone" hidden></div>
                     <div class="mx-pop mx-emoji" id="mx-emoji" role="dialog" aria-label="Emoji" hidden></div>
+                    <!-- One rounded box, as in Bitrix24: + (files, a task, a meeting) · the message · emoji · send or voice. -->
                     <div class="mx-compose-row" id="mx-compose-row">
-                        <button type="button" class="mx-icon-btn" id="mx-attach" title="Send photos or files (up to 25 MB each)" aria-label="Attach files" data-icon="attach"></button>
-                        <input type="file" id="mx-file" multiple hidden>
                         <div class="mx-input-wrap">
-                            <textarea id="mx-input" rows="1" maxlength="4000" placeholder="Type a message" aria-label="Message" enterkeyhint="send"></textarea>
+                            <button type="button" class="mx-icon-btn sm mx-plus" id="mx-attach" title="Attach a file, create a task or a meeting" aria-label="Attach or create" aria-haspopup="menu" data-icon="plus"></button>
+                            <input type="file" id="mx-file" multiple hidden>
+                            <textarea id="mx-input" rows="1" maxlength="4000" placeholder="Type @ or + to mention a person, a chat or AI" aria-label="Message" enterkeyhint="send"></textarea>
                             <button type="button" class="mx-icon-btn sm" id="mx-emoji-btn" title="Emoji" aria-label="Emoji" data-icon="smile"></button>
+                            <button type="button" class="mx-send" id="mx-send" title="Send (Enter)" aria-label="Send message" data-icon="send" hidden></button>
+                            <button type="button" class="mx-send" id="mx-mic" title="Record a voice message" aria-label="Record a voice message" data-icon="mic"></button>
                         </div>
-                        <button type="button" class="mx-send" id="mx-send" title="Send (Enter)" aria-label="Send message" data-icon="send" hidden></button>
-                        <button type="button" class="mx-send" id="mx-mic" title="Record a voice message" aria-label="Record a voice message" data-icon="mic"></button>
                     </div>
                     <div class="mx-rec" id="mx-rec" hidden>
                         <button type="button" class="mx-icon-btn" id="mx-rec-cancel" title="Discard" aria-label="Discard voice message" data-icon="trash"></button>
@@ -117,6 +120,9 @@
                 <div class="mx-drop" id="mx-drop" hidden><div><span data-icon="attach" aria-hidden="true"></span>Drop files to send</div></div>
             </section>
         </main>
+
+        <!-- About chat: the person or group, sound, files and media. A column on wide screens, a full-screen sheet on phones. -->
+        <aside class="mx-about" id="mx-about" aria-label="About chat" tabindex="-1" hidden></aside>
     </div>
 
     <!-- Overlays live outside the page column so nothing clips them. -->

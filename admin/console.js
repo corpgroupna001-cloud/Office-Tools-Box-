@@ -107,7 +107,7 @@
         if (!table) return;
         exportTable(table, p.id.replace('-panel', ''));
       });
-      const bar = p.querySelector('.glass.rounded-2xl.p-4, .mg-toolbar');
+      const bar = p.querySelector('.glass.rounded-2xl.p-4, .mg-toolbar, .ws-page-head .actions');
       if (bar) bar.append(btn); else p.prepend(btn);
     });
   }
@@ -117,13 +117,13 @@
   addModal.id = 'add-emp-modal';
   addModal.className = 'hidden fixed inset-0 z-50 items-center justify-center p-4';
   addModal.style.background = 'rgba(2,6,23,.72)';
-  addModal.innerHTML = `<div class="glass rounded-2xl p-6 w-full ws-management" style="max-width:760px;max-height:90vh;overflow:auto">
+  addModal.innerHTML = `<div class="glass rounded-2xl adm-modal ws-management" role="dialog" aria-modal="true">
     <h1>Add employee</h1>
     <p>Creates the login account and the employee record together. They are emailed a link to set their own password — no password is chosen here or sent in plain text.</p>
     <div id="add-emp-fields" class="mg-fields"></div>
     <label class="mg-check"><input id="add-emp-invite" type="checkbox" checked> Email them an invite to set a password</label>
     <p id="add-emp-err" class="mg-error hidden"></p>
-    <div class="mg-toolbar"><button id="add-emp-cancel" type="button">Cancel</button><button id="add-emp-save" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl">Create account</button></div>
+    <div class="mg-toolbar adm-modal-foot"><button id="add-emp-cancel" type="button">Cancel</button><button id="add-emp-save" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl">Create account</button></div>
   </div>`;
   document.body.append(addModal);
 
@@ -173,12 +173,12 @@
   exitModal.id = 'exit-emp-modal';
   exitModal.className = 'hidden fixed inset-0 z-50 items-center justify-center p-4';
   exitModal.style.background = 'rgba(2,6,23,.72)';
-  exitModal.innerHTML = `<div class="glass rounded-2xl p-6 w-full ws-management" style="max-width:520px">
+  exitModal.innerHTML = `<div class="glass rounded-2xl adm-modal adm-modal-sm ws-management" role="dialog" aria-modal="true">
     <h1 id="exit-emp-title">Offboard employee</h1>
     <p id="exit-emp-copy"></p>
     <div id="exit-emp-fields" class="mg-fields"></div>
     <p id="exit-emp-err" class="mg-error hidden"></p>
-    <div class="mg-toolbar"><button id="exit-emp-cancel" type="button">Cancel</button><button id="exit-emp-save" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl">Confirm</button></div>
+    <div class="mg-toolbar adm-modal-foot"><button id="exit-emp-cancel" type="button">Cancel</button><button id="exit-emp-save" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl">Confirm</button></div>
   </div>`;
   document.body.append(exitModal);
   let exitTarget = null;

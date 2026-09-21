@@ -112,6 +112,28 @@ test('mentions: parsed as whole names, and the picker finds the term before the 
   assert.equal(L.mentionQuery('no at sign', 10), null);
 });
 
+test('mentions by Employee ID: parsed in any case, one id per person, the ID wins over a shorter name', () => {
+  const people = [{ id: 'a', name: 'Anil', code: '' }, { id: 'ak', name: 'Anil Kumar', code: 'NSP-SLS-EXE-002' }, { id: 'c', name: 'Chitra Rao', code: 'CG-ITSA-SNA-NA-001' }];
+  assert.deepEqual(L.mentionIdsIn('ping @CG-ITSA-SNA-NA-001 please', people), ['c']);
+  assert.deepEqual(L.mentionIdsIn('ping @cg-itsa-sna-na-001', people), ['c'], 'an Employee ID matches in any case');
+  assert.deepEqual(L.mentionIdsIn('@NSP-SLS-EXE-002 and @Anil Kumar', people), ['ak'], 'the same person by ID and by name counts once');
+  assert.deepEqual(L.mentionIdsIn('@NSP-SLS-EXE-002 and @Anil', people).sort(), ['a', 'ak']);
+  assert.deepEqual(L.mentionIdsIn('@NSP-SLS-EXE-0021 or x@NSP-SLS-EXE-002', people), [], 'a longer code or an address is not a mention');
+  assert.deepEqual(L.mentionIdsIn('hi @Anil Kumar', [{ id: 'ak', name: 'Anil Kumar' }]), ['ak'], 'candidates without a code still work');
+});
+
+test('formatBody highlights "@<Employee ID>" with the name as its tooltip, and old "@Name" messages as before', () => {
+  const opts = { names: ['Anil Kumar', 'Maya Manager'], codes: { 'Anil Kumar': 'NSP-SLS-EXE-002', 'Maya Manager': 'NSP-SLS-MGR-001' },
+    ids: { 'NSP-SLS-EXE-002': 'Anil Kumar', 'NSP-SLS-MGR-001': 'Maya Manager', 'X-<9>': '<b>Evil</b>' }, meName: 'Maya Manager', meCode: 'NSP-SLS-MGR-001' };
+  const html = L.formatBody('see @NSP-SLS-EXE-002 and @nsp-sls-mgr-001\nold: @Anil Kumar', opts);
+  assert.ok(html.includes('<span class="mx-mention" title="Anil Kumar">@<b class="mx-emp-id">NSP-SLS-EXE-002</b></span>'), html);
+  assert.ok(html.includes('<span class="mx-mention me" title="Maya Manager">@<b class="mx-emp-id">NSP-SLS-MGR-001</b></span>'), 'my own ID, typed in lower case, is highlighted as me');
+  assert.ok(html.includes('<span class="mx-mention">@<b class="mx-emp-id">NSP-SLS-EXE-002</b> Anil Kumar</span>'), 'a stored "@Name" keeps its rendering');
+  assert.ok(L.formatBody('@X-<9> hi', opts).includes('title="&lt;b&gt;Evil&lt;/b&gt;">@<b class="mx-emp-id">X-&lt;9&gt;</b>'), 'IDs and names are escaped');
+  assert.equal(L.formatBody('@NSP-SLS-EXE-0029', opts), '@NSP-SLS-EXE-0029', 'a longer code is left alone');
+  assert.equal(L.formatBody('@anil kumar', opts), '@anil kumar', 'names only match as written');
+});
+
 test('file names and storage paths are safe', () => {
   assert.equal(L.safeFileName('My Report (final).pdf'), 'My_Report_final_.pdf');
   assert.equal(L.safeFileName('../../etc/passwd'), 'etc_passwd');

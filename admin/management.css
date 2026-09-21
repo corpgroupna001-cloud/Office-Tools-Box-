@@ -23,10 +23,11 @@
 .mg-status.ok { background:#dcfce7; color:#166534; }
 .mg-status.bad { background:#fee2e2; color:#991b1b; }
 .mg-error { color:#b91c1c; padding:16px 0; }
-.mg-fields { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:20px 0; }
-.mg-fields .mg-check { flex-direction:row; align-items:center; }
-#edit-emp-modal > div { max-width:760px; max-height:90vh; overflow:auto; }
-@media(max-width:600px) { .mg-fields { grid-template-columns:1fr; } }
+.mg-fields { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; margin:20px 0; }
+.mg-fields > * { min-width:0; }
+.mg-fields input:not([type="checkbox"]), .mg-fields select { width:100%; max-width:100%; box-sizing:border-box; text-overflow:ellipsis; }
+.mg-fields .mg-check, .ws-management label.mg-check { flex-direction:row; align-items:center; gap:8px; }
+@media(max-width:720px) { .mg-fields { grid-template-columns:minmax(0, 1fr); } }
 
 /* Admin console additions: export buttons and the add/offboard modals. */
 .ws-export { margin-left: auto; }
@@ -67,3 +68,137 @@
 /* CRM permissions: the Bitrix24-style matrix (ui/crm-perms.css) on the console's page. */
 .crm-perms-panel .cp-root { padding: 4px 0 20px; }
 .crm-perms-panel .cp-top h1 { color: var(--ws-text, #172b4d); }
+
+/* ===========================================================================
+   Admin console (wsm-admin) - Bitrix24-style look. Everything below is scoped
+   to body[data-ws-page="admin"] so no other page is affected.
+   =========================================================================== */
+body[data-ws-page="admin"] {
+    --adm-glass: color-mix(in srgb, var(--ws-surface) 70%, transparent);
+    --adm-glass-2: color-mix(in srgb, var(--ws-surface-2) 62%, transparent);
+    --adm-glass-line: color-mix(in srgb, var(--ws-border) 65%, rgba(255, 255, 255, 0.35));
+    --adm-solid: color-mix(in srgb, var(--ws-surface) 82%, var(--ws-bg-2));
+    --adm-modal-bg: color-mix(in srgb, var(--ws-surface) 94%, transparent);
+    --adm-shadow: 0 4px 22px rgba(0, 18, 45, 0.10);
+}
+:root[data-theme="dark"] body[data-ws-page="admin"] {
+    --adm-glass: color-mix(in srgb, var(--ws-surface) 70%, transparent);
+    --adm-glass-2: color-mix(in srgb, var(--ws-surface-2) 55%, transparent);
+    --adm-glass-line: color-mix(in srgb, var(--ws-border) 70%, rgba(255, 255, 255, 0.06));
+    --adm-modal-bg: color-mix(in srgb, var(--ws-surface) 95%, transparent);
+    --adm-shadow: 0 6px 26px rgba(0, 0, 0, 0.32);
+}
+
+/* ---- Cards: frosted glass over the wallpaper, not big opaque panels ---- */
+:root:not([data-wallpaper="light"]) body[data-ws-page="admin"].ws-app .ws-page .admin-main :is(.glass.rounded-2xl, .glass.rounded-3xl, .ws-card, .stat-card, .mg-scroll, .crm-cols) {
+    background: var(--adm-glass);
+    -webkit-backdrop-filter: blur(18px) saturate(1.25); backdrop-filter: blur(18px) saturate(1.25);
+    border: 1px solid var(--adm-glass-line);
+    box-shadow: var(--adm-shadow);
+}
+/* A table inside a card is part of the card: no second frosted layer. */
+:root body[data-ws-page="admin"].ws-app .ws-page .admin-main :is(.ws-card, .glass) :is(.ws-table-wrap, .overflow-x-auto) {
+    background: transparent; border: 0; box-shadow: none;
+}
+/* Inputs and small buttons that reuse .glass: a light tint, no nested blur. */
+body[data-ws-page="admin"] .admin-main .glass :is(input.glass, select.glass, button.glass),
+body[data-ws-page="admin"] .admin-main :is(input.glass, select.glass) {
+    background: color-mix(in srgb, var(--ws-surface) 82%, transparent);
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    border: 1px solid var(--ws-border); box-shadow: none;
+}
+:root[data-theme="dark"] body[data-ws-page="admin"] .admin-main .glass button.glass { background: var(--adm-glass-2); }
+/* Table heads and row hovers pick up the glass rather than solid grey bands. */
+body[data-ws-page="admin"].ws-corporate .admin-main table th { background: var(--adm-glass-2); }
+body[data-ws-page="admin"].ws-corporate .admin-main table tbody tr:hover td { background: color-mix(in srgb, var(--ws-surface-2) 70%, transparent); }
+body[data-ws-page="admin"] .ws-management h1 { color: var(--ws-text); }
+
+/* ---- Employees: a dense Bitrix24-style grid that fits 1366px ---- */
+body[data-ws-page="admin"].ws-corporate .admin-main .adm-grid th {
+    padding: 10px 9px; font-size: 11px; letter-spacing: .04em; white-space: nowrap; vertical-align: middle;
+}
+body[data-ws-page="admin"].ws-corporate .admin-main .adm-grid tbody td {
+    padding: 8px 9px; font-size: 13px; vertical-align: middle; line-height: 1.35;
+}
+body[data-ws-page="admin"] .adm-grid th:first-child, body[data-ws-page="admin"] .adm-grid td:first-child { padding-left: 16px; }
+body[data-ws-page="admin"] .adm-grid th:last-child, body[data-ws-page="admin"] .adm-grid td:last-child { padding-right: 14px; }
+body[data-ws-page="admin"] .adm-grid .adm-who { max-width: 230px; }
+body[data-ws-page="admin"] .adm-grid .adm-who :is(b, small) { display: block; max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body[data-ws-page="admin"] .adm-grid .adm-who b { font-weight: 600; color: var(--ws-text); }
+body[data-ws-page="admin"] .adm-grid .adm-who small { font-size: 12px; color: var(--ws-text-muted); }
+body[data-ws-page="admin"] .adm-grid .adm-assess span { display: block; color: var(--ws-text-muted); }
+body[data-ws-page="admin"] .adm-grid .adm-assess b { color: var(--ws-text); font-weight: 700; }
+body[data-ws-page="admin"] .adm-grid .mg-status { padding: 3px 8px; }
+/* Employee ID pinned left, Actions pinned right while the grid scrolls sideways. */
+body[data-ws-page="admin"].ws-corporate .admin-main .adm-grid :is(th, td).adm-stick-l { position: sticky; left: 0; z-index: 2; background: var(--adm-solid); }
+body[data-ws-page="admin"].ws-corporate .admin-main .adm-grid :is(th, td).adm-stick-r {
+    position: sticky; right: 0; z-index: 2; background: var(--adm-solid);
+    box-shadow: -10px 0 10px -10px rgba(0, 20, 50, 0.25);
+}
+body[data-ws-page="admin"].ws-corporate .admin-main .adm-grid th.adm-stick-l { box-shadow: 10px 0 10px -10px rgba(0, 20, 50, 0.18); }
+body[data-ws-page="admin"].ws-corporate .admin-main .adm-grid tbody tr:hover td:is(.adm-stick-l, .adm-stick-r) { background: var(--ws-surface-2); }
+/* WFH switch and device icons on one compact line. */
+body[data-ws-page="admin"] .adm-wfh { display: flex; align-items: center; gap: 6px; }
+body[data-ws-page="admin"] .adm-wfh .wfh-switch { width: 32px; height: 18px; flex: 0 0 auto; }
+body[data-ws-page="admin"] .adm-wfh .wfh-slider::before { width: 12px; height: 12px; }
+body[data-ws-page="admin"] .adm-wfh .wfh-switch input:checked + .wfh-slider::before { transform: translateX(14px); }
+body[data-ws-page="admin"] .adm-devs { display: inline-flex; gap: 2px; }
+body[data-ws-page="admin"] .adm-devs .dev-chip { padding: 2px 3px; font-size: 11px; border-radius: 6px; }
+body[data-ws-page="admin"] .adm-actions button { padding: 4px 6px; font-size: 12px; line-height: 1; border-radius: 7px; }
+body[data-ws-page="admin"] .adm-actions button + button { margin-left: 2px; }
+/* On a phone a pinned Actions column would cover most of the grid; only the ID stays pinned. */
+@media (max-width: 640px) {
+    body[data-ws-page="admin"].ws-corporate .admin-main .adm-grid :is(th, td).adm-stick-r { position: static; box-shadow: none; }
+}
+
+/* ---- Overview: attendance today stays one line per person ---- */
+body[data-ws-page="admin"].ws-corporate .ws-table.ov-att th { padding: 10px 10px; }
+body[data-ws-page="admin"].ws-corporate .ws-table.ov-att td { padding: 9px 10px; }
+body[data-ws-page="admin"] .ov-att :is(th, td):first-child { padding-left: 18px; }
+body[data-ws-page="admin"] .ov-att .ws-badge.late { font-size: 11px; padding: 1px 6px; }
+body[data-ws-page="admin"] .ov-att .who { flex-direction: column; align-items: flex-start; gap: 0; }
+body[data-ws-page="admin"] .ov-att .who b { max-width: 220px; }
+body[data-ws-page="admin"] .ov-att .ov-ell { display: block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body[data-ws-page="admin"] .ov-att .nowrap, body[data-ws-page="admin"] .ov-att .ws-badge { white-space: nowrap; }
+/* The company rides under the name as a small second line; its own column would push Status out of the card. */
+body[data-ws-page="admin"] .ws-table.ov-att .col-co { display: none; }
+body[data-ws-page="admin"] .ws-table.ov-att .who small { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body[data-ws-page="admin"] .ws-table.ov-att .who small.co { display: block; }
+
+/* ---- Dialogs: responsive two-column form, vertical scroll, sticky footer ---- */
+body[data-ws-page="admin"] .adm-modal {
+    width: 100%; max-width: 880px; max-height: min(90vh, 920px); box-sizing: border-box;
+    overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+    padding: 26px 30px 0 !important; text-align: left;
+    background: var(--adm-modal-bg) !important; color: var(--ws-text);
+    -webkit-backdrop-filter: blur(22px) saturate(1.3); backdrop-filter: blur(22px) saturate(1.3);
+    border: 1px solid var(--adm-glass-line) !important;
+    box-shadow: 0 24px 60px rgba(0, 12, 35, 0.35);
+}
+body[data-ws-page="admin"] .adm-modal.adm-modal-sm { max-width: 540px; }
+body[data-ws-page="admin"] .adm-modal h3, body[data-ws-page="admin"] .adm-modal h1 { color: var(--ws-text) !important; }
+body[data-ws-page="admin"] .adm-modal .mg-fields { margin: 14px 0; gap: 14px 18px; }
+body[data-ws-page="admin"] .adm-modal .adm-name-row { grid-template-columns: minmax(0, 1fr); margin: 0; }
+body[data-ws-page="admin"] .adm-modal label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 650; color: var(--ws-text-2, var(--ws-text)); }
+body[data-ws-page="admin"] .adm-modal label.mg-check { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; }
+body[data-ws-page="admin"] .adm-modal :is(input:not([type="checkbox"]), select, textarea) {
+    width: 100%; max-width: 100%; box-sizing: border-box; min-width: 0;
+    border: 1px solid var(--ws-border); border-radius: 8px; padding: 9px 11px; font-size: 14px; font-weight: 500;
+    background: var(--ws-surface); color: var(--ws-text); color-scheme: light;
+}
+:root[data-theme="dark"] body[data-ws-page="admin"] .adm-modal :is(input, select, textarea) { color-scheme: dark; background: var(--ws-surface-2); }
+body[data-ws-page="admin"] .adm-modal :is(input, select, textarea):focus { outline: 2px solid color-mix(in srgb, var(--ws-accent, #2f6fdb) 55%, transparent); outline-offset: 1px; }
+body[data-ws-page="admin"] .adm-modal :is(input, select):disabled { opacity: .55; }
+body[data-ws-page="admin"] .adm-modal-foot {
+    position: sticky; bottom: 0; z-index: 2;
+    display: flex; justify-content: flex-end; gap: 10px;
+    margin: 18px -30px 0 !important; padding: 14px 30px 18px;
+    background: var(--adm-modal-bg); border-top: 1px solid var(--ws-border);
+}
+body[data-ws-page="admin"] .adm-modal-foot button { min-width: 110px; padding: 10px 18px; border-radius: 10px; font-weight: 700; }
+body[data-ws-page="admin"] .adm-modal-foot button:not(.btn-primary) { background: var(--ws-surface); color: var(--ws-text); border: 1px solid var(--ws-border); }
+@media (max-width: 720px) {
+    body[data-ws-page="admin"] .adm-modal { padding: 20px 18px 0 !important; max-height: 94vh; }
+    body[data-ws-page="admin"] .adm-modal-foot { margin: 16px -18px 0 !important; padding: 12px 18px 16px; }
+    body[data-ws-page="admin"] .adm-modal-foot button { flex: 1 1 0; min-width: 0; }
+}

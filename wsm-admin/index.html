@@ -319,7 +319,7 @@
                                 <div class="right"><button type="button" class="ws-btn sm" data-jump="attendance">Full report →</button></div>
                             </div>
                             <div class="ws-table-wrap">
-                                <table class="ws-table">
+                                <table class="ws-table ov-att">
                                     <thead><tr><th>Employee</th><th class="col-co">Company</th><th>Shift</th><th>In</th><th>Out</th><th>Status</th></tr></thead>
                                     <tbody id="ov-att-body"><tr><td colspan="6"><div class="ws-empty">Loading…</div></td></tr></tbody>
                                 </table>
@@ -594,24 +594,19 @@
                 </div>
 
                 <div class="glass rounded-2xl overflow-hidden">
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm">
+                    <div class="overflow-x-auto adm-grid-wrap">
+                        <table id="emp-table" class="w-full text-sm adm-grid">
                             <thead>
                                 <tr>
-                                    <th>Employee ID</th>
-                                    <th>Name</th>
-                                    <th title="The fingerprint reader's enrolment number">Biometric ID</th>
-                                    <th>Email</th>
+                                    <th class="adm-stick-l">Employee ID</th>
+                                    <th>Name · email</th>
+                                    <th title="The fingerprint reader's enrolment number">Bio ID</th>
                                     <th>Joined</th>
                                     <th title="Active employees can sign in and appear in the live schedule">Status</th>
-                                    <th title="Assign as Work-From-Home — enables the Friday video check-in">WFH</th>
-                                    <th>Tests</th>
-                                    <th>Best WPM</th>
-                                    <th>Quizzes</th>
-                                    <th>Best Score</th>
-                                    <th>Strikes</th>
-                                    <th>Last Active</th>
-                                    <th class="text-right">Actions</th>
+                                    <th title="Assign as Work-From-Home — enables the Friday video check-in; the icons are the devices they must record on">WFH</th>
+                                    <th title="Typing tests (best WPM) and quizzes (best score); strikes are quiz rule violations">Assessments</th>
+                                    <th title="Last typing test">Last active</th>
+                                    <th class="text-right adm-stick-r">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="emp-tbody"></tbody>
@@ -1197,18 +1192,19 @@
     </div>
     <!-- Edit Employee modal -->
     <div id="edit-emp-modal" class="fixed inset-0 z-[70] hidden items-center justify-center p-4" data-ws="scrim">
-        <div class="glass-strong w-full max-w-md rounded-3xl p-8">
-            <h3 class="text-2xl font-black text-white mb-1 text-center">Edit Employee</h3>
-            <p id="edit-emp-email" class="text-slate-400 text-sm text-center mb-6">—</p>
-            <label class="text-[10px] uppercase tracking-widest text-slate-400 font-black block mb-2">Full Name</label>
-            <input id="edit-emp-name" type="text" class="glass w-full px-4 py-3 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-400/40 font-bold mb-6">
-            <div id="mg-edit-fields" class="mg-fields"></div>
-            <p id="mg-edit-note" class="text-slate-400 text-xs mb-4"></p>
-            <div class="flex gap-3">
-                <button id="edit-emp-cancel" type="button" class="glass flex-1 text-white font-bold py-3 rounded-xl">Cancel</button>
-                <button id="edit-emp-save" type="button" class="btn-primary flex-1 text-white font-black py-3 rounded-xl">Save</button>
+        <div class="glass-strong adm-modal rounded-3xl" role="dialog" aria-modal="true" aria-labelledby="edit-emp-title">
+            <h3 id="edit-emp-title" class="text-2xl font-black text-white mb-1">Edit Employee</h3>
+            <p id="edit-emp-email" class="text-slate-400 text-sm mb-5">—</p>
+            <div class="mg-fields adm-name-row">
+                <label class="adm-wide">Full name<input id="edit-emp-name" type="text" autocomplete="off"></label>
             </div>
-            <p id="edit-emp-err" class="text-rose-300 text-sm font-bold mt-3 hidden text-center"></p>
+            <div id="mg-edit-fields" class="mg-fields"></div>
+            <p id="mg-edit-note" class="text-slate-400 text-xs mb-2"></p>
+            <p id="edit-emp-err" class="text-rose-300 text-sm font-bold mt-2 hidden"></p>
+            <div class="adm-modal-foot">
+                <button id="edit-emp-cancel" type="button" class="adm-btn">Cancel</button>
+                <button id="edit-emp-save" type="button" class="btn-primary adm-btn text-white font-black">Save</button>
+            </div>
         </div>
     </div>
 
@@ -1284,6 +1280,7 @@
     </div>
 
     <script src="/ui/shell.js"></script>
+    <script src="/admin/router.js"></script>
     <script>
         WSShell.mount({
             active: 'overview', crumb: 'Overview', crumbPrefix: 'Admin', brandSub: 'Admin',
@@ -1329,8 +1326,14 @@
             tools: '<button type="button" id="refresh-btn" class="ws-btn sm" title="Reload the current data"><span class="ic ic-refresh"></span><span>Refresh</span></button>' +
                    '<button type="button" id="logout-btn" class="ws-btn sm danger" title="Lock the admin console"><span class="ic ic-lock"></span><span>Lock</span></button>',
         });
+        // The shell moves the page into #ws-page, whose frosted background makes it the
+        // containing block for position:fixed - so the admin dialogs would only cover the
+        // content area. Put them back on <body> so they cover the whole window.
+        document.querySelectorAll('#ws-page [id$="-modal"][data-ws="scrim"]').forEach(m => document.body.appendChild(m));
         // Every sidebar tab button carries .admin-tab so the existing switchers keep working.
         document.querySelectorAll('.ws-side-item[data-tab]').forEach(b => b.classList.add('admin-tab'));
+        // Real URLs per section (/wsm-admin/employees …); the tab items become links.
+        if (window.WSAdminRouter) WSAdminRouter.install();
     </script>
     <script>
         let adminAuthenticated = false;
@@ -1405,11 +1408,10 @@
             renderAll();
             if (window.WSShell) WSShell.setUser({ name: 'Administrator', company: 'Admin console' });
             document.dispatchEvent(new CustomEvent('admin-unlocked'));
-            // /wsm-admin?tab=crmimport opens on that tab (the CRM pages link here).
+            // /wsm-admin/employees (or the older /wsm-admin?tab=crmimport the CRM pages
+            // link to) opens on that section - admin/router.js reads the address.
             try {
-                const wanted = new URLSearchParams(location.search).get('tab');
-                const tabBtn = wanted && document.querySelector(`.admin-tab[data-tab="${CSS.escape(wanted)}"]`);
-                if (tabBtn) tabBtn.click();
+                if (window.WSAdminRouter) window.WSAdminRouter.openInitial();
             } catch (e) { /* no such tab: stay on the overview */ }
         }
 
@@ -1800,6 +1802,14 @@
             const d = new Date(iso);
             return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
         }
+        // One-line day for dense tables: "4 Sep 2026" (the full stamp goes in a tooltip).
+        const DAY_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        function formatDay(iso) {
+            if (!iso) return '—';
+            const d = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date(iso + 'T12:00:00') : new Date(iso);
+            if (isNaN(d)) return '—';
+            return `${d.getDate()} ${DAY_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+        }
 
         // CSV export
         document.getElementById('export-btn').addEventListener('click', () => {
@@ -2059,7 +2069,7 @@
         // ---------- Employees ----------
         async function loadEmployees() {
             if (!adminAuthenticated) return;
-            document.getElementById('emp-tbody').innerHTML = '<tr><td colspan="14" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading employees…</td></tr>';
+            document.getElementById('emp-tbody').innerHTML = '<tr><td colspan="9" class="p-8 text-center text-slate-400 font-bold animate-pulse">Loading employees…</td></tr>';
             try {
                 const r = await adminFetch({
                     method: 'POST',
@@ -2071,7 +2081,7 @@
                 allEmployees = data.employees || [];
                 renderEmployees();
             } catch (e) {
-                document.getElementById('emp-tbody').innerHTML = `<tr><td colspan="14" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
+                document.getElementById('emp-tbody').innerHTML = `<tr><td colspan="9" class="p-8 text-center text-rose-300 font-bold">${escapeHtml(e.message)}</td></tr>`;
             }
         }
 
@@ -2115,38 +2125,39 @@
             tbody.innerHTML = filtered.map(e => {
                 const strikes = e.quiz_violations || 0;
                 const wfhOn = !!e.is_wfh;
+                const left = (e.status || 'active') === 'inactive';
                 return `
                 <tr>
-                    <td class="mono font-black text-white whitespace-nowrap">${e.employee_id ? escapeHtml(e.employee_id) : '<span class="text-slate-500 font-medium" title="No Employee ID yet — set it with ✏️">—</span>'}</td>
-                    <td class="font-bold text-white">${escapeHtml(e.full_name || '—')}</td>
+                    <td class="adm-stick-l mono font-black text-white whitespace-nowrap">${e.employee_id ? escapeHtml(e.employee_id) : '<span class="text-slate-500 font-medium" title="No Employee ID yet — set it with ✏️">—</span>'}</td>
+                    <td class="adm-who"><b title="${escapeHtml(e.full_name || '')}">${escapeHtml(e.full_name || '—')}</b><small title="${escapeHtml(e.email || '')}">${escapeHtml(e.email || '—')}</small></td>
                     <td class="mono text-slate-300 text-xs whitespace-nowrap">${escapeHtml(e.employee_code || '—')}</td>
-                    <td class="text-slate-300 text-xs">${escapeHtml(e.email || '—')}</td>
-                    <td class="text-slate-400 text-xs">${formatDate(e.created_at)}</td>
-                    <td class="text-xs">${(e.status || 'active') === 'inactive'
-                        ? `<span class="mg-status bad" title="Cannot sign in${e.exit_reason ? ' — ' + escapeHtml(e.exit_reason) : ''}">Left${e.exit_date ? ' ' + formatDate(e.exit_date) : ''}</span>`
+                    <td class="text-slate-400 text-xs whitespace-nowrap" title="${e.created_at ? escapeHtml(formatDate(e.created_at)) : ''}">${formatDay(e.created_at)}</td>
+                    <td class="text-xs whitespace-nowrap">${left
+                        ? `<span class="mg-status bad" title="Cannot sign in${e.exit_date ? ' since ' + escapeHtml(formatDay(e.exit_date)) : ''}${e.exit_reason ? ' — ' + escapeHtml(e.exit_reason) : ''}">Left</span>`
                         : '<span class="mg-status ok">Active</span>'}</td>
-                    <td>
-                        <label class="wfh-switch" title="${wfhOn ? 'WFH enabled — will see the Friday check-in' : 'Not WFH — click to enable'}">
-                            <input type="checkbox" data-wfh-id="${e.id}" ${wfhOn ? 'checked' : ''}>
-                            <span class="wfh-slider"></span>
-                        </label>
-                        <div class="flex items-center gap-1 mt-1.5" ${wfhOn ? '' : 'style="opacity:.35; pointer-events:none;"'} title="Toggle which devices they must record on Fridays">
-                            <button type="button" class="dev-chip ${e.req_mobile !== false ? 'on' : ''}" data-dev-toggle="${e.id}" data-dev="mobile" title="Mobile ${e.req_mobile !== false ? 'required — click to remove' : 'not required — click to add'}">📱</button>
-                            <button type="button" class="dev-chip ${e.req_laptop !== false ? 'on' : ''}" data-dev-toggle="${e.id}" data-dev="laptop" title="Laptop ${e.req_laptop !== false ? 'required — click to remove' : 'not required — click to add'}">💻</button>
-                            <button type="button" class="dev-chip ${e.req_tab !== false ? 'on' : ''}" data-dev-toggle="${e.id}" data-dev="tab" title="Tab ${e.req_tab !== false ? 'required — click to remove' : 'not required — click to add'}">📲</button>
+                    <td class="whitespace-nowrap">
+                        <div class="adm-wfh">
+                            <label class="wfh-switch" title="${wfhOn ? 'WFH enabled — will see the Friday check-in' : 'Not WFH — click to enable'}">
+                                <input type="checkbox" data-wfh-id="${e.id}" ${wfhOn ? 'checked' : ''}>
+                                <span class="wfh-slider"></span>
+                            </label>
+                            <span class="adm-devs" ${wfhOn ? '' : 'style="opacity:.35; pointer-events:none;"'} title="Toggle which devices they must record on Fridays">
+                                <button type="button" class="dev-chip ${e.req_mobile !== false ? 'on' : ''}" data-dev-toggle="${e.id}" data-dev="mobile" title="Mobile ${e.req_mobile !== false ? 'required — click to remove' : 'not required — click to add'}">📱</button>
+                                <button type="button" class="dev-chip ${e.req_laptop !== false ? 'on' : ''}" data-dev-toggle="${e.id}" data-dev="laptop" title="Laptop ${e.req_laptop !== false ? 'required — click to remove' : 'not required — click to add'}">💻</button>
+                                <button type="button" class="dev-chip ${e.req_tab !== false ? 'on' : ''}" data-dev-toggle="${e.id}" data-dev="tab" title="Tab ${e.req_tab !== false ? 'required — click to remove' : 'not required — click to add'}">📲</button>
+                            </span>
                         </div>
                     </td>
-                    <td class="mono font-black text-white">${e.tests || 0}</td>
-                    <td class="mono font-black text-blue-300">${e.best_wpm || 0}</td>
-                    <td class="mono font-black text-orange-300">${e.quiz_attempts || 0}</td>
-                    <td class="mono font-black text-purple-300">${e.best_quiz_score || 0}</td>
-                    <td class="mono ${strikes > 0 ? 'font-black text-rose-300' : 'text-slate-500'}">${strikes > 0 ? strikes : '·'}</td>
-                    <td class="text-slate-400 text-xs">${e.last_test_at ? formatDate(e.last_test_at) : '—'}</td>
-                    <td class="text-right whitespace-nowrap">
-                        <button data-action="edit"   data-id="${e.id}" class="emp-action glass px-3 py-1 rounded-lg text-xs font-bold hover:bg-white/20" title="Edit name">✏️</button>
-                        <button data-action="reset"  data-id="${e.id}" data-email="${escapeHtml(e.email || '')}" class="emp-action glass px-3 py-1 rounded-lg text-xs font-bold hover:bg-white/20" title="Send password reset email">🔑</button>
-                        <button data-action="exit" data-id="${e.id}" class="glass px-3 py-1 rounded-lg text-xs font-bold hover:bg-white/20" title="${(e.status || 'active') === 'inactive' ? 'Bring this employee back' : 'Offboard — blocks login, keeps all history'}">${(e.status || 'active') === 'inactive' ? '↩️' : '🚪'}</button>
-                        <button data-action="delete" data-id="${e.id}" class="emp-action glass px-3 py-1 rounded-lg text-xs font-bold text-rose-300 hover:bg-rose-500/20" title="Delete employee and all their history">🗑️</button>
+                    <td class="adm-assess whitespace-nowrap text-xs">
+                        <span title="Typing tests taken · best WPM"><b class="mono">${e.tests || 0}</b> tests · <b class="mono text-blue-300">${e.best_wpm || 0}</b> wpm</span>
+                        <span title="Quizzes taken · best score"><b class="mono">${e.quiz_attempts || 0}</b> quizzes · <b class="mono text-purple-300">${e.best_quiz_score || 0}</b> best${strikes > 0 ? ` · <b class="mono text-rose-300" title="${strikes} quiz rule violation${strikes === 1 ? '' : 's'}">${strikes} strike${strikes === 1 ? '' : 's'}</b>` : ''}</span>
+                    </td>
+                    <td class="text-slate-400 text-xs whitespace-nowrap" title="${e.last_test_at ? escapeHtml(formatDate(e.last_test_at)) : ''}">${e.last_test_at ? formatDay(e.last_test_at) : '—'}</td>
+                    <td class="adm-stick-r adm-actions text-right whitespace-nowrap">
+                        <button data-action="edit"   data-id="${e.id}" class="emp-action glass rounded-lg" title="Edit employee">✏️</button>
+                        <button data-action="reset"  data-id="${e.id}" data-email="${escapeHtml(e.email || '')}" class="emp-action glass rounded-lg" title="Send password reset email">🔑</button>
+                        <button data-action="exit" data-id="${e.id}" class="glass rounded-lg" title="${left ? 'Bring this employee back' : 'Offboard — blocks login, keeps all history'}">${left ? '↩️' : '🚪'}</button>
+                        <button data-action="delete" data-id="${e.id}" class="emp-action glass rounded-lg text-rose-300" title="Delete employee and all their history">🗑️</button>
                     </td>
                 </tr>`;
             }).join('');

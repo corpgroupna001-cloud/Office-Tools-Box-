@@ -39,6 +39,10 @@
     {
       "source": "/messenger/",
       "destination": "/chat/index.html"
+    },
+    {
+      "source": "/wsm-admin/:path*",
+      "destination": "/wsm-admin/index.html"
     }
   ],
   "redirects": [

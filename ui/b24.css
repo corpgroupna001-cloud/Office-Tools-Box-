@@ -1868,3 +1868,25 @@ body.ws-b24.ws-corporate #view .b24-tnew-title input:not(:focus) { border-color:
 @media (max-width: 900px) { .b24-tnew-chat { min-height: 0; } .b24-tnew-chat .body { display: none; } .b24-trow .l { width: 88px; } }
 .b24-tnew-title .crm-field, body.ws-b24.ws-corporate #view .b24-tnew-title input { width: 100%; }
 body.ws-app .b24-tnew-title .crm-form { display: block; }
+
+/* ---------- Glass: Bitrix24's see-through work areas ---------------------
+   Older pages keep one work area, now frosted glass over the wallpaper, and
+   their cards are lightly translucent, so the wallpaper shows through as in
+   Bitrix24 while text stays on a calm, readable ground. The plain
+   (no wallpaper) theme stays solid. */
+:root:not([data-wallpaper="light"]) body.ws-b24 .ws-page.legacy {
+    background: color-mix(in srgb, var(--ws-bg) 58%, transparent);
+    -webkit-backdrop-filter: blur(24px) saturate(1.25); backdrop-filter: blur(24px) saturate(1.25);
+    border: 1px solid rgba(255, 255, 255, 0.28); box-shadow: 0 8px 32px rgba(0, 10, 30, 0.18);
+}
+:root[data-theme="dark"]:not([data-wallpaper="light"]) body.ws-b24 .ws-page.legacy {
+    background: color-mix(in srgb, var(--ws-bg) 66%, transparent); border-color: rgba(255, 255, 255, 0.08);
+}
+:root:not([data-wallpaper="light"]) body.ws-b24 .ws-page.legacy :is(.ws-card, .crm-kpi, .ws-stat, .ws-table-wrap, .crm-table-wrap, .ws-panel) {
+    background: color-mix(in srgb, var(--ws-surface) 84%, transparent);
+    border-color: color-mix(in srgb, var(--ws-border) 70%, transparent);
+}
+@supports not (background: color-mix(in srgb, red 50%, transparent)) {
+    :root:not([data-wallpaper="light"]) body.ws-b24 .ws-page.legacy { background: rgba(244, 246, 250, 0.62); }
+    :root[data-theme="dark"]:not([data-wallpaper="light"]) body.ws-b24 .ws-page.legacy { background: rgba(16, 26, 39, 0.7); }
+}

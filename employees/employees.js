@@ -345,8 +345,9 @@
         const self = p.id === me.id;
         const priv = L.canSeePrivate({ id: me.id, role: me.role, company: me.company, company2: me.company2 }, p);
         const name = nameOf(p);
-        document.title = `${name} · Employees · WorkSuite`;
-        WSShell.setCrumb(name);
+        const code = String(p.employee_id || '').trim();          // the Employee ID is how people are known here; the name comes second
+        document.title = `${code ? code + ' · ' : ''}${name} · Employees · WorkSuite`;
+        WSShell.setCrumb(code || name);
         const reports = people.filter(x => x.manager_id === p.id && (x.status || 'active') !== 'inactive');
         await loadShifts();
         if (mySeq !== navSeq) return;                        // navigated away while it loaded
@@ -358,16 +359,21 @@
         // Your own card is edited right here, the way Bitrix24 does it; others' by an admin in the console.
         const editHref = !self && ctx.isAdmin ? '/wsm-admin' : '';
         const field = (label, value) => `<div class="f"><dt>${esc(label)}</dt><dd>${value || '<span class="empty">field is empty</span>'}</dd></div>`;
+        const photo = p.avatar_url ? `<img src="${esc(p.avatar_url)}" alt="${esc(name)}">` : `<span class="mono">${esc(L.initials(name))}</span>`;
+        // Chat and calls live in Messenger; from a slide-over they open in the full window, not inside the panel.
+        const chatHref = `/chat/#thread=${encodeURIComponent(p.id)}`;
         view.innerHTML = `
-            <div class="b24-titlebar emp-bar">
-                <a class="b24-btn-glass" href="/employees/" data-nav>${C.icon('arrow')}<span>Employees</span></a>
-                <h1 class="b24-title">${esc(name)}</h1>
-                <span class="grow"></span>
-                ${self ? `<a class="b24-btn-glass" href="/security">${C.icon('shield')}<span>Security</span></a>`
-                       : `<a class="b24-btn-glass" href="/chat/#thread=${esc(p.id)}">${C.icon('chat')}<span>Message</span></a>`}
-                ${ctx.isAdmin ? `<a class="b24-btn-glass round" href="/wsm-admin" title="Admin console" aria-label="Admin console">${C.icon('shield')}</a>` : ''}
+            <div class="emp-hero">
+                <div class="b24-titlebar emp-bar">
+                    <a class="b24-btn-glass" href="/employees/" data-nav>${C.icon('arrow')}<span>Employees</span></a>
+                    <div class="emp-hero-title"><h1 class="b24-title">${esc(code || name)}</h1>${code ? `<span class="emp-hero-name">${esc(name)}</span>` : ''}</div>
+                    <span class="grow"></span>
+                    ${self ? `<a class="b24-btn-glass" href="/security">${C.icon('shield')}<span>Security</span></a>`
+                           : `<a class="b24-btn-glass" href="${chatHref}" target="_top">${C.icon('chat')}<span>Chat</span></a>`}
+                    ${ctx.isAdmin ? `<a class="b24-btn-glass round" href="/wsm-admin" title="Admin console" aria-label="Admin console">${C.icon('shield')}</a>` : ''}
+                </div>
+                <div class="emp-tabs" id="tabs"></div>
             </div>
-            <div class="emp-tabs" id="tabs"></div>
             <section class="crm-tabpanel" data-panel="overview">
                 <div class="emp-prof">
                     <aside class="emp-side">
@@ -377,15 +383,18 @@
                                 <span class="pres${online ? ' on' : ''}"><i></i>${esc(online ? 'Online' : 'Offline')}</span>
                             </div>
                             ${self
-                                ? `<label class="shot editable" title="Change photo">${p.avatar_url ? `<img src="${esc(p.avatar_url)}" alt="${esc(name)}">` : `<span class="mono">${esc(L.initials(name))}</span>`}<span class="shot-edit">${C.icon('camera')}Change photo</span><input type="file" accept="image/*" id="me-photo" hidden></label>`
-                                : `<div class="shot">${p.avatar_url ? `<img src="${esc(p.avatar_url)}" alt="${esc(name)}">` : `<span class="mono">${esc(L.initials(name))}</span>`}</div>`}
-                            ${p.employee_id ? `<span class="emp-idline" title="Employee ID">${esc(p.employee_id)}</span>` : ''}
+                                ? `<label class="shot editable" title="Change photo">${photo}<span class="shot-edit">${C.icon('camera')}Change photo</span><input type="file" accept="image/*" id="me-photo" hidden></label>`
+                                : `<div class="shot">${photo}</div>`}
+                            ${code ? `<span class="emp-idline" title="Employee ID">${esc(code)}</span>` : ''}
                             <b>${esc(name)}</b>
                             <span>${esc([p.job_title, p.department].filter(Boolean).join(' · ') || p.email || '')}</span>
-                            <span class="seen">${esc(lastSeen(p))}</span>
+                            <span class="seen${online ? ' on' : ''}">${esc(lastSeen(p))}</span>
+                            ${self ? '' : `<div class="emp-talk">
+                                <a class="ws-btn primary" href="${chatHref}" target="_top">${C.icon('chat')}<span>Chat</span></a>
+                                <button type="button" class="ws-btn" id="video-btn">${C.icon('video')}<span>Video call</span></button>
+                            </div>`}
                         </div>
                         <div class="emp-pcard emp-do">
-                            ${self ? '' : `<a class="ws-btn primary" href="/chat/#thread=${esc(p.id)}">${C.icon('chat')}<span>Message</span></a>`}
                             ${p.email ? `<a class="ws-btn" href="mailto:${esc(p.email)}">${C.icon('mail')}<span>Email</span></a>` : ''}
                             ${p.phone ? `<a class="ws-btn" href="tel:${esc(p.phone)}">${C.icon('phone')}<span>Call</span></a>` : ''}
                             <button type="button" class="ws-btn" id="task-btn">${C.icon('tasks')}<span>Assign task</span></button>
@@ -393,30 +402,31 @@
                         </div>
                         ${reports.length ? `<div class="emp-pcard">
                             <div class="emp-pcard-head"><h2>Direct reports</h2><span class="n">${reports.length}</span></div>
-                            <ul class="crm-list compact">${reports.map(r => `<li>${C.avatarHtml(r)}<div class="main"><b><a href="/employees/?id=${esc(r.id)}" data-nav>${esc(nameOf(r))}</a></b><span>${esc([r.job_title, r.department].filter(Boolean).join(' · ') || r.email || '')}</span></div></li>`).join('')}</ul>
+                            <ul class="crm-list compact">${reports.map(r => `<li>${C.avatarHtml(r)}<div class="main"><b><a href="/employees/?id=${esc(r.id)}" data-nav>${esc(r.employee_id ? r.employee_id + ' · ' + nameOf(r) : nameOf(r))}</a></b><span>${esc([r.job_title, r.department].filter(Boolean).join(' · ') || r.email || '')}</span></div></li>`).join('')}</ul>
                         </div>` : ''}
                     </aside>
                     <div class="emp-main">
                         <div class="emp-pcard">
                             <div class="emp-pcard-head"><h2>Contact information</h2>${self ? '<button type="button" class="b24-link" id="me-edit">edit</button>' : editHref ? `<a class="b24-link" href="${esc(editHref)}">edit</a>` : ''}</div>
-                            <dl class="emp-fields" id="me-contact">
-                                ${field('Full name', esc(name))}
+                            <dl class="emp-fields emp-cols" id="me-contact">
+                                ${field('Employee ID', code ? `<b class="emp-code">${esc(code)}</b>` : '')}
+                                ${field('Full name', esc(p.full_name || ''))}
                                 ${field('Email', (p.email ? `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : '') + (self ? ' <button type="button" class="b24-link emp-inline" id="me-email-btn">change</button>' : ''))}
-                                ${field('Mobile', p.phone ? `<a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : '')}
-                                ${field('Position', esc(p.job_title || ''))}
+                                ${field('Phone', p.phone ? `<a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>` : '')}
+                                ${field('Company', esc(p.company || '') + (p.company2 ? `<br><span class="muted">also ${esc(p.company2)}</span>` : ''))}
                                 ${field('Department', esc(p.department || ''))}
                                 <div class="f" id="emp-depts-row" hidden><dt>In the company structure</dt><dd id="emp-depts"></dd></div>
-                                ${field('Company', esc(p.company || '') + (p.company2 ? `<br><span class="muted">also ${esc(p.company2)}</span>` : ''))}
-                                ${field('Reports to', p.manager_id ? C.personHtml(p.manager_id) : '')}
+                                ${field('Job title', esc(p.job_title || ''))}
+                                ${field('Manager', p.manager_id ? C.personHtml(p.manager_id) : '')}
+                                ${field('Joining date', esc(L.fmtDate(p.joining_date) || ''))}
+                                ${field('Biometric ID', esc(p.employee_code || ''))}
                             </dl>
                         </div>
                         <div class="emp-pcard">
                             <div class="emp-pcard-head"><h2>Employment</h2></div>
-                            <dl class="emp-fields">
-                                ${field('Employee ID', esc(p.employee_id || ''))}
-                                ${field('Biometric ID', esc(p.employee_code || ''))}
+                            <dl class="emp-fields emp-cols">
                                 ${field('Status', C.statusBadge(EMP_STATUS, p.status || 'active'))}
-                                ${field('Joining date', esc(L.fmtDate(p.joining_date) || ''))}
+                                ${field('Role', esc(roleChip))}
                                 ${p.created_at ? field('In WorkSuite since', esc(L.fmtDate(p.created_at))) : ''}
                                 ${field('Work location', p.is_wfh ? 'Work from home' : 'Office')}
                                 ${field('Shift', esc(describeShift(shift)) + (shift && shift.company_default ? '<br><span class="muted">Company default</span>' : ''))}
@@ -453,7 +463,7 @@
             <section class="crm-tabpanel" data-panel="activity" hidden><div class="ws-card"><div id="activity"></div></div></section>`;
         view.querySelectorAll('[data-nav]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); go(a.getAttribute('href')); }));
 
-        const tabItems = [{ key: 'overview', label: 'Overview' }];
+        const tabItems = [{ key: 'overview', label: 'General' }];
         if (priv) tabItems.push({ key: 'attendance', label: 'Attendance & leave' });
         tabItems.push({ key: 'tasks', label: 'Tasks' }, { key: 'projects', label: 'Projects' }, { key: 'calendar', label: 'Calendar' }, { key: 'activity', label: 'Activity' });
         const loaded = {};
@@ -624,6 +634,12 @@
 
         const assign = () => C.openTaskEditor({ defaults: { assignee_id: p.id }, onSaved: () => { loaded.tasks = false; if (tabs.active === 'tasks') loadTab('tasks'); showProfile(id); } });
         view.querySelector('#task-btn').addEventListener('click', assign);
+        // A video call the way Messenger starts one (calls.js is on every signed-in page); without it, the chat.
+        const video = view.querySelector('#video-btn');
+        if (video) video.addEventListener('click', () => {
+            try { if (window.WSCalls && typeof WSCalls.start === 'function') return WSCalls.start({ userIds: [p.id], video: true }); } catch (e) { /* open the chat instead */ }
+            (window.top || window).location.href = chatHref;
+        });
         view.querySelector('#task-btn-2').addEventListener('click', assign);
         view.querySelector('#meet-btn').addEventListener('click', () => C.openEventEditor({ defaults: { participants: self ? [] : [p.id], title: self ? '' : `Meeting with ${name}` }, onSaved: () => showProfile(id) }));
     }

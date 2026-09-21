@@ -92,10 +92,10 @@
             const label = st === 'On leave' || st === 'Half day leave' ? (r.leave_type || st) : st === 'Holiday' ? (r.holiday_name || 'Holiday') : st;
             return `<tr>
                 <td><div class="who"><b>${r.employee_id ? `<span class="mono">${esc(r.employee_id)}</span> · ` : ''}${esc(r.full_name || r.email || r.employee_code || '—')}</b>${r.is_wfh ? '<small>Work from home</small>' : ''}<small class="co">${esc(r.company || '')}</small></div></td>
-                <td class="muted col-co">${esc(r.company || '—')}</td>
-                <td class="muted">${esc(r.shift_name || '—')}</td>
-                <td class="num">${t(r.first_in)}${r.is_late ? ` <span class="ws-badge late">+${r.late_minutes}m</span>` : ''}</td>
-                <td class="num">${t(r.last_out)}</td>
+                <td class="muted col-co"><span class="ov-ell" title="${esc(r.company || '')}">${esc(r.company || '—')}</span></td>
+                <td class="muted"><span class="ov-ell" title="${esc(r.shift_name || '')}">${esc(r.shift_name || '—')}</span></td>
+                <td class="num nowrap">${t(r.first_in)}${r.is_late ? ` <span class="ws-badge late">+${r.late_minutes}m</span>` : ''}</td>
+                <td class="num nowrap">${t(r.last_out)}</td>
                 <td><span class="ws-badge ${BADGE[st] || 'mute'}">${esc(label)}</span></td>
             </tr>`;
         }).join('') || `<tr><td colspan="6"><div class="ws-empty"><b>${failure ? 'Could not load the report' : 'Nothing yet'}</b>${failure ? esc(failure.reason && failure.reason.message || '') : 'No profiles with attendance today.'}</div></td></tr>`;

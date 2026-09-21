@@ -223,54 +223,85 @@
 
     /**
      * Safe HTML for a text message: everything escaped, links made clickable,
-     * @mentions of known names highlighted, newlines kept.
-     *   opts.names   display names that can be mentioned
+     * @mentions of known people highlighted, newlines kept.
+     *   opts.names   display names that can be mentioned ("@Anil Kumar")
      *   opts.meName  the reader's own name (highlighted differently)
-     *   opts.codes   optional { name: Employee ID }; a mention shows the ID before the name
+     *   opts.codes   optional { name: Employee ID }; a name mention shows the ID before the name
+     *   opts.ids     optional { Employee ID: name }; "@<ID>" is a mention too, the name in its tooltip
+     *   opts.meCode  the reader's own Employee ID
      */
     function formatBody(text, opts) {
-        opts = opts || {};
-        var names = (opts.names || []).filter(Boolean).slice().sort(function (a, b) { return b.length - a.length; });
+        var o = mentionRules(opts || {});
         var src = String(text == null ? '' : text), out = [], last = 0, m;
         URL_RE.lastIndex = 0;
         while ((m = URL_RE.exec(src))) {
             var url = trimUrl(m[0]);
             if (!url) continue;
-            out.push(formatPlain(src.slice(last, m.index), names, opts.meName, opts.codes));
+            out.push(formatPlain(src.slice(last, m.index), o));
             out.push('<a class="mx-link" href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(url) + '</a>');
             last = m.index + url.length;
             URL_RE.lastIndex = last;
         }
-        out.push(formatPlain(src.slice(last), names, opts.meName, opts.codes));
+        out.push(formatPlain(src.slice(last), o));
         return out.join('');
     }
-    function formatPlain(s, names, meName, codes) {
+    function escRe(t) { return t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+    // The page formats every message with the same lists: build the pattern once per set of lists.
+    var rulesCache = null;
+    function mentionRules(opts) {
+        var c = rulesCache;
+        if (c && c.src.names === opts.names && c.src.codes === opts.codes && c.src.ids === opts.ids && c.src.meName === opts.meName && c.src.meCode === opts.meCode) return c;
+        var nameSet = {}, idName = {}, codeOf = {};
+        (opts.names || []).filter(Boolean).forEach(function (n) { nameSet[escapeHtml(n)] = true; });
+        if (opts.codes) Object.keys(opts.codes).forEach(function (k) { if (opts.codes[k]) codeOf[escapeHtml(k)] = escapeHtml(String(opts.codes[k])); });
+        if (opts.ids) Object.keys(opts.ids).forEach(function (k) { if (k && opts.ids[k]) idName[escapeHtml(k).toLowerCase()] = { code: escapeHtml(k), name: escapeHtml(String(opts.ids[k])) }; });
+        // Longest first, so "@Anil Kumar" is wrapped once and never again as "@Anil".
+        var alts = Object.keys(nameSet).concat(Object.keys(idName).map(function (k) { return idName[k].code; }))
+            .sort(function (a, b) { return b.length - a.length; });
+        rulesCache = {
+            src: { names: opts.names, codes: opts.codes, ids: opts.ids, meName: opts.meName, meCode: opts.meCode },
+            nameSet: nameSet, idName: idName, codeOf: codeOf,
+            meKey: opts.meName ? escapeHtml(opts.meName) : null, meCode: opts.meCode ? escapeHtml(opts.meCode).toLowerCase() : null,
+            // Employee IDs match in any case ("@nsp-sls-exe-002"); names only as written (checked below).
+            re: alts.length ? new RegExp('@(' + alts.map(escRe).join('|') + ')(?![\\w])', 'gi') : null,
+        };
+        return rulesCache;
+    }
+    function formatPlain(s, o) {
         var html = escapeHtml(s);
-        if (html.indexOf('@') !== -1 && names.length) {
-            // One pass, longest names first, so "@Anil Kumar" is wrapped once and never again as "@Anil".
-            var escRe = function (t) { return t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
-            var meKey = meName ? escapeHtml(meName) : null;
-            var re = new RegExp('@(' + names.map(function (n) { return escRe(escapeHtml(n)); }).join('|') + ')(?![\\w])', 'g');
-            var codeOf = {};
-            if (codes) Object.keys(codes).forEach(function (k) { if (codes[k]) codeOf[escapeHtml(k)] = escapeHtml(String(codes[k])); });
-            html = html.replace(re, function (all, n) {
-                var shown = codeOf[n] ? '@<b class="mx-emp-id">' + codeOf[n] + '</b> ' + n : all;
-                return '<span class="' + (meKey && n === meKey ? 'mx-mention me' : 'mx-mention') + '">' + shown + '</span>';
+        if (o.re && html.indexOf('@') !== -1) {
+            html = html.replace(o.re, function (all, n) {
+                if (o.nameSet[n]) {
+                    var shown = o.codeOf[n] ? '@<b class="mx-emp-id">' + o.codeOf[n] + '</b> ' + n : all;
+                    return '<span class="' + (o.meKey && n === o.meKey ? 'mx-mention me' : 'mx-mention') + '">' + shown + '</span>';
+                }
+                var id = o.idName[n.toLowerCase()];
+                if (!id) return all;                          // a name in another case is not a mention
+                // "@<Employee ID>": the ID as written in the directory, the person's name as its tooltip.
+                return '<span class="' + (o.meCode && n.toLowerCase() === o.meCode ? 'mx-mention me' : 'mx-mention') + '" title="' + id.name + '">@<b class="mx-emp-id">' + id.code + '</b></span>';
             });
         }
         return html.replace(/\r?\n/g, '<br>');
     }
 
-    /** The ids of candidates mentioned as "@Full Name" in body (longest names first, whole words). */
+    /**
+     * The ids of candidates mentioned in body, as "@<Employee ID>" (any case) or "@Full Name".
+     * Longest first and whole words, so "@Anil Kumar" never also counts as "@Anil"; each person once.
+     * candidates: [{ id, name, code }]
+     */
     function mentionIdsIn(body, candidates) {
-        var ids = [], text = String(body || '');
-        var esc = function (t) { return t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
-        (candidates || []).slice().sort(function (a, b) { return (b.name || '').length - (a.name || '').length; }).forEach(function (c) {
-            if (!c || !c.name || ids.indexOf(c.id) !== -1) return;
-            var re = new RegExp('(^|[^\\w])@' + esc(c.name) + '(?![\\w])', 'g');
+        var ids = [], text = String(body || ''), tokens = [];
+        (candidates || []).forEach(function (c) {
+            if (!c || c.id == null) return;
+            if (c.code) tokens.push({ id: c.id, t: String(c.code), flags: 'gi' });
+            if (c.name) tokens.push({ id: c.id, t: String(c.name), flags: 'g' });
+        });
+        tokens.sort(function (a, b) { return b.t.length - a.t.length; }).forEach(function (k) {
+            var re = new RegExp('(^|[^\\w])@' + escRe(k.t) + '(?![\\w])', k.flags);
             if (!re.test(text)) return;
-            ids.push(c.id);
-            // "@Anil Kumar" must not also count as "@Anil": blank out what matched.
+            if (ids.indexOf(k.id) === -1) ids.push(k.id);
+            // Blank out what matched, so a shorter name inside it is not counted again.
+            re.lastIndex = 0;
             text = text.replace(re, function (all, lead) { return lead + ' '.repeat(all.length - lead.length); });
         });
         return ids;

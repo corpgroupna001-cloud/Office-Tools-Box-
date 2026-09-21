@@ -42,7 +42,7 @@ const PAGES = [
   ['/quotes', 'quotes'], ['/quotes?id=Q1', 'quote-record'], ['/crm/forecast', 'forecast'],
   ['/crm/settings?section=lost', 'crm-lost-reasons'], ['/crm/settings?section=forms', 'crm-web-forms'], ['/form?f=smoke0000000000000000000000000001', 'web-form'],
   ['/chat', 'messenger'], [`/call?id=${F.CALL}`, 'call'], ['/attendance', 'attendance'],
-  ['/wsm-admin', 'admin'], ['/crm', 'themes'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
+  ['/wsm-admin', 'admin'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/crm', 'themes'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
 ];
 const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'leads-list', 'lead-record', 'lead-imported', 'deals', 'deals-list', 'deal-record', 'deal-imported', 'boards', 'board', 'projects',
   'project-record', 'tasks', 'task-record', 'task-new', 'task-people', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record', 'quotes', 'quote-record', 'forecast', 'crm-lost-reasons', 'crm-web-forms']);
@@ -161,15 +161,44 @@ async function supabase(req, res, url) {
   if (method === 'DELETE') { DB[table] = rows.filter(r => !matched.includes(r)); return send(res, 200, matched); }
   return send(res, 405, {});
 }
+// A few fictional people so the admin tables (Employees, the Overview's attendance) draw real rows.
+const ADMIN_PEOPLE = [
+  ['WS-0001', 'Asha Verma', 'Sportsmart Retail Private Limited', 'General shift (long name)', 'Present', false],
+  ['WS-0002', 'Rahul Menon', 'Northwind Logistics & Warehousing', 'Evening support', 'Present', true],
+  ['WS-0003', 'Priya Nair', 'Sportsmart Retail Private Limited', 'General shift (long name)', 'Absent', false],
+].map(([employee_id, full_name, company, shift_name, status, late], i) => ({
+  id: `a000000${i}-0000-4000-8000-000000000000`, employee_id, full_name, company, shift_name, status, is_late: late, late_minutes: late ? 12 : 0,
+  email: full_name.toLowerCase().replace(' ', '.') + '@example.com', employee_code: String(101 + i), is_working_day: true,
+  created_at: '2026-09-04T09:03:00Z', last_test_at: i ? '2026-09-18T11:40:00Z' : null, status_emp: 'active', is_wfh: i === 1,
+  tests: 3 * i, best_wpm: 40 + 7 * i, quiz_attempts: i, best_quiz_score: 60 + 10 * i, quiz_violations: i === 2 ? 1 : 0,
+  first_in: status === 'Present' ? '2026-09-21T03:45:00Z' : null, last_out: i === 0 ? '2026-09-21T12:40:00Z' : null,
+}));
+function adminApi(req, res) {
+  let raw = '';
+  req.on('data', c => { raw += c; });
+  req.on('end', () => {
+    let action = '';
+    try { action = JSON.parse(raw || '{}').action || ''; } catch { /* empty */ }
+    const base = { success: true, results: [], rows: [], items: [], employees: [], data: [], shifts: [] };
+    const emps = ADMIN_PEOPLE.map(({ status, status_emp, ...e }) => ({ ...e, status: status_emp }));
+    if (action === 'employees') return send(res, 200, { ...base, employees: emps });
+    if (action === 'shift_list') return send(res, 200, { ...base, employees: emps });
+    if (action === 'att_daily_report') return send(res, 200, { ...base, date: '2026-09-21', rows: ADMIN_PEOPLE,
+      totals: { employees: 3, present: 2, late: 1, absent: 1 } });
+    send(res, 200, base);
+  });
+}
 function serveStatic(req, res, url) {
   let p = decodeURIComponent(url.pathname);
   if (p === '/api/config') return send(res, 200, { supabaseUrl: `${ORIGIN}/sb`, supabaseAnonKey: 'smoke-anon-key' });
   if (p === '/api/push' && req.method === 'GET') return send(res, 200, { publicKey: '' });
   // The admin console: a signed-in session and empty lists, enough to draw every tab's frame.
-  if (p === '/api/admin') return send(res, 200, { success: true, results: [], rows: [], items: [], employees: [], data: [] });
+  if (p === '/api/admin') return adminApi(req, res);
   if (p.startsWith('/api/')) return send(res, 404, { error: 'not available in the smoke test' });
   if (p === '/messenger' || p === '/messenger/') p = '/chat/';
   if (p === '/admin' || p.startsWith('/admin/') && !p.endsWith('.js') && !p.endsWith('.css')) p = '/wsm-admin';
+  // /wsm-admin/<section> is the admin console itself (vercel.json rewrites it the same way).
+  if (/^\/wsm-admin\/[^.]+$/.test(p)) p = '/wsm-admin';
   let file = path.join(ROOT, p);
   if (!file.startsWith(ROOT)) { res.writeHead(403); return res.end(); }
   if (fs.existsSync(file) && fs.statSync(file).isDirectory()) file = path.join(file, 'index.html');
