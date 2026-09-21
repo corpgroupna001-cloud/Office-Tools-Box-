@@ -824,6 +824,7 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 12 | `supabase-crm-all-companies-migration.sql` | CRM access across companies: a sixth access level, **All companies**, and a role *Full CRM access (every company)* assigned to nobody. See [14. CRM access across companies](#14-crm-access-across-companies) |
 | 13 | `supabase-task-summary-migration.sql` | `tasks.result_required`: Bitrix24's *Task status summary is required* on the new-task page |
 | 14 | `supabase-crm-roles-migration.sql` | Ready-made CRM roles, assigned to nobody: *Super admin* (every company), *Admin*, *Team lead*, *Sales executive*, *Accounts* and *Read only*. Add people in Admin → CRM permissions |
+| 15 | `supabase-company-structure-migration.sql` | The company structure as in Bitrix24: Corporate Group → Jobways Point LLP (9 departments, down to Interview Supports and Accountant), Genie Lamp Private Limited (10), SPORTSMART → Nova Sportsmart Private Limited (12), Navyug Raise A Player Foundation. Heads are set by Employee ID; missing people are skipped. Adds only what is missing, so it is safe to run again. Everyone signed in can now see the whole chart |
 
 **Ran migration 8 before 15 Sep 2026?** Run it again. Its first version made
 `external_ref`'s unique index partial, which `ON CONFLICT` cannot use, so every

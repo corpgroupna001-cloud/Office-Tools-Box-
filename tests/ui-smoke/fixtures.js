@@ -170,8 +170,44 @@ function db(opts = {}) {
     conversation_members: [ME, U2, U3].map((u, i) => ({ conversation_id: 'G1', user_id: u, role: i ? 'member' : 'admin', added_by: ME, last_read_at: at(-1), muted: false, created_at: at(-9) })),
     test_results: [], quiz_results: [], wfh_recordings: [], push_subscriptions: [], salaries: [],
   };
+  addStructure(d);
   if (opts.big) addBigData(d);
   return d;
+}
+
+// The company structure (departments + department_members), shaped like
+// supabase-company-structure-migration.sql: Corporate Group > companies >
+// their departments, four and more levels deep, with heads and a deputy.
+function addStructure(d) {
+  const JW = 'Jobways Point LLP', GL = 'Genie Lamp Private Limited', RAP = 'Navyug Raise A Player Foundation';
+  let n = 0;
+  const id = () => `dddddddd-0000-4000-8000-${String(++n).padStart(12, '0')}`;
+  d.departments = []; d.department_members = [];
+  const add = (name, parent, company, sort, people) => {
+    const row = { id: id(), name, parent_id: parent ? parent.id : null, company, sort, created_at: at(-60) };
+    d.departments.push(row);
+    for (const [user_id, role, position] of people || []) d.department_members.push({ department_id: row.id, user_id, role, position: position || null, created_at: at(-60) });
+    return row;
+  };
+  const tree = (parent, company, nodes) => nodes.forEach(([name, people, kids], i) => { const row = add(name, parent, company, (i + 1) * 10, people); if (kids) tree(row, company, kids); });
+  const common = (co, lead) => [
+    ['Executive Management', lead ? [[U3, 'head', 'Chief Executive Officer'], [U2, 'deputy', 'Managing Partner']] : [], [['Chief Executive Officer', lead ? [[U3, 'head', 'Chief Executive Officer']] : []], ['Managing Partner']]],
+    ['Finance and Accounts', [], [['Accounts', [], [['Accounts Manager']]]]],
+    ['Human Resource', [], [['Human Resource', [], [['Human Resource Analyst']]]]],
+    ['Corporate Project Governance', [], [['General Supervision', [], [['General Supervisor']]]]],
+    ['Information Technology Security and Administration', [], [['System and Network Administration', [], [['Network Administrator']]]]],
+    ['Research and Development', [], [['Product Research', [], [['Research and Development Analyst']]]]],
+    ['Business Intelligence and Analytics', [], [['Business Intelligence Analyst']]],
+    ['Digital Marketing', co === NOVA ? [[ME, 'head', 'Digital Marketing Manager'], [U2, 'member', 'Performance Marketing Executive']] : [], [['Performance Marketing Management', [], [['Performance Marketing Manager']]], ['Content Management', [], [['Content Manager'], ['Creative Designer']]]]],
+  ];
+  const root = add('Corporate Group', null, null, 0);
+  const jw = add(JW, root, JW, 10), gl = add(GL, root, GL, 20), sm = add('SPORTSMART', root, null, 30);
+  const nova = add(NOVA, sm, NOVA, 10, [[ME, 'head', 'Sales Manager']]);
+  add(RAP, root, RAP, 40);
+  tree(jw, JW, [...common(JW, true), ['Resume Marketing Services', [], [['Operations Management', [], [['Resume Marketing Management', [], [
+    ['Service Leads Executive'], ['Resume Marketing Executive'], ['Interview Supports', [], [['Interview Coordinator'], ['Mock Interviewer'], ['Interview Supporter']]], ['Accounts and Reconciliation', [], [['Accountant']]]]]]]]]]);
+  tree(gl, GL, [...common(GL), ['Interview Supports'], ['Employment BGC Saviors']]);
+  tree(nova, NOVA, [...common(NOVA), ['Software Development', [[U3, 'member', 'Coordinator']]], ['Marketplace'], ['Franchise Partnership System'], ['Own Brand Commerce']]);
 }
 
 // SMOKE_BIG=1: far more rows than a screen holds, cloned from the rows above so

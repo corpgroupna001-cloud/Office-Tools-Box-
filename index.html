@@ -808,12 +808,18 @@
 
         function showAuthModal() {
             const m = document.getElementById('auth-modal');
+            // Signed out: only the sign-in screen. The shell moved the page into its
+            // (frosted) work area, which would trap this fixed layer inside it.
+            if (m.parentElement !== document.body) document.body.appendChild(m);
+            const t = document.getElementById('toast'); if (t && t.parentElement !== document.body) document.body.appendChild(t);
+            document.body.classList.add('ws-signed-out');
             m.classList.remove('hidden'); m.classList.add('flex');
             const emailInput = document.querySelector('#login-form input[name="email"]');
             if (emailInput) emailInput.focus();
         }
         function hideAuthModal() {
             const m = document.getElementById('auth-modal');
+            document.body.classList.remove('ws-signed-out');
             m.classList.add('hidden'); m.classList.remove('flex');
         }
         let currentUser = null;

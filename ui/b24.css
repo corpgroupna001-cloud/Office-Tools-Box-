@@ -1890,3 +1890,33 @@ body.ws-app .b24-tnew-title .crm-form { display: block; }
     :root:not([data-wallpaper="light"]) body.ws-b24 .ws-page.legacy { background: rgba(244, 246, 250, 0.62); }
     :root[data-theme="dark"]:not([data-wallpaper="light"]) body.ws-b24 .ws-page.legacy { background: rgba(16, 26, 39, 0.7); }
 }
+
+/* ---------- Signed out: only the sign-in screen (index.html) ------------- */
+body.ws-signed-out .ws-shell { display: none !important; }
+body.ws-b24.ws-signed-out #auth-modal {
+    z-index: 1000; padding: 32px; background: var(--b24-wall) fixed; background-size: cover;
+}
+body.ws-b24.ws-signed-out #auth-modal .ws-auth-layout {
+    width: min(1180px, 100%); min-height: min(680px, calc(100dvh - 64px)); border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.16); box-shadow: 0 30px 80px rgba(0, 10, 30, 0.45);
+    animation: ws-auth-in 320ms cubic-bezier(.2, .9, .3, 1) both;
+}
+body.ws-b24.ws-signed-out .ws-auth-brand {
+    padding: 56px; background: linear-gradient(160deg, rgba(8, 24, 48, 0.92), rgba(16, 52, 96, 0.88));
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+}
+body.ws-b24.ws-signed-out .ws-auth-brand h2 { font-size: 54px; line-height: 1.12; }
+body.ws-b24.ws-signed-out .ws-auth-brand p:not(.ws-eyebrow) { font-size: 17px; }
+body.ws-b24.ws-signed-out .ws-auth-form { padding: 56px 64px; display: flex; flex-direction: column; justify-content: center; }
+body.ws-b24.ws-signed-out .ws-auth-form > h2 { font-size: 32px; }
+body.ws-b24.ws-signed-out .ws-auth-form input { font-size: 16px; }
+body.ws-b24.ws-signed-out .ws-auth-form form > button[type="submit"] { min-height: 52px; font-size: 16px; }
+@keyframes ws-auth-in { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
+@media (max-width: 860px) {
+    body.ws-b24.ws-signed-out #auth-modal { padding: 12px; }
+    body.ws-b24.ws-signed-out #auth-modal .ws-auth-layout { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+    body.ws-b24.ws-signed-out .ws-auth-brand { padding: 28px; gap: 16px; }
+    body.ws-b24.ws-signed-out .ws-auth-brand h2 { font-size: 32px; }
+    body.ws-b24.ws-signed-out .ws-auth-caption { display: none; }
+    body.ws-b24.ws-signed-out .ws-auth-form { padding: 28px 22px; }
+}

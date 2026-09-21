@@ -20,8 +20,9 @@ const FILES = [
   'supabase-crm-all-companies-migration.sql',
   'supabase-task-summary-migration.sql',
   'supabase-crm-roles-migration.sql',
+  'supabase-company-structure-migration.sql',
 ];
-const ALTER_ONLY = new Set(['supabase-employee-id-migration.sql', 'supabase-security-hardening-migration.sql', 'supabase-crm-all-companies-migration.sql', 'supabase-task-summary-migration.sql', 'supabase-crm-roles-migration.sql']);
+const ALTER_ONLY = new Set(['supabase-employee-id-migration.sql', 'supabase-security-hardening-migration.sql', 'supabase-crm-all-companies-migration.sql', 'supabase-task-summary-migration.sql', 'supabase-crm-roles-migration.sql', 'supabase-company-structure-migration.sql']);
 const read = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 const stripComments = sql => sql.replace(/--[^\n]*/g, '');
 
