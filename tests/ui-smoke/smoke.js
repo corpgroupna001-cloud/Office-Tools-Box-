@@ -247,6 +247,17 @@ async function visit(browser, route, name, [vpName, viewport]) {
   try {
     await page.goto(ORIGIN + route, { waitUntil: 'load', timeout: 30000 });
     await new Promise(r => setTimeout(r, 2600));
+    // A code / error dialog opened while signing in must sit above the sign-in card.
+    if (name === 'signin') {
+      const onTop = await page.evaluate(() => {
+        if (typeof showOtpModal !== 'function') return 'no showOtpModal';
+        showOtpModal({ email: 'x@y.test', onVerify: async () => ({ ok: false }) });
+        const host = document.getElementById('verify-code-modal');
+        const el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+        return host && host.contains(el) ? 'ok' : 'covered by ' + (el && (el.id || el.className));
+      });
+      if (onTop !== 'ok') result.problems.push('sign-in dialog hidden: ' + onTop);
+    }
     if (name === 'task-people') { await page.evaluate(() => document.querySelector('[data-assignee]').click()); await new Promise(r => setTimeout(r, 300)); }
     if (name === 'themes') { await page.evaluate(() => window.WSShell.openThemes()); await new Promise(r => setTimeout(r, 400)); }
     const info = await page.evaluate(() => {

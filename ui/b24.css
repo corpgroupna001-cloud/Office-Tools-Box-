@@ -1893,8 +1893,10 @@ body.ws-app .b24-tnew-title .crm-form { display: block; }
 
 /* ---------- Signed out: only the sign-in screen (index.html) ------------- */
 body.ws-signed-out .ws-shell { display: none !important; }
+/* Keep the card's own z-index (60): the two-step code, email code and error
+   dialogs open above it (80, 300). The shell is hidden, so nothing else competes. */
 body.ws-b24.ws-signed-out #auth-modal {
-    z-index: 1000; padding: 32px; background: var(--b24-wall) fixed; background-size: cover;
+    padding: 32px; background: var(--b24-wall) fixed; background-size: cover;
 }
 body.ws-b24.ws-signed-out #auth-modal .ws-auth-layout {
     width: min(1180px, 100%); min-height: min(680px, calc(100dvh - 64px)); border-radius: 18px;
