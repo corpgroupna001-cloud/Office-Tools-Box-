@@ -189,6 +189,14 @@ function adminApi(req, res) {
     const emps = ADMIN_PEOPLE.map(({ status, status_emp, ...e }) => ({ ...e, status: status_emp }));
     if (action === 'employees') return send(res, 200, { ...base, employees: emps });
     if (action === 'shift_list') return send(res, 200, { ...base, employees: emps });
+    if (action === 'setup_health') {
+      const H = require('../../lib/setup-health');
+      const checks = [...H.configChecks({ SUPABASE_URL: 'x', SUPABASE_ANON_KEY: 'x', SUPABASE_SERVICE_ROLE_KEY: 'x', ADMIN_PASSWORD: 'short', SMTP_HOST: 'x', SMTP_PASS: 'x', MAIL_API_KEY: 'x', SMTP_USER_1: 'x' }),
+        { id: 'migration_20', group: 'Database', label: 'Migration 20: supabase-task-completion-migration.sql', state: 'missing', fix: 'Run supabase-task-completion-migration.sql in Supabase → SQL Editor.' },
+        { id: 'published_leftovers', group: 'Database', label: 'Old public file copies', state: 'degraded', detail: '3 file(s) left', fix: 'Remove them with the button below.' }];
+      const n = st => checks.filter(c => c.state === st).length;
+      return send(res, 200, { checks, summary: { ok: n('ok'), missing: n('missing'), degraded: n('degraded'), off: n('off') } });
+    }
     if (action === 'att_daily_report') return send(res, 200, { ...base, date: '2026-09-21', rows: ADMIN_PEOPLE,
       totals: { employees: 3, present: 2, late: 1, absent: 1 } });
     send(res, 200, base);
@@ -699,6 +707,11 @@ async function interact(page, name, result) {
     });
     await wait(150);
     return page.evaluate(() => !['html', 'body'].some(t => /hidden|clip/.test(getComputedStyle(document.querySelector(t)).overflowY)));
+  });
+  if (name === 'admin') await expect('Setup health lists what is missing and offers the clean-up', async () => {
+    await wait(600);
+    const t = await page.evaluate(() => (document.getElementById('ov-health') || {}).innerText || '');
+    return /Migration 20/.test(t) && /Admin password/.test(t) && !!(await page.$('#ov-health-clean'));
   });
   if (name === 'typing') await expect('the typing test shows its passage', async () => (await page.evaluate(() => document.body.innerText)).includes('busy season'));
   if (name === 'calendar') await expect('a calendar view renders', async () => !!(await page.$('.cal-month, .cal-week, .cal-agenda')));

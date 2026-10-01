@@ -141,6 +141,38 @@
         </li>`).join('') || '<li><div class="ws-empty" style="width:100%">No employees yet.</div></li>';
     }
 
+    /* ------------------------------------------------ setup health (F-01) */
+    // Which settings are present (never their values) and which migrations have
+    // run, with what to do about each gap. Only an administrator reaches it: it
+    // is an admin API action like every other on this page.
+    const STATE = { ok: ['ok', 'OK'], missing: ['bad', 'Missing'], degraded: ['warn', 'Needs attention'], off: ['mute', 'Not set up'] };
+    async function loadHealth() {
+        const el = $('ov-health');
+        if (!el || !adminAuthenticated) return;
+        el.innerHTML = '<div class="ws-empty">Checking…</div>';
+        let h;
+        try { h = await api('setup_health'); }
+        catch (e) { el.innerHTML = `<div class="ws-empty"><b>Could not check</b>${esc(e.message)}</div>`; return; }
+        const order = { missing: 0, degraded: 1, off: 2, ok: 3 };
+        const rows = h.checks.slice().sort((a, b) => order[a.state] - order[b.state] || a.group.localeCompare(b.group));
+        const shown = rows.filter(c => c.state !== 'ok');
+        const left = rows.find(c => c.id === 'published_leftovers' && c.state !== 'ok');
+        el.innerHTML = `<p class="sub" style="margin:0 0 10px">${h.summary.ok} OK · ${h.summary.missing} missing · ${h.summary.degraded} need attention · ${h.summary.off} optional, not set up</p>
+            <ul class="ws-list" id="ov-health-list">${(shown.length ? shown : [{ group: '', label: 'Everything is set up', state: 'ok', detail: 'All settings and migrations are in place.' }]).map(c => `<li>
+                <div class="main"><b style="white-space:normal">${esc(c.label)}</b><span style="white-space:normal">${esc(c.fix || c.detail || '')}</span></div>
+                <div class="right"><span class="ws-badge ${STATE[c.state][0]}">${STATE[c.state][1]}</span></div></li>`).join('')}</ul>
+            ${shown.length < rows.length ? `<details style="margin-top:8px"><summary class="sub" style="cursor:pointer">${rows.length - shown.length} in order</summary><ul class="ws-list">${rows.filter(c => c.state === 'ok').map(c => `<li><div class="main"><b style="white-space:normal">${esc(c.label)}</b>${c.detail ? `<span>${esc(c.detail)}</span>` : ''}</div><div class="right"><span class="ws-badge ok">OK</span></div></li>`).join('')}</ul></details>` : ''}
+            ${left ? '<p style="margin:10px 0 0"><button type="button" class="ws-btn sm" id="ov-health-clean">Remove leftover public copies</button></p>' : ''}`;
+        const clean = $('ov-health-clean');
+        if (clean) clean.addEventListener('click', async () => {
+            clean.disabled = true; clean.textContent = 'Removing…';
+            try { const out = await api('published_cleanup', { apply: true }); clean.textContent = `Removed ${out.removed}${out.more ? ' (more left: run again)' : ''}`; setTimeout(loadHealth, 1200); }
+            catch (e) { clean.disabled = false; clean.textContent = 'Remove leftover public copies'; if (window.WSShell) WSShell.toast(e.message, 'bad'); }
+        });
+    }
+    if ($('ov-health-run')) $('ov-health-run').addEventListener('click', () => loadHealth());
+    document.addEventListener('admin-unlocked', () => loadHealth());
+
     // Jump buttons anywhere in the panel switch tabs through the sidebar buttons.
     document.addEventListener('click', e => {
         const b = e.target.closest('[data-jump]');

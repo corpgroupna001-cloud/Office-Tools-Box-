@@ -21,6 +21,7 @@ function backend(config = env, opts = {}) {
       // The audit trail has its own tests; here it must not reach the network.
       if (name === '../lib/admin-audit') return { auditWrap: res => res, recordSecurityEvent: async (...a) => { (opts.events || []).push(a[0]); return true; } };
       if (name === '../lib/employee-admin') return require('../lib/employee-admin');
+      if (name === '../lib/setup-health') return require('../lib/setup-health');
       throw new Error(name);
     },
     fetch: opts.fetch || (async () => new Response(JSON.stringify([]), { status: 200 })),
@@ -272,4 +273,15 @@ test('when the database limiter cannot be reached a per-instance count still hol
   assert.deepEqual(codes, [...Array(10).fill(401), 429, 429]);
   assert.ok(lines.some(l => l.includes('admin_password_rejected')));
   assert.equal(lines.some(l => l.includes('secret-guess')), false);
+});
+
+test('setup health is for administrators only and never carries a secret (F-01)', async () => {
+  const config = { ...env, MAIL_API_KEY: 'mail-key-value-123', SMTP_PASS: 'smtp-pass-value-456', SMTP_HOST: 'mail.example' };
+  assert.equal((await backend(config)({ action: 'setup_health' })).code, 401);
+  const login = await backend(config)({ action: 'login', password: env.ADMIN_PASSWORD });
+  const r = await backend(config)({ action: 'setup_health' }, login.headers['Set-Cookie'].split(';')[0]);
+  assert.equal(r.code, 200);
+  assert.ok(r.body.checks.length > 10);
+  const text = JSON.stringify(r.body);
+  for (const secret of [env.ADMIN_PASSWORD, env.SUPABASE_SERVICE_ROLE_KEY, 'mail-key-value-123', 'smtp-pass-value-456']) assert.equal(text.includes(secret), false, secret);
 });

@@ -545,6 +545,11 @@ module.exports = async function handler(req, res) {
       } catch (e) { return res.status(e.status || 502).json({ error: e.message || 'Request failed' }); }
     }
 
+    // Setup health (F-01): settings present or not (never their values) and which migrations ran.
+    if (action === 'setup_health') {
+      return res.status(200).json(await require('../lib/setup-health').setupHealth(process.env, { url: SUPABASE_URL, key: SERVICE_KEY, request: fetch }));
+    }
+
     // Files left in the retired public "published" bucket (supabase-document-links-migration.sql):
     // no longer reachable, removed here through the Storage API. { apply: true } deletes.
     if (action === 'published_cleanup') {

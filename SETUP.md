@@ -1555,3 +1555,20 @@ check` fails if the committed copies do not match the pinned versions.
 `npm run smoke:ui` refuses every CDN request, so a page that starts depending
 on one fails there.
 
+# 20. Setup health
+
+**Admin → Overview → Setup health** lists what is set up and what is not:
+
+- **Settings** — every environment variable the features need, reported as
+  *OK*, *Missing*, *Needs attention* (say the admin password is shorter than
+  12 characters, or a company has no sender mailbox) or *Not set up* for
+  optional features (push, AI, TURN). Only whether a value is set is ever
+  reported, never the value.
+- **Database** — which migrations have run (each by a zero-row read of
+  something it adds), whether the access gate of migration 16 covers every
+  table and has its pre-request check, and how many old public file copies
+  are left (with a button that removes them).
+
+Each gap says what to do. Checking sends no mail or push and changes no row.
+It is the admin API action `setup_health`, so only administrators reach it.
+
