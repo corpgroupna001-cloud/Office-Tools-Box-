@@ -1,9 +1,10 @@
 /* ============================================================================
    Public document page: /documents/public?t=<token>
    No sign-in. Reads one published document through ws_published_document()
-   (the token is the only key; unpublished or deleted documents return
-   nothing) and shows it read-only. Files come from the public "published"
-   bucket, where a copy lives only while the link is on.
+   (the token is the only key; unpublished, expired or deleted documents
+   return nothing) and shows it read-only. Files come through
+   /api/public-document, which checks the link again on every request and
+   redirects to a signed URL that lives about a minute.
    ============================================================================ */
 (async function () {
     'use strict';
@@ -28,9 +29,9 @@
             main.innerHTML = `<div class="pub-card k-${esc(d.doc_kind)}">${D.renderStatic(d.doc_kind, d.content)}</div>`;
             return;
         }
-        if (!d.path) return msg('This file is not available', 'Ask the person who shared it for a new link.');
-        const url = `${cfg.supabaseUrl}/storage/v1/object/public/published/${String(d.path).split('/').map(encodeURIComponent).join('/')}`;
-        const dlUrl = `${url}?download=${encodeURIComponent(d.name)}`;
+        if (!d.file) return msg('This file is not available', 'Ask the person who shared it for a new link.');
+        const url = `/api/public-document?t=${encodeURIComponent(token)}`;
+        const dlUrl = `${url}&download=1`;
         const dl = document.getElementById('dl'); dl.href = dlUrl; dl.hidden = false;
         const m = String(d.mime_type || '');
         main.innerHTML = m.startsWith('image/') ? `<div class="pub-card pub-file"><img src="${esc(url)}" alt="${esc(d.name)}"></div>`

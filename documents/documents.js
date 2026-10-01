@@ -251,7 +251,7 @@
     }
     async function toTrash(d, after) {
         try {
-            if (d.published_token) await unpublishCopy(d);                 // a deleted item is not public any more
+            // A deleted item is not public any more: clearing the token is the whole of it (the database checks every view).
             const r = await C.q(sb.from('documents').update({ archived_at: new Date().toISOString(), ...(cols.full ? { published_token: null, published_at: null } : {}) }).eq('id', d.id).select('id'));
             if (!(r.data || []).length) throw new Error('Only people who can edit this item can delete it.');
             d.archived_at = new Date().toISOString(); d.published_token = null;
@@ -267,7 +267,6 @@
         catch (e) { C.toast(e.message, 'bad'); }
     }
     async function removeForGood(d) {
-        if (d.published_token) await unpublishCopy(d);
         if (d.storage_path) {
             // The storage delete policy for managers checks the documents row, so the object goes first.
             const r = await sb.storage.from(d.bucket || 'documents').remove([d.storage_path]);
@@ -344,31 +343,20 @@
     }
 
     /* ------------------------------------------------------- public links */
+    // A link is a token on the row. Viewers reach files through /api/public-document,
+    // which asks the database on every view whether the link is still on and only then
+    // hands out a short-lived signed URL (supabase-document-links-migration.sql).
+    // Turning it off is clearing the token: nothing is copied, so nothing is left behind.
     const publicUrl = token => `${location.origin}/documents/public?t=${encodeURIComponent(token)}`;
-    async function unpublishCopy(d) {
-        if (d.storage_path && d.published_token) { const r = await sb.storage.from('published').remove([`${d.published_token}/file`]); if (r.error) console.warn('[documents] unpublish copy', r.error); }
-    }
     async function publish(d) {
         const token = D.newToken(), at = new Date().toISOString();
         await C.q(sb.from('documents').update({ published_token: token, published_at: at }).eq('id', d.id));
-        if (d.storage_path) {
-            // Files: a copy goes to the public "published" bucket under the token, and only lives while the link is on.
-            try {
-                const dl = await sb.storage.from(d.bucket || 'documents').download(d.storage_path);
-                if (dl.error) throw dl.error;
-                const up = await sb.storage.from('published').upload(`${token}/file`, dl.data, { contentType: d.mime_type || 'application/octet-stream', upsert: false });
-                if (up.error) throw up.error;
-            } catch (e) {
-                console.warn('[documents] publish', e);
-                await sb.from('documents').update({ published_token: null, published_at: null }).eq('id', d.id);
-                throw new Error('The file could not be published. Try again.');
-            }
-        }
         d.published_token = token; d.published_at = at;
     }
     async function unpublish(d) {
-        await unpublishCopy(d);
-        await C.q(sb.from('documents').update({ published_token: null, published_at: null }).eq('id', d.id));
+        const r = await C.q(sb.from('documents').update({ published_token: null, published_at: null }).eq('id', d.id).select('id, published_token'));
+        const row = (r.data || [])[0];
+        if (!row || row.published_token) throw new Error('The link could not be turned off. Only people who can edit this item can do that.');
         d.published_token = null; d.published_at = null;
     }
     function publishDoc(d, after) {
@@ -377,11 +365,12 @@
         body.innerHTML = d.published_token
             ? `<p style="margin:0 0 12px">Anyone with this link can view ${what} without signing in. Turning the link off stops it working straight away.</p>
                <div class="dv-link"><input type="text" readonly value="${esc(publicUrl(d.published_token))}" aria-label="Public link"><button type="button" class="ws-btn" data-copy>Copy</button></div>
-               <p class="muted" style="font-size:12.5px;margin:10px 0 0">On since ${esc(L.fmtDateTime(d.published_at))}. ${isNative(d) ? 'Viewers always see the latest saved version.' : 'Viewers get the file as it was when the link was turned on.'}</p>`
+               <p class="muted" style="font-size:12.5px;margin:10px 0 0">On since ${esc(L.fmtDateTime(d.published_at))}. ${isNative(d) ? 'Viewers always see the latest saved version.' : 'Each view is checked against the link, so turning it off works within a minute even for someone who has the page open (a video already playing can run up to 15 minutes).'}</p>`
             : `<p style="margin:0">Create a link that lets anyone view ${what} without signing in, for example to send it to a customer. You can turn it off at any time.</p>`;
         const m = C.modal({
             title: 'Public link', body,
             actions: d.published_token
+                // A failure stays in the dialog (the modal shows the error); success is only claimed after the row says so.
                 ? [{ label: 'Turn the link off', danger: true, onClick: async api => { await unpublish(d); api.close(); C.toast('Public link turned off', 'ok'); if (after) after(); } }, { label: 'Done', primary: true, close: true }]
                 : [{ label: 'Cancel', close: true }, { label: 'Create public link', primary: true, onClick: async api => { await publish(d); api.close(); if (after) after(); publishDoc(d, after); } }],
         });
@@ -687,10 +676,7 @@
             } },
             { label: 'Delete', icon: 'trash', danger: true, run: async (ids, o) => {
                 const list = await docIdsFor(ids, o); if (!list.length) return;
-                if (cols.full) {                                            // deleted items are not public any more
-                    const pub = (await sb.from('documents').select('id, published_token, storage_path').in('id', list).not('published_token', 'is', null)).data || [];
-                    for (const x of pub) await unpublishCopy(x);
-                }
+                // Deleted items are not public any more: the update below clears their links.
                 const r = await C.q(sb.from('documents').update({ archived_at: new Date().toISOString(), ...(cols.full ? { published_token: null, published_at: null } : {}) }).in('id', list).select('id'));
                 const n = (r.data || []).length;
                 C.toast(n === list.length ? `${n} moved to the Recycle bin` : `${n} of ${list.length} moved to the Recycle bin: you can only delete items you can edit`, n === list.length ? 'ok' : 'warn');
@@ -945,7 +931,7 @@
             <div class="b24-titlebar wb-titlebar dv-edbar">
                 <a class="b24-btn-glass" href="${esc(back)}" data-nav>${C.icon('arrow')}<span>${esc(d.folder_id ? folderName(d.folder_id) : 'Documents')}</span></a>
                 ${ico(d)}
-                <h1 class="b24-title" data-name>${esc(d.name)}</h1>
+                <h1 class="b24-title" data-name>${esc(d.name)}</h1>${C.favoriteHtml('document', d.id)}
                 ${canEdit(d) ? `<button type="button" class="b24-btn-glass round" data-rename aria-label="Rename" title="Rename">${C.icon('edit')}</button>` : ''}
                 <span class="wb-status" data-status>${d.archived_at ? 'In the Recycle bin' : editable ? 'All changes saved' : 'View only'}</span>
                 <span class="grow"></span>
@@ -1029,7 +1015,7 @@
             <div class="crm-record-head">
                 ${ico(d, true)}
                 <div class="titles">
-                    <h1>${esc(d.name)}</h1>
+                    <h1>${esc(d.name)}${C.favoriteHtml('document', d.id)}</h1>
                     <div class="meta">
                         <span>${esc(typeText(d))} · ${esc(L.fmtBytes(d.size_bytes))}</span>
                         ${d.archived_at ? C.badge('mute', 'In the Recycle bin') : ''}

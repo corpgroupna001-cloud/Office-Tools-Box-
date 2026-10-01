@@ -51,6 +51,8 @@
         mini: null,
         cals: Object.assign(Object.fromEntries(Object.keys(CALS).map(k => [k, true])), readJson('ws-cal-cals')),
         items: [], loading: false, eventsMissing: false, invites: 0, invitesLoaded: false,
+        // Per source: what could not be loaded, and what was cut short (UI-02, PERF-01).
+        problems: [],
     };
     let filter = null, reloadTimer = null, suppressClick = false, loadSeq = 0;
     const remindedIds = new Set();
@@ -134,6 +136,20 @@
     }
 
     /* ------------------------------------------------------------- loading */
+    // Every source is read in pages of 1,000 (PostgREST's limit) in a stable
+    // order, up to PAGE_CAP rows; a source that reaches the cap is reported as
+    // cut short instead of quietly missing items.
+    const PAGE_CAP = 5000;
+    async function pages(build) {
+        const out = [];
+        for (let from = 0; from < PAGE_CAP; from += 1000) {
+            const r = await build().range(from, from + 999);
+            if (r.error) { const e = r.error; e.partialRows = out; throw e; }
+            out.push(...(r.data || []));
+            if ((r.data || []).length < 1000) return { rows: out, partial: false };
+        }
+        return { rows: out, partial: true };
+    }
     async function load() {
         const seq = ++loadSeq;
         const range = visibleRange(), iso = L.rangeToIso(range);
@@ -142,75 +158,88 @@
         const items = [];
         const mine = [me.company, me.company2].filter(Boolean);
         let eventsMissing = false;
+        const problems = [];                                              // { source, reason } shown above the calendar
+        /** One source: its rows, or a problem noted against its name — never silently nothing. */
+        const source = (label, job) => async () => {
+            try {
+                const partial = await job();
+                if (partial) problems.push({ source: label, reason: `only the first ${PAGE_CAP.toLocaleString('en-IN')} are shown` });
+            } catch (e) {
+                if (label === 'Events' && C.isMissingSchema(e)) { eventsMissing = true; return; }
+                console.warn('[calendar]', label, e);
+                problems.push({ source: label, reason: C.isMissingSchema(e) ? 'not set up yet' : C.friendly(e) });
+            }
+        };
         const jobs = [
-            async () => {                                                  // calendar events
+            source('Events', async () => {                                 // calendar events
                 if (!state.cals.mine && !state.cals.company) return;
-                const r = await sb.from('calendar_events').select('*, participants:event_participants(user_id, response)')
-                    .lt('starts_at', iso.to).gte('ends_at', iso.from).order('starts_at').limit(1000);
-                if (r.error) { if (C.isMissingSchema(r.error)) eventsMissing = true; else console.warn('[calendar] events', r.error); return; }
-                (r.data || []).forEach(ev => items.push(eventItem(ev)));
-            },
-            async () => {                                                  // invitations waiting for me, whatever the dates on screen
+                const r = await pages(() => sb.from('calendar_events').select('*, participants:event_participants(user_id, response)')
+                    .lt('starts_at', iso.to).gte('ends_at', iso.from).order('starts_at').order('id'));
+                r.rows.forEach(ev => items.push(eventItem(ev)));
+                return r.partial;
+            }),
+            source('Invitations', async () => {                            // invitations waiting for me, whatever the dates on screen
                 if (!invitesOn) return;
-                const r = await sb.from('event_participants').select('response, event:calendar_events(*, participants:event_participants(user_id, response))')
-                    .eq('user_id', me.id).eq('response', 'invited').limit(300);
-                if (r.error) return;
+                const r = await pages(() => sb.from('event_participants').select('event_id, response, event:calendar_events(*, participants:event_participants(user_id, response))')
+                    .eq('user_id', me.id).eq('response', 'invited').order('event_id'));
                 const now = Date.now();
-                (r.data || []).map(x => x.event).filter(ev => ev && Date.parse(ev.ends_at) >= now).forEach(ev => items.push(eventItem(ev)));
-            },
-            async () => {                                                  // task due dates
+                r.rows.map(x => x.event).filter(ev => ev && Date.parse(ev.ends_at) >= now).forEach(ev => items.push(eventItem(ev)));
+                return r.partial;
+            }),
+            source('Tasks', async () => {                                  // task due dates
                 if (!state.cals.tasks) return;
-                const r = await sb.from('tasks').select('id,title,due_date,due_time,status,completed_at,assignee_id').is('archived_at', null)
-                    .gte('due_date', range.from).lte('due_date', range.to).limit(1000);
-                if (r.error) return;
+                const r = await pages(() => sb.from('tasks').select('id,title,due_date,due_time,status,completed_at,assignee_id').is('archived_at', null)
+                    .gte('due_date', range.from).lte('due_date', range.to).order('due_date').order('id'));
                 const today = L.todayIST();
-                (r.data || []).forEach(t => {
+                r.rows.forEach(t => {
                     const timed = !!t.due_time;
                     const startIso = timed ? L.isoAtIST(t.due_date, t.due_time) : L.isoAtIST(t.due_date, '00:00');
                     items.push({ kind: 'task', id: t.id, key: 't:' + t.id, task: t, title: t.title, from: t.due_date, to: t.due_date, allDay: !timed, startIso,
                         endIso: timed ? new Date(new Date(startIso).getTime() + 30 * 60000).toISOString() : L.isoEndOfIST(t.due_date),
                         cls: (!t.completed_at && t.due_date < today ? ' overdue' : '') + (t.completed_at ? ' cancelled' : ''), href: `/tasks/?id=${t.id}` });
                 });
-            },
-            async () => {                                                  // project deadlines
+                return r.partial;
+            }),
+            source('Project deadlines', async () => {                      // project deadlines
                 if (!state.cals.projects) return;
-                const r = await sb.from('projects').select('id,name,due_date,status').in('status', ['planning', 'active']).is('archived_at', null)
-                    .gte('due_date', range.from).lte('due_date', range.to).limit(500);
-                if (r.error) return;
-                (r.data || []).forEach(p => items.push({ kind: 'project', id: p.id, key: 'p:' + p.id, title: `Project due: ${p.name}`, from: p.due_date, to: p.due_date, allDay: true, startIso: L.isoAtIST(p.due_date, '00:00'), cls: '', href: `/projects/?id=${p.id}` }));
-            },
-            async () => {                                                  // holidays
+                const r = await pages(() => sb.from('projects').select('id,name,due_date,status').in('status', ['planning', 'active']).is('archived_at', null)
+                    .gte('due_date', range.from).lte('due_date', range.to).order('due_date').order('id'));
+                r.rows.forEach(p => items.push({ kind: 'project', id: p.id, key: 'p:' + p.id, title: `Project due: ${p.name}`, from: p.due_date, to: p.due_date, allDay: true, startIso: L.isoAtIST(p.due_date, '00:00'), cls: '', href: `/projects/?id=${p.id}` }));
+                return r.partial;
+            }),
+            source('Holidays', async () => {                               // holidays
                 if (!state.cals.holidays) return;
-                const r = await sb.from('holidays').select('id,holiday_date,name,company,is_optional').gte('holiday_date', range.from).lte('holiday_date', range.to).limit(500);
-                if (r.error) return;
-                (r.data || []).filter(hd => !hd.company || !mine.length || mine.includes(hd.company)).forEach(hd =>
+                const r = await pages(() => sb.from('holidays').select('id,holiday_date,name,company,is_optional').gte('holiday_date', range.from).lte('holiday_date', range.to).order('holiday_date').order('id'));
+                r.rows.filter(hd => !hd.company || !mine.length || mine.includes(hd.company)).forEach(hd =>
                     items.push({ kind: 'holiday', id: hd.id, key: 'h:' + hd.id, title: `${hd.name}${hd.is_optional ? ' (optional)' : ''}`, from: hd.holiday_date, to: hd.holiday_date, allDay: true, startIso: L.isoAtIST(hd.holiday_date, '00:00'), cls: '', off: !hd.is_optional, tip: hd.company ? hd.company : 'All companies' }));
-            },
-            async () => {                                                  // approved leave
+                return r.partial;
+            }),
+            source('Leave', async () => {                                  // approved leave
                 if (!state.cals.leave) return;
-                const r = await sb.from('leave_requests').select('id,user_id,start_date,end_date,day_part,status').eq('status', 'approved')
-                    .lte('start_date', range.to).gte('end_date', range.from).limit(500);
-                if (r.error) return;
-                (r.data || []).forEach(lv => items.push({ kind: 'leave', id: lv.id, key: 'l:' + lv.id, user_id: lv.user_id, title: `On leave: ${C.personText(lv.user_id)}${lv.day_part !== 'full' ? ' (half day)' : ''}`,
+                const r = await pages(() => sb.from('leave_requests').select('id,user_id,start_date,end_date,day_part,status').eq('status', 'approved')
+                    .lte('start_date', range.to).gte('end_date', range.from).order('start_date').order('id'));
+                r.rows.forEach(lv => items.push({ kind: 'leave', id: lv.id, key: 'l:' + lv.id, user_id: lv.user_id, title: `On leave: ${C.personText(lv.user_id)}${lv.day_part !== 'full' ? ' (half day)' : ''}`,
                     from: lv.start_date, to: lv.end_date, allDay: true, startIso: L.isoAtIST(lv.start_date, '00:00'), cls: '', tip: `${L.fmtDate(lv.start_date)} – ${L.fmtDate(lv.end_date)}` }));
-            },
-            async () => {                                                  // lead follow-ups
+                return r.partial;
+            }),
+            source('Follow-ups', async () => {                             // lead follow-ups
                 if (!state.cals.followups) return;
-                const r = await sb.from('crm_leads').select('id,name,next_follow_up_at,owner_id,status').is('archived_at', null)
-                    .gte('next_follow_up_at', iso.from).lt('next_follow_up_at', iso.to).limit(500);
-                if (r.error) return;
-                (r.data || []).forEach(ld => {
+                const r = await pages(() => sb.from('crm_leads').select('id,name,next_follow_up_at,owner_id,status').is('archived_at', null)
+                    .gte('next_follow_up_at', iso.from).lt('next_follow_up_at', iso.to).order('next_follow_up_at').order('id'));
+                r.rows.forEach(ld => {
                     const day = L.istDate(ld.next_follow_up_at);
                     items.push({ kind: 'followup', id: ld.id, key: 'f:' + ld.id, lead: ld, title: `Follow up: ${ld.name}`, from: day, to: day, allDay: false, startIso: ld.next_follow_up_at,
                         endIso: new Date(new Date(ld.next_follow_up_at).getTime() + 30 * 60000).toISOString(), cls: '', href: `/leads/?id=${ld.id}` });
                 });
-            },
+                return r.partial;
+            }),
         ];
-        await Promise.all(jobs.map(j => j().catch(e => console.warn('[calendar]', e))));
+        await Promise.all(jobs.map(j => j()));
         if (seq !== loadSeq) return;                                       // a newer load started meanwhile
         const seen = new Set();
         state.items = items.filter(it => (seen.has(it.key) ? false : seen.add(it.key)));
         state.eventsMissing = eventsMissing;
+        state.problems = problems;
         state.loading = false;
         renderBody();
         checkReminders();
@@ -365,10 +394,14 @@
         const prevScroll = body.querySelector('.cal-scroll');
         const keep = prevScroll && key === lastKey ? prevScroll.scrollTop : null;
         let html = state.eventsMissing ? C.migrationNoticeHtml() : '';
+        // What the calendar could not show: the rest is still drawn, but it is not claimed to be complete.
+        if (state.problems.length) html += `<div class="crm-notice cal-partial" role="status">${C.icon('flag')}<div><b>Some items are missing from this view.</b> ${state.problems.map(p => `${esc(p.source)}: ${esc(p.reason)}`).join(' · ')} <button type="button" class="ws-btn sm" data-cal-retry>Retry</button></div></div>`;
         if (state.view === 'month') html += renderMonth(items);
         else if (state.view === 'schedule') html += renderSchedule(items);
         else html += renderWeek(items, state.view === 'day' ? [state.date] : weekDays());
         body.innerHTML = html;
+        const retry = body.querySelector('[data-cal-retry]');
+        if (retry) retry.addEventListener('click', () => load());
         const sc = body.querySelector('.cal-scroll');
         if (sc) { fitScroll(); sc.scrollTop = keep != null ? keep : 8 * HOUR_PX - 8; }
         lastKey = key;

@@ -100,18 +100,18 @@
         try {
             const today = L.todayIST(), month = L.dateRange('month');
             const [open, accepted] = await Promise.all([
-                sb.from('crm_quotes').select('status, valid_until, total, currency').in('status', ['draft', 'sent']).limit(2000),
-                sb.from('crm_quotes').select('total, currency').eq('status', 'accepted').gte('accepted_at', `${month.from}T00:00:00+05:30`).limit(2000),
+                C.fetchAll(() => sb.from('crm_quotes').select('id, status, valid_until, total, currency').in('status', ['draft', 'sent']).order('id'), 20000).then(data => ({ data })),
+                C.fetchAll(() => sb.from('crm_quotes').select('id, total, currency').eq('status', 'accepted').gte('accepted_at', `${month.from}T00:00:00+05:30`).order('id'), 20000).then(data => ({ data })),
             ]);
             const rows = open.data || [], acc = accepted.data || [];
-            const cur = (rows[0] || acc[0] || {}).currency || 'INR';
-            const sum = list => list.filter(r => (r.currency || 'INR') === cur).reduce((a, r) => a + Number(r.total || 0), 0);
+            // Each currency on its own (BUG-04): "₹1.2L · $400", never one sum in the first row's currency.
+            const sumText = list => { const m = new Map(); list.forEach(r => { const c = r.currency || 'INR'; m.set(c, (m.get(c) || 0) + Number(r.total || 0)); }); return L.moneyList([...m].map(([currency, value]) => ({ currency, value })), { full: true }) || L.money(0, 'INR'); };
             const sent = rows.filter(r => r.status === 'sent' && !(r.valid_until && r.valid_until < today));
             const expired = rows.filter(r => r.status === 'sent' && r.valid_until && r.valid_until < today);
             el.innerHTML = `
-                <button type="button" class="b24-counter" data-counter="sent"><span class="n">${sent.length}</span>Awaiting answer · <b>${esc(L.money(sum(sent), cur))}</b></button>
+                <button type="button" class="b24-counter" data-counter="sent"><span class="n">${sent.length}</span>Awaiting answer · <b>${esc(sumText(sent))}</b></button>
                 <button type="button" class="b24-counter${expired.length ? ' red' : ''}" data-counter="expired"><span class="n">${expired.length}</span>Expired</button>
-                <button type="button" class="b24-counter green" data-counter="accepted"><span class="n">${acc.length}</span>Accepted this month · <b>${esc(L.money(sum(acc), cur))}</b></button>
+                <button type="button" class="b24-counter green" data-counter="accepted"><span class="n">${acc.length}</span>Accepted this month · <b>${esc(sumText(acc))}</b></button>
                 <button type="button" class="b24-counter" data-counter="draft"><span class="n">${rows.filter(r => r.status === 'draft').length}</span>Drafts</button>`;
         } catch (e) { el.innerHTML = ''; }
     }

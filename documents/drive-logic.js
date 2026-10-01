@@ -33,6 +33,7 @@
             .replace(/&colon;/gi, ':').replace(/&tab;/gi, '\t').replace(/&newline;/gi, '\n').replace(/&amp;/gi, '&');
     }
     function safeHref(v) {
+        // eslint-disable-next-line no-control-regex -- control characters hide "javascript:" from the check
         const plain = decodeEntities(v).replace(/[\u0000-\u0020\u007f-\u009f]/g, '');
         return /^(https?:|mailto:|tel:|\/(?!\/)|#)/i.test(plain) ? plain : null;
     }
@@ -363,6 +364,7 @@
     }
     /** Nice file name for a download: keeps letters, digits, spaces, dots, dashes. */
     function fileName(name, ext) {
+        // eslint-disable-next-line no-control-regex -- control characters are not allowed in file names
         const base = String(name || 'Untitled').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Untitled';
         return ext && !base.toLowerCase().endsWith('.' + ext) ? `${base}.${ext}` : base;
     }

@@ -3,7 +3,13 @@
    owner and (for admins) company. Every tile and widget loads on its own so a
    module that is not migrated yet only blanks its own card.
 
-   URL params: range=today|week|month|quarter|custom  from= to=  owner=<uuid|me>  company=<name>
+   URL params: range=today|week|month|quarter|custom  from= to=  owner=<uuid|me>  company=<name>  currency=<ISO code>
+
+   Totals come from the database (crm_deal_summary / crm_lead_summary,
+   supabase-crm-summary-migration.sql), over every row the person may see and
+   per currency: a rupee is never added to a dollar. When deals use more than
+   one currency a "Values in" picker chooses which one the value tiles, the
+   stage bars and the top deals show; the others are listed next to them.
    ============================================================================ */
 (async function () {
     'use strict';
@@ -17,10 +23,11 @@
     const f = {
         range: C.param('range') || 'month', from: C.param('from') || '', to: C.param('to') || '',
         owner: C.param('owner') || '', company: ctx.isAdmin ? (C.param('company') || '') : '',
+        currency: /^[A-Z]{3}$/.test(C.param('currency') || '') ? C.param('currency') : '',
     };
     function range() { const r = L.dateRange(f.range, new Date(), { from: f.from, to: f.to }); return r || L.dateRange('month'); }
     function ownerId() { return f.owner === 'me' ? me.id : f.owner || null; }
-    function persist() { ['range', 'from', 'to', 'owner', 'company'].forEach(k => C.setParam(k, f[k] || null, true)); }
+    function persist() { ['range', 'from', 'to', 'owner', 'company', 'currency'].forEach(k => C.setParam(k, f[k] || null, true)); }
 
     /* Query helpers: apply the shared filters; count or rows. */
     function scoped(b, opts) {
@@ -47,6 +54,46 @@
         return r.data || [];
     }
     function missing(e) { return C.isMissingSchema(e); }
+    const noFunction = e => !!e && (e.code === 'PGRST202' || e.code === '42883');
+
+    /** Every row (a page of 1,000 at a time), up to `max`; `partial` says the cap was reached. Only for the fallback below. */
+    async function allRows(table, select, build, opts, max = 10000) {
+        const out = [];
+        for (let from = 0; from < max; from += 1000) {
+            let b = scoped(sb.from(table).select(select), opts);
+            if (build) b = build(b);
+            const r = await b.order('id').range(from, from + 999);
+            if (r.error) throw r.error;
+            out.push(...(r.data || []));
+            if ((r.data || []).length < 1000) return { rows: out, partial: false };
+        }
+        return { rows: out, partial: true };
+    }
+    /** Deal totals per currency: the database adds them up; before migration 19, the browser does (paged). */
+    async function dealSummary(r) {
+        const res = await sb.rpc('crm_deal_summary', { p_owner: ownerId(), p_company: f.company || null, p_from: r.from, p_to: r.to });
+        if (!res.error && res.data && Array.isArray(res.data.currencies)) return { ...res.data, partial: false };
+        if (res.error && !noFunction(res.error)) throw res.error;
+        const cols = 'id, value, currency, probability, stage_id, status, archived_at';
+        const [open, closed] = await Promise.all([
+            allRows('crm_deals', cols, b => b.eq('status', 'open').is('archived_at', null), { ownerCol: 'owner_id' }),
+            allRows('crm_deals', cols, b => b.in('status', ['won', 'lost']).is('archived_at', null).gte('actual_close_date', r.from).lte('actual_close_date', r.to), { ownerCol: 'owner_id' }),
+        ]);
+        return { ...L.dealsByCurrency(open.rows.concat(closed.rows)), partial: open.partial || closed.partial };
+    }
+    /** Lead counts by status, and conversion among leads created in the period. */
+    async function leadSummary(iso) {
+        const res = await sb.rpc('crm_lead_summary', { p_owner: ownerId(), p_company: f.company || null, p_from: iso.from, p_to: iso.to });
+        if (!res.error && res.data && res.data.by_status) return res.data;
+        if (res.error && !noFunction(res.error)) throw res.error;
+        const by_status = {};
+        await Promise.all(lk.leadStatuses.map(async st => { by_status[st.key] = await count('crm_leads', b => b.eq('status', st.key).is('archived_at', null), { ownerCol: 'owner_id' }); }));
+        const [created, converted] = await Promise.all([
+            count('crm_leads', b => b.is('archived_at', null).gte('created_at', iso.from).lt('created_at', iso.to), { ownerCol: 'owner_id' }),
+            count('crm_leads', b => b.is('archived_at', null).gte('created_at', iso.from).lt('created_at', iso.to).or('status.eq.converted,converted_at.not.is.null'), { ownerCol: 'owner_id' }),
+        ]);
+        return { by_status, created, created_converted: converted };
+    }
     function widgetError(el, e) {
         el.innerHTML = missing(e)
             ? `<div class="muted" style="font-size:13px">${C.icon('lock', 'sm')} Not set up yet — run the CRM migrations.</div>`
@@ -79,7 +126,7 @@
             </div>
             <h2 class="crm-section-title" style="font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--ws-text-muted);margin:4px 0 10px">Contacts &amp; leads</h2>
             <div class="crm-kpis" id="k1">${skel(5)}</div>
-            <h2 class="crm-section-title" style="font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--ws-text-muted);margin:4px 0 10px">Pipeline</h2>
+            <div class="crm-section-title" style="margin:4px 0 10px;align-items:center"><h2 style="font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--ws-text-muted);margin:0">Pipeline</h2><div class="right" id="cur-pick"></div></div>
             <div class="crm-kpis" id="k2">${skel(5)}</div>
             <h2 class="crm-section-title" style="font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--ws-text-muted);margin:4px 0 10px">Work</h2>
             <div class="crm-kpis" id="k3">${skel(4)}</div>
@@ -133,12 +180,12 @@
                 out.push(kpi({ label: 'New contacts', value: fresh, sub: 'in this period', href: '/contacts/', cls: fresh ? 'ok' : '' }));
             } catch (e) { out.push(kpiFail('Total contacts', e), kpiFail('New contacts', e)); }
             try {
-                const [open, qualified, created] = await Promise.all([
+                const [open, qualified, ls] = await Promise.all([
                     openLeadKeys.length ? count('crm_leads', b => b.in('status', openLeadKeys).is('archived_at', null), { ownerCol: 'owner_id' }) : Promise.resolve(0),
                     count('crm_leads', b => b.eq('status', 'qualified').is('archived_at', null), { ownerCol: 'owner_id' }),
-                    rows('crm_leads', 'id, status, converted_at, archived_at', b => b.gte('created_at', iso.from).lt('created_at', iso.to), { ownerCol: 'owner_id' }),
+                    leadSummary(iso),
                 ]);
-                const m = L.leadMetrics(created, lk.leadStatuses);
+                const m = { total: ls.created, converted: ls.created_converted, conversion_rate: ls.created ? Math.round(ls.created_converted / ls.created * 100) : null };
                 out.push(kpi({ label: 'Open leads', value: open, href: `/leads/${owner ? '?owner=' + encodeURIComponent(f.owner) : ''}`, cls: 'accent' }));
                 out.push(kpi({ label: 'Qualified leads', value: qualified, href: '/leads/?status=qualified' }));
                 out.push(kpi({ label: 'Lead conversion', value: m.conversion_rate == null ? '—' : m.conversion_rate + '%', sub: `${m.converted} of ${m.total} created in period`, href: '/leads/?status=converted' }));
@@ -146,45 +193,55 @@
             el.innerHTML = out.join('');
         })();
 
-        // --- Pipeline tiles + widgets
+        // --- Pipeline tiles + widgets: per-currency totals from the database
         (async () => {
             const el = view.querySelector('#k2');
             try {
-                const [open, won, lost] = await Promise.all([
-                    rows('crm_deals', 'id, title, value, currency, probability, stage_id, status, owner_id, contact_id, expected_close_date, archived_at', b => b.eq('status', 'open').is('archived_at', null), { ownerCol: 'owner_id' }, 2000),
-                    rows('crm_deals', 'id, value, status, archived_at', b => b.eq('status', 'won').gte('actual_close_date', r.from).lte('actual_close_date', r.to), { ownerCol: 'owner_id' }, 2000),
-                    rows('crm_deals', 'id, value, status, archived_at', b => b.eq('status', 'lost').gte('actual_close_date', r.from).lte('actual_close_date', r.to), { ownerCol: 'owner_id' }, 2000),
-                ]);
-                const m = L.pipelineMetrics(open), mw = L.pipelineMetrics(won), ml = L.pipelineMetrics(lost);
-                const closed = mw.won_count + ml.lost_count;
-                const cur = (open[0] && open[0].currency) || 'INR';
+                const sum = await dealSummary(r);
+                const curs = sum.currencies.map(c => c.currency);
+                const cur = curs.includes(f.currency) ? f.currency : (curs[0] || 'INR');
+                const pick = view.querySelector('#cur-pick');
+                pick.innerHTML = curs.length > 1 ? `<label class="muted" style="font-size:12.5px;display:inline-flex;gap:6px;align-items:center">Values in <select id="currency" aria-label="Currency for values">${curs.map(c => `<option ${c === cur ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>` : '';
+                const sel = pick.querySelector('#currency');
+                if (sel) sel.addEventListener('change', e => { f.currency = e.target.value; persist(); render(); load(); });
+                const one = sum.currencies.find(c => c.currency === cur) || { open_value: 0, weighted_value: 0 };
+                const list = k => sum.currencies.map(c => ({ value: c[k], currency: c.currency }));
+                const also = k => { const t = L.moneyList(list(k).filter(x => x.currency !== cur)); return t ? ` · also ${t}` : ''; };
+                const closed = sum.won_count + sum.lost_count;
+                const partial = sum.partial ? ' (first 10,000 deals only)' : '';
                 el.innerHTML = [
-                    kpi({ label: 'Open deals', value: m.open_count, href: `/deals/${owner ? '?owner=' + encodeURIComponent(f.owner) : ''}`, cls: 'accent' }),
-                    kpi({ label: 'Won deals', value: mw.won_count, sub: `${L.money(mw.won_value, cur)} in period`, subCls: 'ok', href: '/deals/?status=won', cls: 'ok' }),
-                    kpi({ label: 'Lost deals', value: ml.lost_count, sub: closed ? `Win rate ${Math.round(mw.won_count / closed * 100)}%` : 'No closed deals in period', href: '/deals/?status=lost', cls: ml.lost_count ? 'bad' : '' }),
-                    kpi({ label: 'Pipeline value', value: esc(L.moneyShort(m.pipeline_value, cur)), sub: L.money(m.pipeline_value, cur), href: '/deals/?view=board' }),
-                    kpi({ label: 'Expected value', value: esc(L.moneyShort(m.weighted_value, cur)), sub: 'value × probability', href: '/deals/' }),
+                    kpi({ label: 'Open deals', value: sum.open_count, sub: partial ? 'first 10,000 deals only' : '', href: `/deals/${owner ? '?owner=' + encodeURIComponent(f.owner) : ''}`, cls: 'accent' }),
+                    kpi({ label: 'Won deals', value: sum.won_count, sub: `${L.moneyList(list('won_value')) || L.moneyShort(0, cur)} in period`, subCls: 'ok', href: '/deals/?status=won', cls: 'ok' }),
+                    kpi({ label: 'Lost deals', value: sum.lost_count, sub: closed ? `Win rate ${Math.round(sum.won_count / closed * 100)}%` : 'No closed deals in period', href: '/deals/?status=lost', cls: sum.lost_count ? 'bad' : '' }),
+                    kpi({ label: 'Pipeline value', value: esc(L.moneyShort(one.open_value, cur)), sub: L.money(one.open_value, cur) + also('open_value') + partial, href: '/deals/?view=board' }),
+                    kpi({ label: 'Expected value', value: esc(L.moneyShort(one.weighted_value, cur)), sub: 'value × probability' + also('weighted_value'), href: '/deals/' }),
                 ].join('');
-                // Pipeline by stage
+                // Pipeline by stage: bars by this currency's value; counts of every currency.
                 const stEl = view.querySelector('#w-stages');
-                const pipelineIds = Array.from(new Set(open.map(d => lk.stageById[d.stage_id] && lk.stageById[d.stage_id].pipeline_id).filter(Boolean)));
-                const stages = L.stagesOf(lk.stages, pipelineIds.length === 1 ? pipelineIds[0] : ((lk.defaultPipeline && lk.defaultPipeline.id) || pipelineIds[0])).filter(s => !s.is_won && !s.is_lost);
-                if (!open.length) C.empty(stEl, 'No open deals', 'Deals in the pipeline will be summarised here.', `<a class="ws-btn sm" href="/deals/?new=1">${C.icon('plus')}<span>New deal</span></a>`);
-                else stEl.innerHTML = bars(stages.map(s => ({ label: s.name, color: s.color, value: (m.by_stage[s.id] || { value: 0 }).value, count: (m.by_stage[s.id] || { count: 0 }).count })), i => `${i.count} · ${L.moneyShort(i.value, cur)}`) +
+                const pipelineIds = Array.from(new Set(sum.stages.map(x => lk.stageById[x.stage_id] && lk.stageById[x.stage_id].pipeline_id).filter(Boolean)));
+                const stages = L.stagesOf(lk.stages, pipelineIds.length === 1 ? pipelineIds[0] : ((lk.defaultPipeline && lk.defaultPipeline.id) || pipelineIds[0])).filter(st => !st.is_won && !st.is_lost);
+                if (!sum.open_count) C.empty(stEl, 'No open deals', 'Deals in the pipeline will be summarised here.', `<a class="ws-btn sm" href="/deals/?new=1">${C.icon('plus')}<span>New deal</span></a>`);
+                else stEl.innerHTML = bars(stages.map(st => {
+                    const here = sum.stages.filter(x => x.stage_id === st.id), mine = here.find(x => x.currency === cur) || { count: 0, value: 0 };
+                    const count = here.reduce((a, x) => a + x.count, 0);
+                    return { label: st.name, color: st.color, value: mine.value, count, other: count - mine.count };
+                }), i => `${i.count} · ${L.moneyShort(i.value, cur)}${i.other ? ` +${i.other} other currency` : ''}`) +
                     (pipelineIds.length > 1 ? '<p class="muted" style="font-size:12px;margin:10px 0 0">Several pipelines are in use; the default pipeline\'s stages are shown.</p>' : '');
-                // Closing soon
-                const soon = open.filter(d => d.expected_close_date && L.daysBetween(today, d.expected_close_date) <= 30).sort((a, b) => a.expected_close_date.localeCompare(b.expected_close_date)).slice(0, 8);
+                // Closing soon and the top deals: small queries of their own, never a slice of a capped download.
+                const [soon, top] = await Promise.all([
+                    rows('crm_deals', 'id, title, value, currency, stage_id, owner_id, expected_close_date', b => b.eq('status', 'open').is('archived_at', null).not('expected_close_date', 'is', null).lte('expected_close_date', L.addDays(today, 30)).order('expected_close_date'), { ownerCol: 'owner_id' }, 8),
+                    rows('crm_deals', 'id, title, value, currency, probability, stage_id, owner_id', b => b.eq('status', 'open').is('archived_at', null).eq('currency', cur).order('value', { ascending: false }), { ownerCol: 'owner_id' }, 6),
+                ]);
                 const clEl = view.querySelector('#w-closing');
                 if (!soon.length) C.empty(clEl, 'Nothing closing soon', 'Open deals with an expected close date in the next 30 days appear here.');
                 else clEl.innerHTML = `<ul class="crm-list compact">${soon.map(d => { const days = L.daysBetween(today, d.expected_close_date); return listItem('deal', `/deals/?id=${d.id}`, d.title, `${esc(lk.stageById[d.stage_id] ? lk.stageById[d.stage_id].name : '')} · ${esc(C.personText(d.owner_id))}`, `<span class="crm-due ${days < 0 ? 'overdue' : days === 0 ? 'today' : 'soon'}">${days < 0 ? Math.abs(days) + 'd late' : days === 0 ? 'Today' : days + 'd'}</span><b style="font-size:13px">${esc(L.moneyShort(d.value, d.currency))}</b>`); }).join('')}</ul>`;
-                // Top open deals
-                const top = open.slice().sort((a, b) => Number(b.value) - Number(a.value)).slice(0, 6);
                 const tpEl = view.querySelector('#w-top');
                 if (!top.length) C.empty(tpEl, 'No open deals', '');
-                else tpEl.innerHTML = `<ul class="crm-list compact">${top.map(d => listItem('deal', `/deals/?id=${d.id}`, d.title, `${esc(lk.stageById[d.stage_id] ? lk.stageById[d.stage_id].name : '')} · ${d.probability}% · ${esc(C.personText(d.owner_id))}`, `<b style="font-size:13px">${esc(L.money(d.value, d.currency))}</b>`)).join('')}</ul>`;
+                else tpEl.innerHTML = `<ul class="crm-list compact">${top.map(d => listItem('deal', `/deals/?id=${d.id}`, d.title, `${esc(lk.stageById[d.stage_id] ? lk.stageById[d.stage_id].name : '')} · ${d.probability}% · ${esc(C.personText(d.owner_id))}`, `<b style="font-size:13px">${esc(L.money(d.value, d.currency))}</b>`)).join('')}</ul>` +
+                    (curs.length > 1 ? `<p class="muted" style="font-size:12px;margin:10px 0 0">In ${esc(cur)}; choose another currency above.</p>` : '');
             } catch (e) {
                 el.innerHTML = ['Open deals', 'Won deals', 'Lost deals', 'Pipeline value', 'Expected value'].map(l => kpiFail(l, e)).join('');
-                ['#w-stages', '#w-closing', '#w-top'].forEach(s => widgetError(view.querySelector(s), e));
+                ['#w-stages', '#w-closing', '#w-top'].forEach(sel => widgetError(view.querySelector(sel), e));
             }
         })();
 
@@ -192,10 +249,10 @@
         (async () => {
             const el = view.querySelector('#w-leads');
             try {
-                const leads = await rows('crm_leads', 'id, status, archived_at, converted_at', b => b.is('archived_at', null), { ownerCol: 'owner_id' }, 5000);
-                if (!leads.length) return C.empty(el, 'No leads yet', 'Capture your first enquiry.', `<a class="ws-btn sm" href="/leads/?new=1">${C.icon('plus')}<span>New lead</span></a>`);
-                const m = L.leadMetrics(leads, lk.leadStatuses);
-                el.innerHTML = bars(lk.leadStatuses.slice().sort((a, b) => a.sort_order - b.sort_order).map(s => ({ label: s.label, color: s.color, value: m.by_status[s.key] || 0 })), i => String(i.value));
+                const ls = await leadSummary(L.rangeToIso(range()));
+                const byStatus = ls.by_status || {};
+                if (!Object.values(byStatus).some(Boolean)) return C.empty(el, 'No leads yet', 'Capture your first enquiry.', `<a class="ws-btn sm" href="/leads/?new=1">${C.icon('plus')}<span>New lead</span></a>`);
+                el.innerHTML = bars(lk.leadStatuses.slice().sort((a, b) => a.sort_order - b.sort_order).map(st => ({ label: st.label, color: st.color, value: byStatus[st.key] || 0 })), i => String(i.value));
             } catch (e) { widgetError(el, e); }
         })();
 
@@ -204,8 +261,15 @@
             const el = view.querySelector('#k3'); const out = [];
             let tasks = [];
             try {
-                tasks = await rows('tasks', 'id, title, status, priority, due_date, assignee_id, completed_at, archived_at, project_id', b => b.is('archived_at', null).is('completed_at', null).not('due_date', 'is', null).lte('due_date', today).order('due_date'), { ownerCol: 'assignee_id' }, 2000);
-                const c = L.taskCounts(tasks, today);
+                // Counted by the database; the list is the first few, with "n more".
+                const open = b => b.is('archived_at', null).is('completed_at', null);
+                const [overdue, dueToday, list] = await Promise.all([
+                    count('tasks', b => open(b).lt('due_date', today), { ownerCol: 'assignee_id' }),
+                    count('tasks', b => open(b).eq('due_date', today), { ownerCol: 'assignee_id' }),
+                    rows('tasks', 'id, title, status, priority, due_date, assignee_id, completed_at, archived_at, project_id', b => open(b).not('due_date', 'is', null).lte('due_date', today).order('due_date'), { ownerCol: 'assignee_id' }, 10),
+                ]);
+                tasks = list; tasks.total = overdue + dueToday;
+                const c = { overdue, due_today: dueToday };
                 out.push(kpi({ label: 'Overdue tasks', value: c.overdue, href: `/tasks/?view=overdue${owner ? '&owner=' + encodeURIComponent(f.owner) : ''}`, cls: c.overdue ? 'bad' : '' }));
                 out.push(kpi({ label: 'Due today', value: c.due_today, href: '/tasks/?view=today', cls: c.due_today ? 'warn' : '' }));
             } catch (e) { out.push(kpiFail('Overdue tasks', e), kpiFail('Due today', e)); widgetError(view.querySelector('#w-tasks'), e); tasks = null; }
@@ -216,19 +280,24 @@
             let events = null;
             try {
                 const now = new Date(), week = new Date(now.getTime() + 7 * 86400000);
-                events = await rows('calendar_events', 'id, title, starts_at, ends_at, event_type, owner_id, contact_id, deal_id, status', b => b.eq('status', 'scheduled').gte('ends_at', now.toISOString()).lte('starts_at', week.toISOString()).order('starts_at'), { ownerCol: 'owner_id' }, 200);
-                out.push(kpi({ label: 'Upcoming meetings', value: events.length, sub: 'next 7 days', href: '/calendar/' }));
+                const upcoming = b => b.eq('status', 'scheduled').gte('ends_at', now.toISOString()).lte('starts_at', week.toISOString());
+                const [n, list] = await Promise.all([
+                    count('calendar_events', upcoming, { ownerCol: 'owner_id' }),
+                    rows('calendar_events', 'id, title, starts_at, ends_at, event_type, owner_id, contact_id, deal_id, status', b => upcoming(b).order('starts_at'), { ownerCol: 'owner_id' }, 8),
+                ]);
+                events = list;
+                out.push(kpi({ label: 'Upcoming meetings', value: n, sub: 'next 7 days', href: '/calendar/' }));
             } catch (e) { out.push(kpiFail('Upcoming meetings', e)); widgetError(view.querySelector('#w-meetings'), e); }
             el.innerHTML = out.join('');
             if (tasks) {
                 const tEl = view.querySelector('#w-tasks');
                 if (!tasks.length) C.empty(tEl, 'Nothing overdue', 'No open tasks are due today or earlier.');
-                else tEl.innerHTML = `<ul class="crm-list compact">${tasks.slice(0, 10).map(t => listItem('tasks', `/tasks/?id=${t.id}`, t.title, `${esc(C.personText(t.assignee_id))} · ${C.priorityBadge(t.priority)}`, C.dueHtml(t, today))).join('')}</ul>${tasks.length > 10 ? `<p class="muted" style="font-size:12.5px;margin:10px 0 0"><a class="crm-link" href="/tasks/?view=overdue">${tasks.length - 10} more…</a></p>` : ''}`;
+                else tEl.innerHTML = `<ul class="crm-list compact">${tasks.map(t => listItem('tasks', `/tasks/?id=${t.id}`, t.title, `${esc(C.personText(t.assignee_id))} · ${C.priorityBadge(t.priority)}`, C.dueHtml(t, today))).join('')}</ul>${tasks.total > tasks.length ? `<p class="muted" style="font-size:12.5px;margin:10px 0 0"><a class="crm-link" href="/tasks/?view=overdue">${tasks.total - tasks.length} more…</a></p>` : ''}`;
             }
             if (events) {
                 const mEl = view.querySelector('#w-meetings');
                 if (!events.length) C.empty(mEl, 'No meetings this week', 'Scheduled events for the next 7 days appear here.', `<a class="ws-btn sm" href="/calendar/?new=1">${C.icon('plus')}<span>Schedule</span></a>`);
-                else mEl.innerHTML = `<ul class="crm-list compact">${events.slice(0, 8).map(e => listItem('calendar', `/calendar/?id=${e.id}`, e.title, `${esc(L.fmtDateTime(e.starts_at))} · ${esc(C.personText(e.owner_id))}`, C.statusBadge(L.EVENT_TYPE, e.event_type))).join('')}</ul>`;
+                else mEl.innerHTML = `<ul class="crm-list compact">${events.map(e => listItem('calendar', `/calendar/?id=${e.id}`, e.title, `${esc(L.fmtDateTime(e.starts_at))} · ${esc(C.personText(e.owner_id))}`, C.statusBadge(L.EVENT_TYPE, e.event_type))).join('')}</ul>`;
             }
         })();
 

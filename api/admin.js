@@ -1,4 +1,5 @@
-const { safeEqual, sessionUser, bearer } = require('../lib/request-auth');
+const { safeEqual, sessionUser, bearer, clientIp } = require('../lib/request-auth');
+const { rpc } = require('../lib/service-rpc');
 const { resolveShift } = require('../company-config');
 // Password login and signed-cookie admin API. Uses the Supabase service_role key to bypass RLS
 // and return every employee's test results for the dashboard.
@@ -12,7 +13,7 @@ const { resolveShift } = require('../company-config');
 const { sendMail, senderFor: mailSenderFor, COMPANY_TO_USER, COMING_SOON_COMPANIES } = require('../lib/mailer');
 const bitrix = require('../lib/bitrix');
 const { createSession, validSession, sessionCookie, sameOrigin } = require('../lib/admin-session');
-const { auditWrap } = require('../lib/admin-audit');
+const { auditWrap, recordSecurityEvent } = require('../lib/admin-audit');
 const { istParts, istToday, buildPunchEmail, evaluateShift, describeWorkingDays,
         weekOffsFor, buildMonth, computePay, computeMonthlyPay, monthDates, DAY_STATUS,
         buildLeaveChatLine, assignDays, effectiveShift, istIsoWeekday, shiftDays,
@@ -307,6 +308,39 @@ async function recomputePunches({ sb, from, to, apply, employeeCode, deadlineAt 
   };
 }
 
+/* ---------------------------------------------------------------------------
+ * Admin password attempts (SEC-09). Every request that carries a password
+ * counts one attempt BEFORE the password is looked at — per address and
+ * across all addresses — in the database (ws_rate_hit), so parallel requests
+ * and separate function instances share one count. Over the limit, the
+ * password is not even checked. A right password clears its address's count.
+ * If the database limiter cannot be reached, a per-instance counter stands in.
+ * ------------------------------------------------------------------------- */
+const PW_WINDOW_SECONDS = 15 * 60;
+const PW_PER_ADDRESS = 10;
+const PW_ALL_ADDRESSES = 100;
+const pwFallback = new Map();
+
+function fallbackHit(key, max) {
+  const now = Date.now();
+  const e = pwFallback.get(key);
+  const live = e && now - e.start < PW_WINDOW_SECONDS * 1000 ? e : { start: now, hits: 0 };
+  live.hits++;
+  pwFallback.set(key, live);
+  if (pwFallback.size > 5000) pwFallback.clear();
+  return { allowed: live.hits <= max, hits: live.hits, retry_after: Math.ceil((live.start + PW_WINDOW_SECONDS * 1000 - now) / 1000) };
+}
+
+async function passwordAttempt(req, db) {
+  const ip = clientIp(req);
+  const count = async (key, max) => {
+    const r = await rpc('ws_rate_hit', { p_key: key, p_window_seconds: PW_WINDOW_SECONDS, p_max: max }, db);
+    return r.ok && r.data && typeof r.data.allowed === 'boolean' ? r.data : fallbackHit(key, max);
+  };
+  const [one, all] = await Promise.all([count('admin-pw:ip:' + ip, PW_PER_ADDRESS), count('admin-pw:all', PW_ALL_ADDRESSES)]);
+  return { ip, allowed: one.allowed && all.allowed, hits: one.hits, retry_after: Math.max(one.allowed ? 0 : one.retry_after, all.allowed ? 0 : all.retry_after) };
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (!sameOrigin(req)) return res.status(403).json({ error: 'Cross-origin admin requests are not allowed.' });
@@ -334,12 +368,25 @@ module.exports = async function handler(req, res) {
   if (!ADMIN_PASSWORD) {
     return res.status(500).json({ error: 'ADMIN_PASSWORD not configured on server.' });
   }
-  const passwordOK = !!password && safeEqual(password, ADMIN_PASSWORD);
+  let passwordOK = false;
+  if (password) {
+    const attempt = await passwordAttempt(req, { url: SUPABASE_URL, key: SERVICE_KEY, request: fetch });
+    if (!attempt.allowed) {
+      console.warn(JSON.stringify({ event: 'admin_password_blocked', ip: attempt.ip, action, hits: attempt.hits }));
+      // One audit row when an address is first shut out, not one per try.
+      if (attempt.hits === PW_PER_ADDRESS + 1) await recordSecurityEvent('admin_password_locked', req, { detail: 'Too many admin password attempts from this address' });
+      res.setHeader('Retry-After', String(attempt.retry_after || PW_WINDOW_SECONDS));
+      return res.status(429).json({ error: 'Too many password attempts. Try again in a few minutes.' });
+    }
+    passwordOK = safeEqual(password, ADMIN_PASSWORD);
+    if (passwordOK) await rpc('ws_rate_clear', { p_key: 'admin-pw:ip:' + attempt.ip }, { url: SUPABASE_URL, key: SERVICE_KEY, request: fetch });
+    else console.warn(JSON.stringify({ event: 'admin_password_rejected', ip: attempt.ip, action, hits: attempt.hits }));
+  }
   const sessionOK = validSession(req.headers.cookie, process.env);
   // A person signed in to WorkSuite whose workspace role is admin needs no password.
   const adminUser = !passwordOK && !sessionOK && action !== 'login' ? await workspaceAdmin(req, SUPABASE_URL, SERVICE_KEY) : null;
   if (action === 'login' ? !passwordOK : !passwordOK && !sessionOK && !adminUser) {
-    // Small delay to slow brute-force. Not a defense on its own — pick a strong password.
+    // A small delay on top of the attempt limit above.
     await new Promise(r => setTimeout(r, 500));
     return res.status(401).json({ error: action === 'login' ? 'Invalid password' : 'Admin session expired. Please sign in again.' });
   }
@@ -489,13 +536,39 @@ module.exports = async function handler(req, res) {
       } catch (e) { return res.status(e.status || 502).json({ error: e.message || 'Employee update failed' }); }
     }
 
-    if (action === 'create_employee' || action === 'set_employee_status' || action === 'bulk_employees') {
+    if (action === 'create_employee' || action === 'set_employee_status' || action === 'bulk_employees' || action === 'reset_employee_mfa') {
       const people = require('../lib/employee-admin');
       const run = { create_employee: people.createEmployee, set_employee_status: people.setEmployeeStatus,
-                    bulk_employees: people.bulkEmployees }[action];
+                    bulk_employees: people.bulkEmployees, reset_employee_mfa: people.resetMfa }[action];
       try {
         return res.status(200).json(await run(body, { url: SUPABASE_URL, key: SERVICE_KEY }));
       } catch (e) { return res.status(e.status || 502).json({ error: e.message || 'Request failed' }); }
+    }
+
+    // Setup health (F-01): settings present or not (never their values) and which migrations ran.
+    if (action === 'setup_health') {
+      return res.status(200).json(await require('../lib/setup-health').setupHealth(process.env, { url: SUPABASE_URL, key: SERVICE_KEY, request: fetch }));
+    }
+
+    // Files left in the retired public "published" bucket (supabase-document-links-migration.sql):
+    // no longer reachable, removed here through the Storage API. { apply: true } deletes.
+    if (action === 'published_cleanup') {
+      const db = { url: SUPABASE_URL, key: SERVICE_KEY, request: fetch };
+      const list = await rpc('ws_published_leftovers', { p_limit: 500 }, db);
+      if (!list.ok) return res.status(list.missing ? 409 : 502).json({ error: list.missing ? 'Run supabase-document-links-migration.sql first' : 'Could not list the leftover copies' });
+      const names = Array.isArray(list.data) ? list.data.filter(n => typeof n === 'string') : [];
+      if (body.apply !== true) return res.status(200).json({ leftovers: names.length, more: names.length === 500 });
+      let removed = 0;
+      for (let i = 0; i < names.length; i += 100) {
+        const r = await fetch(`${SUPABASE_URL}/storage/v1/object/published`, {
+          method: 'DELETE', headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prefixes: names.slice(i, i + 100) }),
+        });
+        if (!r.ok) return res.status(502).json({ error: 'Storage refused the delete', removed });
+        const gone = await r.json().catch(() => []);
+        removed += Array.isArray(gone) ? gone.length : 0;
+      }
+      return res.status(200).json({ removed, more: names.length === 500 });
     }
 
     if (action === 'set_wfh') {
@@ -3126,12 +3199,13 @@ async function workspaceAdmin(req, SUPABASE_URL, SERVICE_KEY) {
   if (hit && hit.until > Date.now()) return hit.admin;
   let admin = null;
   try {
-    const user = await sessionUser(req);
+    // Held to the session gate's rules: live session, second step done, active account.
+    const user = await sessionUser(req, process.env, fetch);
     if (user) {
       const r = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=full_name,app_role,status&limit=1`,
         { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } });
       const [p] = r.ok ? await r.json() : [];
-      if (p && p.app_role === 'admin' && (p.status || 'active') !== 'inactive') admin = { id: user.id, name: p.full_name || user.email };
+      if (p && p.app_role === 'admin' && (p.status || 'active') === 'active') admin = { id: user.id, name: p.full_name || user.email };
     }
   } catch { admin = null; }
   if (ADMIN_CACHE.size > 200) ADMIN_CACHE.clear();

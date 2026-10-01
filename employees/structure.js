@@ -58,7 +58,7 @@
                 .then(r => (r.error ? sb.from('profiles').select('id, full_name, email, avatar_url, company, company2, department, job_title, status, last_seen_at').order('full_name').limit(3000) : r)),
         ]);
         if (p.error) throw p.error;
-        people = (p.data || []).filter(x => (x.status || 'active') !== 'inactive');
+        people = (p.data || []).filter(x => (x.status || 'active') === 'active');
         if (d.error && !C.isMissingSchema(d.error)) throw d.error;
         mode = d.error ? 'legacy' : (d.data || []).length ? 'live' : 'empty';
         if (mode === 'live') { depts = d.data; members = m.error ? [] : (m.data || []); }

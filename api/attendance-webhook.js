@@ -60,6 +60,18 @@ const {
   buildPunchChatLine, buildLeaveChatLine,
   shiftEndAt, autoLogoutFor, AUTO_LOGOUT_GRACE_MS, isRepeatRow,
 } = require('../lib/attendance');
+const { verifyToken, accessError } = require('../lib/request-auth');
+
+/** The signed-in employee behind `token`, held to the session gate's rules; sends the refusal itself. */
+async function signedInEmployee(res, token, SUPABASE_URL, SERVICE_KEY) {
+  const access = await verifyToken(token, { url: SUPABASE_URL, key: process.env.SUPABASE_ANON_KEY || SERVICE_KEY, serviceKey: SERVICE_KEY, request: fetch });
+  if (!access.reason) return access.user;
+  const e = accessError(access.reason);
+  res.status(e.status).json(access.reason === 'signed_out'
+    ? { error: 'session_expired', detail: 'Your session expired. Refresh the page and sign in again.' }
+    : { error: e.body.error, detail: e.body.message });
+  return null;
+}
 
 // Vercel Hobby kills the function at 10s. Stop starting new sends at 7.5s and
 // leave unsent emails as 'pending'. Bitrix has its own independent queue;
@@ -1179,14 +1191,9 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
   const sb = (path) => fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: H });
 
   try {
-    const anonKey = process.env.SUPABASE_ANON_KEY || SERVICE_KEY;
-    const uRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-      headers: { apikey: anonKey, Authorization: `Bearer ${token}` },
-    });
-    if (!uRes.ok) return res.status(401).json({ error: 'session_expired', detail: 'Your session expired. Refresh the page and sign in again.' });
-    const user = await uRes.json();
-    const userId = user && user.id;
-    if (!userId) return res.status(401).json({ error: 'session_expired' });
+    const user = await signedInEmployee(res, token, SUPABASE_URL, SERVICE_KEY);
+    if (!user) return;
+    const userId = user.id;
 
     const today = istToday();
 
@@ -1591,14 +1598,9 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
 
   try {
     // ---- 1. Who is this, really? Ask Supabase, don't trust the payload ----
-    const anonKey = process.env.SUPABASE_ANON_KEY || SERVICE_KEY;
-    const uRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-      headers: { apikey: anonKey, Authorization: `Bearer ${token}` },
-    });
-    if (!uRes.ok) return res.status(401).json({ error: 'session_expired', detail: 'Your session expired. Refresh the page and sign in again.' });
-    const user = await uRes.json();
-    const userId = user && user.id;
-    if (!userId) return res.status(401).json({ error: 'session_expired', detail: 'Could not confirm who you are. Sign in again.' });
+    const user = await signedInEmployee(res, token, SUPABASE_URL, SERVICE_KEY);
+    if (!user) return;
+    const userId = user.id;
 
     // ---- 2. Validate what the client did supply ----
     const eventType = String(body.event_type || '').toUpperCase();

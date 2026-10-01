@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { freshDb, as, makeUser, pglite } = require('./fixtures/load-db');
 
-const skip = pglite() ? false : 'PGlite is not installed (npm i -D @electric-sql/pglite)';
+const skip = pglite() ? false : 'WS_SKIP_DB_TESTS=1: database tests skipped on purpose';
 const NOVA = 'Nova Sportsmart Private Limited';
 const JOBWAYS = 'Jobways Point LLP';
 const RLS = /row-level security/;

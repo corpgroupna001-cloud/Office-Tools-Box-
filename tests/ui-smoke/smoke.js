@@ -27,7 +27,7 @@ const CHROME = process.env.CHROME_PATH || [
 if (!CHROME) { console.error('No Chrome found. Set CHROME_PATH.'); process.exit(2); }
 
 const PAGES = [
-  ['/', 'home'], ['/', 'signin'], ['/crm', 'crm'], ['/crm/settings', 'crm-settings'], ['/companies', 'companies'],
+  ['/', 'home'], ['/', 'signin'], ['/', 'pending'], ['/crm', 'crm'], ['/crm/settings', 'crm-settings'], ['/companies', 'companies'],
   ['/contacts', 'contacts'], ['/contacts?id=C1', 'contact-record'],
   ['/leads', 'leads'], ['/leads?view=list', 'leads-list'], ['/leads?id=L1', 'lead-record'], ['/leads?id=L4', 'lead-imported'],
   ['/deals', 'deals'], ['/deals?view=list', 'deals-list'], ['/deals?id=D1', 'deal-record'], ['/deals?id=D4', 'deal-imported'],
@@ -35,14 +35,15 @@ const PAGES = [
   ['/projects', 'projects'], ['/projects?id=P1', 'project-record'],
   ['/tasks', 'tasks'], ['/tasks?id=T1', 'task-record'], ['/tasks?id=new', 'task-new'], ['/tasks?id=new', 'task-people'],
   ['/documents', 'documents'], ['/documents?id=DOC1', 'document-record'],
+  ['/documents/public?t=smokepublic0000000000000000000001', 'public-doc'], ['/documents/public?t=smokeoff00000000000000000000000001', 'public-doc-off'],
   ['/calendar', 'calendar'], ['/calendar?view=day', 'calendar-day'], ['/calendar?view=week', 'calendar-week'],
-  ['/calendar?view=month', 'calendar-month'], ['/calendar?view=schedule', 'calendar-schedule'], ['/employees', 'employees'],
+  ['/calendar?view=month', 'calendar-month'], ['/calendar?view=schedule', 'calendar-schedule'], ['/calendar?view=month', 'calendar-partial'], ['/employees', 'employees'],
   ['/employees?view=tiles', 'employees-tiles'], ['/employees/structure/', 'org-chart'], ['/employees?id=22222222-2222-4222-8222-222222222222', 'employee-record'],
   ['/invoices', 'invoices'], ['/invoices?id=I1', 'invoice-record'],
   ['/quotes', 'quotes'], ['/quotes?id=Q1', 'quote-record'], ['/crm/forecast', 'forecast'],
   ['/crm/settings?section=lost', 'crm-lost-reasons'], ['/crm/settings?section=forms', 'crm-web-forms'], ['/form?f=smoke0000000000000000000000000001', 'web-form'],
   ['/chat', 'messenger'], [`/call?id=${F.CALL}`, 'call'], ['/attendance', 'attendance'],
-  ['/wsm-admin', 'admin'], ['/wsm-admin?gate=1', 'admin-gate'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/crm', 'themes'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
+  ['/wsm-admin', 'admin'], ['/wsm-admin?gate=1', 'admin-gate'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/crm', 'themes'], ['/crm', 'dialogs'], ['/crm', 'paging'], ['/tasks', 'task-complete'], ['/crm', 'notif-settings'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
 ];
 const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'leads-list', 'lead-record', 'lead-imported', 'deals', 'deals-list', 'deal-record', 'deal-imported', 'boards', 'board', 'projects',
   'project-record', 'tasks', 'task-record', 'task-new', 'task-people', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record', 'quotes', 'quote-record', 'forecast', 'crm-lost-reasons', 'crm-web-forms']);
@@ -88,6 +89,7 @@ function filterFn(col, expr) {
   };
   return not ? r => !test(r) : test;
 }
+const MAX_ROWS = 1000;
 const SKIP_PARAMS = new Set(['select', 'order', 'limit', 'offset', 'on_conflict', 'columns', 'or', 'and']);
 const FK_OF = { calendar_events: 'event_id', documents: 'document_id', invoices: 'invoice_id', projects: 'project_id', tasks: 'task_id',
   conversations: 'conversation_id', crm_deals: 'deal_id', crm_contacts: 'contact_id', boards: 'board_id', calls: 'call_id' };
@@ -134,6 +136,8 @@ async function supabase(req, res, url) {
   if (!p.startsWith('/rest/v1/')) return send(res, 404, { message: 'not mocked' });
 
   const table = decodeURIComponent(p.slice('/rest/v1/'.length));
+  // A page can make a table fail, to check how it reports a source it could not load.
+  if (DB.__fail && DB.__fail[table]) return send(res, DB.__fail[table][0], DB.__fail[table][1]);
   const rows = DB[table] || (DB[table] = []);
   const filters = [...url.searchParams].filter(([k]) => !SKIP_PARAMS.has(k)).map(([k, v]) => filterFn(k, v));
   let matched = rows.filter(r => filters.every(f => f(r)));
@@ -142,8 +146,10 @@ async function supabase(req, res, url) {
   if (method === 'GET' || method === 'HEAD') {
     matched = orderRows(matched, url.searchParams.get('order'));
     const total = matched.length;
-    const limit = Number(url.searchParams.get('limit')) || 0;
-    const outRows = (limit ? matched.slice(0, limit) : matched).map(r => embed(r, url.searchParams.get('select'), table));
+    // Like PostgREST with Supabase's max-rows: never more than 1,000 rows in one response.
+    const offset = Number(url.searchParams.get('offset')) || 0;
+    const limit = Math.min(Number(url.searchParams.get('limit')) || MAX_ROWS, MAX_ROWS);
+    const outRows = matched.slice(offset, offset + limit).map(r => embed(r, url.searchParams.get('select'), table));
     const headers = { 'Content-Range': `0-${Math.max(0, outRows.length - 1)}/${total}` };
     if (method === 'HEAD') return send(res, 200, undefined, headers);
     if (single) return outRows.length === 1 ? send(res, 200, outRows[0], headers)
@@ -183,6 +189,14 @@ function adminApi(req, res) {
     const emps = ADMIN_PEOPLE.map(({ status, status_emp, ...e }) => ({ ...e, status: status_emp }));
     if (action === 'employees') return send(res, 200, { ...base, employees: emps });
     if (action === 'shift_list') return send(res, 200, { ...base, employees: emps });
+    if (action === 'setup_health') {
+      const H = require('../../lib/setup-health');
+      const checks = [...H.configChecks({ SUPABASE_URL: 'x', SUPABASE_ANON_KEY: 'x', SUPABASE_SERVICE_ROLE_KEY: 'x', ADMIN_PASSWORD: 'short', SMTP_HOST: 'x', SMTP_PASS: 'x', MAIL_API_KEY: 'x', SMTP_USER_1: 'x' }),
+        { id: 'migration_20', group: 'Database', label: 'Migration 20: supabase-task-completion-migration.sql', state: 'missing', fix: 'Run supabase-task-completion-migration.sql in Supabase → SQL Editor.' },
+        { id: 'published_leftovers', group: 'Database', label: 'Old public file copies', state: 'degraded', detail: '3 file(s) left', fix: 'Remove them with the button below.' }];
+      const n = st => checks.filter(c => c.state === st).length;
+      return send(res, 200, { checks, summary: { ok: n('ok'), missing: n('missing'), degraded: n('degraded'), off: n('off') } });
+    }
     if (action === 'att_daily_report') return send(res, 200, { ...base, date: '2026-09-21', rows: ADMIN_PEOPLE,
       totals: { employees: 3, present: 2, late: 1, absent: 1 } });
     send(res, 200, base);
@@ -196,6 +210,9 @@ function serveStatic(req, res, url) {
   // /wsm-admin?gate=1: someone who is not an administrator sees the gate.
   if (p === '/api/admin' && /[?&]gate=1/.test(String(req.headers.referer || ''))) return send(res, 401, { error: 'Admin session expired. Please sign in again.' });
   if (p === '/api/admin') return adminApi(req, res);
+  // The typing test's AI passage (/api/groq calls Groq in production): a fixed one here.
+  if (p === '/api/groq') return send(res, 200, { passage: 'Every small step forward builds the habit that carries a team through the busy season.', tip: 'Keep your wrists relaxed.',
+    source: 'fixture', theme: 'teamwork', themeLabel: 'Teamwork', category: 'motivation', person: null, level: 'steady', wordCount: 16, duration: 60 });
   if (p.startsWith('/api/')) return send(res, 404, { error: 'not available in the smoke test' });
   if (p === '/messenger' || p === '/messenger/') p = '/chat/';
   if (p === '/admin' || p.startsWith('/admin/') && !p.endsWith('.js') && !p.endsWith('.css')) p = '/wsm-admin';
@@ -234,7 +251,9 @@ async function visit(browser, route, name, [vpName, viewport]) {
     const u = r.url();
     if (u.startsWith(ORIGIN)) return r.continue();
     if (/fonts\.(googleapis|gstatic)\.com/.test(u)) return r.respond({ status: 200, contentType: 'text/css', body: '' });
-    if (/cdn\.jsdelivr\.net|cdn\.tailwindcss\.com|cdnjs\.cloudflare\.com/.test(u)) return r.continue();
+    // Pages must start without any CDN (DEP-03): their libraries and CSS are served from the site.
+    if (process.env.SMOKE_ALLOW_CDN === '1' && /cdn\.tailwindcss\.com/.test(u)) return r.continue();   // comparison runs only
+    if (/cdn\.jsdelivr\.net|cdn\.tailwindcss\.com|cdnjs\.cloudflare\.com|unpkg\.com/.test(u)) { cdnHits.push(u); return r.respond({ status: 404, body: '' }); }
     return r.respond({ status: 204, body: '' });
   });
   const key = `sb-${new URL(ORIGIN).hostname.split('.')[0]}-auth-token`;
@@ -246,6 +265,18 @@ async function visit(browser, route, name, [vpName, viewport]) {
     } catch (e) { /* ignore */ }
   }, key, JSON.stringify(F.session()), { wallpaper: process.env.SMOKE_WALLPAPER || '', theme: process.env.SMOKE_THEME || '', signedOut: name === 'signin' });
   const result = { route, name, viewport: vpName, errors, consoleErrors, problems: [], notes: [] };
+  const cdnHits = [];
+  // A signed-in account still waiting for an administrator's approval.
+  // T2 needs a status summary; the others do not (BUG-05).
+  if (name === 'task-complete') DB.tasks.forEach(t => { t.result_required = t.id === 'T2'; });
+  // Far more people than one response holds: everything that lists them must page (PERF-01).
+  if (name === 'paging') {
+    for (let i = 0; i < 2500; i++) DB.profiles.push({ id: `p0000000-0000-4000-8000-${String(i).padStart(12, '0')}`, full_name: `Person ${String(i).padStart(4, '0')}`,
+      email: `p${i}@example.test`, company: 'Nova Sportsmart Private Limited', status: 'active', app_role: 'employee', created_at: '2026-01-01T00:00:00Z' });
+  }
+  // Two calendar sources fail (a server error and a permission refusal); the rest must still show.
+  if (name === 'calendar-partial') DB.__fail = { tasks: [500, { message: 'upstream timeout' }], leave_requests: [403, { code: '42501', message: 'permission denied for table leave_requests' }] };
+  if (name === 'pending') DB.__access = { signed_in: true, access: 'pending', status: 'pending', email_verified: true, company: 'Nova Sportsmart Private Limited', full_name: 'Maya Manager' };
   try {
     await page.goto(ORIGIN + route, { waitUntil: 'load', timeout: 30000 });
     await new Promise(r => setTimeout(r, 2600));
@@ -265,9 +296,11 @@ async function visit(browser, route, name, [vpName, viewport]) {
         return fm && fm.contains(el2) ? 'ok' : 'success dialog covered by ' + (el2 && (el2.id || el2.className));
       });
       if (onTop !== 'ok') result.problems.push('sign-in dialog hidden: ' + onTop);
+      await new Promise(r => setTimeout(r, 1200));                     // let the dialog finish its entrance before the picture
     }
     if (name === 'task-people') { await page.evaluate(() => document.querySelector('[data-assignee]').click()); await new Promise(r => setTimeout(r, 300)); }
     if (name === 'themes') { await page.evaluate(() => window.WSShell.openThemes()); await new Promise(r => setTimeout(r, 400)); }
+    if (name === 'notif-settings') { await page.evaluate(() => window.WSShell.openNotifSettings()); await new Promise(r => setTimeout(r, 600)); }
     const info = await page.evaluate(() => {
       const w = window.innerWidth;
       const text = (document.querySelector('#ws-page') || document.body).innerText || '';
@@ -293,12 +326,22 @@ async function visit(browser, route, name, [vpName, viewport]) {
       };
     });
     // The call window is full-screen and the public web form is for visitors: neither has the shell.
-    if (!info.shell && !['home', 'call', 'web-form', 'signin', 'admin-gate'].includes(name)) result.problems.push('app shell did not mount');
+    if (!info.shell && !['home', 'call', 'web-form', 'signin', 'pending', 'admin-gate', 'public-doc', 'public-doc-off'].includes(name)) result.problems.push('app shell did not mount');
+    if (name === 'calendar-partial') {
+      const t = await page.evaluate(() => document.body.innerText);
+      if (!/Some items are missing from this view/.test(t) || !/Tasks:/.test(t) || !/Leave:/.test(t)) result.problems.push('a failed calendar source was not reported');
+      if (!(await page.$('[data-cal-retry]'))) result.problems.push('no Retry for the failed sources');
+      if (!(await page.$('.cal-month .cal-ev, .cal-month [data-key]'))) result.notes.push('no items drawn on the partial calendar');
+    }
+    if (name === 'public-doc' && !/Academy kit: 1,680/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('the public document did not render');
+    if (name === 'public-doc-off' && !/no longer available/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('a link that is off did not say so');
     if (name === 'web-form' && !/Talk to our sales team/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('web form did not render');
+    if (cdnHits.length) result.problems.push(`loaded from a CDN at start-up: ${[...new Set(cdnHits)].join(', ')}`);
     if (vpName === 'phone' && info.overflow > 1) result.problems.push(`horizontal overflow ${info.overflow}px: ${info.offenders.join(', ')}`);
     if (CRM_PAGES.has(name) && info.errorText) result.problems.push(`error state on screen: "${info.errorText.slice(0, 90)}"`);
-    if (info.signedOut && name !== 'signin') result.problems.push('ended on the sign-in screen');
-    if (name === 'signin' && !info.signedOut) result.problems.push('the sign-in screen did not show');
+    if (info.signedOut && name !== 'signin' && name !== 'pending') result.problems.push('ended on the sign-in screen');
+    if ((name === 'signin' || name === 'pending') && !info.signedOut) result.problems.push('the sign-in screen did not show');
+    if (name === 'pending' && !/Waiting for approval/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('a pending account was not told it waits for approval');
     // The fixtures keep a call ringing for Maya; outside Messenger and the call
     // window its card would cover the page being checked and photographed.
     if (name !== 'messenger' && name !== 'call') await page.evaluate(() => { const r = document.getElementById('wsc-root'); if (r) r.style.display = 'none'; });
@@ -436,10 +479,149 @@ async function messengerScroll(page, vpName, result) {
   await expect('the floating date fades once scrolling stops', () => page.evaluate(() => !document.getElementById('mx-floatday').classList.contains('show')));
 }
 
+// dialogs.js with the keyboard only (UI-01): the answer must be the button that
+// has focus, never "OK" because Enter was pressed somewhere.
+async function dialogKeyboard(page, expect, wait) {
+  // Ask a question; the page keeps the answer in window.__answers.
+  const ask = (kind, opts) => page.evaluate((k, o) => { window.__answers = window.__answers || []; window.wsDialog[k](o).then(v => window.__answers.push(v)); }, kind, opts);
+  const answers = () => page.evaluate(() => window.__answers.splice(0));
+  const focused = () => page.evaluate(() => document.activeElement && document.activeElement.id);
+  await expect('a destructive confirm opens with focus on Cancel, and Enter there cancels', async () => {
+    await ask('confirm', { title: 'Delete for good?', message: 'x', okText: 'Delete', danger: true }); await wait(80);
+    const f = await focused();
+    await page.keyboard.press('Enter'); await wait(80);
+    const a = await answers();
+    return f === 'ws-dialog-cancel' && a.length === 1 && a[0] === false;
+  });
+  await expect('Tab and Shift+Tab stay on the dialog buttons; Enter answers for the focused one', async () => {
+    await ask('confirm', { title: 'Send?', message: 'x' }); await wait(80);
+    const start = await focused();                                   // not destructive: the main button
+    await page.keyboard.press('Tab'); const t1 = await focused();
+    await page.keyboard.press('Tab'); const t2 = await focused();
+    await page.keyboard.down('Shift'); await page.keyboard.press('Tab'); await page.keyboard.up('Shift'); const t3 = await focused();
+    await page.keyboard.press('Enter'); await wait(80);
+    const a = await answers();
+    return start === 'ws-dialog-ok' && t1 === 'ws-dialog-cancel' && t2 === 'ws-dialog-ok' && t3 === 'ws-dialog-cancel' && a[0] === false;
+  });
+  await expect('Escape cancels, Space on OK confirms', async () => {
+    await ask('confirm', { title: 'Q1', message: 'x' }); await wait(80); await page.keyboard.press('Escape'); await wait(80);
+    await ask('confirm', { title: 'Q2', message: 'x' }); await wait(80); await page.keyboard.press('Space'); await wait(80);
+    const a = await answers();
+    return a.length === 2 && a[0] === false && a[1] === true;
+  });
+  await expect('the dialog is announced as modal and the page behind is out of reach', async () => {
+    await ask('confirm', { title: 'Archive?', message: 'Moves it.' }); await wait(80);
+    const r = await page.evaluate(() => {
+      const card = document.getElementById('ws-dialog-card');
+      const behind = [...document.body.children].filter(el => el.id !== 'ws-dialog-overlay');
+      return { role: card.getAttribute('role'), modal: card.getAttribute('aria-modal'), label: document.getElementById(card.getAttribute('aria-labelledby')).textContent,
+               inert: behind.length > 0 && behind.every(el => el.hasAttribute('inert')) };
+    });
+    await page.keyboard.press('Escape'); await wait(80); await answers();
+    const freed = await page.evaluate(() => ![...document.body.children].some(el => el.hasAttribute('inert')));
+    return r.role === 'alertdialog' && r.modal === 'true' && r.label === 'Archive?' && r.inert && freed;
+  });
+  await expect('focus goes back where it was', async () => {
+    await page.evaluate(() => { const b = document.createElement('button'); b.id = 'smoke-origin'; b.textContent = 'origin'; document.body.appendChild(b); b.focus(); });
+    await ask('alert', { title: 'Saved', message: 'x' }); await wait(80);
+    await page.keyboard.press('Enter'); await wait(80);
+    const back = await focused();
+    const a = await answers();
+    await page.evaluate(() => document.getElementById('smoke-origin').remove());
+    if (back !== 'smoke-origin') throw new Error(`focus is on ${back}`);
+    return a.length === 1 && a[0] == null;              // an alert answers nothing (undefined arrives as null)
+  });
+  await expect('a second dialog waits for the first; each answer reaches its own question', async () => {
+    await page.evaluate(() => {
+      window.__answers = [];
+      window.wsDialog.confirm({ title: 'First', message: '1' }).then(v => window.__answers.push(['first', v]));
+      window.wsDialog.confirm({ title: 'Second', message: '2', danger: true }).then(v => window.__answers.push(['second', v]));
+    });
+    await wait(80);
+    const t1 = await page.evaluate(() => document.getElementById('ws-dialog-title').textContent);
+    await page.keyboard.press('Enter'); await wait(80);                 // OK on the first
+    const t2 = await page.evaluate(() => document.getElementById('ws-dialog-title').textContent);
+    await page.keyboard.press('Enter'); await wait(80);                 // Cancel (destructive) on the second
+    const a = await answers();
+    return t1 === 'First' && t2 === 'Second' && JSON.stringify(a) === JSON.stringify([['first', true], ['second', false]]);
+  });
+}
+
+// Completing tasks from the browser (BUG-05): the summary a task requires is
+// asked for and sent in the same update, in single and bulk completion, and a
+// failed lookup refuses instead of completing.
+async function taskCompletion(page, expect, wait) {
+  const within = (p, what) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(`timed out: ${what}`)), 6000))]);
+  const patches = [];
+  page.on('request', r => { if (r.method() === 'PATCH' && r.url().includes('/rest/v1/tasks')) patches.push({ url: decodeURIComponent(r.url()), body: r.postData() }); });
+  const fillAndSubmit = async text => {
+    await page.waitForSelector('.crm-modal textarea', { timeout: 3000 });
+    for (const ta of await page.$$('.crm-modal textarea')) { await ta.click(); await page.keyboard.type(text); }
+    await page.evaluate(() => { const b = [...document.querySelectorAll('.crm-modal .foot button')].find(x => x.dataset.primary); b.click(); });
+  };
+  await expect('a single completion asks for the summary and sends it with the status', async () => {
+    const done = page.evaluate(() => window.WSCrm.completeTask({ id: 'T2' }));
+    await fillAndSubmit('Measurements received');
+    const ok = await within(done, 'single completion'); await wait(100);
+    const p = patches.find(x => x.url.includes('id=eq.T2'));
+    const body = p && JSON.parse(p.body);
+    return ok === true && body && body.status === 'completed' && body.result_summary === 'Measurements received';
+  });
+  await expect('cancelling the summary does not complete the task', async () => {
+    patches.length = 0;
+    const done = page.evaluate(() => window.WSCrm.completeTask({ id: 'T2' }));
+    await page.waitForSelector('.crm-modal textarea', { timeout: 3000 });
+    await page.evaluate(() => { const b = [...document.querySelectorAll('.crm-modal .foot button')].find(x => /Cancel/.test(x.textContent)); b.click(); });
+    return (await within(done, 'cancel')) === false && patches.length === 0;
+  });
+  await expect('bulk Complete: tasks without a summary rule go together, the one that needs a summary gets its own', async () => {
+    patches.length = 0;
+    const done = page.evaluate(() => window.WSCrm.completeTasks(['T1', 'T2', 'T3']));
+    await fillAndSubmit('Bluewave measured');
+    const out = await within(done, 'bulk completion'); await wait(100);
+    const bulk = patches.find(x => x.url.includes('id=in.(T1,T3)'));
+    const single = patches.find(x => x.url.includes('id=eq.T2'));
+    if (!bulk) throw new Error('no bulk update: ' + patches.map(x => x.url).join(' | '));
+    return out && out.done >= 1 && bulk.url.includes('result_required=eq.false') && single && JSON.parse(single.body).result_summary === 'Bluewave measured';
+  });
+  await expect('a failed lookup refuses to complete instead of skipping the summary', async () => {
+    patches.length = 0;
+    const r = await page.evaluate(async () => {
+      const C = window.WSCrm, sb = C.ctx().sb, from = sb.from.bind(sb);
+      sb.from = t => (t === 'tasks' ? { select: () => ({ in: async () => ({ data: null, error: { code: '503', message: 'Service unavailable' } }) }) } : from(t));
+      try { await C.completeTask({ id: 'T2' }); return 'completed'; } catch (e) { return 'refused'; } finally { sb.from = from; }
+    });
+    return r === 'refused' && patches.length === 0;
+  });
+}
+
 // A few interactions that exercise the shared runtime, not just the first paint.
 async function interact(page, name, result) {
   const expect = async (label, fn) => { try { const ok = await fn(); if (!ok) result.problems.push(`interaction failed: ${label}`); } catch (e) { result.problems.push(`interaction threw: ${label}: ${e.message.split('\n')[0]}`); } };
   const wait = ms => new Promise(r => setTimeout(r, ms));
+  if (name === 'dialogs') await dialogKeyboard(page, expect, wait);
+  if (name === 'task-complete') await taskCompletion(page, expect, wait);
+  if (name === 'notif-settings') await expect('notification settings save the choices made (overnight quiet hours, a muted category)', async () => {
+    const posts = [];
+    const onReq = r => { if (r.url().includes('/rest/v1/notification_prefs') && r.method() === 'POST') posts.push(JSON.parse(r.postData() || '{}')); };
+    page.on('request', onReq);
+    await page.click('#ws-notif-prefs input[name=cat][value=crm]');
+    await page.click('#ws-notif-prefs input[name=quiet_enabled]');
+    await page.click('#ws-notif-prefs button[type=submit]'); await wait(600);
+    page.off('request', onReq);
+    const row = Array.isArray(posts[0]) ? posts[0][0] : posts[0];
+    if (!row) throw new Error('nothing saved');
+    return row.quiet_enabled === true && row.quiet_start === '22:00' && row.quiet_end === '07:00' && row.muted_categories.join() === 'crm' && row.push_enabled === true && !(await page.$('#ws-notif-prefs'));
+  });
+  if (name === 'paging') {
+    await expect('the people list holds everyone, not the first 1,000', () => page.evaluate(() => window.WSCrm.activePeople().length > 2500));
+    await expect('fetchAll pages to the end, and says when it stopped at its cap', () => page.evaluate(async () => {
+      const sb = window.WSCrm.ctx().sb;
+      const all = await window.WSCrm.fetchAll(() => sb.from('profiles').select('id').order('id'));
+      const capped = await window.WSCrm.fetchAll(() => sb.from('profiles').select('id').order('id'), 2000);
+      return all.length > 2500 && all.partial === false && new Set(all.map(r => r.id)).size === all.length && capped.length === 2000 && capped.partial === true;
+    }));
+  }
   if (name === 'contacts') {
     await expect('Create opens the new-contact page in a slider', async () => {
       await page.click('[data-create]');
@@ -539,6 +721,24 @@ async function interact(page, name, result) {
     await wait(150);
     return page.evaluate(() => !['html', 'body'].some(t => /hidden|clip/.test(getComputedStyle(document.querySelector(t)).overflowY)));
   });
+  if (name === 'task-record') await expect('the star adds the task to favourites, and Ctrl+K lists it first', async () => {
+    const star = await page.waitForSelector('[data-ws-fav="task:T1"]', { timeout: 3000 });
+    const pressed = () => page.evaluate(() => document.querySelector('[data-ws-fav="task:T1"]').getAttribute('aria-pressed'));
+    if (await pressed() !== 'false') throw new Error('starts as ' + await pressed());
+    await star.focus(); await page.keyboard.press('Enter'); await wait(600);          // by keyboard
+    if (await pressed() !== 'true') throw new Error('after Enter: ' + await pressed());
+    await page.keyboard.down('Control'); await page.keyboard.press('k'); await page.keyboard.up('Control'); await wait(900);
+    const t = (await page.evaluate(() => (document.querySelector('#ws-cmdk-results') || {}).textContent || '')).replace(/\s+/g, ' ');
+    await page.keyboard.press('Escape');
+    if (!(/Favourites/.test(t) && t.indexOf('Send revised proposal to Acme') > -1 && t.indexOf('Favourites') < t.indexOf('Go to'))) throw new Error('palette: ' + t.slice(0, 160).replace(/\n/g, ' | '));
+    return true;
+  });
+  if (name === 'admin') await expect('Setup health lists what is missing and offers the clean-up', async () => {
+    await wait(600);
+    const t = await page.evaluate(() => (document.getElementById('ov-health') || {}).innerText || '');
+    return /Migration 20/.test(t) && /Admin password/.test(t) && !!(await page.$('#ov-health-clean'));
+  });
+  if (name === 'typing') await expect('the typing test shows its passage', async () => (await page.evaluate(() => document.body.innerText)).includes('busy season'));
   if (name === 'calendar') await expect('a calendar view renders', async () => !!(await page.$('.cal-month, .cal-week, .cal-agenda')));
   if (name === 'invoice-record') await expect('the invoice sheet shows its total', async () => (await page.evaluate(() => document.body.innerText)).includes('1,680'));
   if (name === 'crm') {
@@ -561,7 +761,8 @@ async function interact(page, name, result) {
 (async () => {
   await new Promise(r => server.listen(0, 'localhost', r));
   ORIGIN = `http://localhost:${server.address().port}`;
-  const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ['--no-first-run', '--no-default-browser-check',
+  // CI runners (Ubuntu 24.04) block the user namespaces Chrome's sandbox needs; a throwaway runner may skip it.
+  const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: [...(process.env.CI ? ['--no-sandbox'] : []), '--no-first-run', '--no-default-browser-check',
     // A fake camera and microphone, already allowed, so the call page renders as it would for a person.
     '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   const results = [];

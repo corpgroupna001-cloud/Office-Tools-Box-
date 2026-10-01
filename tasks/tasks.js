@@ -77,22 +77,12 @@
         if (expected && n < expected) C.toast(`${expected - n} task${expected - n > 1 ? 's were' : ' was'} skipped: no permission`, 'bad');
         return n;
     }
-    /** "Task status summary is required": ask what was done, and post it as the task's comment. Resolves false when cancelled. */
-    async function askSummary(t) {
-        const r = await sb.from('tasks').select('result_required').eq('id', t.id).maybeSingle();
-        if (r.error || !r.data || !r.data.result_required) return true;
-        const text = await C.formModal({ title: 'Task status summary', submitLabel: 'Complete task',
-            intro: `<div class="crm-info">${esc(t.title || 'This task')} needs a summary of what was done before it is completed.</div>`,
-            fields: [{ name: 'summary', label: 'Summary', type: 'textarea', rows: 5, required: true, full: true, placeholder: 'What was done, and the result' }],
-            onSubmit: v => String(v.summary || '').trim() });
-        if (!text || text === true) return false;
-        await C.q(sb.from('comments').insert({ entity_type: 'task', entity_id: t.id, body: `Task status summary:\n${text}`, mentions: [], author_id: me.id }));
-        return true;
-    }
+    // Completing goes through C.completeTask, which asks for the status summary a
+    // task requires and saves it in the same update the database checks (BUG-05).
     async function setDone(t, done, after) {
         try {
-            if (done && !await askSummary(t)) { if (after) after(); return; }
-            await mustUpdate(sb.from('tasks').update({ status: done ? DONE_KEY : OPEN_KEY }).eq('id', t.id));
+            if (done) { if (!await C.completeTask(t)) { if (after) after(); return; } }
+            else await mustUpdate(sb.from('tasks').update({ status: OPEN_KEY }).eq('id', t.id));
             C.toast(done ? 'Task completed' : 'Task reopened', 'ok');
             WSShell.refreshUnread();
             if (after) after();
@@ -339,7 +329,15 @@
                 return items;
             },
             bulk: [
-                { label: 'Complete', icon: 'check', run: async (ids, o) => bulkPatch(ids, o, { status: DONE_KEY }, 'Completed') },
+                { label: 'Complete', icon: 'check', run: async (ids, o) => {
+                    // Each task needing a status summary gets one; the rest complete together.
+                    const list = o.all ? (await C.fetchAll(() => scoped(sb.from('tasks').select('id')).is('completed_at', null).order('id'), 5000)).map(x => x.id) : ids;
+                    if (!list.length) return false;
+                    const out = await C.completeTasks(list);
+                    if (!out) return false;
+                    C.toast(out.skipped ? `${out.done} completed, ${out.skipped} skipped` : `${out.done} completed`, out.skipped ? 'warn' : 'ok');
+                    WSShell.refreshUnread();
+                } },
                 { label: 'Change responsible', icon: 'user', run: async (ids, o) => { const v = await B.pick('Change responsible', { type: 'people', label: 'Responsible', none: 'Not assigned' }, ''); if (v === undefined) return false; return bulkPatch(ids, o, { assignee_id: v || null }, 'Responsible changed'); } },
                 { label: 'Set deadline', icon: 'calendar', run: async (ids, o) => { const v = await B.pick('Set deadline', { type: 'date', label: 'Deadline' }, today); if (v === undefined) return false; return bulkPatch(ids, o, { due_date: v || null }, 'Deadline set'); } },
                 { label: 'Priority', icon: 'star', run: async (ids, o) => { const v = await B.pick('Set priority', { type: 'select', label: 'Priority', required: true, options: Object.entries(L.PRIORITY).map(([value, p]) => ({ value, label: p.label })) }, 'high'); if (!v) return false; return bulkPatch(ids, o, { priority: v }, 'Priority set'); } },
@@ -359,12 +357,29 @@
         await mustUpdate(b, o.all ? null : ids.length);
         C.toast(msg, 'ok'); WSShell.refreshUnread();
     }
+    // Boards, the calendar and the Gantt chart read the tasks in pages of 1,000
+    // (PostgREST's limit), in a stable order, up to BOARD_CAP; reaching the cap is
+    // said on the board (capNote) instead of tasks quietly going missing (PERF-01).
+    const BOARD_CAP = 3000;
     async function loadRows(extra) {
-        let b = scoped(sb.from('tasks').select(SELECT));
-        if (extra) b = extra(b);
-        const rows = (await C.q(b.order('due_date', { ascending: true, nullsFirst: false }).limit(600))).data || [];
+        const rows = [];
+        let partial = true;
+        for (let from = 0; from < BOARD_CAP; from += 1000) {
+            let b = scoped(sb.from('tasks').select(SELECT));
+            if (extra) b = extra(b);
+            const got = (await C.q(b.order('due_date', { ascending: true, nullsFirst: false }).order('id').range(from, from + 999))).data || [];
+            rows.push(...got);
+            if (got.length < 1000) { partial = false; break; }
+        }
         await resolveNames(rows);
+        rows.partial = partial;
         return rows;
+    }
+    function capNote(body, rows) {
+        let n = body.querySelector(':scope > .b24-cap-note');
+        if (!rows || !rows.partial) { if (n) n.remove(); return; }
+        if (!n) { n = document.createElement('div'); n.className = 'crm-notice b24-cap-note'; n.setAttribute('role', 'status'); body.prepend(n); }
+        n.innerHTML = `${C.icon('flag')}<div>Showing the first ${BOARD_CAP.toLocaleString('en-IN')} tasks. Narrow the filter or switch to the list to see the rest.</div>`;
     }
     function taskCard(t) {
         return `<div class="b24-kcard"><a class="t" href="/tasks/?id=${esc(t.id)}" data-open>${esc(t.title)}</a>${chipText(t) ? `<div class="org">${chipText(t)}</div>` : ''}<div class="meta">${t.assignee_id ? C.avatarHtml(t.assignee_id, 'sm') : ''}${C.dueHtml(t, today)}${t.priority === 'high' || t.priority === 'urgent' ? C.priorityBadge(t.priority) : ''}</div></div>`;
@@ -405,6 +420,7 @@
                 const rows = await loadRows(b => b.is('completed_at', null));
                 if (stale()) return;
                 page.board.update({ columns: DEADLINES, cards: rows.map((t, i) => ({ id: t.id, columnId: bucketOf(t), position: i, task: t })) });
+                capNote(body, rows);
             } catch (e) { if (!stale()) C.errorState(body, e, page.reloadView); }
         };
         page.reloadView();
@@ -441,6 +457,7 @@
                 if (stale()) return;
                 const mineRows = rows.filter(t => t.assignee_id === me.id || roleIds.assisting.includes(t.id) || page.role !== 'ongoing');
                 page.board.update({ columns: PLANNER, cards: mineRows.map((t, i) => { const x = plan.get(t.id); return { id: t.id, columnId: x ? x.stage : 'new', position: x ? Number(x.position) : i, task: t }; }) });
+                capNote(body, rows);
             } catch (e) { if (!stale()) C.errorState(body, e, page.reloadView); }
         };
         page.reloadView();
@@ -467,6 +484,7 @@
                     <div class="grid">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="dow">${d}</div>`).join('')}
                     ${days.map(d => { const list = byDay.get(d) || []; return `<div class="day${d.slice(0, 7) !== page.month ? ' other' : ''}${d === today ? ' today' : ''}"><span class="n">${Number(d.slice(8))}</span>
                         ${list.slice(0, 4).map(t => `<a class="chip ${isDone(t) ? 'done' : L.taskDueState(t, today)}" href="/tasks/?id=${esc(t.id)}" data-open title="${esc(t.title)}">${esc(t.title)}</a>`).join('')}${list.length > 4 ? `<span class="more">+${list.length - 4} more</span>` : ''}</div>`; }).join('')}</div></div>`;
+                capNote(body, rows);
                 body.querySelectorAll('[data-mon]').forEach(b => b.addEventListener('click', () => {
                     const k = Number(b.dataset.mon);
                     if (!k) page.month = today.slice(0, 7);
@@ -487,7 +505,8 @@
             const start = page.ganttStart, end = L.addDays(start, SPAN - 1);
             body.innerHTML = '<div class="b24-area pad"><div class="ws-empty">Loading…</div></div>';
             try {
-                const rows = (await loadRows(b => b.or(`due_date.gte.${start},start_date.gte.${start}`))).filter(t => (t.start_date || t.due_date) && (t.start_date || t.due_date) <= end);
+                const loaded = await loadRows(b => b.or(`due_date.gte.${start},start_date.gte.${start}`));
+                const rows = loaded.filter(t => (t.start_date || t.due_date) && (t.start_date || t.due_date) <= end);
                 if (stale()) return;
                 const days = Array.from({ length: SPAN }, (_, i) => L.addDays(start, i));
                 const off = d => L.daysBetween(start, d);
@@ -502,6 +521,7 @@
                         }).join('') || '<div class="ws-empty">No tasks with dates in these weeks.</div>'}
                         <span class="now" style="left:calc(var(--name-w) + ${off(today) * DAY + DAY / 2}px)"></span>
                     </div></div></div>`;
+                capNote(body, loaded);
                 body.querySelectorAll('[data-shift]').forEach(b => b.addEventListener('click', () => {
                     const k = Number(b.dataset.shift);
                     if (!k) { const dow = (new Date(today + 'T00:00:00Z').getUTCDay() + 6) % 7; page.ganttStart = L.addDays(today, -dow - 7); } else page.ganttStart = L.addDays(page.ganttStart, k);
@@ -538,7 +558,10 @@
             onAddCard: colId => C.openTaskEditor({ defaults: { assignee_id: me.id, status: colId }, onSaved: async s => { if (s && s.status !== colId) await sb.from('tasks').update({ status: colId }).eq('id', s.id); page.reloadView(); } }),
             onMove: async m => {
                 const { card, toColumnId, columnCards } = m, renumber = renumberNeeded(m);
-                await mustUpdate(sb.from('tasks').update({ status: toColumnId, position: renumber ? slot(columnCards, card.id) : m.position }).eq('id', card.task.id));
+                const done = lk.taskStatus[toColumnId] && lk.taskStatus[toColumnId].is_done;
+                if (done && !card.task.completed_at) {
+                    if (!await C.completeTask(card.task, { status: toColumnId, position: renumber ? slot(columnCards, card.id) : m.position })) throw new Error('Not completed: a status summary is needed');
+                } else await mustUpdate(sb.from('tasks').update({ status: toColumnId, position: renumber ? slot(columnCards, card.id) : m.position }).eq('id', card.task.id));
                 // Best effort: tasks I cannot edit keep their old position.
                 if (renumber) await Promise.all(columnCards.filter(id => id !== card.id).map(id => sb.from('tasks').update({ position: slot(columnCards, id) }).eq('id', id).then(() => {}, () => {})));
                 WSShell.refreshUnread(); page.reloadView();
@@ -550,6 +573,7 @@
                 const rows = await loadRows();
                 if (stale()) return;
                 page.board.update({ columns: lk.taskStatuses.map((s, i) => ({ id: s.key, name: s.label, hex: B.hex(s.color, i) })), cards: rows.map(t => ({ id: t.id, columnId: t.status, position: Number(t.position) || 0, task: t })) });
+                capNote(body, rows);
             } catch (e) { if (!stale()) C.errorState(body, e, page.reloadView); }
         };
         page.reloadView();
@@ -872,7 +896,7 @@
 
         view.innerHTML = `
             <div class="b24-card-head">
-                <h1 class="b24-card-title"><span class="t" style="${done ? 'text-decoration:line-through;opacity:.7' : ''}">${esc(t.title)}</span>${cols.full && t.number != null ? `<span class="num">#${esc(t.number)}</span>` : ''}</h1>
+                <h1 class="b24-card-title"><span class="t" style="${done ? 'text-decoration:line-through;opacity:.7' : ''}">${esc(t.title)}</span>${cols.full && t.number != null ? `<span class="num">#${esc(t.number)}</span>` : ''}${C.favoriteHtml('task', t.id)}</h1>
                 <div class="sub">${parent ? `Subtask of <a href="/tasks/?id=${esc(parent.id)}" style="color:inherit">${esc(parent.title)}</a> · ` : ''}${C.statusBadge(STATUS, t.status)} ${C.priorityBadge(t.priority)} ${t.due_date ? C.dueHtml(t, today) : ''} ${linked.map(([k, i, n]) => C.entityChip(k, i, n)).join(' ')}</div>
                 <div class="acts">
                     ${WSShell.inSlider ? '' : `<a class="b24-btn-card" href="/tasks/" data-nav>${C.icon('arrow')}<span>All tasks</span></a>`}

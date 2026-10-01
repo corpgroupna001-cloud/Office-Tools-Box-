@@ -8,8 +8,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
     <title>WorkSuite Admin</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="/ui/vendor/chart.umd.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;800&family=Inter:wght@400;600;900&display=swap" rel="stylesheet">
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/design-system.css">
@@ -265,7 +264,8 @@
     </style>
     <link rel="stylesheet" href="/ui/corporate.css">
     <link rel="stylesheet" href="/ui/b24.css">
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/ui/vendor/supabase-js.js"></script>
+    <link rel="stylesheet" href="/ui/tailwind.css"><!-- prebuilt Tailwind (npm run build), last like the Play CDN's style was -->
 </head>
 <body data-ws-page="admin" class="ws-app ws-corporate ws-b24">
 
@@ -356,6 +356,19 @@
                         <div class="ws-card">
                             <div class="ws-card-head"><h3>Companies</h3><span class="sub">People per entity</span></div>
                             <ul class="ws-list" id="ov-companies"><li><div class="ws-empty">Loading…</div></li></ul>
+                        </div>
+                        <div class="ws-card">
+                            <div class="ws-card-head"><h3>Setup health</h3><div class="right"><button type="button" class="ws-btn sm" id="ov-health-run">Check again</button></div></div>
+                            <div id="ov-health" aria-live="polite"><div class="ws-empty">Checking…</div></div>
+                        </div>
+                        <div class="ws-card">
+                            <div class="ws-card-head"><h3>Console lock</h3></div>
+                            <label for="ov-idle-lock" class="text-sm font-bold" style="display:block;margin-bottom:6px">Lock after inactivity</label>
+                            <select id="ov-idle-lock" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none" style="width:100%">
+                                <option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option>
+                                <option value="60">1 hour</option><option value="120">2 hours</option><option value="240">4 hours</option>
+                            </select>
+                            <p class="sub" style="margin-top:8px">Applies to this browser. Locking signs this browser out of the console and of the WorkSuite account it was opened with. A password sign-in always ends after 12 hours.</p>
                         </div>
                     </div>
                 </div>
@@ -1427,6 +1440,10 @@
         }
 
         async function unlockAdmin() {
+            if (new URLSearchParams(location.search).has('locked')) {
+                const url = new URL(location.href); url.searchParams.delete('locked');
+                history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+            }
             gateSubmit.textContent = 'Loading dashboard…';
             document.getElementById('gate-lead').textContent = 'Loading the dashboard…';
             const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1460,24 +1477,16 @@
                 const data = await r.json();
                 gatePassword.value = '';
                 if (!r.ok) throw new Error(data.error || 'Incorrect password.');
+                window.WSAdminLock.clearLock();
                 await unlockAdmin();
             } catch (err) {
                 showAdminGate(err.message || 'Network error. Please try again.');
             }
         });
 
-        document.getElementById('logout-btn').addEventListener('click', async () => {
-            try {
-                const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'logout' }) });
-                if (!r.ok) throw new Error('Could not end your session. Please try Lock again.');
-                // Reload clears all in-memory reports and the server-cleared
-                // cookie ensures the dashboard stays locked on the next load.
-                location.reload();
-            } catch (err) {
-                if (window.WSShell) WSShell.toast(err.message || 'Could not lock. Please try again.', 'bad');
-            }
-        });
+        // Lock ends the password cookie and the account session in this browser,
+        // then reloads on the gate (admin/inactivity.js; the idle timeout uses it too).
+        document.getElementById('logout-btn').addEventListener('click', () => window.WSAdminLock.lock('manual'));
 
         // Wait until every admin module has installed its unlock listener.
         document.getElementById('gate-use-pw').addEventListener('click', () => {
@@ -1489,6 +1498,18 @@
             gateSubmit.disabled = true;
             gateSubmit.textContent = 'Checking session…';
             adminToken = await accountToken();
+            const lockedBy = new URLSearchParams(location.search).get('locked');
+            if (window.WSAdminLock.lockedState()) {
+                if (!window.WSAdminLock.mayUnlock(adminToken)) {
+                    // A lock whose logout did not reach the server: try again now.
+                    if (window.WSAdminLock.lockedState().incomplete) await window.WSAdminLock.endServerSession();
+                    adminToken = null;
+                    showAdminGate(lockedBy === 'idle' ? 'The console locked itself after a period of inactivity. Sign in again to open it.'
+                        : 'The console is locked. Sign in again to open it.');
+                    return;
+                }
+                window.WSAdminLock.clearLock();   // a new account sign-in since the lock
+            }
             try {
                 const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action: 'session' }) });
@@ -1995,7 +2016,7 @@
         }
 
         function ciLoad(raw) {
-            const text = String(raw || '').replace(/^﻿/, '');     // exports often start with a byte-order mark
+            const text = String(raw || '').replace(/^\uFEFF/, '');     // exports often start with a byte-order mark
             const table = parseCsv(text, sniffDelimiter(text));
             const result = document.getElementById('ci-result');
             result.innerHTML = '';
@@ -2165,6 +2186,7 @@
                 const strikes = e.quiz_violations || 0;
                 const wfhOn = !!e.is_wfh;
                 const left = (e.status || 'active') === 'inactive';
+                const pending = e.status === 'pending';
                 return `
                 <tr>
                     <td class="adm-stick-l mono font-black text-white whitespace-nowrap">${e.employee_id ? escapeHtml(e.employee_id) : '<span class="text-slate-500 font-medium" title="No Employee ID yet — set it with ✏️">—</span>'}</td>
@@ -2173,6 +2195,7 @@
                     <td class="text-slate-400 text-xs whitespace-nowrap" title="${e.created_at ? escapeHtml(formatDate(e.created_at)) : ''}">${formatDay(e.created_at)}</td>
                     <td class="text-xs whitespace-nowrap">${left
                         ? `<span class="mg-status bad" title="Cannot sign in${e.exit_date ? ' since ' + escapeHtml(formatDay(e.exit_date)) : ''}${e.exit_reason ? ' — ' + escapeHtml(e.exit_reason) : ''}">Left</span>`
+                        : pending ? '<span class="mg-status warn" title="Signed up without an invitation: sees nothing until approved">Waiting for approval</span>'
                         : '<span class="mg-status ok">Active</span>'}</td>
                     <td class="whitespace-nowrap">
                         <div class="adm-wfh">
@@ -2194,8 +2217,10 @@
                     <td class="text-slate-400 text-xs whitespace-nowrap" title="${e.last_test_at ? escapeHtml(formatDate(e.last_test_at)) : ''}">${e.last_test_at ? formatDay(e.last_test_at) : '—'}</td>
                     <td class="adm-stick-r adm-actions text-right whitespace-nowrap">
                         <button data-action="edit"   data-id="${e.id}" class="emp-action glass rounded-lg" title="Edit employee">✏️</button>
+                        ${pending ? `<button data-action="approve" data-id="${e.id}" class="emp-action glass rounded-lg" title="Approve — they can use WorkSuite from now on">✅</button>` : ''}
                         <button data-action="reset"  data-id="${e.id}" data-email="${escapeHtml(e.email || '')}" class="emp-action glass rounded-lg" title="Send password reset email">🔑</button>
-                        <button data-action="exit" data-id="${e.id}" class="glass rounded-lg" title="${left ? 'Bring this employee back' : 'Offboard — blocks login, keeps all history'}">${left ? '↩️' : '🚪'}</button>
+                        <button data-action="mfa" data-id="${e.id}" class="emp-action glass rounded-lg" title="Remove two-step verification (lost phone)">🔐</button>
+                        <button data-action="exit" data-id="${e.id}" class="glass rounded-lg" title="${left ? 'Bring this employee back' : pending ? 'Turn this sign-up away — blocks login, keeps the record' : 'Offboard — blocks login, keeps all history'}">${left ? '↩️' : '🚪'}</button>
                         <button data-action="delete" data-id="${e.id}" class="emp-action glass rounded-lg text-rose-300" title="Delete employee and all their history">🗑️</button>
                     </td>
                 </tr>`;
@@ -2211,6 +2236,8 @@
                     if (action === 'edit')   openEditEmployee(emp);
                     if (action === 'delete') openDeleteEmployee(emp);
                     if (action === 'reset')  resetPasswordFor(emp);
+                    if (action === 'approve') approveEmployee(emp);
+                    if (action === 'mfa')    resetMfaFor(emp);
                 });
             });
 
@@ -2369,6 +2396,41 @@
                 const data = await r.json();
                 if (!r.ok) throw new Error(data.error || 'Failed');
                 wsDialog.alert({ icon: '📧', success: true, title: 'Reset email sent', message: 'Password reset email sent to <b>' + escapeHtml(emp.email) + '</b>.' });
+            } catch (e) {
+                wsDialog.alert({ icon: '❌', danger: true, title: 'Failed', message: escapeHtml(e.message || 'Please try again.') });
+            }
+        }
+
+        // A sign-up without an invitation waits here (supabase-access-control-migration.sql).
+        async function approveEmployee(emp) {
+            const ok = await wsDialog.confirm({ icon: '✅', title: 'Approve this sign-up?',
+                message: `<b>${escapeHtml(emp.full_name || emp.email)}</b> (${escapeHtml(emp.email || '')}) signed up for <b>${escapeHtml(emp.company || 'no company')}</b>. Once approved they see that company's workspace.`, okText: 'Approve' });
+            if (!ok) return;
+            try {
+                const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'set_employee_status', id: emp.id, status: 'active' }) });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.error || 'Failed');
+                emp.status = 'active';
+                renderEmployees();
+                wsDialog.alert({ icon: '✅', success: true, title: 'Approved', message: escapeHtml(emp.full_name || emp.email) + ' can sign in now.' + (data.warning ? '<br><br>' + escapeHtml(data.warning) : '') });
+            } catch (e) {
+                wsDialog.alert({ icon: '❌', danger: true, title: 'Failed', message: escapeHtml(e.message || 'Please try again.') });
+            }
+        }
+
+        // Lost authenticator: remove it so they can sign in with the password, and end their sessions.
+        async function resetMfaFor(emp) {
+            const ok = await wsDialog.confirm({ icon: '🔐', danger: true, title: 'Remove two-step verification?',
+                message: `<b>${escapeHtml(emp.full_name || emp.email)}</b> will sign in with the password alone until they set up an authenticator again from Security. Do this only after confirming who is asking.`, okText: 'Remove' });
+            if (!ok) return;
+            try {
+                const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'reset_employee_mfa', id: emp.id }) });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.error || 'Failed');
+                wsDialog.alert({ icon: '🔐', success: true, title: data.removed ? 'Two-step verification removed' : 'Nothing to remove',
+                    message: data.removed ? `${data.removed} authenticator${data.removed === 1 ? '' : 's'} removed; their open sessions were ended.` : 'This person has no authenticator set up.' });
             } catch (e) {
                 wsDialog.alert({ icon: '❌', danger: true, title: 'Failed', message: escapeHtml(e.message || 'Please try again.') });
             }
@@ -3796,6 +3858,7 @@
     <script src="/admin/holidays.js"></script>
     <script src="/admin/overview.js"></script>
     <script src="/admin/management.js"></script>
+    <script src="/admin/inactivity.js"></script>
     <script src="/admin/console.js"></script>
     <script src="/admin/crm-records.js"></script>
     <script src="/ui/crm-perms.js"></script>

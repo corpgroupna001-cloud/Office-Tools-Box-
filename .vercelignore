@@ -1,3 +1,14 @@
 # Test suites, fixtures and browser harnesses are for `npm test` and
 # `npm run smoke:ui` on a developer machine; they are never served.
 tests/
+
+# Developer tooling: checks, lint and type-check configuration, CI.
+scripts/
+types/
+.github/
+eslint.config.mjs
+tsconfig.json
+tsconfig.browser.json
+tailwind.config.js
+.nvmrc
+.env.example

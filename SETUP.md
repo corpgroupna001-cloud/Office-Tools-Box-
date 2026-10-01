@@ -816,8 +816,8 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 5 | `supabase-crm-reminders-migration.sql` | `crm_reminder_log`, `notifications.pushed_at`, `crm_run_reminders()` and a pg_cron schedule every 5 minutes (skipped with a notice where pg_cron is unavailable) |
 | 6 | `supabase-b24-migration.sql` | The Bitrix24-style workspace: company structure, CRM access roles, customer companies, custom fields, products, automation, project privacy, task views, whiteboards, document sharing and public links, calendar colours, per-person list settings — see [11. The Bitrix24-style workspace](#11-the-bitrix24-style-workspace) |
 | 7 | `supabase-messenger-calls-migration.sql` | Messenger & calls v2: `messages.client_id`, `ws_chat_inbox()`, `calls`, `call_participants` and the `ws_call_*` functions — see [10. Messenger & calls](#10-messenger--calls) |
+| 7a | `supabase-chat-flags-migration.sql` | Messenger *Favourites* and *Read later*: `message_flags`, one person's own marks on a message, which nobody else can see. Any time after 7 |
 | 8 | `supabase-crm-import-migration.sql` | CRM import: `external_ref` (the Bitrix24 id, so importing a file again updates instead of duplicating), `source_row` (every filled-in cell of the record's row) on `crm_deals` and `crm_leads`, and `crm_import_layouts` (the file's columns, in order) — behind **Admin → CRM → Deals / Leads** |
-
 | 9 | `supabase-employee-id-migration.sql` | `profiles.employee_id` — the Employee ID people are known by (GL-PIS-CSM-IC-001), unique whatever the case and set only by an administrator. Shown first across the CRM, chat mentions, the directory and the admin console. `employee_code` is unchanged and is labelled **Biometric ID** |
 | 10 | `supabase-crm-sales-migration.sql` | Sales: quotes (`crm_quotes`, `crm_quote_items`, `crm_quote_from_deal()`, `crm_quote_to_invoice()`), lost reasons (`crm_lost_reasons`, `crm_deals.lost_reason`), monthly sales targets (`crm_sales_targets`) and public web-to-lead forms (`crm_web_forms`, `crm_web_form_submit()`) — see [12. Sales: quotes, forecast and web forms](#12-sales-quotes-forecast-and-web-forms) |
 | 11 | `supabase-security-hardening-migration.sql` | Security guards, no data changes — see [13. Security hardening](#13-security-hardening). **Run it together with the deploy that carries it**: the sign-in page and the API were changed to match |
@@ -825,6 +825,13 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 13 | `supabase-task-summary-migration.sql` | `tasks.result_required`: Bitrix24's *Task status summary is required* on the new-task page |
 | 14 | `supabase-crm-roles-migration.sql` | Ready-made CRM roles, assigned to nobody: *Super admin* (every company), *Admin*, *Team lead*, *Sales executive*, *Accounts* and *Read only*. Add people in Admin → CRM permissions |
 | 15 | `supabase-company-structure-migration.sql` | The company structure as in Bitrix24: Corporate Group → Jobways Point LLP (9 departments, down to Interview Supports and Accountant), Genie Lamp Private Limited (10), SPORTSMART → Nova Sportsmart Private Limited (12), Navyug Raise A Player Foundation. Heads are set by Employee ID; missing people are skipped. Adds only what is missing, so it is safe to run again. Everyone signed in can now see the whole chart |
+| 16 | `supabase-access-control-migration.sql` | Who may use the data: new sign-ups wait for an invitation or an administrator's approval, and every request with a person's token needs an active account, its two-step code when they have an authenticator, and a session that has not ended — on every table, storage, Realtime and RPC. Private HR columns, server-only notifications, ending someone's sessions when they leave. **Run it again after re-running any of 1–15.** See [16. Access control](#16-access-control) |
+| 17 | `supabase-otp-limits-migration.sql` | Email codes issued and checked in one locked database call each (parallel guesses all count), durable rate limits for sign-up and the admin password, and sign-up / email verification that finish in one transaction. See [16. Access control](#16-access-control) |
+| 18 | `supabase-document-links-migration.sql` | Public document links without public copies: every view of a file is checked against the link (`/api/public-document`), links can expire, and the old public `published` bucket becomes private. See [17. Public document links](#17-public-document-links) |
+| 19 | `supabase-crm-summary-migration.sql` | CRM totals computed by the database, per currency, over every row the person may see: `crm_deal_summary`, `crm_lead_summary`, `crm_forecast_summary`. The dashboard and the forecast stop adding rupees to dollars and stop at no row cap. See [18. CRM totals and long lists](#18-crm-totals-and-long-lists) |
+| 20 | `supabase-task-completion-migration.sql` | *Task status summary is required* enforced by the database: such a task completes only with `tasks.result_summary` in the same update — from the Complete button, bulk Complete, a done column on a board, the editor or the API — and the summary is posted as the task's comment in the same transaction. Reopening clears it |
+| 21 | `supabase-favorites-migration.sql` | Favourite records: a star on task, deal, project and document pages; **Ctrl+K** lists them first. Personal, and never showing a record the person can no longer open. See [21. Favourites](#21-favourites) |
+| 22 | `supabase-notification-prefs-migration.sql` | Notification settings and quiet hours: which kinds of push reach each person, and when their phone stays quiet. In-app notifications are unchanged. See [22. Notification settings](#22-notification-settings) |
 
 **Ran migration 8 before 15 Sep 2026?** Run it again. Its first version made
 `external_ref`'s unique index partial, which `ON CONFLICT` cannot use, so every
@@ -949,9 +956,10 @@ every new table, idempotent DDL, no destructive statements).
 
 ## 6. Environment variables
 
-No new required variables. Optional: `SMTP_TLS_STRICT=1` makes the mailer
-verify the SMTP server's certificate (set `SMTP_TLS_SERVERNAME` to the name on
-the certificate if it is not `SMTP_HOST`) — see [13. Security hardening](#13-security-hardening). The modules use the existing `SUPABASE_URL`,
+No new required variables. The mailer always verifies the SMTP server's
+certificate: set `SMTP_TLS_SERVERNAME` to the name on the certificate if it is
+not `SMTP_HOST`, and `SMTP_TLS_CA` for a private authority — see
+[16. Access control](#16-access-control). The modules use the existing `SUPABASE_URL`,
 `SUPABASE_ANON_KEY` (via `/api/config`) and, for push notifications, the
 existing `VAPID_*` keys behind `/api/push`. The service-role key is still
 used only by the serverless functions. Calls work without anything new; a
@@ -1316,11 +1324,8 @@ A review of the API and the database found holes that `supabase-security-hardeni
 | Admin password, mail key and cron secrets were compared with `===` | Constant-time comparison |
 | Malformed JSON crashed several functions with a 500 | 400 *Invalid JSON* |
 
-**SMTP certificate.** The mailer still skips certificate checks by default,
-because cPanel mail servers often present a certificate for the server's own
-name and turning it on blindly would stop all email. Once a test mail goes
-through with `SMTP_TLS_STRICT=1` (and `SMTP_TLS_SERVERNAME` if needed), keep
-it on: without it, someone on the network path could read `SMTP_PASS`.
+**SMTP certificate.** Since [16. Access control](#16-access-control) the
+certificate is always verified; `SMTP_TLS_STRICT` is no longer read.
 
 **Not changed:** the biometric device may still send its key as `?key=` in the
 URL, because the vendor's settings offer that shape. Prefer the header forms
@@ -1349,6 +1354,11 @@ policies.
 
 # 15. Tasks, people pickers and wallpapers
 
+- **Task status summary** (migrations 13 and 20): completing a task that
+  requires one asks for the summary everywhere — the Complete button, bulk
+  Complete (one form with a field per task that needs it, up to 10), dragging
+  onto a done column, the task editor and a board card. The database refuses
+  any other completion of such a task, including a direct API call.
 - **New task** (`/tasks/?id=new`) follows Bitrix24's layout:
   - Task name; a description with attach, @mention and list tools; and a checklist.
   - *Task owner*, *Assignee* (**+** adds participants) and *Deadline* rows.
@@ -1365,4 +1375,242 @@ policies.
   30 frames a second, pause in hidden tabs, and stay still when the device
   asks for reduced motion. Light/dark and the wallpaper follow the person
   to every browser they sign in on.
+
+# 16. Access control
+
+An outside review (October 2026) found that the database trusted any signed-in
+token: someone could sign up into any company, an offboarded employee's open
+session kept working, two-step verification was only checked by the pages,
+and anyone could read everyone's exit reason. Migrations 16 and 17, with the
+same deploy, close these.
+
+## What changes for people
+
+| Before | Now |
+|---|---|
+| Anyone with a mailbox could sign up into any company and read its tasks, CRM and directory | A sign-up for an address that was **invited** (Employees → Invite, or Admin → Add employee) to that company is active at once. Anyone else gets an account **waiting for approval**: it sees nothing and the sign-in page says so. Approve with ✅ in **Admin → Employees** (the Overview counts them under *Needs attention*), or turn them away with 🚪. A sign-up made straight through Supabase Auth also waits |
+| Offboarding banned the login, but an already-open session kept working for up to an hour | The database refuses an inactive account's token at once, and its sessions are ended (`ws_end_sessions`) |
+| Two-step verification was asked for by the pages only; the API and database accepted a password-only token | Every API endpoint and every database request needs `aal2` from anyone with an authenticator set up. Lost phone: **Admin → Employees → 🔐** removes their authenticator (and ends their sessions); they sign in with the password and can set up a new one |
+| Signing out on one device left that token usable until it expired | A token whose session was signed out or ended is refused |
+| `profiles.exit_date` / `exit_reason` were readable by every employee | Only the admin console (service key) and `ws_profile_private()` for workspace admins. Everything the directory, chat and org chart show is unchanged |
+| A browser could insert a notification for anyone, in any company | Notifications come only from the database's own triggers |
+| Email codes: 20 parallel wrong guesses counted as 1; resend limits could be raced | One locked database call per check: every guess counts (6 per code), one code a minute and 5 an hour per address, 30 sign-ups an hour per network address |
+| A failed profile update still answered "verified" and burnt the code | Verification and sign-up finish in one transaction or say they did not; the same code can then be entered again |
+| The admin password had only a 500 ms delay | 10 tries per address per 15 minutes (100 across all addresses), counted in the database before the password is checked; a lock-out is written to the audit log |
+| The mailer accepted any SMTP certificate unless `SMTP_TLS_STRICT=1` | Always verified (see below) |
+
+## Deploy
+
+1. Deploy the code.
+2. Supabase → SQL Editor: run `supabase-access-control-migration.sql` (16), then
+   `supabase-otp-limits-migration.sql` (17). Until 17 runs, sign-up and email
+   verification answer *unavailable*; the rest of WorkSuite keeps working.
+3. Check:
+   ```sql
+   select public.ws_access_control_status();
+   ```
+   `tables_gated` must equal `tables_with_rls`, `storage_gated`,
+   `private_columns_hidden`, `mfa_check` and `session_check` must be `true`,
+   and `pre_request` must be `public.ws_pre_request`. If `pre_request` is null,
+   the migration printed why (another pre-request function, or no permission);
+   the table and storage policies still apply.
+4. SMTP: send **Admin → Email monitoring → Send test**. If it fails with
+   *certificate is for another name*, find the name the host presents and set
+   `SMTP_TLS_SERVERNAME` in Vercel:
+   ```
+   openssl s_client -connect $SMTP_HOST:465 -servername $SMTP_HOST </dev/null 2>/dev/null \
+     | openssl x509 -noout -subject -ext subjectAltName
+   ```
+   A host with a private authority: put its CA certificate (PEM, or base64 of
+   it) in `SMTP_TLS_CA`. There is no switch that skips the check.
+5. Optional: Supabase → Authentication → Sign In / Providers → turn **off**
+   *Allow new users to sign up*. WorkSuite's own sign-up creates accounts with
+   the service key and keeps working; direct sign-ups (which only ever reach
+   *waiting for approval*) stop entirely.
+
+Everyone who could sign in before still can: existing accounts keep their
+status. Re-running migrations 1–15 later resets a few helper functions they
+define; run 16 (and 17) again afterwards.
+
+## Rollback
+
+Each step undoes one layer; the data is never touched.
+
+```sql
+-- the PostgREST pre-request gate
+alter role authenticator reset pgrst.db_pre_request; notify pgrst, 'reload config';
+-- the table and storage policies
+do $$ declare t record; begin
+  for t in select schemaname, tablename from pg_policies where policyname = 'ws_session_gate' loop
+    execute format('drop policy ws_session_gate on %I.%I', t.schemaname, t.tablename);
+  end loop; end $$;
+-- private HR columns readable again
+grant select on public.profiles to authenticated;
+-- let everyone waiting in
+update public.profiles set status = 'active' where status = 'pending';
+-- an admin address locked out by wrong passwords (it also clears itself after 15 minutes)
+delete from public.ws_rate_limits where key like 'admin-pw:%';
+```
+
+## Tests
+
+`tests/access-control-database.test.js` (pending, offboarded, aal1/aal2,
+ended sessions, private columns, invitations, every table gated, upgrade of a
+populated database), `tests/signup-otp.test.js` (the real sign-up and
+verification handlers against the database: parallel guesses and resends,
+expiry, double use, invitations, company binding, partial failures and
+retries), `tests/admin-session.test.js` (admin password limits) and
+`tests/mailer-tls.test.js` (valid, wrong-name and self-signed certificates on
+a local TLS server).
+
+# 17. Public document links
+
+**Before:** making a file's link public copied the file into the public
+`published` bucket, and turning the link off deleted that copy from the
+browser. When the delete failed, the link was reported as off while the copy
+stayed downloadable at its permanent public address, and nobody could delete
+it any more.
+
+**Now** (migration 18, with the same deploy) there are no copies:
+
+- A public link is a token on the document row. The public page asks
+  `ws_published_document` for what to show; for a file it uses
+  `/api/public-document?t=…` (a rewrite to `/api/linkpreview?fn=document`, so
+  no new function), which looks the token up **on every request** and
+  redirects to a signed URL of the stored file.
+- **Revocation window:** turning a link off, letting it expire, or deleting the
+  document refuses the very next request. A signed URL already handed out
+  lives **60 seconds** (15 minutes for audio and video, which stream in many
+  requests), so a viewer with the page already open can finish that long at
+  most. Responses are `Cache-Control: no-store`.
+- Links can **expire**: `documents.published_expires_at`, checked by the
+  database on every view; a past date is refused.
+- The `published` bucket is now **private**, so the old direct copy URLs stop
+  working as soon as the migration runs. Remove the copies themselves from
+  **Admin → Overview → Setup health → Remove leftover public copies**
+  (action `published_cleanup`), which deletes them through the Storage API.
+- Native documents, spreadsheets and presentations worked this way already
+  (the content comes from the database on each view).
+
+Rollback: re-running migration 6 makes the bucket public again; nothing else
+depends on it.
+
+# 18. CRM totals and long lists
+
+**Currencies (BUG-04).** The CRM dashboard added every open deal's value
+together and labelled the sum with the first deal's currency (₹100 + $100
+showed as "₹200"); the quote and invoice counters summed only the first row's
+currency and dropped the rest. Now every money total is per currency:
+
+- the dashboard's value tiles, stage bars and top deals use one currency at a
+  time — a **Values in** picker appears when deals use more than one — and the
+  tiles list the other currencies next to it ("₹3.4L · also $500");
+- won/lost totals, the contact card, and the quote and invoice counters and
+  board columns show each currency on its own ("₹1.2L · $400").
+
+Nothing is converted between currencies: there are no exchange rates in WorkSuite.
+
+**Row caps (PERF-01).** PostgREST answers at most 1,000 rows per request, so
+lists and totals built from one request silently went short.
+
+| Where | Now |
+|---|---|
+| CRM dashboard | Totals from `crm_deal_summary` / `crm_lead_summary` (migration 19); counts are `count` queries; lists are small queries of their own |
+| Sales forecast | `crm_forecast_summary` (migration 19). Before it runs, the browser pages through the deals and says so if it stops at 10,000 |
+| Calendar | Every source is read in pages; a source that fails or reaches 5,000 items is named above the calendar, with **Retry** (UI-02) |
+| Task boards, calendar and Gantt | Paged up to 3,000 tasks; past that the board says "Showing the first 3,000 tasks" |
+| People (pickers, names, directory, org chart, home team list) | Everyone, paged |
+| Deals and invoices boards, workgroup boards | Paged up to 5,000, with a notice past that |
+| Lead, deal, contact and company exports | Paged up to 50,000 rows, with a warning past that |
+
+`npm run smoke:ui` now answers at most 1,000 rows per request, like the real
+API, and its `paging` page checks the people list and the paging helper
+against 2,500 extra people.
+
+# 19. Browser libraries and CSS are served by the site
+
+Pages used to load `@supabase/supabase-js@2` (whatever 2.x was newest that
+day), Chart.js, html2canvas and canvas-confetti from jsDelivr, and six pages
+compiled Tailwind in the browser from `cdn.tailwindcss.com`. Two deployments
+of the same code could run different library versions, and start-up depended
+on two third-party services.
+
+Now (DEP-03):
+
+- The libraries are pinned to exact versions in `package.json` and copied to
+  `ui/vendor/` by `npm run build` (supabase-js 2.117.2 — the release `@2`
+  served at the time of the change —, Chart.js 4.4.0, html2canvas 1.4.1,
+  canvas-confetti 1.9.2). The auth guard, notifications and presence load the
+  same local copy when a page has not.
+- `ui/tailwind.css` is Tailwind 3.4 compiled ahead of time from
+  `tailwind.config.js` and linked last in `<head>`, where the Play CDN used to
+  append its styles; screenshots of the sign-in, home and pending pages are
+  pixel-identical to the runtime CDN.
+- Only TensorFlow.js and BlazeFace (the selfie face check, loaded on demand,
+  about 1.4 MB, and fetching their model weights from the web anyway) stay on
+  jsDelivr, at exact versions with Subresource Integrity hashes.
+- Google Fonts stay as they were; without them the pages fall back to system fonts.
+
+**Upgrading a library:** change its exact version in `package.json`, `npm
+install`, `npm run build`, run the checks and commit `ui/vendor/`. `npm run
+check` fails if the committed copies do not match the pinned versions.
+`npm run smoke:ui` refuses every CDN request, so a page that starts depending
+on one fails there.
+
+# 20. Setup health
+
+**Admin → Overview → Setup health** lists what is set up and what is not:
+
+- **Settings** — every environment variable the features need, reported as
+  *OK*, *Missing*, *Needs attention* (say the admin password is shorter than
+  12 characters, or a company has no sender mailbox) or *Not set up* for
+  optional features (push, AI, TURN). Only whether a value is set is ever
+  reported, never the value.
+- **Database** — which migrations have run (each by a zero-row read of
+  something it adds), whether the access gate of migration 16 covers every
+  table and has its pre-request check, and how many old public file copies
+  are left (with a button that removes them).
+
+Each gap says what to do. Checking sends no mail or push and changes no row.
+It is the admin API action `setup_health`, so only administrators reach it.
+
+# 21. Favourites
+
+A **☆** next to the title of a task, deal, project or document adds it to the
+person's favourites (Enter or Space on the focused star works the same; it
+is a normal button on phones too). **Ctrl+K** (⌘K) lists favourites first,
+and matches them as you type.
+
+Migration 21 (`supabase-favorites-migration.sql`) adds `user_favorites`, one
+row per person and record. Each person reads and changes only their own
+rows. Starring a record is refused unless the person can see it, and
+`ws_my_favorites()` runs with the person's own access, so a record that was
+deleted, archived or is no longer theirs to see drops out without its title
+ever being returned.
+
+# 22. Notification settings
+
+The **⚙** in the bell panel opens **Notification settings**:
+
+- **Push notifications** on or off;
+- which kinds of push to receive — messages and mentions, tasks, CRM, meetings,
+  projects and boards, documents, reminders, everything else;
+- **quiet hours** in the person's time zone (a window like 22:00–07:00 runs
+  across midnight), and whether **calls still ring** during them.
+
+Only pushes follow these settings (`lib/notify-prefs.js`, applied in
+`api/push.js` and the reminder job): every notification still appears in the
+bell, unread. With nothing saved — everyone after the upgrade — every push is
+sent as before.
+
+**Policy for calls:** an incoming call is someone trying to reach you now, so
+it is not a category that can be muted and it rings during quiet hours unless
+*Calls still ring during quiet hours* is off. Switching push off stops call
+pushes too; WorkSuite open in a tab still rings. Reminders held back by quiet
+hours go out on the next reminder run after they end (the same day); muted
+ones do not.
+
+The push API's free-form `notify` now reaches only active colleagues who
+share a company with the sender (administrators: anyone), like the in-app
+notifications of section 16.
 

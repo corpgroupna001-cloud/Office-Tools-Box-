@@ -2,6 +2,10 @@
 // and returns its Open Graph title / description / image so the chat can
 // render a little preview card under messages containing links.
 //
+// Also serves public document links (/api/public-document, a vercel.json
+// rewrite to ?fn=document — the Hobby plan has no function to spare): see
+// publicDocument() below.
+//
 // Signed-in callers only (Authorization: Bearer <Supabase access token>).
 // Every connection, including each redirect hop, goes through publicLookup,
 // which refuses loopback / private / link-local / CGNAT addresses at connect
@@ -10,9 +14,30 @@
 const http = require('http');
 const https = require('https');
 const net = require('net');
-const { sessionUser, publicLookup, isPublicAddress } = require('../lib/request-auth');
+const { sessionUser, publicLookup, isPublicAddress, clientIp } = require('../lib/request-auth');
+const { rpc } = require('../lib/service-rpc');
 
-const CACHE = new Map(); // url -> { at, data } per warm lambda
+/* -------------------------------------------------------------- cache */
+// url -> { at, data } per warm lambda. Every answer goes in through remember(),
+// which drops expired entries and then the oldest, so no path can grow it
+// past CACHE_MAX (PERF-02: the non-HTML answer used to skip the size check).
+const CACHE = new Map();
+const CACHE_TTL = 30 * 60_000;
+const CACHE_MAX = 500;
+function cached(key, now = Date.now()) {
+  const hit = CACHE.get(key);
+  if (!hit) return null;
+  if (now - hit.at >= CACHE_TTL) { CACHE.delete(key); return null; }
+  return hit.data;
+}
+function remember(key, data, now = Date.now()) {
+  CACHE.delete(key);                                    // re-inserting moves it to the newest end
+  if (CACHE.size >= CACHE_MAX) {
+    for (const [k, v] of CACHE) if (now - v.at >= CACHE_TTL) CACHE.delete(k);
+    while (CACHE.size >= CACHE_MAX) CACHE.delete(CACHE.keys().next().value);   // Map keeps insertion order: oldest first
+  }
+  CACHE.set(key, { at: now, data });
+}
 
 function pick(html, patterns) {
   for (const re of patterns) {
@@ -70,7 +95,54 @@ function fetchHead(startUrl, deadline) {
   });
 }
 
+/* ---------------------------------------------------- public documents */
+// GET /api/public-document?t=<token>[&download=1]
+// No sign-in: the token is the key. Each request asks the database whether
+// the link is still on (not turned off, expired or deleted) and only then
+// redirects to a signed URL of the stored file. The signed URL lives 60
+// seconds (15 minutes for audio and video, which stream in many requests);
+// that is the longest a turned-off link can keep serving a viewer who already
+// had it open. Nothing is cached on the way.
+const SIGNED_SECONDS = 60;
+const MEDIA_SIGNED_SECONDS = 15 * 60;
+async function publicDocument(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  const token = String(req.query.t || '');
+  if (!/^[a-z0-9]{24,64}$/i.test(token)) return res.status(404).json({ error: 'not_found' });
+  const db = { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY, request: fetch };
+  if (!db.url || !db.key) return res.status(500).json({ error: 'Supabase server config missing' });
+  // Guessing tokens from one address goes nowhere fast.
+  const limit = await rpc('ws_rate_hit', { p_key: `pubdoc:ip:${clientIp(req)}`, p_window_seconds: 3600, p_max: 600 }, db);
+  if (limit.ok && limit.data && limit.data.allowed === false) return res.status(429).json({ error: 'too_many_requests' });
+  const found = await rpc('ws_published_file', { p_token: token }, db);
+  if (!found.ok) return res.status(503).json({ error: 'unavailable' });
+  const f = found.data;
+  if (!f || !f.path) return res.status(404).json({ error: 'not_found', message: 'This link is no longer available.' });
+  const media = /^(audio|video)\//.test(String(f.mime_type || ''));
+  const objectPath = String(f.path).split('/').map(encodeURIComponent).join('/');
+  let signed;
+  try {
+    const r = await fetch(`${db.url}/storage/v1/object/sign/${encodeURIComponent(f.bucket)}/${objectPath}`, {
+      method: 'POST',
+      headers: { apikey: db.key, Authorization: `Bearer ${db.key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expiresIn: media ? MEDIA_SIGNED_SECONDS : SIGNED_SECONDS }),
+    });
+    const j = r.ok ? await r.json() : null;
+    signed = j && (j.signedURL || j.signedUrl);
+  } catch { signed = null; }
+  if (!signed) return res.status(502).json({ error: 'sign_failed' });
+  const target = new URL(signed.startsWith('http') ? signed : `${db.url}/storage/v1${signed.startsWith('/') ? '' : '/'}${signed}`);
+  if (req.query.download === '1') target.searchParams.set('download', String(f.name || 'file'));
+  res.setHeader('Location', target.href);
+  return res.status(302).end();
+}
+
 module.exports = async function handler(req, res) {
+  if (String((req.query && req.query.fn) || '') === 'document') {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return res.status(405).json({ error: 'Method not allowed' });
+    return publicDocument(req, res);
+  }
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization');
   if (req.method === 'OPTIONS') return res.status(204).end();
@@ -82,17 +154,17 @@ module.exports = async function handler(req, res) {
   if (!/^https?:$/.test(url.protocol)) return res.status(400).json({ error: 'http/https only' });
   if (url.username || url.password) return res.status(400).json({ error: 'credentials in url' });
 
-  if (!(await sessionUser(req))) return res.status(401).json({ error: 'Sign in to load link previews' });
+  if (!(await sessionUser(req, process.env, fetch))) return res.status(401).json({ error: 'Sign in to load link previews' });
   // Per-user responses: never let a shared cache keep them.
   res.setHeader('Cache-Control', 'private, max-age=1800');
 
-  const cached = CACHE.get(url.href);
-  if (cached && Date.now() - cached.at < 30 * 60_000) return res.status(200).json(cached.data);
+  const hit = cached(url.href);
+  if (hit) return res.status(200).json(hit);
 
   const fallback = { url: url.href, host: url.hostname, title: url.hostname, description: null, image: null };
   try {
     const r = await fetchHead(url, Date.now() + 6000);
-    if (!r.html) { CACHE.set(url.href, { at: Date.now(), data: fallback }); return res.status(200).json(fallback); }
+    if (!r.html) { remember(url.href, fallback); return res.status(200).json(fallback); }
     const html = r.html;
     const og = (prop) => pick(html, [
       new RegExp(`<meta[^>]+property=["']og:${prop}["'][^>]+content=["']([^"']+)["']`, 'i'),
@@ -111,8 +183,7 @@ module.exports = async function handler(req, res) {
       description: decodeEntities(og('description') || pick(html, [/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i])),
       image
     };
-    if (CACHE.size > 500) CACHE.clear();
-    CACHE.set(url.href, { at: Date.now(), data });
+    remember(url.href, data);
     return res.status(200).json(data);
   } catch (e) {
     return res.status(200).json(fallback); // graceful — card just shows the domain
@@ -120,3 +191,4 @@ module.exports = async function handler(req, res) {
 };
 
 module.exports.fetchHead = fetchHead;
+module.exports.cache = { CACHE, cached, remember, CACHE_MAX, CACHE_TTL };

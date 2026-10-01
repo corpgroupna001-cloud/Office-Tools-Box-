@@ -507,7 +507,7 @@
             const role = p.owner_id === me.id ? 'Owner' : p.manager_id === me.id ? 'Project manager' : (() => { const m = members.find(x => x.user_id === me.id); return m ? ({ manager: 'Manager', moderator: 'Moderator', owner: 'Owner' }[m.role] || 'Member') : ''; })();
             return `
                 <div class="b24-card-head">
-                    <h1 class="b24-card-title">${projAvatar(p, 'lg')}<span class="t">${esc(p.name)}</span>${cols.full && p.number != null ? `<span class="num">#${esc(p.number)}</span>` : ''}</h1>
+                    <h1 class="b24-card-title">${projAvatar(p, 'lg')}<span class="t">${esc(p.name)}</span>${cols.full && p.number != null ? `<span class="num">#${esc(p.number)}</span>` : ''}${C.favoriteHtml('project', p.id)}</h1>
                     <div class="sub">${C.statusBadge(L.PROJECT_STATUS, p.status)} ${cols.full ? privacyBadge(p) : ''} ${C.priorityBadge(p.priority)} ${dueChip(p)} ${p.archived_at ? C.badge('mute', 'Archived') : ''} ${role ? `· You: ${esc(role)}` : ''} ${p.contact_id ? C.entityChip('contact', p.contact_id, contactLabel) : ''}${p.deal_id ? C.entityChip('deal', p.deal_id, dealLabel) : ''}</div>
                     <div class="acts">
                         ${WSShell.inSlider ? '' : `<a class="b24-btn-card" href="/projects/" data-nav>${C.icon('arrow')}<span>All projects</span></a>`}
@@ -620,9 +620,12 @@
                 el.querySelector('#tasks-table').addEventListener('change', async e => {
                     const cb = e.target.closest('input[data-done]'); if (!cb) return;
                     const t = tasks.find(x => x.id === cb.dataset.done); if (!t) return;
-                    const doneKey = (lk.taskStatuses.find(s => s.is_done) || { key: 'completed' }).key;
                     const openKey = (lk.taskStatuses.find(s => !s.is_done) || { key: 'todo' }).key;
-                    try { await C.q(sb.from('tasks').update({ status: cb.checked ? doneKey : openKey }).eq('id', t.id)); C.toast(cb.checked ? 'Task completed' : 'Task reopened', 'ok'); await refreshTasks(); }
+                    try {
+                        if (cb.checked) { if (!await C.completeTask(t)) { cb.checked = false; return; } }       // asks for a required status summary
+                        else await C.q(sb.from('tasks').update({ status: openKey }).eq('id', t.id));
+                        C.toast(cb.checked ? 'Task completed' : 'Task reopened', 'ok'); await refreshTasks();
+                    }
                     catch (err) { cb.checked = !cb.checked; C.toast(err.message, 'bad'); }
                 });
             }

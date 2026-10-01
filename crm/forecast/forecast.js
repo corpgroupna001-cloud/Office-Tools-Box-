@@ -75,19 +75,45 @@
         const owner = ownerId();
         const cols = 'id, title, owner_id, pipeline_id, value, currency, probability, status, expected_close_date, actual_close_date, created_at, archived_at';
         const scope = b => { b = b.is('archived_at', null).eq('currency', f.currency); if (owner) b = b.eq('owner_id', owner); if (f.pipeline) b = b.eq('pipeline_id', f.pipeline); return b; };
-        let open, closed, lostRows, targets;
+        // The database adds the deals up (crm_forecast_summary, migration 19): every deal
+        // the person may see, however many. Before that migration, the browser pages
+        // through them (capped at 10,000, and says so).
+        let fc, wl, people0, targets, partial = false;
         try {
-            const reasonCol = (await sb.from('crm_deals').select('lost_reason').limit(1)).error ? '' : ', lost_reason';
-            [open, closed, targets] = await Promise.all([
-                all(() => scope(sb.from('crm_deals').select(cols)).eq('status', 'open').order('id')),
-                all(() => scope(sb.from('crm_deals').select(cols + reasonCol)).in('status', ['won', 'lost']).gte('actual_close_date', since < first ? since : first).lte('actual_close_date', last).order('id')),
-                sb.from('crm_sales_targets').select('id, owner_id, period_start, amount, currency').gte('period_start', first).lte('period_start', last).then(r => (r.error ? null : r.data || [])),
-            ]);
-            lostRows = closed;
+            const targetsP = sb.from('crm_sales_targets').select('id, owner_id, period_start, amount, currency').gte('period_start', first).lte('period_start', last).then(r => (r.error ? null : r.data || []));
+            const res = await sb.rpc('crm_forecast_summary', { p_months: months, p_since: since, p_currency: f.currency, p_owner: owner, p_pipeline: f.pipeline || null, p_commit: L.COMMIT_PROBABILITY });
+            if (!res.error && res.data && Array.isArray(res.data.months)) {
+                const d = res.data, sum = k => L.round2(d.months.reduce((a, m) => a + Number(m[k] || 0), 0));
+                fc = { months: d.months, totals: { closed: sum('closed'), commit: sum('commit'), bestCase: sum('bestCase'), pipeline: sum('pipeline') }, overdue: d.overdue };
+                const w = d.win_loss, done = w.won + w.lost;
+                wl = { ...w, win_rate: done ? Math.round(w.won / done * 100) : null, reasons: (w.reasons || []).map(x => ({ ...x, share: w.lost ? Math.round(x.count / w.lost * 100) : 0 })) };
+                people0 = d.people;
+            } else {
+                if (res.error && !['PGRST202', '42883'].includes(res.error.code)) throw res.error;
+                const reasonCol = (await sb.from('crm_deals').select('lost_reason').limit(1)).error ? '' : ', lost_reason';
+                const [open, closed] = await Promise.all([
+                    all(() => scope(sb.from('crm_deals').select(cols)).eq('status', 'open').order('id')),
+                    all(() => scope(sb.from('crm_deals').select(cols + reasonCol)).in('status', ['won', 'lost']).gte('actual_close_date', since < first ? since : first).lte('actual_close_date', last).order('id')),
+                ]);
+                partial = open.length >= 10000 || closed.length >= 10000;
+                fc = L.forecast(open.concat(closed), months, { currency: f.currency });
+                wl = L.winLoss(closed.filter(x => x.actual_close_date >= since), { currency: f.currency });
+                const month0 = months[0], byOwner = new Map();
+                open.concat(closed).forEach(x => {
+                    if (!x.owner_id) return;
+                    const r = byOwner.get(x.owner_id) || { owner_id: x.owner_id, closed: 0, commit: 0, pipeline: 0 };
+                    if (x.status === 'won' && L.monthKey(x.actual_close_date) === month0) r.closed += Number(x.value) || 0;
+                    if (x.status === 'open' && L.monthKey(x.expected_close_date) === month0) {
+                        const p = Number(x.probability) || 0;
+                        r.pipeline += (Number(x.value) || 0) * p / 100;
+                        if (p >= L.COMMIT_PROBABILITY) r.commit += Number(x.value) || 0;
+                    }
+                    byOwner.set(x.owner_id, r);
+                });
+                people0 = [...byOwner.values()];
+            }
+            targets = await targetsP;
         } catch (e) { return C.errorState(view.querySelector('#months'), e, load); }
-
-        const fc = L.forecast(open.concat(closed), months, { currency: f.currency });
-        const wl = L.winLoss(lostRows.filter(d => d.actual_close_date >= since), { currency: f.currency });
         const tgt = (month, who) => (targets || []).filter(t => t.period_start.slice(0, 7) === month && (t.currency || 'INR') === f.currency
             && (who === undefined ? (owner ? t.owner_id === owner : !t.owner_id) : t.owner_id === who)).reduce((a, t) => a + Number(t.amount || 0), 0);
         const targetFor = m => { const own = tgt(m); if (own || owner) return own; return (targets || []).filter(t => t.period_start.slice(0, 7) === m && t.owner_id && (t.currency || 'INR') === f.currency).reduce((a, t) => a + Number(t.amount || 0), 0); };
@@ -102,8 +128,9 @@
             kpi({ label: 'Weighted pipeline', value: money(fc.totals.pipeline), sub: 'value × probability' }),
             kpi({ label: 'Win rate', value: wl.win_rate == null ? '—' : wl.win_rate + '%', sub: wl.avg_cycle_days == null ? `${wl.won} won · ${wl.lost} lost` : `${wl.won} won · ${wl.lost} lost · ${wl.avg_cycle_days} days to win` }),
         ].join('');
-        view.querySelector('#overdue').innerHTML = fc.overdue.count
-            ? `<a href="/deals/" class="crm-due overdue">${fc.overdue.count} open deal${fc.overdue.count === 1 ? '' : 's'} (${esc(money(fc.overdue.value))}) past or without an expected close date</a>` : '';
+        view.querySelector('#overdue').innerHTML = (fc.overdue.count
+            ? `<a href="/deals/" class="crm-due overdue">${fc.overdue.count} open deal${fc.overdue.count === 1 ? '' : 's'} (${esc(money(fc.overdue.value))}) past or without an expected close date</a>` : '')
+            + (partial ? ' <span class="crm-due overdue">Only the first 10,000 deals are counted: an administrator needs to run supabase-crm-summary-migration.sql</span>' : '');
 
         const maxV = Math.max(1, ...fc.months.map(m => Math.max(m.closed + m.bestCase, targetFor(m.month))));
         const bar = (v, cls) => `<span class="ws-bar ${cls || ''}" style="min-width:80px"><i style="width:${Math.round(v / maxV * 100)}%"></i></span>`;
@@ -125,15 +152,7 @@
         const month = months[0];
         const byPerson = new Map();
         const row = id => { if (!byPerson.has(id)) byPerson.set(id, { owner_id: id, target: 0, closed: 0, commit: 0, pipeline: 0 }); return byPerson.get(id); };
-        open.concat(closed).forEach(d => {
-            if (!d.owner_id) return;
-            if (d.status === 'won' && L.monthKey(d.actual_close_date) === month) row(d.owner_id).closed += Number(d.value) || 0;
-            if (d.status === 'open' && L.monthKey(d.expected_close_date) === month) {
-                const p = Number(d.probability) || 0, r = row(d.owner_id);
-                r.pipeline += (Number(d.value) || 0) * p / 100;
-                if (p >= L.COMMIT_PROBABILITY) r.commit += Number(d.value) || 0;
-            }
-        });
+        (people0 || []).forEach(p => Object.assign(row(p.owner_id), { closed: Number(p.closed) || 0, commit: Number(p.commit) || 0, pipeline: Number(p.pipeline) || 0 }));
         (targets || []).filter(t => t.owner_id && t.period_start.slice(0, 7) === month && (t.currency || 'INR') === f.currency && (!owner || t.owner_id === owner)).forEach(t => { row(t.owner_id).target += Number(t.amount) || 0; });
         if (ctx.isManager && !owner) C.activePeople().filter(p => !p.company || !me.company || p.company === me.company).slice(0, 200).forEach(p => row(p.id));
         const people = [...byPerson.values()].sort((a, b) => b.closed - a.closed || b.commit - a.commit || b.target - a.target || C.personName(a.owner_id).localeCompare(C.personName(b.owner_id)));

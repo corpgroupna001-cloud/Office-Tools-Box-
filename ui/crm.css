@@ -541,3 +541,11 @@ body.ws-app .crm-kpis { grid-template-columns: repeat(auto-fill, minmax(min(100%
     body.ws-app .inv-sheet table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
     body.ws-app .inv-sheet .top > div:last-child { text-align: left; }
 }
+
+/* Favourite star on record headers (F-02) */
+.crm-fav { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; margin-left: 6px;
+  border: 1px solid var(--ws-border, rgba(0,0,0,.12)); border-radius: 50%; background: transparent; color: var(--ws-text-muted, #64748b); cursor: pointer; vertical-align: middle; }
+.crm-fav:hover { background: var(--ws-surface-2, rgba(0,0,0,.04)); }
+.crm-fav:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+.crm-fav.on { color: #f59e0b; border-color: #f59e0b; background: rgba(245,158,11,.12); }
+

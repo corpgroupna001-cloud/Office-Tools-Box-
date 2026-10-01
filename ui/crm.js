@@ -81,6 +81,31 @@
         return 'Something went wrong. Please try again.';
     }
     function isMissingSchema(error) { const c = String(error && (error.code || '')); return c === '42P01' || c === 'PGRST205' || c === '42703'; }
+    /**
+     * Every row a query returns, a page of 1,000 at a time (PostgREST stops a
+     * single response there). `build` makes a fresh query each time; give it a
+     * unique last order column so pages do not overlap. The array's `.partial`
+     * is true when `cap` rows were reached — say so on screen (capNotice).
+     */
+    async function fetchAll(build, cap = 10000) {
+        const out = [];
+        for (let from = 0; from < cap; from += 1000) {
+            const r = await build().range(from, from + 999);
+            if (r.error) throw r.error;
+            out.push(...(r.data || []));
+            if ((r.data || []).length < 1000) { out.partial = false; return out; }
+        }
+        out.partial = true;
+        return out;
+    }
+    /** Show (or remove) "only the first N" at the top of host, for a list that reached its cap. */
+    function capNotice(host, rows, what) {
+        if (!host) return;
+        let n = host.querySelector(':scope > .crm-cap-note');
+        if (!rows || !rows.partial) { if (n) n.remove(); return; }
+        if (!n) { n = document.createElement('div'); n.className = 'crm-notice crm-cap-note'; n.setAttribute('role', 'status'); host.prepend(n); }
+        n.innerHTML = `${icon('flag')}<div>Showing the first ${rows.length.toLocaleString('en-IN')} ${esc(what || 'items')}. Narrow the filter to see the rest.</div>`;
+    }
     /** Await a supabase-js builder; throw an Error with a user-safe message. */
     async function q(builder) {
         const res = await builder;
@@ -135,9 +160,21 @@
     async function loadPeople(sb) {
         try {
             const cols = 'id, full_name, email, avatar_url, company, company2, department, job_title, status, last_seen_at, manager_id, employee_code, joining_date, is_wfh, phone, shift_id';
+            // Everyone, a page of 1,000 at a time (PostgREST's limit), in a stable order:
+            // pickers and names must not lose the people after the first thousand (PERF-01).
             // employee_id arrives with supabase-employee-id-migration.sql.
-            let { data, error } = await sb.from('profiles').select(cols + ', employee_id').order('full_name').limit(1000);
-            if (error && String(error.code) === '42703') ({ data, error } = await sb.from('profiles').select(cols).order('full_name').limit(1000));
+            const all = async select => {
+                const out = [];
+                for (let from = 0; from < 20000; from += 1000) {
+                    const r = await sb.from('profiles').select(select).order('full_name').order('id').range(from, from + 999);
+                    if (r.error) return { data: null, error: r.error };
+                    out.push(...(r.data || []));
+                    if ((r.data || []).length < 1000) break;
+                }
+                return { data: out, error: null };
+            };
+            let { data, error } = await all(cols + ', employee_id');
+            if (error && String(error.code) === '42703') ({ data, error } = await all(cols));
             if (error) throw error;
             state.people = (data || []).map(p => ({ ...p, name: p.full_name || (p.email || '').split('@')[0] || 'Unknown' }));
         } catch (e) {
@@ -228,7 +265,7 @@
         if (!ac !== !bc) return ac ? -1 : 1;
         return (ac && bc ? ac.localeCompare(bc, 'en', { numeric: true }) : 0) || String(a.name).localeCompare(String(b.name));
     }
-    function activePeople() { return state.people.filter(p => (p.status || 'active') !== 'inactive'); }
+    function activePeople() { return state.people.filter(p => (p.status || 'active') === 'active'); }   // not offboarded, not waiting for approval
     function avatarHtml(p, cls) {
         const who = typeof p === 'string' ? person(p) : p;
         const name = who ? (who.name || who.full_name || who.email || '?') : '?';
@@ -1114,6 +1151,16 @@
                     if (d.position != null) row.position = d.position;
                     row.created_by = state.user.id;
                 }
+                const lkx = await lookups();
+                const toDone = !!(lkx.taskStatus[row.status] && lkx.taskStatus[row.status].is_done) && (isNew || !(lkx.taskStatus[t.status] && lkx.taskStatus[t.status].is_done));
+                if (toDone && !isNew) {
+                    const need = (await summaryNeeded([t.id])).get(t.id);
+                    if (need) {
+                        const summary = await askTaskSummary(need);
+                        if (!summary) throw new Error('Completing this task needs a status summary. Write one, or choose another status.');
+                        row.result_summary = summary;
+                    }
+                }
                 const saved = isNew
                     ? (await q(sb.from('tasks').insert(row).select('*').single())).data
                     : (await q(sb.from('tasks').update(row).eq('id', t.id).select('*').single())).data;
@@ -1132,6 +1179,149 @@
                 return saved;
             },
         });
+    }
+
+    /* ------------------------------------------------ favourites (F-02) */
+    // A star on task, deal, project and document pages; the command palette
+    // lists the favourites (supabase-favorites-migration.sql). One handler
+    // serves every star on the page, so the markup is all a page adds.
+    let favSet = null;                      // Set('type:id') once loaded
+    const favKey = (type, id) => `${type}:${id}`;
+    async function loadFavorites() {
+        if (favSet) return favSet;
+        const sb = await client();
+        const r = await sb.from('user_favorites').select('entity_type, entity_id');
+        favSet = new Set(r.error ? [] : (r.data || []).map(f => favKey(f.entity_type, f.entity_id)));
+        return favSet;
+    }
+    /** The star button for a record header. */
+    function favoriteHtml(type, id) {
+        return `<button type="button" class="crm-fav" data-ws-fav="${esc(type)}:${esc(id)}" aria-pressed="false" aria-label="Add to favourites" title="Add to favourites">${icon('star')}</button>`;
+    }
+    function paintFavorites(root) {
+        if (!favSet) return;
+        (root || document).querySelectorAll('[data-ws-fav]').forEach(b => {
+            const on = favSet.has(b.dataset.wsFav);
+            b.setAttribute('aria-pressed', String(on));
+            b.classList.toggle('on', on);
+            b.title = b.ariaLabel = on ? 'Remove from favourites' : 'Add to favourites';
+            b.setAttribute('aria-label', b.title);
+        });
+    }
+    async function syncFavorites(root) { try { await loadFavorites(); paintFavorites(root); } catch (e) { /* stars stay off */ } }
+    async function toggleFavorite(type, id) {
+        const sb = await client();
+        await loadFavorites();
+        const k = favKey(type, id), on = favSet.has(k);
+        const r = on
+            ? await sb.from('user_favorites').delete().eq('entity_type', type).eq('entity_id', id)
+            : await sb.from('user_favorites').insert({ entity_type: type, entity_id: id });
+        if (r.error) throw new Error(isMissingSchema(r.error) ? 'Favourites need supabase-favorites-migration.sql' : friendly(r.error));
+        if (on) favSet.delete(k); else favSet.add(k);
+        paintFavorites();
+        toast(on ? 'Removed from favourites' : 'Added to favourites — find it with Ctrl+K', 'ok');
+        return !on;
+    }
+    // Stars appear whenever a page renders a record: paint them as they arrive.
+    let favPaint = 0;
+    new MutationObserver(() => {
+        if (favPaint || !document.querySelector('[data-ws-fav]')) return;
+        favPaint = setTimeout(() => { favPaint = 0; syncFavorites(); }, 50);
+    }).observe(document.documentElement, { childList: true, subtree: true });
+    document.addEventListener('click', e => {
+        const b = e.target && e.target.closest ? e.target.closest('[data-ws-fav]') : null;
+        if (!b) return;
+        e.preventDefault();
+        const [type, id] = b.dataset.wsFav.split(':');
+        b.disabled = true;
+        toggleFavorite(type, id).catch(err => toast(err.message, 'bad')).finally(() => { b.disabled = false; });
+    });
+
+    /* ------------------------------------------------ completing tasks */
+    // "Task status summary is required" (BUG-05). The database refuses to
+    // complete such a task unless the same update carries result_summary
+    // (supabase-task-completion-migration.sql), and posts the summary as the
+    // task's comment. These helpers ask for it first, so every way of
+    // completing a task — a checkbox, bulk Complete, dragging to a done column,
+    // the editor — goes through the same rule.
+    const SUMMARY_FIELD = { name: 'summary', label: 'Summary', type: 'textarea', rows: 5, required: true, full: true, placeholder: 'What was done, and the result' };
+    const noSummaryColumn = e => !!e && (String(e.code) === 'PGRST204' || String(e.code) === '42703');
+    async function askTaskSummary(t) {
+        const out = await formModal({ title: 'Task status summary', submitLabel: 'Complete task',
+            intro: `<div class="crm-info">${esc(t.title || 'This task')} needs a summary of what was done before it is completed.</div>`,
+            fields: [SUMMARY_FIELD], onSubmit: v => String(v.summary || '').trim() });
+        return typeof out === 'string' && out ? out : null;
+    }
+    /** Which of these tasks need a summary. A failed lookup is an error, never "none of them" (it used to fail open). */
+    async function summaryNeeded(ids) {
+        const sb = await client();
+        const r = await sb.from('tasks').select('id, title, result_required').in('id', ids);
+        if (r.error) {
+            if (noSummaryColumn(r.error)) return new Map();            // before migration 13 nothing requires one
+            throw new Error(friendly(r.error));
+        }
+        return new Map((r.data || []).filter(x => x.result_required).map(x => [x.id, x]));
+    }
+    /**
+     * Complete one task, asking for the summary when it needs one. `patch` adds
+     * other columns to the same update (a board column, a position).
+     * Resolves true when completed, false when the person cancelled.
+     */
+    async function completeTask(t, patch) {
+        const sb = await client();
+        const lk = await lookups();
+        const doneKey = (lk.taskStatuses.find(x => x.is_done) || { key: 'completed' }).key;
+        const need = (await summaryNeeded([t.id])).get(t.id);
+        const summary = need ? await askTaskSummary(need) : null;
+        if (need && !summary) return false;
+        const row = { ...(patch && patch.board_column_id ? {} : { status: doneKey }), ...(patch || {}), ...(summary ? { result_summary: summary } : {}) };
+        let res = await sb.from('tasks').update(row).eq('id', t.id).select('id');
+        if (res.error && summary && noSummaryColumn(res.error)) {
+            // Before migration 20: the old way, the summary as a separate comment.
+            delete row.result_summary;
+            res = await sb.from('tasks').update(row).eq('id', t.id).select('id');
+            if (!res.error && (res.data || []).length) await q(sb.from('comments').insert({ entity_type: 'task', entity_id: t.id, body: `Task status summary:\n${summary}`, mentions: [], author_id: state.user.id }));
+        }
+        if (res.error) throw new Error(friendly(res.error));
+        if (!(res.data || []).length) throw new Error('You do not have permission to change this task.');
+        return true;
+    }
+    /**
+     * Complete several tasks. Those that need no summary go in one update (which
+     * itself skips any that do); those that do get a summary each in one form,
+     * up to 10 — more than that are left for one by one.
+     * Resolves { done, skipped } (counts), or null when cancelled.
+     */
+    async function completeTasks(ids) {
+        const sb = await client();
+        const lk = await lookups();
+        const doneKey = (lk.taskStatuses.find(x => x.is_done) || { key: 'completed' }).key;
+        const need = await summaryNeeded(ids);
+        let done = 0, skipped = 0;
+        const plain = ids.filter(id => !need.has(id));
+        if (plain.length) {
+            const res = await sb.from('tasks').update({ status: doneKey }).in('id', plain).eq('result_required', false).select('id');
+            if (res.error) throw new Error(friendly(res.error));
+            done += (res.data || []).length;
+            skipped += plain.length - (res.data || []).length;
+        }
+        const asked = [...need.values()];
+        if (asked.length > 10) { skipped += asked.length; asked.length = 0; toast('Tasks that need a status summary: complete them one by one', 'warn'); }
+        if (asked.length) {
+            const answers = await formModal({
+                title: asked.length === 1 ? 'Task status summary' : `Status summaries (${asked.length} tasks)`, size: 'wide', submitLabel: 'Complete',
+                intro: `<div class="crm-info">${asked.length === 1 ? 'This task needs' : 'These tasks need'} a summary of what was done before ${asked.length === 1 ? 'it is' : 'they are'} completed.</div>`,
+                fields: asked.map(t => ({ ...SUMMARY_FIELD, name: 's_' + t.id, label: t.title || 'Task', rows: 3 })),
+                onSubmit: v => v,
+            });
+            if (!answers || answers === true) { if (!done) return null; skipped += asked.length; }
+            else for (const t of asked) {
+                const summary = String(answers['s_' + t.id] || '').trim();
+                const res = await sb.from('tasks').update({ status: doneKey, result_summary: summary }).eq('id', t.id).select('id');
+                if (!res.error && (res.data || []).length) done++; else skipped++;
+            }
+        }
+        return { done, skipped };
     }
 
     /* ------------------------------------------------ event quick editor */
@@ -1217,7 +1407,8 @@
 
     /* --------------------------------------------------------- public API */
     window.WSCrm = {
-        boot, ctx, client, lookups, q, friendly, isMissingSchema, migrationNoticeHtml,
+        boot, ctx, client, lookups, q, friendly, isMissingSchema, migrationNoticeHtml, fetchAll, capNotice, completeTask, completeTasks,
+        favoriteHtml, syncFavorites, toggleFavorite,
         esc, h, $, $$, uid, debounce, param, setParam, toast, icon, nl2br, linkify,
         person, personName, personLabel, personText, personInline, activePeople, avatarHtml, personHtml, avatarsHtml, peopleOptions, peoplePicker, pickPeople, personField,
         badge, statusBadge, priorityBadge, dueHtml, tagsHtml, entityUrl, entityChip, ENTITY_META,

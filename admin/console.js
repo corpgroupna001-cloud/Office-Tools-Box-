@@ -74,7 +74,7 @@
   function parseCsv(text) {
     const rows = [];
     let row = [], field = '', quoted = false;
-    const src = String(text).replace(/^﻿/, '');
+    const src = String(text).replace(/^\uFEFF/, '');
     for (let i = 0; i < src.length; i++) {
       const c = src[i];
       if (quoted) {
@@ -185,23 +185,26 @@
 
   function openExit(emp) {
     exitTarget = emp;
-    const leaving = (emp.status || 'active') === 'active';
+    const leaving = (emp.status || 'active') !== 'inactive';
+    const pending = emp.status === 'pending';
     $('exit-emp-err').classList.add('hidden');
-    $('exit-emp-title').textContent = leaving ? 'Offboard employee' : 'Bring employee back';
-    $('exit-emp-copy').textContent = leaving
-      ? `${emp.full_name || emp.email} will no longer be able to sign in, and drops out of the live schedule and company structure. Their attendance, payroll, leave and assessment history is kept — this is not a deletion.`
+    $('exit-emp-title').textContent = pending ? 'Turn this sign-up away' : leaving ? 'Offboard employee' : 'Bring employee back';
+    $('exit-emp-copy').textContent = pending
+      ? `${emp.full_name || emp.email} signed up without an invitation. They will not be able to sign in; the record stays, so you can still approve them later with ↩️.`
+      : leaving
+      ? `${emp.full_name || emp.email} will no longer be able to sign in — any session they have open stops working at once — and drops out of the live schedule and company structure. Their attendance, payroll, leave and assessment history is kept — this is not a deletion.`
       : `${emp.full_name || emp.email} will be able to sign in again and returns to the live schedule. Any last working day on record is cleared.`;
     $('exit-emp-fields').innerHTML = leaving
       ? `<label>Last working day<input id="exit-emp-date" type="date" value="${today()}"></label><label>Reason (optional)<input id="exit-emp-reason" type="text" placeholder="Resigned, contract ended…"></label>`
       : '';
-    $('exit-emp-save').textContent = leaving ? 'Offboard' : 'Reactivate';
+    $('exit-emp-save').textContent = pending ? 'Turn away' : leaving ? 'Offboard' : 'Reactivate';
     exitModal.classList.remove('hidden'); exitModal.classList.add('flex');
   }
   function closeExit() { exitModal.classList.add('hidden'); exitModal.classList.remove('flex'); exitTarget = null; }
 
   async function submitExit() {
     if (!exitTarget) return;
-    const leaving = (exitTarget.status || 'active') === 'active';
+    const leaving = (exitTarget.status || 'active') !== 'inactive';
     const err = $('exit-emp-err');
     err.classList.add('hidden');
     $('exit-emp-save').disabled = true;

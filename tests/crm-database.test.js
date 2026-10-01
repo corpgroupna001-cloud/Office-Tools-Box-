@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { freshDb, as, makeUser, pglite } = require('./fixtures/load-db');
 
-const skip = pglite() ? false : 'PGlite is not installed (npm i -D @electric-sql/pglite)';
+const skip = pglite() ? false : 'WS_SKIP_DB_TESTS=1: database tests skipped on purpose';
 const NOVA = 'Nova Sportsmart Private Limited';
 const JOBWAYS = 'Jobways Point LLP';
 const RLS = /row-level security/;
@@ -250,10 +250,13 @@ test('group messages are for members only, authors alone edit, and DMs work as b
   await assert.rejects(q(A, `insert into messages (sender_id, recipient_id, conversation_id, body) values ($1, $2, $3, 'both')`, [A, C, conv.id]), /messages_target_ck/);
 });
 
-test('a browser can notify a colleague only as itself', { skip }, async () => {
-  await assert.rejects(q(A, `insert into notifications (user_id, actor_id, kind, title) values ($1, $1, 'mention', 'x')`, [C]), RLS);
-  await assert.rejects(q(A, `insert into notifications (user_id, actor_id, kind, title) values ($1, $1, 'mention', 'x')`, [A]), RLS);
-  await q(A, `insert into notifications (user_id, actor_id, kind, title) values ($1, $2, 'mention', 'Anil mentioned you')`, [C, A]);
+test('a browser cannot write notifications; only the database sends them (SEC-10)', { skip }, async () => {
+  const DENIED = /permission denied/;
+  await assert.rejects(q(A, `insert into notifications (user_id, actor_id, kind, title) values ($1, $1, 'mention', 'x')`, [C]), DENIED);
+  await assert.rejects(q(A, `insert into notifications (user_id, actor_id, kind, title) values ($1, $2, 'mention', 'Anil mentioned you')`, [C, A]), DENIED, 'not even as itself');
+  await assert.rejects(q(A, `insert into notifications (user_id, actor_id, kind, title) values ($1, $2, 'mention', 'x')`, [B, A]), DENIED, 'nor across companies');
+  await assert.rejects(q(A, `select public.ws_notify($1, 'deal.assigned', 'You were given a deal')`, [B]), DENIED, 'ws_notify is not an RPC');
+  assert.equal((await q(B, `select id from notifications where user_id = $1 and kind in ('mention', 'deal.assigned')`, [B])).length, 0);
 });
 
 test('server reminders fire once each, in their windows, and only the service may run them', { skip }, async () => {

@@ -22,7 +22,9 @@ function reset() {
   sent = [];
   rpcCalls = [];
   rows = {
-    profiles: [{ id: A, full_name: 'Anil Kumar', email: 'anil@nova.test' }, { id: C, full_name: 'Chitra Rao' }],
+    profiles: [{ id: A, full_name: 'Anil Kumar', email: 'anil@nova.test', company: 'Nova', status: 'active' }, { id: C, full_name: 'Chitra Rao', company: 'Nova', status: 'active' },
+               { id: D, full_name: 'Dev Jobways', company: 'Jobways', status: 'active' }],
+    notification_prefs: [],
     messages: [
       { id: 7, sender_id: A, recipient_id: C, conversation_id: null, body: 'hello there', mentions: [], created_at: now },
       { id: 8, sender_id: A, recipient_id: null, conversation_id: G, body: 'team update', mentions: [], created_at: now },
@@ -174,4 +176,48 @@ test('a free-form notify only links inside WorkSuite and cannot pose as a call',
   }
   assert.deepEqual([...new Set(sent.map(s => s.payload.url))], ['/chat/']);
   assert.equal((await call({ token: 'tok-a', body: { action: 'notify', to: C, title: 'Incoming call', tag: 'call' } })).statusCode, 400);
+});
+
+/* ------------------------------------------------ settings and who may be notified (F-03, SEC-10) */
+const quietNow = () => {
+  // A quiet window around the current time in India, whatever time the test runs.
+  const t = new Date(Date.now() + 5.5 * 3600 * 1000);
+  const hh = m => String(Math.floor(((m % 1440) + 1440) % 1440 / 60)).padStart(2, '0') + ':' + String(((m % 60) + 60) % 60).padStart(2, '0');
+  const mins = t.getUTCHours() * 60 + t.getUTCMinutes();
+  return { quiet_enabled: true, quiet_start: hh(mins - 60), quiet_end: hh(mins + 60), timezone: 'Asia/Kolkata' };
+};
+
+test('a free-form notify reaches colleagues only: not another company, not someone who left', async () => {
+  reset();
+  assert.equal((await call({ token: 'tok-a', body: { action: 'notify', to: D, title: 'Hi', tag: 'task' } })).statusCode, 403);
+  rows.profiles.find(p => p.id === C).status = 'inactive';
+  assert.equal((await call({ token: 'tok-a', body: { action: 'notify', to: C, title: 'Hi', tag: 'task' } })).statusCode, 403);
+  assert.equal(sent.length, 0);
+});
+
+test('a muted category or switched-off push is held; the response says why', async () => {
+  reset();
+  rows.notification_prefs = [{ user_id: C, push_enabled: true, muted_categories: ['tasks'] }];
+  const r = await call({ token: 'tok-a', body: { action: 'notify', to: C, title: 'Task assigned', tag: 'task' } });
+  assert.deepEqual([r.statusCode, r.body.sent, r.body.held, r.body.reason], [200, 0, 1, 'held_by_settings']);
+  await call({ token: 'tok-a', body: { action: 'message', message_id: 7 } });
+  assert.equal(sent.length, 1, 'messages were not muted');
+  sent = [];
+  rows.notification_prefs = [{ user_id: C, push_enabled: false, muted_categories: [] }];
+  await call({ token: 'tok-a', body: { action: 'message', message_id: 7 } });
+  await call({ token: 'tok-a', body: { action: 'call', call_id: CALL } });
+  assert.equal(sent.length, 0, 'push off means no pushes, calls included (an open tab still rings)');
+});
+
+test('quiet hours hold messages but let calls ring, unless calls are switched off too', async () => {
+  reset();
+  rows.notification_prefs = [{ user_id: C, push_enabled: true, muted_categories: [], calls_in_quiet: true, ...quietNow() }];
+  await call({ token: 'tok-a', body: { action: 'message', message_id: 7 } });
+  assert.equal(sent.length, 0, 'a message waits for the morning');
+  await call({ token: 'tok-a', body: { action: 'call', call_id: CALL } });
+  assert.equal(sent.length, 1, 'a call still rings');
+  sent = [];
+  rows.notification_prefs[0].calls_in_quiet = false;
+  await call({ token: 'tok-a', body: { action: 'call', call_id: CALL } });
+  assert.equal(sent.length, 0);
 });

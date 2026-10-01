@@ -1,0 +1,17 @@
+{
+  // Browser half of the scoped JSDoc type check: plain <script> files with
+  // `// @ts-check` on their first line, checked against the DOM.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "target": "es2022",
+    "module": "preserve",
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "types": [],
+    "skipLibCheck": true
+  },
+  "include": ["admin/*.js", "dialogs.js", "types/*.d.ts"]
+}

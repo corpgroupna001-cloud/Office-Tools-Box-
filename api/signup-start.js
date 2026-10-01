@@ -3,14 +3,26 @@
 // NO auth user is created here. The account only comes into
 // existence in /api/signup-complete after the code checks out.
 //
+// The code is bound to the email AND the company chosen here: completing
+// uses the company stored with the code, never one sent later. Issuing is
+// one database call (ws_signup_code_issue) under a row lock, so parallel
+// requests cannot slip past "one code a minute, five an hour"; each address
+// is also limited per IP. Storage errors refuse rather than guess.
+//
+// Whether the new account is active straight away depends on an invitation
+// (ws_invitations, from Employees → Invite or the admin console); without
+// one it waits for an administrator. `invited` in the reply tells the page.
+//
 // POST { email, company, full_name }
-//   → 200 { success, expires_at }
+//   → 200 { success, expires_at, invited }
 //   → 409 email already registered
-//   → 503 company email coming soon (Navyug Raise A Player)
+//   → 429 too soon / too many codes / too many sign-ups from this network
+//   → 503 company email coming soon (Navyug Raise A Player) / storage unavailable
 // ============================================================
 
 const crypto = require('crypto');
-const { readJson } = require('../lib/request-auth');
+const { readJson, clientIp } = require('../lib/request-auth');
+const { rpc } = require('../lib/service-rpc');
 function sha256(s) { return crypto.createHash('sha256').update(s).digest('hex'); }
 function sixDigits() { return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0'); }
 
@@ -21,6 +33,8 @@ const ALLOWED_COMPANIES = [
   'Genie Lamp Private Limited',
 ];
 const COMING_SOON = ['Navyug Raise A Player Foundation', 'Raise a Player'];
+// Codes asked for from one network address in an hour (shared offices sit behind one).
+const PER_IP_PER_HOUR = 30;
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -33,9 +47,9 @@ module.exports = async function handler(req, res) {
   if (!body) return res.status(400).json({ error: 'Invalid JSON' });
   const email     = String(body.email || '').trim().toLowerCase();
   const company   = String(body.company || '');
-  const full_name = String(body.full_name || '').trim();
+  const full_name = String(body.full_name || '').trim().slice(0, 150);
 
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'invalid_email', message: 'Please enter a valid email address.' });
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 254) return res.status(400).json({ error: 'invalid_email', message: 'Please enter a valid email address.' });
   if (COMING_SOON.includes(company)) {
     return res.status(503).json({ error: 'company_coming_soon', message: 'Sign-ups for this company are not open yet. Please choose a different company.' });
   }
@@ -50,57 +64,61 @@ module.exports = async function handler(req, res) {
   if (!MAIL_KEY)                     return res.status(500).json({ error: 'MAIL_API_KEY not configured.' });
 
   const H = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` };
+  const db = { url: SUPABASE_URL, key: SERVICE_KEY, request: fetch };
+  const unavailable = () => res.status(503).json({ error: 'unavailable', message: 'Sign-up is unavailable right now. Please try again in a few minutes.' });
+
+  // Per network address, so one machine cannot walk through many mailboxes.
+  const ip = await rpc('ws_rate_hit', { p_key: `signup-start:ip:${clientIp(req)}`, p_window_seconds: 3600, p_max: PER_IP_PER_HOUR }, db);
+  if (!ip.ok) return unavailable();
+  if (!ip.data.allowed) {
+    res.setHeader('Retry-After', String(ip.data.retry_after || 3600));
+    return res.status(429).json({ error: 'too_many_requests', message: 'Too many sign-ups from this network. Try again later.' });
+  }
 
   // Already registered? (profiles carries every account's email)
+  let taken;
   try {
     const pr = await fetch(`${SUPABASE_URL}/rest/v1/profiles?select=id&email=eq.${encodeURIComponent(email)}&limit=1`, { headers: H });
-    if (pr.ok) {
-      const rows = await pr.json();
-      if (rows.length) return res.status(409).json({ error: 'already_registered', message: 'An account with this email already exists. Try logging in instead.' });
-    }
-  } catch {}
+    if (!pr.ok) return unavailable();
+    taken = (await pr.json()).length > 0;
+  } catch { return unavailable(); }
+  if (taken) return res.status(409).json({ error: 'already_registered', message: 'An account with this email already exists. Try logging in instead.' });
 
-  // One code a minute per address, so this cannot be used to flood a mailbox.
-  try {
-    const pr = await fetch(`${SUPABASE_URL}/rest/v1/pending_signups?select=sent_at&email=eq.${encodeURIComponent(email)}&limit=1`, { headers: H });
-    const [row] = pr.ok ? await pr.json() : [];
-    if (row && row.sent_at && Date.now() - new Date(row.sent_at).getTime() < 60_000) {
-      return res.status(429).json({ error: 'too_soon', message: 'A code was sent less than a minute ago. Check your inbox, or try again in a minute.' });
-    }
-  } catch {}
-
-  // Store (or replace) the pending code — 15 minute window.
+  // Store the code with its company — one database call, under a row lock.
   const code = sixDigits();
-  const up = await fetch(`${SUPABASE_URL}/rest/v1/pending_signups`, {
-    method: 'POST',
-    headers: { ...H, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
-    body: JSON.stringify({
-      email,
-      code_hash: sha256(code),
-      attempts: 0,
-      sent_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-    })
-  });
-  if (!up.ok) return res.status(502).json({ error: 'store_code_failed', detail: (await up.text()).slice(0, 300) });
+  const codeHash = sha256(code);
+  const issued = await rpc('ws_signup_code_issue', { p_email: email, p_company: company, p_full_name: full_name, p_code_hash: codeHash }, db);
+  if (!issued.ok) return unavailable();
+  if (!issued.data.ok) {
+    res.setHeader('Retry-After', String(issued.data.retry_after || 60));
+    return res.status(429).json(issued.data.reason === 'too_soon'
+      ? { error: 'too_soon', message: 'A code was sent less than a minute ago. Check your inbox, or try again in a minute.' }
+      : { error: 'too_many_codes', message: 'Too many codes were sent to this address. Try again in an hour.' });
+  }
+  const invited = await rpc('ws_invite_open', { p_email: email, p_company: company }, db);
 
   // Email the code through the company-routed sender.
   const proto = req.headers['x-forwarded-proto'] || 'https';
   const name = full_name || email.split('@')[0];
-  const mailRes = await fetch(`${proto}://${req.headers.host}/api/mail`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-worksuite-mail-key': MAIL_KEY },
-    body: JSON.stringify({
-      company, to: email,
-      subject: `Your WorkSuite verification code: ${code}`,
-      html: renderOtpEmail({ name, code, company }),
-    })
-  });
-  if (!mailRes.ok) {
-    const detail = await mailRes.json().catch(() => ({}));
+  let mailRes = null;
+  try {
+    mailRes = await fetch(`${proto}://${req.headers.host}/api/mail`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-worksuite-mail-key': MAIL_KEY },
+      body: JSON.stringify({
+        company, to: email,
+        subject: `Your WorkSuite verification code: ${code}`,
+        html: renderOtpEmail({ name, code, company }),
+      })
+    });
+  } catch { mailRes = null; }
+  if (!mailRes || !mailRes.ok) {
+    const detail = mailRes ? await mailRes.json().catch(() => ({})) : {};
+    // The code never arrived: take it back so asking again is not "too soon".
+    await rpc('ws_signup_code_withdraw', { p_email: email, p_code_hash: codeHash }, db);
     return res.status(502).json({ error: 'mail_failed', message: 'Could not send the verification email. Please try again.', detail });
   }
-  return res.status(200).json({ success: true, expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+  return res.status(200).json({ success: true, expires_at: issued.data.expires_at, invited: !!(invited.ok && invited.data === true) });
 };
 
 function renderOtpEmail({ name, code, company }) {

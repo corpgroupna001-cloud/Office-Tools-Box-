@@ -5,7 +5,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WorkSuite Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/design-system.css">
@@ -37,6 +36,7 @@
     </style>
     <link rel="stylesheet" href="/ui/corporate.css">
     <link rel="stylesheet" href="/ui/b24.css">
+    <link rel="stylesheet" href="/ui/tailwind.css"><!-- prebuilt Tailwind (npm run build), last like the Play CDN's style was -->
 </head>
 <body data-ws-page="home" class="ws-app ws-corporate ws-b24">
 
@@ -433,7 +433,7 @@
             }
         });
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/ui/vendor/supabase-js.js"></script>
     <script src="/mfa.js"></script>
     <script src="/presence.js"></script>
     <script src="/notifications.js"></script>
@@ -593,8 +593,8 @@
                     close(); setBusy(false);
                     showDialog({
                         type: 'success',
-                        title: successTitle || 'Email verified! 🎉',
-                        message: successMessage || 'You are all set.',
+                        title: result.successTitle || successTitle || 'Email verified! 🎉',
+                        message: result.successMessage || successMessage || 'You are all set.',
                         buttonText: 'Continue',
                         onClose: () => { if (typeof onSuccess === 'function') onSuccess(); }
                     });
@@ -806,6 +806,34 @@
                 window.__WS_SB__ = rootSb;
                 return true;
             } catch { return false; }
+        }
+
+        // What the database says about this session (supabase-access-control-migration.sql):
+        // { access: 'ok' | 'pending' | 'inactive' | 'mfa_required' | 'session_ended' | 'no_profile',
+        //   status, email_verified, company, full_name }. null before that migration runs.
+        async function myAccess() {
+            try {
+                const { data, error } = await rootSb.rpc('ws_my_access');
+                return error || !data || typeof data !== 'object' ? null : data;
+            } catch { return null; }
+        }
+        // A pending or offboarded account cannot use WorkSuite: say why and sign this browser out.
+        // Returns true when it handled the session.
+        async function refuseAccess(access) {
+            const why = access && access.access;
+            if (!['pending', 'inactive', 'no_profile', 'session_ended'].includes(why)) return false;
+            try { await rootSb.auth.signOut({ scope: 'local' }); } catch {}
+            onLoggedOut();
+            if (why === 'pending') {
+                showDialog({ type: 'info', title: 'Waiting for approval',
+                    message: `Your account${access.company ? ' at ' + access.company : ''} has not been approved yet. An administrator needs to approve it before you can sign in. Try again once they have.` });
+            } else if (why === 'inactive') {
+                showDialog({ type: 'warning', title: 'Account not active',
+                    message: 'This account is no longer active. If you think that is a mistake, contact your administrator.' });
+            } else {
+                showDialog({ type: 'info', title: 'Signed out', message: 'Your session ended. Please sign in again.' });
+            }
+            return true;
         }
 
         function showAuthModal() {
@@ -1034,7 +1062,14 @@
                 apiView({ mode: 'team_status' }),
                 teamAvatars ? null : (async () => {
                     // Photos and Employee IDs; before supabase-employee-id-migration.sql there are only photos.
-                    const r = await rootSb.from('profiles').select('id, avatar_url, employee_id').limit(2000);
+                    // A page of 1,000 at a time (PostgREST's limit), so the 1,001st person keeps their photo.
+                    const r = { data: [], error: null };
+                    for (let from = 0; from < 20000; from += 1000) {
+                        const pg = await rootSb.from('profiles').select('id, avatar_url, employee_id').order('id').range(from, from + 999);
+                        if (pg.error) { r.error = pg.error; break; }
+                        r.data.push(...(pg.data || []));
+                        if ((pg.data || []).length < 1000) break;
+                    }
                     if (!r.error) {
                         teamAvatars = new Map((r.data || []).filter(p => p.avatar_url).map(p => [p.id, p.avatar_url]));
                         teamIds = new Map((r.data || []).filter(p => p.employee_id).map(p => [p.id, p.employee_id]));
@@ -1342,9 +1377,12 @@
                     showDialog({ type: 'error', title: f.title, message: f.message, buttonText: 'Try Again' });
                     return;
                 }
+                // Pending approval or offboarded: say so instead of an empty workspace.
+                const access = await myAccess();
+                if (await refuseAccess(access)) return;
                 // Gate: users who never completed the sign-up OTP must verify now.
-                let prof = null;
-                try {
+                let prof = access ? { email_verified: access.email_verified, company: access.company, full_name: access.full_name } : null;
+                if (!access) try {
                     const { data: p } = await rootSb.from('profiles')
                         .select('email_verified, company, full_name')
                         .eq('id', data.session.user.id).maybeSingle();
@@ -1526,8 +1564,11 @@
                             })
                         });
                         const j = await r.json().catch(() => ({}));
-                        if (r.ok) resetSignupForm();
-                        return { ok: r.ok, message: j.message || j.error };
+                        if (!r.ok) return { ok: false, message: j.message || j.error };
+                        resetSignupForm();
+                        if (j.status === 'pending') return { ok: true, successTitle: 'Account created — waiting for approval',
+                            successMessage: `Thanks, ${firstName}. Your email is verified. An administrator at ${company} now needs to approve your account; you can sign in once they have.` };
+                        return { ok: true };
                     },
                     onResend: async () => {
                         const r = await fetch('/api/signup-start', {
@@ -1586,6 +1627,7 @@
             if (!ok) { showAuthModal(); openInviteSignup(); return; }
             const { data: { session } } = await rootSb.auth.getSession();
             if (!session) { onLoggedOut(); openInviteSignup(); return; }
+            if (await refuseAccess(await myAccess())) return;
             // A sign-in that stopped before its two-step code: ask for the code, as every other page's guard expects.
             if (window.WSMfa) {
                 const mfa = await window.WSMfa.status(rootSb);

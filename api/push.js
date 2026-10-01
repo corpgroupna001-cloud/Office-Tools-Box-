@@ -29,6 +29,8 @@
 const webpush = require('web-push');
 const { iceServersFor } = require('../lib/ice-servers');
 const P = require('../lib/comms-push');
+const { verifyToken, accessError } = require('../lib/request-auth');
+const { loadPrefs, pushDecision } = require('../lib/notify-prefs');
 
 function queryParam(req, name) {
   if (req.query && req.query[name] != null) return String(req.query[name]);
@@ -71,17 +73,10 @@ module.exports = async function handler(req, res) {
   // ---- Verify the caller's Supabase session token ----
   const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (!token) return res.status(401).json({ error: 'Missing Authorization token' });
-  let caller = null;
-  try {
-    const ur = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${token}` }
-    });
-    if (!ur.ok) return res.status(401).json({ error: 'Invalid session' });
-    caller = await ur.json();
-  } catch {
-    return res.status(401).json({ error: 'Auth check failed' });
-  }
-  if (!caller?.id) return res.status(401).json({ error: 'Invalid session' });
+  // Same rules as the database: a live session, the second step done, an active account.
+  const access = await verifyToken(token, { url: SUPABASE_URL, key: SERVICE_KEY, serviceKey: SERVICE_KEY, request: fetch });
+  if (access.reason) { const e = accessError(access.reason); return res.status(e.status).json(e.body); }
+  const caller = access.user;
 
   if (action === 'ice') {
     res.setHeader('Cache-Control', 'private, no-store');
@@ -124,13 +119,18 @@ module.exports = async function handler(req, res) {
   };
 
   // Push to every device of these people. payloadFor(userId) may return null to skip someone.
-  async function pushTo(userIds, payloadFor, { ttl, urgency }) {
+  // Each person's notification settings (F-03) decide whether `kind` reaches them now;
+  // the in-app notification is not affected.
+  async function pushTo(userIds, payloadFor, { ttl, urgency, kind }) {
     const ids = [...new Set(userIds)].filter(P.isUuid);
-    if (!ids.length) return { sent: 0, cleaned: 0 };
+    if (!ids.length) return { sent: 0, cleaned: 0, held: 0 };
+    const prefs = await loadPrefs(ids, { url: SUPABASE_URL, key: SERVICE_KEY, request: fetch });
+    const held = new Set(ids.filter(id => !pushDecision(prefs.get(id), kind).allowed));
     const subs = await rest(`push_subscriptions?user_id=in.(${ids.join(',')})&select=*`);
     webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
     let sent = 0, cleaned = 0;
     await Promise.all(subs.map(async s => {
+      if (held.has(s.user_id)) return;
       const payload = payloadFor(s.user_id);
       if (!payload) return;
       try {
@@ -152,7 +152,7 @@ module.exports = async function handler(req, res) {
         }
       }
     }));
-    return { sent, cleaned };
+    return { sent, cleaned, held: held.size };
   }
 
   try {
@@ -199,7 +199,7 @@ module.exports = async function handler(req, res) {
       }
       const senderName = await nameOf(message.sender_id);
       const r = await pushTo(P.messageRecipients(message, members),
-        uid => P.messagePush({ message, senderName, groupName, recipientId: uid }), { ttl: 3600, urgency: 'normal' });
+        uid => P.messagePush({ message, senderName, groupName, recipientId: uid }), { ttl: 3600, urgency: 'normal', kind: 'message' });
       return res.status(200).json({ success: true, ...r });
     }
 
@@ -213,13 +213,13 @@ module.exports = async function handler(req, res) {
       if (action === 'call') {
         if (!P.mayPushCall(call, caller.id)) return res.status(403).json({ error: 'Only the caller can ring, while the call is ringing' });
         const payload = P.callPush({ call, callerName, groupName });
-        const r = await pushTo(P.callRecipients(parts), () => payload, { ttl: 45, urgency: 'high' });
+        const r = await pushTo(P.callRecipients(parts), () => payload, { ttl: 45, urgency: 'high', kind: 'call' });
         return res.status(200).json({ success: true, ...r });
       }
       if (!P.mayPushCallEnd(parts, caller.id)) return res.status(403).json({ error: 'Not in this call' });
       const byUser = new Map(parts.map(p => [p.user_id, p]));
       const r = await pushTo(parts.map(p => p.user_id),
-        uid => P.callEndPush({ call, participant: byUser.get(uid), callerName, groupName }), { ttl: 120, urgency: 'high' });
+        uid => P.callEndPush({ call, participant: byUser.get(uid), callerName, groupName }), { ttl: 120, urgency: 'high', kind: 'call-end' });
       return res.status(200).json({ success: true, ...r });
     }
 
@@ -230,6 +230,15 @@ module.exports = async function handler(req, res) {
       // Calls ring through the 'call' action; a plain notify may not look like one.
       const tag = String(body.tag || 'worksuite').slice(0, 60);
       if (/^call/i.test(tag)) return res.status(400).json({ error: 'Use the call action to ring someone' });
+      // Only to a colleague: someone who shares a company with the sender, and is active (an administrator may reach anyone).
+      const [me, them] = await Promise.all([
+        rest(`profiles?id=eq.${caller.id}&select=company,company2,app_role`).then(r => r[0]),
+        rest(`profiles?id=eq.${to}&select=company,company2,status`).then(r => r[0]),
+      ]);
+      const mine = [me && me.company, me && me.company2].filter(Boolean);
+      if (!them || (them.status || 'active') !== 'active' || !(me && me.app_role === 'admin') && ![them.company, them.company2].filter(Boolean).some(c => mine.includes(c))) {
+        return res.status(403).json({ error: 'You can only notify colleagues in your company' });
+      }
       const url = String(body.url || '/chat/').slice(0, 200);
       const payload = {
         title: String(body.title || 'WorkSuite').slice(0, 100),
@@ -237,8 +246,8 @@ module.exports = async function handler(req, res) {
         url: /^\/([^/\\]|$)/.test(url) ? url : '/chat/',     // in-app paths only
         tag,
       };
-      const r = await pushTo([to], () => payload, { ttl: 3600, urgency: 'normal' });
-      return res.status(200).json({ success: true, ...r, ...(r.sent ? {} : { reason: 'no_subscriptions' }) });
+      const r = await pushTo([to], () => payload, { ttl: 3600, urgency: 'normal', kind: tag });
+      return res.status(200).json({ success: true, ...r, ...(r.sent ? {} : { reason: r.held ? 'held_by_settings' : 'no_subscriptions' }) });
     }
 
     return res.status(400).json({ error: 'Unknown action' });

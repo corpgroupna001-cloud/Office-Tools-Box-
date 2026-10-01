@@ -7,7 +7,7 @@ const URL_BASE = 'https://db.example.test';
 const VAPID = { publicKey: 'pub', privateKey: 'priv', subject: 'mailto:test@example.test' };
 const NOW = Date.parse('2026-09-11T04:00:00Z');   // 09:30 IST
 
-function backend({ rpcStatus = 200, queue = [], subs = [] } = {}) {
+function backend({ rpcStatus = 200, queue = [], subs = [], prefs = [] } = {}) {
   const calls = [];
   const request = async (url, options = {}) => {
     const method = options.method || 'GET';
@@ -16,6 +16,7 @@ function backend({ rpcStatus = 200, queue = [], subs = [] } = {}) {
     if (path.startsWith('/rest/v1/rpc/crm_run_reminders')) return new Response(JSON.stringify({ tasks: 1 }), { status: rpcStatus });
     if (path.startsWith('/rest/v1/notifications') && method === 'GET') return new Response(JSON.stringify(queue), { status: 200 });
     if (path.startsWith('/rest/v1/push_subscriptions') && method === 'GET') return new Response(JSON.stringify(subs), { status: 200 });
+    if (path.startsWith('/rest/v1/notification_prefs') && method === 'GET') return new Response(JSON.stringify(prefs), { status: 200 });
     return new Response(null, { status: 204 });
   };
   return { request, calls, of: (method, frag) => calls.filter(c => c.method === method && c.url.includes(frag)) };
@@ -92,4 +93,22 @@ test('a database without the reminders migration is skipped quietly', async () =
 test('a network failure is reported, never thrown into the cron', async () => {
   const out = await runAndPush({ url: URL_BASE, key: 'svc', webpush: fakePush(), vapid: VAPID, request: async () => { throw new Error('socket hang up'); }, now: NOW });
   assert.equal(out.error, 'socket hang up');
+});
+
+test('settings: a muted reminder is marked and not pushed; one in quiet hours waits for a later run (F-03)', async () => {
+  const b = backend({
+    queue: [{ id: 'm1', user_id: 'muted', kind: 'task.reminder', title: 'Muted' },
+            { id: 'q1', user_id: 'quiet', kind: 'event.reminder', title: 'Quiet' },
+            { id: 'o1', user_id: 'open', kind: 'task.reminder', title: 'Open' }],
+    subs: ['muted', 'quiet', 'open'].map(u => ({ user_id: u, endpoint: 'https://push/' + u, p256dh: 'k', auth: 'a' })),
+    // NOW is 09:30 in India.
+    prefs: [{ user_id: 'muted', push_enabled: true, muted_categories: ['reminders'] },
+            { user_id: 'quiet', push_enabled: true, muted_categories: [], quiet_enabled: true, quiet_start: '09:00', quiet_end: '10:00', timezone: 'Asia/Kolkata' }],
+  });
+  const wp = fakePush();
+  const out = await runAndPush({ url: URL_BASE, key: 'svc', webpush: wp, vapid: VAPID, request: b.request, now: NOW });
+  assert.deepEqual(wp.sent.map(x => x.endpoint), ['https://push/open']);
+  assert.equal(out.held, 2);
+  const mark = b.of('PATCH', '/rest/v1/notifications')[0];
+  assert.match(mark.url, /id=in\.\(m1,o1\)/, 'the quiet one is left to go out after quiet hours');
 });

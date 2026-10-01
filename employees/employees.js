@@ -33,9 +33,15 @@
 
     async function loadPeople() {
         try {
-            const { data, error } = await sb.from('profiles').select(FULL).order('full_name').limit(1000);
-            if (error) throw error;
-            people = (data || []).map(p => ({ ...p, name: nameOf(p) }));
+            // Everyone, a page of 1,000 at a time (PostgREST's limit), in a stable order (PERF-01).
+            const data = [];
+            for (let from = 0; from < 20000; from += 1000) {
+                const r = await sb.from('profiles').select(FULL).order('full_name').order('id').range(from, from + 999);
+                if (r.error) throw r.error;
+                data.push(...(r.data || []));
+                if ((r.data || []).length < 1000) break;
+            }
+            people = data.map(p => ({ ...p, name: nameOf(p) }));
         } catch (e) {
             console.warn('[employees] profiles', e);
             people = ctx.people.slice();
@@ -348,7 +354,7 @@
         const code = String(p.employee_id || '').trim();          // the Employee ID is how people are known here; the name comes second
         document.title = `${code ? code + ' · ' : ''}${name} · Employees · WorkSuite`;
         WSShell.setCrumb(code || name);
-        const reports = people.filter(x => x.manager_id === p.id && (x.status || 'active') !== 'inactive');
+        const reports = people.filter(x => x.manager_id === p.id && (x.status || 'active') === 'active');
         await loadShifts();
         if (mySeq !== navSeq) return;                        // navigated away while it loaded
         const shift =window.WSCompanies ? WSCompanies.resolveShift(p, shifts) : shifts.find(s => String(s.id) === String(p.shift_id));

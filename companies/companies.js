@@ -222,8 +222,9 @@
 
     async function exportCompanies() {
         try {
-            const { data } = await C.q(scoped(sb.from('crm_companies').select(SELECT)).order('title').limit(5000));
-            const rows = data || [];
+            // Every row, a page at a time: an export must not stop at PostgREST's first 1,000.
+            const rows = await C.fetchAll(() => scoped(sb.from('crm_companies').select(SELECT)).order('title').order('id'), 50000);
+            if (rows.partial) C.toast(`Exported the first ${rows.length.toLocaleString('en-IN')} rows; narrow the filter for the rest`, 'warn');
             B.exportCsv(`companies-${L.todayIST()}.csv`, [
                 { title: 'Company', value: r => r.title }, { title: 'Type', value: r => TYPES[r.company_type] || r.company_type },
                 { title: 'Industry', value: r => r.industry }, { title: 'Phone', value: r => r.phone }, { title: 'Email', value: r => r.email },

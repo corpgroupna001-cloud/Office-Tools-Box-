@@ -371,6 +371,42 @@
     m.won_value = round2(m.won_value); m.lost_value = round2(m.lost_value);
     return m;
   }
+  /**
+   * Deal totals per currency (BUG-04): never one currency's value added to
+   * another's. The same shape crm_deal_summary() answers, so the dashboard
+   * draws either. Won/lost rows count toward won/lost whatever their date:
+   * pass only the rows for the period.
+   *   { currencies: [{ currency, open_count, open_value, weighted_value, won_count, won_value, lost_count, lost_value }],
+   *     stages: [{ stage_id, currency, count, value }], open_count, won_count, lost_count }
+   */
+  function dealsByCurrency(deals) {
+    const cur = new Map(), stages = new Map();
+    const out = { currencies: [], stages: [], open_count: 0, won_count: 0, lost_count: 0 };
+    (deals || []).forEach(d => {
+      if (d.archived_at) return;
+      const c = d.currency || 'INR', v = Number(d.value) || 0;
+      if (!cur.has(c)) cur.set(c, { currency: c, open_count: 0, open_value: 0, weighted_value: 0, won_count: 0, won_value: 0, lost_count: 0, lost_value: 0 });
+      const t = cur.get(c);
+      if (d.status === 'won') { t.won_count++; t.won_value += v; out.won_count++; }
+      else if (d.status === 'lost') { t.lost_count++; t.lost_value += v; out.lost_count++; }
+      else {
+        t.open_count++; t.open_value += v; out.open_count++;
+        t.weighted_value += v * (Math.min(100, Math.max(0, Number(d.probability) || 0)) / 100);
+        const k = (d.stage_id || 'none') + '|' + c;
+        const st = stages.get(k) || { stage_id: d.stage_id || null, currency: c, count: 0, value: 0 };
+        st.count++; st.value += v; stages.set(k, st);
+      }
+    });
+    out.currencies = [...cur.values()].map(t => ({ ...t, open_value: round2(t.open_value), weighted_value: round2(t.weighted_value), won_value: round2(t.won_value), lost_value: round2(t.lost_value) }))
+      .sort((a, b) => b.open_count - a.open_count || b.open_value - a.open_value || a.currency.localeCompare(b.currency));
+    out.stages = [...stages.values()].map(s => ({ ...s, value: round2(s.value) }));
+    return out;
+  }
+  /** "₹1.2L · $4k": each currency on its own, largest first; '' when there is nothing. */
+  function moneyList(pairs, opts) {
+    const list = (pairs || []).filter(p => p && Number(p.value)).sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+    return list.map(p => (opts && opts.full ? money(p.value, p.currency) : moneyShort(p.value, p.currency))).join(' · ');
+  }
   /** Sort stages by position; find the first open stage of a pipeline. */
   function stagesOf(stages, pipelineId) {
     return (stages || []).filter(s => !pipelineId || s.pipeline_id === pipelineId).slice().sort((a, b) => a.position - b.position);
@@ -545,11 +581,8 @@
     if (isAdmin(viewer)) return true;
     if (target.manager_id === viewer.id) return true;
     if (!isManager(viewer)) return false;
-    {
-      const mine = [viewer.company, viewer.company2].filter(Boolean);
-      return mine.includes(target.company) || !!(target.company2 && mine.includes(target.company2));
-    }
-    return false;
+    const mine = [viewer.company, viewer.company2].filter(Boolean);
+    return mine.includes(target.company) || !!(target.company2 && mine.includes(target.company2));
   }
 
   /* --------------------------------------------------------------- search */
@@ -680,7 +713,7 @@
   /** RFC 4180 CSV to rows of strings. Quoted fields may hold commas, doubled quotes and
       newlines. The delimiter is a comma, or a semicolon when the header row has no comma. */
   function csvParse(text) {
-    const s = String(text == null ? '' : text).replace(/^﻿/, '');
+    const s = String(text == null ? '' : text).replace(/^\uFEFF/, '');
     const head = s.split(/\r?\n/, 1)[0] || '';
     const delim = !head.includes(',') && head.includes(';') ? ';' : ',';
     const rows = [];
@@ -718,7 +751,7 @@
     round2, money, moneyShort,
     invoiceLine, invoiceTotals, invoiceStatus, invoiceActions, INVOICE_STATUS,
     quoteStatus, quoteActions, QUOTE_STATUS, monthKey, monthKeys, forecast, winLoss, attainment, COMMIT_PROBABILITY,
-    pipelineMetrics, stagesOf, firstOpenStage, positionBetween,
+    pipelineMetrics, dealsByCurrency, moneyList, stagesOf, firstOpenStage, positionBetween,
     leadMetrics, normalizeEmail, normalizePhone, findDuplicateContacts, splitName, planLeadConversion,
     taskDueState, taskCounts, taskBadgeCount, projectProgress, PRIORITY, PROJECT_STATUS, DEAL_STATUS, EVENT_TYPE,
     isManager, isAdmin, canEdit, canDelete, canFinance, canSeePrivate,

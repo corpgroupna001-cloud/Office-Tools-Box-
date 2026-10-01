@@ -296,11 +296,11 @@ drop policy if exists notifications_delete_own on public.notifications;
 create policy notifications_delete_own on public.notifications
   for delete to authenticated using (user_id = auth.uid());
 
--- A client may notify a colleague only as itself (mentions, manual shares).
+-- Notifications are written only by the database (the triggers below, through
+-- ws_notify). A browser never inserts one: that let anyone notify anyone, in
+-- any company, about anything (supabase-access-control-migration.sql, SEC-10).
 drop policy if exists notifications_insert_as_actor on public.notifications;
-create policy notifications_insert_as_actor on public.notifications
-  for insert to authenticated
-  with check (actor_id = auth.uid() and user_id <> auth.uid());
+revoke insert on public.notifications from anon, authenticated;
 
 -- Trigger-side helper: never notifies the actor about their own action, and
 -- collapses repeats of the same kind for the same record within an hour so a
@@ -326,7 +326,8 @@ begin
 end;
 $$;
 
-grant execute on function public.ws_notify(uuid, text, text, text, text, text, uuid) to authenticated;
+-- Called by SECURITY DEFINER triggers and server jobs only, never as an RPC.
+revoke execute on function public.ws_notify(uuid, text, text, text, text, text, uuid) from public, anon, authenticated;
 
 do $$
 begin

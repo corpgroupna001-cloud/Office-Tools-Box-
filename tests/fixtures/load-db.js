@@ -1,9 +1,11 @@
 // Builds an in-process Postgres (PGlite) with the Supabase stand-in and every
 // WorkSuite migration applied in deployment order, for the database tests.
 //
-// PGlite is a dev-only dependency. When it is not installed the loader
-// returns null and the database tests skip themselves, so `npm test` still
-// runs everywhere.
+// PGlite is a dev-only dependency, and the database tests are required: when
+// it is missing, or a listed migration file is missing, they FAIL (QUAL-03) —
+// a damaged checkout must not pass by skipping its database tests. For a
+// machine that cannot install it, WS_SKIP_DB_TESTS=1 skips them on purpose,
+// and every skipped test says so.
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -38,6 +40,7 @@ const CRM = [
   'supabase-crm-reminders-migration.sql',
   'supabase-b24-migration.sql',
   'supabase-messenger-calls-migration.sql',
+  'supabase-chat-flags-migration.sql',
   'supabase-crm-import-migration.sql',
   'supabase-employee-id-migration.sql',
   'supabase-crm-sales-migration.sql',
@@ -46,6 +49,13 @@ const CRM = [
   'supabase-task-summary-migration.sql',
   'supabase-crm-roles-migration.sql',
   'supabase-company-structure-migration.sql',
+  'supabase-access-control-migration.sql',
+  'supabase-otp-limits-migration.sql',
+  'supabase-document-links-migration.sql',
+  'supabase-crm-summary-migration.sql',
+  'supabase-task-completion-migration.sql',
+  'supabase-favorites-migration.sql',
+  'supabase-notification-prefs-migration.sql',
 ];
 
 // Files that end by scheduling a job with pg_cron + pg_net, which only exist on
@@ -65,38 +75,57 @@ function sqlOf(file) {
   return sql;
 }
 
-function pglite() {
-  try { return require('@electric-sql/pglite').PGlite; } catch { return null; }
+/**
+ * The PGlite class. Throws when it is not installed, unless WS_SKIP_DB_TESTS=1
+ * asks to skip the database tests (then null, and the tests skip, saying why).
+ */
+function pglite(load = () => require('@electric-sql/pglite').PGlite, env = process.env) {
+  try { return load(); }
+  catch (e) {
+    if (env.WS_SKIP_DB_TESTS === '1') {
+      if (!pglite.warned) { pglite.warned = true; console.warn('WS_SKIP_DB_TESTS=1: the database tests are SKIPPED (PGlite is not installed).'); }
+      return null;
+    }
+    const err = new Error('The database tests need @electric-sql/pglite: run `npm ci`. (WS_SKIP_DB_TESTS=1 skips them on purpose.)');
+    err.cause = e;
+    throw err;
+  }
+}
+
+/** Every listed migration must exist: a missing file is an error, not a quiet gap in the schema. */
+function checkFiles(files, root = ROOT) {
+  const missing = files.filter(f => !fs.existsSync(path.join(root, f)));
+  if (missing.length) throw new Error(`Migration file(s) listed in tests/fixtures/load-db.js are missing: ${missing.join(', ')}`);
 }
 
 /**
  * freshDb({ crm = true, twice = false, without = [] }) -> PGlite | null
- * `without` leaves those files out, for a database where an administrator
- * never ran them. Throws with the file name when a migration fails, so a
+ * `without` leaves those files out (base or CRM set), for a database where an
+ * administrator never ran them — or has not run them yet (an upgrade test). Throws with the file name when a migration fails, so a
  * failing test says which file to look at.
  */
 async function freshDb(opts = {}) {
   const PGlite = pglite();
   if (!PGlite) return null;
+  checkFiles([...BASE, ...CRM]);
   const db = new PGlite();
   await db.exec(fs.readFileSync(path.join(__dirname, 'supabase-stub.sql'), 'utf8'));
   const run = async file => {
-    if (!fs.existsSync(path.join(ROOT, file))) return;
     try { await db.exec(sqlOf(file)); }
     catch (e) { const err = new Error(`${file}: ${e.message}`); err.file = file; err.cause = e; throw err; }
   };
   const without = new Set(opts.without || []);
   for (const f of BASE) if (!without.has(f)) await run(f);
   if (opts.crm !== false) {
-    for (const f of CRM) await run(f);
-    if (opts.twice) for (const f of CRM) await run(f);     // every CRM migration must be safe to re-run
+    for (const f of CRM) if (!without.has(f)) await run(f);
+    if (opts.twice) for (const f of CRM) if (!without.has(f)) await run(f);     // every CRM migration must be safe to re-run
   }
   return db;
 }
 
-/** Run fn as a signed-in user: role authenticated + JWT claims, exactly as PostgREST does. */
-async function as(db, userId, fn) {
-  await db.query(`select set_config('request.jwt.claims', $1, false)`, [JSON.stringify({ sub: userId, role: 'authenticated' })]);
+/** Run fn as a signed-in user: role authenticated + JWT claims, exactly as PostgREST does. `claims` adds session_id, aal… */
+async function as(db, userId, fn, claims = {}) {
+  await db.query(`select set_config('request.jwt.claims', $1, false)`, [JSON.stringify({ sub: userId, role: 'authenticated', ...claims })]);
   await db.exec('set role authenticated');
   try { return await fn(); }
   finally {
@@ -116,4 +145,4 @@ async function makeUser(db, { email, name, company, role = 'employee', manager_i
   return id;
 }
 
-module.exports = { freshDb, as, makeUser, sqlOf, BASE, CRM, pglite };
+module.exports = { freshDb, as, makeUser, sqlOf, BASE, CRM, pglite, checkFiles };

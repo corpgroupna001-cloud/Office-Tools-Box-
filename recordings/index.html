@@ -5,7 +5,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Friday WFH Check-in · WorkSuite</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/design-system.css">
@@ -311,11 +310,12 @@
         .qc-banner.pending  { background: rgba(234,179,8,0.10);  border: 1px solid rgba(234,179,8,0.30);  color: #fde68a; }
         .qc-banner b { color: #fff; }
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/ui/vendor/supabase-js.js"></script>
     <script src="/presence.js"></script>
     <script src="/notifications.js"></script>
     <link rel="stylesheet" href="/ui/corporate.css">
     <link rel="stylesheet" href="/ui/b24.css">
+    <link rel="stylesheet" href="/ui/tailwind.css"><!-- prebuilt Tailwind (npm run build), last like the Play CDN's style was -->
 </head>
 <body data-ws-page="recordings" class="ws-app ws-corporate page-tool ws-b24">
 

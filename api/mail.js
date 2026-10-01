@@ -74,6 +74,7 @@ module.exports = async function handler(req, res) {
   const result = await sendMail({ company, to, subject, html, text, replyTo });
   const auditRecorded = await recordMail({ company, to, category: body.category }, result);
   if (result.ok) return res.status(200).json({ success: true, messageId: result.messageId, from: result.from, audit_recorded: auditRecorded });
-  const code = result.reason === 'email_coming_soon' ? 503 : result.reason === 'unknown_company' ? 400 : 502;
+  const code = result.reason === 'email_coming_soon' ? 503
+    : ['unknown_company', 'bad_recipient', 'bad_reply_to'].includes(result.reason) ? 400 : 502;
   return res.status(code).json({ error: result.reason, detail: result.detail, audit_recorded: auditRecorded });
 };
