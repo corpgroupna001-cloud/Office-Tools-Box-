@@ -295,6 +295,7 @@ test('the endpoint creates missing lead stages and finds contacts past the first
     require(name) {
       if (name === '../lib/request-auth') return require('../lib/request-auth');
       if (name === '../lib/service-rpc') return require('../lib/service-rpc');
+      if (name === '../lib/attendance-live') return require('../lib/attendance-live');
       if (name === '../lib/admin-session') return sessions;
       if (name === '../lib/admin-audit') return { auditWrap: r => r, recordSecurityEvent: async () => true };
       if (name === '../lib/crm-import' || name === '../company-config') return require(name);
@@ -440,6 +441,7 @@ test('the console counts CRM records nobody can see and gives them to a company'
     require(name) {
       if (name === '../lib/request-auth') return require('../lib/request-auth');
       if (name === '../lib/service-rpc') return require('../lib/service-rpc');
+      if (name === '../lib/attendance-live') return require('../lib/attendance-live');
       if (name === '../lib/admin-session') return sessions;
       if (name === '../lib/admin-audit') return { auditWrap: r => r, recordSecurityEvent: async () => true };
       if (name === '../lib/crm-import' || name === '../company-config') return require(name);

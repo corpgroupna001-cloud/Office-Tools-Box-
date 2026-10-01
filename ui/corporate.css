@@ -223,6 +223,8 @@ body.ws-corporate .pay-tile .sub { font-size: 12px; font-weight: 400; }
 body.ws-corporate .seg { padding: 4px; border: 1px solid var(--ws-border); border-radius: 6px; background: var(--ws-surface-2); }
 body.ws-corporate .seg button { font-size: 14px; padding: 9px 16px; font-weight: 500; }
 body.ws-corporate .lv-btn { background: #2158a0; font-size: 14px; font-weight: 500; min-height: 42px; }
+body.ws-corporate .lv-btn.ghost, body.ws-corporate .lv-btn.ghost:hover:not(:disabled) { background: var(--ws-surface-2); color: var(--ws-text); border: 1px solid var(--ws-border); }
+body.ws-corporate .lv-btn.danger, body.ws-corporate .lv-btn.danger:hover:not(:disabled) { background: #be123c; color: #fff; }
 body.ws-corporate .sheet-card { padding: 24px; border-radius: 10px; }
 body.ws-corporate .sheet-card .sub { font-size: 14px; font-weight: 400; }
 /* Administration uses the same surface hierarchy as the employee dashboard. */

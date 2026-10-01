@@ -894,6 +894,29 @@
                     </div>
                 </div>
 
+                <!-- Attendance correction requests: owned by admin/corrections.js. -->
+                <div class="section-head mb-3"><h3><span class="ic ic-clock"></span>Attendance corrections</h3><span class="sub">A forgotten or wrong punch. Approving adds the right punch; the device's own record is kept</span></div>
+                <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
+                    <label for="ac-status" class="sr-only">Show</label>
+                    <select id="ac-status" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                        <option value="pending">Pending</option>
+                        <option value="">All</option>
+                        <option value="approved">Approved</option>
+                        <option value="rejected">Rejected</option>
+                    </select>
+                    <button id="ac-refresh" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh</button>
+                    <div class="flex-1"></div>
+                    <span id="ac-counts" class="text-xs font-bold text-slate-400" aria-live="polite"></span>
+                </div>
+                <div class="glass rounded-2xl overflow-hidden mb-8">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead><tr><th>Employee</th><th>Asked for</th><th>Instead of</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+                            <tbody id="ac-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
             </div>
 
             <!-- ================= HOLIDAYS ================= -->
@@ -3260,8 +3283,8 @@
             };
             document.getElementById('att-feed-tbody').innerHTML = attFeed.length
                 ? attFeed.map(l => `
-                    <tr>
-                        <td class="text-white font-black">${escapeHtml(l.pretty_time || '—')}</td>
+                    <tr${l.superseded_by ? ' class="opacity-60"' : ''}>
+                        <td class="text-white font-black">${l.superseded_by ? `<s>${escapeHtml(l.pretty_time || '—')}</s><br><span class="text-amber-300 text-xs font-bold">Replaced by an approved correction</span>` : escapeHtml(l.pretty_time || '—')}</td>
                         <td class="font-bold text-white">${empNameHtml(l.employee_id, l.full_name || l.employee_code)}<br>
                             <span class="text-slate-400 text-xs font-medium">${l.employee_code ? 'Biometric ID ' + escapeHtml(l.employee_code) : ''}</span></td>
                         <td>${l.direction === 'IN'
@@ -3856,6 +3879,7 @@
     <script src="/admin/roster.js"></script>
     <script src="/admin/attendance-tools.js"></script>
     <script src="/admin/holidays.js"></script>
+    <script src="/admin/corrections.js"></script>
     <script src="/admin/overview.js"></script>
     <script src="/admin/management.js"></script>
     <script src="/admin/inactivity.js"></script>

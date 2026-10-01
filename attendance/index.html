@@ -139,6 +139,8 @@
         .lv-btn { background: var(--ws-grad-cool); border:none; color:#fff; border-radius: var(--ws-r-sm);
                   padding:9px 20px; font-weight:900; font-size:12.5px; cursor:pointer; }
         .lv-btn:disabled { opacity:0.5; cursor:not-allowed; }
+        .lv-btn.ghost  { background: var(--ws-surface-2); color: var(--ws-text); border:1px solid var(--ws-border); padding:6px 12px; }
+        .lv-btn.danger { background:#be123c; padding:6px 12px; }
         .lv-pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:10.5px; font-weight:900; }
         .lv-pill.ok   { background: rgba(16,185,129,0.16); color:#6ee7b7; }
         .lv-pill.no   { background: rgba(244,63,94,0.16);  color:#fda4af; }
@@ -361,6 +363,33 @@
             <div class="scroll"><table><thead id="lv-head"></thead><tbody id="lv-body"></tbody></table></div>
         </div>
 
+        <!-- Fix a punch: a forgotten punch, or one recorded at the wrong time.
+             Hidden until supabase-attendance-corrections-migration.sql has run. -->
+        <div class="card clock" id="fix-card" style="display:none;"><a id="fix" class="anchor"></a>
+            <h2><span class="ic ic-clock"></span> Fix a punch</h2>
+            <p class="hint">Forgot to punch, or the device got the time wrong? Ask here, up to 45 days back. Your manager or admin approves it; the device's own record is kept.</p>
+            <div style="display:flex;flex-wrap:wrap;gap:9px;align-items:flex-end;margin-bottom:14px;">
+                <div><label class="lv-lab" for="fx-kind">What happened</label>
+                    <select id="fx-kind" class="lv-in">
+                        <option value="missing">I forgot to punch</option>
+                        <option value="wrong_time">A punch has the wrong time</option>
+                    </select></div>
+                <div id="fx-log-wrap" style="display:none;"><label class="lv-lab" for="fx-log">Which punch</label><select id="fx-log" class="lv-in"></select></div>
+                <div><label class="lv-lab" for="fx-dir">Punch</label>
+                    <select id="fx-dir" class="lv-in"><option value="IN">In</option><option value="OUT">Out</option></select></div>
+                <div><label class="lv-lab" for="fx-date">Date</label><input id="fx-date" type="date" class="lv-in"></div>
+                <div><label class="lv-lab" for="fx-time">Right time (IST)</label><input id="fx-time" type="time" class="lv-in"></div>
+                <div style="flex:1;min-width:170px;"><label class="lv-lab" for="fx-reason">Reason</label><input id="fx-reason" type="text" maxlength="500" placeholder="e.g. Left through the side gate" class="lv-in" style="width:100%;"></div>
+                <button id="fx-send" class="lv-btn">Send</button>
+            </div>
+            <p id="fx-msg" role="status" style="font-size:12px;font-weight:800;margin:0 0 12px;"></p>
+            <div class="scroll"><table><thead id="fx-head"></thead><tbody id="fx-body"></tbody></table></div>
+            <div id="fx-team" style="display:none;margin-top:18px;">
+                <h2 style="font-size:15px;">Requests from your team</h2>
+                <div class="scroll"><table><thead><tr><th>Who</th><th>Asked for</th><th>Reason</th><th></th></tr></thead><tbody id="fx-team-body"></tbody></table></div>
+            </div>
+        </div>
+
         <!-- Holidays: this company's list for the year. A holiday counts as a
              day off in the calendar and the pay sheet, never as Absent. -->
         <div class="card clock" id="hol-card" style="display:none;"><a id="holidays" class="anchor"></a>
@@ -372,7 +401,7 @@
 
 
         <p class="muted" style="text-align:center;font-size:12px;margin-top:18px;">
-            Times are IST, straight from the biometric device. Something look wrong? Tell your admin.
+            Times are IST, straight from the biometric device. Something look wrong? Tell your admin<span id="fx-foot" style="display:none;">, or <a href="#fix" style="color:inherit;">fix a punch</a></span>.
         </p>
     </div>
 
@@ -1626,7 +1655,7 @@
                     <td class="muted">${esc(PART[r.day_part] || r.day_part)}</td>
                     <td>${pill(r.status)}${r.decision_note ? `<br><span class="muted" style="font-size:11px;">${esc(r.decision_note)}</span>` : ''}</td>
                     <td>${r.status === 'pending'
-                        ? `<button data-lv-cancel="${r.id}" class="lv-btn" style="background:rgba(255,255,255,0.08);padding:6px 12px;">Withdraw</button>`
+                        ? `<button data-lv-cancel="${r.id}" class="lv-btn ghost">Withdraw</button>`
                         : ''}</td>
                 </tr>`).join('')
                 : '<tr><td class="muted" style="padding:14px 16px;">No leave requests yet.</td></tr>';
@@ -1689,6 +1718,105 @@
             loadLeave();
         });
 
+        // ================= FIX A PUNCH (supabase-attendance-corrections-migration.sql) =================
+        const fxWhen = iso => new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true }).replace(',', '');
+        const fxPill = s => s === 'approved' ? '<span class="lv-pill ok">Approved</span>'
+                          : s === 'rejected' ? '<span class="lv-pill no">Rejected</span>' : '<span class="lv-pill wait">Pending</span>';
+        let fxMine = [], fxTeam = [], fxPunches = [];
+
+        async function loadFixes() {
+            const since = new Date(Date.now() - 45 * 86400000).toISOString();
+            const [mine, punches] = await Promise.all([
+                sb.from('attendance_corrections').select('*').order('created_at', { ascending: false }).limit(100),
+                sb.from('attendance_logs').select('id,log_datetime,direction').eq('user_id', session.user.id)
+                    .gte('log_datetime', since).order('log_datetime', { ascending: false }).limit(200),
+            ]);
+            if (mine.error) { el('fix-card').style.display = 'none'; return; }   // migration not run yet
+            el('fix-card').style.display = '';
+            el('fx-foot').style.display = '';
+            const rows = mine.data || [];
+            fxMine = rows.filter(r => r.user_id === session.user.id);
+            fxTeam = rows.filter(r => r.user_id !== session.user.id && r.status === 'pending');
+            fxPunches = punches.data || [];
+            el('fx-log').innerHTML = fxPunches.length
+                ? fxPunches.map(p => `<option value="${p.id}">${p.direction === 'IN' ? 'In' : 'Out'} · ${esc(fxWhen(p.log_datetime))}</option>`).join('')
+                : '<option value="">No punches in the last 45 days</option>';
+            el('fx-head').innerHTML = fxMine.length ? '<tr><th>Asked for</th><th>Reason</th><th>Status</th><th></th></tr>' : '';
+            el('fx-body').innerHTML = fxMine.length ? fxMine.map(r => `
+                <tr>
+                    <td>${r.direction === 'IN' ? 'In' : 'Out'} at ${esc(fxWhen(r.requested_at))}<br><span class="muted" style="font-size:11px;">${r.kind === 'missing' ? 'Forgot to punch' : 'Wrong time recorded'}</span></td>
+                    <td class="muted">${esc(r.reason)}</td>
+                    <td>${fxPill(r.status)}${r.review_note ? `<br><span class="muted" style="font-size:11px;">${esc(r.review_note)}</span>` : ''}</td>
+                    <td>${r.status === 'pending' ? `<button data-fx-withdraw="${esc(r.id)}" class="lv-btn ghost">Withdraw</button>` : ''}</td>
+                </tr>`).join('') : '<tr><td class="muted" style="padding:14px 16px;">No requests yet.</td></tr>';
+
+            // A manager also sees their team's pending requests (row security decides who that is).
+            el('fx-team').style.display = fxTeam.length ? '' : 'none';
+            if (fxTeam.length) {
+                const ids = [...new Set(fxTeam.map(r => r.user_id))];
+                const { data: people } = await sb.from('profiles').select('id,full_name').in('id', ids);
+                const nameOf = id => ((people || []).find(p => p.id === id) || {}).full_name || 'Employee';
+                el('fx-team-body').innerHTML = fxTeam.map(r => `
+                    <tr data-fx="${esc(r.id)}">
+                        <td><b>${esc(nameOf(r.user_id))}</b></td>
+                        <td>${r.direction === 'IN' ? 'In' : 'Out'} at ${esc(fxWhen(r.requested_at))}<br><span class="muted" style="font-size:11px;">${r.kind === 'missing' ? 'Forgot to punch' : 'Wrong time recorded'}</span></td>
+                        <td class="muted">${esc(r.reason)}</td>
+                        <td style="white-space:nowrap;">
+                            <button data-fx-ok class="lv-btn" style="padding:6px 12px;">Approve</button>
+                            <button data-fx-no class="lv-btn danger">Reject</button>
+                        </td>
+                    </tr>`).join('');
+            }
+        }
+
+        el('fx-kind').addEventListener('change', () => {
+            el('fx-log-wrap').style.display = el('fx-kind').value === 'wrong_time' ? '' : 'none';
+        });
+        el('fx-log').addEventListener('change', () => {
+            const p = fxPunches.find(x => String(x.id) === el('fx-log').value);
+            if (p) { el('fx-dir').value = p.direction === 'OUT' ? 'OUT' : 'IN'; el('fx-date').value = fmtISO.format(new Date(p.log_datetime)); }
+        });
+        el('fx-send').addEventListener('click', async () => {
+            const msg = el('fx-msg'), btn = el('fx-send');
+            const kind = el('fx-kind').value, date = el('fx-date').value, time = el('fx-time').value;
+            const reason = el('fx-reason').value.trim();
+            msg.style.color = '#fda4af';
+            if (kind === 'wrong_time' && !el('fx-log').value) { msg.textContent = 'Choose the punch that is wrong.'; return; }
+            if (!date || !time) { msg.textContent = 'Pick the date and the right time.'; return; }
+            if (reason.length < 5) { msg.textContent = 'Say briefly what happened (at least 5 characters).'; return; }
+            const at = new Date(`${date}T${time}:00+05:30`);
+            if (at.getTime() > Date.now() + 5 * 60000) { msg.textContent = 'That time has not happened yet.'; return; }
+            btn.disabled = true; msg.textContent = '';
+            const { error } = await sb.from('attendance_corrections').insert({
+                kind, direction: el('fx-dir').value, requested_at: at.toISOString(), reason,
+                log_id: kind === 'wrong_time' ? Number(el('fx-log').value) : null,
+            });
+            btn.disabled = false;
+            if (error) { msg.textContent = error.message; return; }
+            msg.style.color = '#6ee7b7';
+            msg.textContent = 'Request sent — your manager or admin will approve or reject it.';
+            el('fx-reason').value = '';
+            loadFixes();
+        });
+        el('fx-body').addEventListener('click', async ev => {
+            const b = ev.target.closest('[data-fx-withdraw]');
+            if (!b) return;
+            b.disabled = true;
+            const { error } = await sb.from('attendance_corrections').delete().eq('id', b.dataset.fxWithdraw);
+            if (error) { el('fx-msg').style.color = '#fda4af'; el('fx-msg').textContent = error.message; b.disabled = false; return; }
+            loadFixes();
+        });
+        el('fx-team-body').addEventListener('click', async ev => {
+            const ok = ev.target.closest('[data-fx-ok]'), no = ev.target.closest('[data-fx-no]');
+            if (!ok && !no) return;
+            const tr = ev.target.closest('[data-fx]');
+            tr.querySelectorAll('button').forEach(x => { x.disabled = true; });
+            const { error } = await sb.rpc('ws_review_attendance_correction', { p_id: tr.dataset.fx, p_approve: !!ok });
+            el('fx-msg').style.color = error ? '#fda4af' : '#6ee7b7';
+            el('fx-msg').textContent = error ? error.message : (ok ? 'Approved — the punch is added to their attendance.' : 'Rejected.');
+            loadFixes();
+        });
+
         document.querySelectorAll('.seg button').forEach(b => {
             b.addEventListener('click', () => {
                 document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b));
@@ -1707,6 +1835,7 @@
 
         await loadMyShift();
         await loadLeave();
+        loadFixes().catch(() => { el('fix-card').style.display = 'none'; });
         await load();
         loadCalendar();                            // pay card + calendar, from the same call
 

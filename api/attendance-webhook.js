@@ -61,6 +61,7 @@ const {
   shiftEndAt, autoLogoutFor, AUTO_LOGOUT_GRACE_MS, isRepeatRow,
 } = require('../lib/attendance');
 const { verifyToken, accessError } = require('../lib/request-auth');
+const { liveFilter } = require('../lib/attendance-live');
 
 /** The signed-in employee behind `token`, held to the session gate's rules; sends the refusal itself. */
 async function signedInEmployee(res, token, SUPABASE_URL, SERVICE_KEY) {
@@ -525,9 +526,10 @@ module.exports = async function handler(req, res) {
         const to   = new Date(hi + CONTEXT_MS).toISOString();
         let stored = [];
         try {
+          const live = await liveFilter({ url: SUPABASE_URL, key: SERVICE_KEY, request: fetch });
           const r = await fetch(
             `${SUPABASE_URL}/rest/v1/attendance_logs` +
-            `?employee_code=eq.${encodeURIComponent(code)}` +
+            `?employee_code=eq.${encodeURIComponent(code)}` + live +
             `&log_datetime=gte.${encodeURIComponent(from)}&log_datetime=lte.${encodeURIComponent(to)}` +
             `&select=id,log_datetime,log_date,direction,direction_derived,event_type,source&limit=1000`,
             { headers: H }
@@ -1031,8 +1033,9 @@ async function runAttendanceTick({ SUPABASE_URL, SERVICE_KEY, startedAt = Date.n
   // ---- 3. Shifts that ended with nobody logged out ----
   const today = istParts(now).isoDate;
   const yesterday = istParts(new Date(now.getTime() - 86400000)).isoDate;
+  const live = await liveFilter({ url: SUPABASE_URL, key: SERVICE_KEY, request: fetch });
   const logs = await readAllRows(sb, `attendance_logs?select=id,user_id,direction,event_type,log_datetime,log_date,source,email_status,email_error` +
-    `&log_date=in.(${yesterday},${today})&user_id=not.is.null&order=log_datetime.asc,id.asc`);
+    `&log_date=in.(${yesterday},${today})&user_id=not.is.null&order=log_datetime.asc,id.asc` + live);
   if (!logs) return { ...report, notes: report.notes.concat('auto logout skipped: attendance read failed') };
   const days = new Map();
   for (const l of logs) {
@@ -1244,7 +1247,8 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
         sb('leave_types?select=id,name').then(r => r.ok ? r.json() : []),
         // Today AND yesterday: a night shift that started at 6pm yesterday is
         // still "today" for the people on it until they log out.
-        sb(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type,email_status,email_error&log_date=gte.${yesterdayOf(today)}&limit=3000`).then(r => r.ok ? r.json() : []),
+        liveFilter({ url: SUPABASE_URL, key: SERVICE_KEY, request: fetch }).then(live =>
+          sb(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type,email_status,email_error&log_date=gte.${yesterdayOf(today)}&limit=3000` + live)).then(r => r.ok ? r.json() : []),
       ]);
 
       const shiftById = new Map(shifts.map(s => [s.id, s]));
@@ -1301,7 +1305,7 @@ async function handleUserView({ res, token, body, SUPABASE_URL, SERVICE_KEY }) {
       // happily return everyone's.
       sb(`leave_requests?select=user_id,leave_type_id,day_part,start_date,end_date&status=eq.approved&user_id=eq.${encodeURIComponent(userId)}&start_date=lte.${to}&end_date=gte.${from}`).then(r => r.ok ? r.json() : []),
       sb('leave_types?select=id,name').then(r => r.ok ? r.json() : []),
-      sb(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type,source,email_status,email_error&user_id=eq.${encodeURIComponent(userId)}&log_date=gte.${from}&log_date=lte.${to}&limit=2000`).then(r => r.ok ? r.json() : []),
+      liveFilter({ url: SUPABASE_URL, key: SERVICE_KEY, request: fetch }).then(live => sb(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type,source,email_status,email_error&user_id=eq.${encodeURIComponent(userId)}&log_date=gte.${from}&log_date=lte.${to}&limit=2000` + live)).then(r => r.ok ? r.json() : []),
     ]);
 
     const profile = profileRows[0] || {};
@@ -1457,8 +1461,9 @@ async function runShiftSwitchJob({ res, SUPABASE_URL, SERVICE_KEY }) {
   // midnight belongs to a day that began the evening before.
   const ids = due.map(p => encodeURIComponent(p.id)).join(',');
   const yesterday = istParts(new Date(now.getTime() - 86400000)).isoDate;
+  const live = await liveFilter({ url: SUPABASE_URL, key: SERVICE_KEY, request: fetch });
   const logs = await sb(`attendance_logs?select=user_id,direction,event_type,log_datetime,log_date,email_status,email_error&user_id=in.(${ids})` +
-    `&log_date=in.(${yesterday},${today})&order=log_datetime.asc&limit=2000`).then(r => r.ok ? r.json() : []);
+    `&log_date=in.(${yesterday},${today})&order=log_datetime.asc&limit=2000` + live).then(r => r.ok ? r.json() : []);
   // Yesterday's day counts only while it is still open, exactly as for the
   // team status: a forgotten punch-out yesterday must not make someone who is
   // absent today look on site at 5 PM.
@@ -1670,10 +1675,11 @@ async function handleSelfiePunch({ res, token, body, SUPABASE_URL, SERVICE_KEY, 
     let priorToday = 0;
     let dayStartedAt = when.toISOString();
     try {
+      const live = await liveFilter({ url: SUPABASE_URL, key: SERVICE_KEY, request: fetch });
       const recent = await fetch(
         `${SUPABASE_URL}/rest/v1/attendance_logs?user_id=eq.${encodeURIComponent(userId)}` +
         `&log_datetime=gte.${encodeURIComponent(new Date(when.getTime() - 60 * 3600 * 1000).toISOString())}` +
-        `&select=id,log_datetime,log_date,direction,direction_derived,event_type,source&order=log_datetime.asc&limit=500`,
+        `&select=id,log_datetime,log_date,direction,direction_derived,event_type,source&order=log_datetime.asc&limit=500` + live,
         { headers: H }
       );
       const rows = recent.ok ? await recent.json() : [];

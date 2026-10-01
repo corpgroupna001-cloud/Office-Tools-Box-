@@ -43,7 +43,7 @@ const PAGES = [
   ['/quotes', 'quotes'], ['/quotes?id=Q1', 'quote-record'], ['/crm/forecast', 'forecast'],
   ['/crm/settings?section=lost', 'crm-lost-reasons'], ['/crm/settings?section=forms', 'crm-web-forms'], ['/form?f=smoke0000000000000000000000000001', 'web-form'],
   ['/chat', 'messenger'], [`/call?id=${F.CALL}`, 'call'], ['/attendance', 'attendance'],
-  ['/wsm-admin', 'admin'], ['/wsm-admin?gate=1', 'admin-gate'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/crm', 'themes'], ['/crm', 'dialogs'], ['/crm', 'paging'], ['/tasks', 'task-complete'], ['/crm', 'notif-settings'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
+  ['/wsm-admin', 'admin'], ['/wsm-admin?gate=1', 'admin-gate'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/wsm-admin/leave', 'admin-leave'], ['/crm', 'themes'], ['/crm', 'dialogs'], ['/crm', 'paging'], ['/tasks', 'task-complete'], ['/crm', 'notif-settings'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
 ];
 const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'leads-list', 'lead-record', 'lead-imported', 'deals', 'deals-list', 'deal-record', 'deal-imported', 'boards', 'board', 'projects',
   'project-record', 'tasks', 'task-record', 'task-new', 'task-people', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record', 'quotes', 'quote-record', 'forecast', 'crm-lost-reasons', 'crm-web-forms']);
@@ -160,6 +160,8 @@ async function supabase(req, res, url) {
     // Messages have bigserial ids in the real table (threads page by id); everything else a uuid.
     const nextId = rows.reduce((n, r) => Math.max(n, Number(r.id) || 0), 0) + 1;
     const items = (Array.isArray(body) ? body : [body || {}]).map((b, i) => ({ id: table === 'messages' ? nextId + i : randomUUID(), created_at: stamp, updated_at: stamp, ...b }));
+    // What attendance_corrections_check does in the database: the author is the caller, and it starts pending.
+    if (table === 'attendance_corrections') items.forEach(i => Object.assign(i, { user_id: F.ME, status: 'pending', reviewed_by: null, review_note: null }));
     rows.push(...items);
     return send(res, 201, single ? items[0] : items);
   }
@@ -196,6 +198,15 @@ function adminApi(req, res) {
         { id: 'published_leftovers', group: 'Database', label: 'Old public file copies', state: 'degraded', detail: '3 file(s) left', fix: 'Remove them with the button below.' }];
       const n = st => checks.filter(c => c.state === st).length;
       return send(res, 200, { checks, summary: { ok: n('ok'), missing: n('missing'), degraded: n('degraded'), off: n('off') } });
+    }
+    if (action === 'att_corrections') {
+      const people = DB.profiles || [];
+      const requests = (DB.attendance_corrections || []).map(c => ({ ...c, full_name: (people.find(p => p.id === c.user_id) || {}).full_name || null, wrong_punch: null, reviewer: c.reviewer_label }));
+      return send(res, 200, { requests, counts: { pending: requests.filter(c => c.status === 'pending').length } });
+    }
+    if (action === 'att_correction_decide') {
+      try { return send(res, 200, { success: true, request: F.RPC.ws_review_attendance_correction({ p_id: JSON.parse(raw).id, p_approve: JSON.parse(raw).status === 'approved' }, DB) }); }
+      catch (e) { return send(res, 409, { error: e.message }); }
     }
     if (action === 'att_daily_report') return send(res, 200, { ...base, date: '2026-09-21', rows: ADMIN_PEOPLE,
       totals: { employees: 3, present: 2, late: 1, absent: 1 } });
@@ -732,6 +743,38 @@ async function interact(page, name, result) {
     await page.keyboard.press('Escape');
     if (!(/Favourites/.test(t) && t.indexOf('Send revised proposal to Acme') > -1 && t.indexOf('Favourites') < t.indexOf('Go to'))) throw new Error('palette: ' + t.slice(0, 160).replace(/\n/g, ' | '));
     return true;
+  });
+  if (name === 'attendance') await expect('Fix a punch lists my requests and my team\'s, files a new one, and a manager decides once', async () => {
+    await page.waitForSelector('#fix-card:not([style*="display: none"])', { timeout: 3000 });
+    await (await page.$('#fix-card')).screenshot({ path: path.join(OUT, 'attendance-fix-desktop.png') });
+    const text = id => page.evaluate(i => (document.getElementById(i) || {}).innerText || '', id);
+    if (!/Left through the side gate/.test(await text('fx-body')) || !/Seen on camera/.test(await text('fx-body'))) throw new Error('own list: ' + (await text('fx-body')).slice(0, 120));
+    if (!/Anil Kumar/.test(await text('fx-team-body'))) throw new Error('team list: ' + (await text('fx-team-body')).slice(0, 120));
+    const posts = [];
+    const onReq = r => { if (r.url().includes('/rest/v1/attendance_corrections') && r.method() === 'POST') posts.push(JSON.parse(r.postData() || '{}')); };
+    page.on('request', onReq);
+    await page.click('#fx-send'); await wait(200);
+    if (!/date and the right time/.test(await text('fx-msg'))) throw new Error('an empty form was not explained: ' + await text('fx-msg'));
+    const y = await page.evaluate(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(Date.now() - 86400000)));
+    await page.$eval('#fx-date', (e, v) => { e.value = v; }, y);
+    await page.$eval('#fx-time', e => { e.value = '18:45'; });
+    await page.select('#fx-dir', 'OUT');
+    await page.type('#fx-reason', 'Punched out on the phone, not the device');
+    await page.click('#fx-send'); await wait(700);
+    page.off('request', onReq);
+    const row = Array.isArray(posts[0]) ? posts[0][0] : posts[0];
+    if (!row || row.kind !== 'missing' || row.direction !== 'OUT' || row.requested_at !== new Date(`${y}T18:45:00+05:30`).toISOString() || row.user_id || row.status) throw new Error('filed: ' + JSON.stringify(row));
+    if (!/Punched out on the phone/.test(await text('fx-body'))) throw new Error('the new request is not listed');
+    await page.click('#fx-team-body [data-fx-ok]'); await wait(700);
+    return /Approved/.test(await text('fx-msg')) && await page.evaluate(() => document.getElementById('fx-team').style.display === 'none');
+  });
+  if (name === 'admin-leave') await expect('the console lists correction requests and approves one once', async () => {
+    await page.waitForSelector('#ac-tbody [data-ac-ok]', { timeout: 3000 });
+    if (!/Device was offline/.test(await page.evaluate(() => document.getElementById('ac-tbody').innerText))) throw new Error('not listed');
+    await page.click('#ac-tbody [data-ac-ok]'); await wait(400);
+    await page.click('#ws-dialog-ok'); await wait(800);
+    const t = await page.evaluate(() => document.getElementById('ac-tbody').innerText + ' | ' + document.getElementById('ac-counts').innerText);
+    return /0 pending/.test(t) || /No correction requests/.test(t);
   });
   if (name === 'admin') await expect('Setup health lists what is missing and offers the clean-up', async () => {
     await wait(600);

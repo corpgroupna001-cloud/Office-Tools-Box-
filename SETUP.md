@@ -832,6 +832,7 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 20 | `supabase-task-completion-migration.sql` | *Task status summary is required* enforced by the database: such a task completes only with `tasks.result_summary` in the same update — from the Complete button, bulk Complete, a done column on a board, the editor or the API — and the summary is posted as the task's comment in the same transaction. Reopening clears it |
 | 21 | `supabase-favorites-migration.sql` | Favourite records: a star on task, deal, project and document pages; **Ctrl+K** lists them first. Personal, and never showing a record the person can no longer open. See [21. Favourites](#21-favourites) |
 | 22 | `supabase-notification-prefs-migration.sql` | Notification settings and quiet hours: which kinds of push reach each person, and when their phone stays quiet. In-app notifications are unchanged. See [22. Notification settings](#22-notification-settings) |
+| 23 | `supabase-attendance-corrections-migration.sql` | Attendance correction requests (*Fix a punch*): an employee asks, their manager or an administrator decides once. Approving adds a punch and marks a wrong one as replaced; the device's own record is never edited. Also allows `source = 'correction'` on `attendance_logs`. See [23. Attendance corrections](#23-attendance-corrections) |
 
 **Ran migration 8 before 15 Sep 2026?** Run it again. Its first version made
 `external_ref`'s unique index partial, which `ON CONFLICT` cannot use, so every
@@ -1613,4 +1614,40 @@ ones do not.
 The push API's free-form `notify` now reaches only active colleagues who
 share a company with the sender (administrators: anyone), like the in-app
 notifications of section 16.
+
+# 23. Attendance corrections
+
+An employee who forgot to punch, or whose punch the device recorded at the
+wrong time, asks on **Time and attendance → Fix a punch**: In or Out, the date
+and the right time (IST), and a reason. Up to 45 days back, never in the
+future; for a wrong time they pick the punch that is wrong. They can withdraw
+a request while it is pending.
+
+Who decides:
+
+- their **manager** (or a manager of their company, or a workspace
+  administrator) — on the same page, under *Requests from your team*;
+- the **admin console** — **Leave → Attendance corrections**, recorded in the
+  audit log as *Decided an attendance correction*, with the console's sign-in
+  (password, or the administrator's own name) as the reviewer.
+
+Nobody decides their own request, and a request is decided once: a second
+decision, or a double click, is refused. The employee gets a notification.
+
+What an approval changes (migration 23, `ws_review_attendance_correction`):
+
+- a **forgotten punch** is added as a new punch, `source = 'correction'`;
+- a **wrong time**: the right punch is added and the wrong one gets
+  `superseded_by` = the new punch. Days, the daily report, the month report,
+  recompute, the shift-end job and the pay sheet all skip replaced punches
+  (`lib/attendance-live.js`); signed-in people's own reads skip them through a
+  read policy. The admin console's raw feed still shows the replaced punch,
+  struck through.
+
+Nothing the device sent is edited or deleted, and a correction punch sends no
+attendance email. The request keeps who decided, when, the note, and the punch
+before and after (`before` / `after`).
+
+**Before migration 23** the server reads every punch as before, and the *Fix a
+punch* card stays hidden.
 

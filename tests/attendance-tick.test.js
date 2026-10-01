@@ -47,6 +47,7 @@ function harness({ now, logs, profiles, bitrixResult, shifts = [DAY_SHIFT], targ
     process: { env: { SUPABASE_URL: 'https://db.example.test', SUPABASE_SERVICE_ROLE_KEY: 's', BIOMETRIC_API_KEY: 'test-device' } },
     require(name) {
       if (name === '../lib/request-auth') return require('../lib/request-auth');
+      if (name === '../lib/attendance-live') return require('../lib/attendance-live');
       if (name === '../company-config') return require('../company-config');
       if (name === 'crypto') return require('crypto');
       if (name === '../lib/attendance') return attendance;

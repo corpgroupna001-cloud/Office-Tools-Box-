@@ -1,5 +1,6 @@
 const { safeEqual, sessionUser, bearer, clientIp } = require('../lib/request-auth');
 const { rpc } = require('../lib/service-rpc');
+const { liveFilter } = require('../lib/attendance-live');
 const { resolveShift } = require('../company-config');
 // Password login and signed-cookie admin API. Uses the Supabase service_role key to bypass RLS
 // and return every employee's test results for the dashboard.
@@ -197,6 +198,7 @@ async function recomputePunches({ sb, from, to, apply, employeeCode, deadlineAt 
     withEmployeeId(sb, `profiles?select=id,full_name,company,employee_code,shift_id${dual}&limit=2000`),
     sb('shifts?select=*'),
     readPages(sb, `attendance_logs?select=id,user_id,employee_code,log_datetime,log_date,direction,direction_derived,event_type,source` +
+       (await liveFilter({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY, request: fetch })) +
        (employeeCode ? `&employee_code=eq.${encodeURIComponent(employeeCode)}` : '') +
        `&log_datetime=gte.${encodeURIComponent(new Date(fromAt - RECOMPUTE_CONTEXT_MS).toISOString())}` +
        `&log_datetime=lte.${encodeURIComponent(new Date(toAt + RECOMPUTE_CONTEXT_MS).toISOString())}` +
@@ -2069,7 +2071,9 @@ module.exports = async function handler(req, res) {
         sb('leave_types?select=id,name').then(r => r.ok ? r.json() : []),
         // email_status / email_error mark a repeat tap (lib isRepeatRow), which
         // the month's days must not count; id orders ties so pages never overlap.
-        fetchAll(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type,source,email_status,email_error&log_date=gte.${from}&log_date=lte.${to}&order=log_datetime.asc,id.asc`),
+        // Superseded punches (an approved correction replaced them) do not count.
+        fetchAll(`attendance_logs?select=user_id,log_date,log_datetime,direction,event_type,source,email_status,email_error&log_date=gte.${from}&log_date=lte.${to}&order=log_datetime.asc,id.asc`
+          + await liveFilter({ url: SUPABASE_URL, key: SERVICE_KEY, request: fetch })),
         sb('salaries?select=*').then(r => r.ok ? r.json() : []),
         sb('secondary_roles?select=user_id,label,shift_id,per_day_rate,currency,note').then(r => r.ok ? r.json() : []),
       ]);
@@ -2568,7 +2572,7 @@ module.exports = async function handler(req, res) {
         loadProfiles(),
         // Paged: Supabase answers 1,000 rows a request. select=* carries
         // email_status / email_error, which mark a repeat tap (lib isRepeatRow).
-        readPages(sb, `attendance_logs?log_date=eq.${date}&select=*&order=log_datetime.asc,id.asc`),
+        readPages(sb, `attendance_logs?log_date=eq.${date}&select=*&order=log_datetime.asc,id.asc` + await liveFilter({ url: SUPABASE_URL, key: SERVICE_KEY, request: fetch })),
         sb('shifts?select=*'),
         sb(`holidays?holiday_date=eq.${date}&select=*`),
         // Approved leave whose range covers this date.
@@ -3085,6 +3089,60 @@ module.exports = async function handler(req, res) {
       }
       return res.status(200).json({ success: true, status: r.status, ...result });
     }
+
+      // ---- Correction requests (supabase-attendance-corrections-migration.sql) ----
+      // Employees ask from the attendance page; managers decide there, the
+      // console decides here. A decision goes through
+      // ws_review_attendance_correction: once only, the device's punch is
+      // never edited, and an administrator signed in with their own account
+      // cannot decide their own request.
+      if (action === 'att_corrections') {
+        const status = ['pending', 'approved', 'rejected'].includes(body.status) ? body.status : null;
+        const r = await sb('attendance_corrections?select=*&order=created_at.desc&limit=300' + (status ? `&status=eq.${status}` : ''));
+        if (!r.ok) {
+          const missing = r.status === 404 || /PGRST205|42P01/.test(await r.text());
+          return res.status(missing ? 409 : 502).json({ error: missing ? 'Run supabase-attendance-corrections-migration.sql first' : 'Could not load correction requests' });
+        }
+        const rows = await r.json();
+        const logIds = [...new Set(rows.map(c => c.log_id).filter(Boolean))];
+        const [profiles, logs] = await Promise.all([
+          loadProfiles(),
+          logIds.length ? sb(`attendance_logs?id=in.(${logIds.join(',')})&select=id,log_datetime,direction,source,device_name`).then(x => x.ok ? x.json() : []) : [],
+        ]);
+        const byId = new Map(profiles.map(p => [p.id, p]));
+        const logById = new Map(logs.map(l => [l.id, l]));
+        return res.status(200).json({
+          requests: rows.map(c => {
+            const p = byId.get(c.user_id) || {};
+            const rv = c.reviewed_by ? byId.get(c.reviewed_by) : null;
+            return { ...c, full_name: p.full_name || null, email: p.email || null, employee_id: p.employee_id || null,
+                     wrong_punch: c.log_id ? logById.get(c.log_id) || null : null,
+                     reviewer: rv ? rv.full_name : c.reviewer_label || null };
+          }),
+          counts: { pending: rows.filter(c => c.status === 'pending').length },
+        });
+      }
+
+      if (action === 'att_correction_decide') {
+        const id = String(body.id || '');
+        if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'id required' });
+        if (!['approved', 'rejected'].includes(body.status)) return res.status(400).json({ error: 'status must be approved or rejected' });
+        if (adminUser) {
+          const own = await sb(`attendance_corrections?id=eq.${id}&select=user_id&limit=1`).then(x => x.ok ? x.json() : []);
+          if (own[0] && own[0].user_id === adminUser.id) return res.status(403).json({ error: 'Nobody approves their own correction. Ask another administrator.' });
+        }
+        const out = await rpc('ws_review_attendance_correction', {
+          p_id: id, p_approve: body.status === 'approved',
+          p_note: body.note ? String(body.note).slice(0, 500) : null,
+          p_reviewer_label: adminUser ? `Admin console (${adminUser.name})` : 'Admin console (password)',
+        }, { url: SUPABASE_URL, key: SERVICE_KEY, request: fetch });
+        if (!out.ok) {
+          if (out.missing) return res.status(409).json({ error: 'Run supabase-attendance-corrections-migration.sql first' });
+          const msg = out.error || 'The decision failed';
+          return res.status(/already|no longer|No such/.test(msg) ? 409 : 502).json({ error: msg });
+        }
+        return res.status(200).json({ success: true, request: out.data });
+      }
 
       if (action === 'att_selfies') {
         const date   = body.date ? String(body.date).slice(0, 10) : null;

@@ -51,6 +51,7 @@ function harness({ now = '2026-09-10T12:00:00+05:30', db = {}, env: envOverride,
     const table = url.pathname.replace('/rest/v1/', '');
     if (table.startsWith('rpc/')) {
       const fn = tables[table];
+      if (typeof fn === 'function') return fn(JSON.parse(init.body || '{}'), reply);   // a function decides its own answer
       return fn ? reply(fn) : reply({ code: 'PGRST202', message: 'Could not find the function' }, 404);
     }
     const rows = tables[table];
@@ -82,6 +83,7 @@ function harness({ now = '2026-09-10T12:00:00+05:30', db = {}, env: envOverride,
     require(name) {
       if (name === '../lib/request-auth') return require('../lib/request-auth');
       if (name === '../lib/service-rpc') return require('../lib/service-rpc');
+      if (name === '../lib/attendance-live') return require('../lib/attendance-live');
       if (name === '../company-config') return require('../company-config');
       if (name === '../lib/attendance') return attendance;
       if (name === '../lib/admin-session') return sessions;
@@ -141,7 +143,7 @@ test('a night shift recomputed from the middle of the week keeps every label', a
   assert.equal(res.body.scanned, inRange.length, 'only the range asked for is judged');
   assert.ok(res.body.context > 0, 'the nights either side were read as context');
 
-  const read = h.calls.find(c => c.url.includes('/attendance_logs?'));
+  const read = h.calls.find(c => c.url.includes('/attendance_logs?') && c.url.includes('log_datetime='));
   const u = new URL(read.url);
   assert.deepEqual(u.searchParams.getAll('log_datetime'),
     [`gte.${new Date(Date.parse('2026-09-10T00:00:00+05:30') - 36 * 3600e3).toISOString()}`,
@@ -658,4 +660,59 @@ test('recompute for one Biometric ID leaves everyone else alone', async () => {
   assert.ok(one.body.sample.every(c => c.employee_code === 'code-a'));
   const all = await h.call({ action: 'att_recompute', from: '2026-09-08', to: '2026-09-08' });
   assert.deepEqual([all.body.people, all.body.changes], [2, 6]);
+});
+
+/* ============================ Correction requests ============================ */
+
+const CID = 'c0000001-0000-4000-8000-000000000001';
+const request = extra => ({ id: CID, user_id: 'emp', kind: 'wrong_time', direction: 'OUT', requested_at: '2026-09-09T18:40:00+05:30', log_id: 7,
+  reason: 'Device clock was fast', status: 'pending', created_at: '2026-09-09T19:00:00+05:30', ...extra });
+
+test('the console lists correction requests with the person and the punch they say is wrong', async () => {
+  const h = harness({ db: {
+    profiles: [person('emp', DAY, { employee_id: 'NSP-001' })],
+    attendance_corrections: [request(), request({ id: 'c2', status: 'approved', log_id: null, kind: 'missing', reviewer_label: 'Admin console (password)' })],
+    attendance_logs: [{ id: 7, user_id: 'emp', log_datetime: '2026-09-09T20:40:00+05:30', direction: 'OUT', source: 'biometric' }],
+  } });
+  const res = await h.call({ action: 'att_corrections', status: 'pending' });
+  assert.equal(res.code, 200, JSON.stringify(res.body));
+  assert.equal(res.body.requests.length, 1);
+  const [r] = res.body.requests;
+  assert.deepEqual([r.full_name, r.employee_id, r.wrong_punch.log_datetime], ['Person emp', 'NSP-001', '2026-09-09T20:40:00+05:30']);
+  assert.equal(res.body.counts.pending, 1);
+  const all = await h.call({ action: 'att_corrections' });
+  assert.equal(all.body.requests.find(x => x.id === 'c2').reviewer, 'Admin console (password)');
+});
+
+test('the console decides through the database function, as "Admin console (password)", and says when it was already decided', async () => {
+  const seen = [];
+  let status = 'pending';
+  const h = harness({ db: { profiles: [person('emp', DAY)], attendance_corrections: [request()],
+    'rpc/ws_review_attendance_correction': (args, reply) => {
+      seen.push(args);
+      if (status !== 'pending') return reply({ code: '22023', message: `This request was already ${status}` }, 400);
+      status = args.p_approve ? 'approved' : 'rejected';
+      return reply({ ...request(), status, reviewer_label: args.p_reviewer_label, applied_log_id: 99 });
+    } } });
+  assert.equal((await h.call({ action: 'att_correction_decide', id: 'not-an-id', status: 'approved' })).code, 400);
+  assert.equal((await h.call({ action: 'att_correction_decide', id: CID, status: 'maybe' })).code, 400);
+  const ok = await h.call({ action: 'att_correction_decide', id: CID, status: 'approved', note: 'Checked the CCTV' });
+  assert.equal(ok.code, 200, JSON.stringify(ok.body));
+  assert.deepEqual(seen[0], { p_id: CID, p_approve: true, p_note: 'Checked the CCTV', p_reviewer_label: 'Admin console (password)' });
+  assert.equal(ok.body.request.applied_log_id, 99);
+  const again = await h.call({ action: 'att_correction_decide', id: CID, status: 'rejected' });
+  assert.equal(again.code, 409);
+  assert.match(again.body.error, /already approved/);
+  // Nothing is written to the punches from here: the function does it, in one transaction.
+  assert.ok(!h.calls.some(c => c.url.includes('/attendance_logs') && c.method !== 'GET'));
+});
+
+test('before migration 23 the console says which file to run', async () => {
+  const h = harness({ db: {} });
+  const list = await h.call({ action: 'att_corrections' });
+  assert.equal(list.code, 409);
+  assert.match(list.body.error, /supabase-attendance-corrections-migration\.sql/);
+  const decide = await h.call({ action: 'att_correction_decide', id: CID, status: 'approved' });
+  assert.equal(decide.code, 409);
+  assert.match(decide.body.error, /supabase-attendance-corrections-migration\.sql/);
 });
