@@ -532,7 +532,7 @@ body.ws-b24 .ws-side-foot .ws-side-link { color: var(--b24-menu-muted); }
 
 /* A small modal the shell owns (Themes). */
 .ws-lite-backdrop { position: fixed; inset: 0; z-index: 180; background: rgba(0, 16, 32, 0.45); display: flex; align-items: center; justify-content: center; padding: 16px; animation: ws-fade 140ms ease-out; }
-.ws-lite { width: min(760px, 100%); max-height: calc(100dvh - 32px); overflow: auto; background: var(--b24-surface); color: var(--b24-text); border-radius: 14px; box-shadow: var(--b24-shadow-pop); }
+.ws-lite { width: min(760px, 100%); max-height: calc(100dvh - 32px); overflow: auto; overscroll-behavior: contain; background: var(--b24-surface); color: var(--b24-text); border-radius: 14px; box-shadow: var(--b24-shadow-pop); }
 .ws-lite-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--b24-line); }
 .ws-lite-head b { flex: 1; font-size: 18px; font-weight: 500; }
 .ws-lite-head .x { width: 32px; height: 32px; border: 0; border-radius: 50%; background: none; color: var(--b24-muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }

@@ -202,6 +202,9 @@ function serveStatic(req, res, url) {
   // /wsm-admin?gate=1: someone who is not an administrator sees the gate.
   if (p === '/api/admin' && /[?&]gate=1/.test(String(req.headers.referer || ''))) return send(res, 401, { error: 'Admin session expired. Please sign in again.' });
   if (p === '/api/admin') return adminApi(req, res);
+  // The typing test's AI passage (/api/groq calls Groq in production): a fixed one here.
+  if (p === '/api/groq') return send(res, 200, { passage: 'Every small step forward builds the habit that carries a team through the busy season.', tip: 'Keep your wrists relaxed.',
+    source: 'fixture', theme: 'teamwork', themeLabel: 'Teamwork', category: 'motivation', person: null, level: 'steady', wordCount: 16, duration: 60 });
   if (p.startsWith('/api/')) return send(res, 404, { error: 'not available in the smoke test' });
   if (p === '/messenger' || p === '/messenger/') p = '/chat/';
   if (p === '/admin' || p.startsWith('/admin/') && !p.endsWith('.js') && !p.endsWith('.css')) p = '/wsm-admin';
@@ -697,6 +700,7 @@ async function interact(page, name, result) {
     await wait(150);
     return page.evaluate(() => !['html', 'body'].some(t => /hidden|clip/.test(getComputedStyle(document.querySelector(t)).overflowY)));
   });
+  if (name === 'typing') await expect('the typing test shows its passage', async () => (await page.evaluate(() => document.body.innerText)).includes('busy season'));
   if (name === 'calendar') await expect('a calendar view renders', async () => !!(await page.$('.cal-month, .cal-week, .cal-agenda')));
   if (name === 'invoice-record') await expect('the invoice sheet shows its total', async () => (await page.evaluate(() => document.body.innerText)).includes('1,680'));
   if (name === 'crm') {

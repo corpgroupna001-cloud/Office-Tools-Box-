@@ -1191,7 +1191,7 @@
             const data = await response.json();
             if (!response.ok || data.error || !data.passage) {
                 // Log full details to console for debugging, but throw a clean message for UI.
-                console.error('AI passage error:', data);
+                console.error(`AI passage error: HTTP ${response.status} ${(data && (data.error || data.message)) || ''}`.trim());
                 throw new Error('refresh');
             }
             if (data.theme) {
@@ -1447,7 +1447,7 @@
             try {
                 aiData = await fetchAIPassage(wpmToUse, accToUse);
             } catch (e) {
-                console.error('AI passage fetch failed', e);
+                if (e && e.message !== 'refresh') console.error('AI passage fetch failed:', e && e.message);   // 'refresh' was logged above
                 showError();
                 return false;
             }

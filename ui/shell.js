@@ -838,7 +838,11 @@
             }).join('') +
             '</div></div>';
         document.body.appendChild(bd);
-        var close = function () { bd.remove(); document.removeEventListener('keydown', onKey, true); };
+        // The page behind stays put while the dialog is open: a swipe that reaches
+        // the end of the wallpapers must not scroll the page underneath (phones).
+        var root = document.documentElement, prevOverflow = root.style.overflow;
+        root.style.overflow = 'hidden';
+        var close = function () { bd.remove(); root.style.overflow = prevOverflow; document.removeEventListener('keydown', onKey, true); };
         var onKey = function (e) { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
         document.addEventListener('keydown', onKey, true);
         bd.addEventListener('click', function (e) {
