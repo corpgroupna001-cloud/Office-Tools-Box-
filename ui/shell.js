@@ -443,6 +443,7 @@
         notif.hidden = true;
         notif.innerHTML =
             '<div class="head"><b>Notifications</b><button type="button" id="ws-notif-readall">Mark all read</button>' +
+                '<button type="button" class="x" id="ws-notif-settings" aria-label="Notification settings" title="Notification settings"><span class="ic ic-gear"></span></button>' +
                 '<button type="button" class="x" id="ws-notif-close" aria-label="Close"><span class="ic ic-x"></span></button></div>' +
             '<a class="msgs" href="/chat/"><span class="ic ic-chat"></span>Messages<span class="n" id="ws-notif-msgs" hidden></span></a>' +
             '<div class="list" id="ws-notif-list"><div class="empty">Loading…</div></div>';
@@ -557,6 +558,7 @@
         $('#ws-help', refs.top).addEventListener('click', function (e) { e.stopPropagation(); toggleMenu(false); openHelp(); });
         refs.notif.querySelector('#ws-notif-readall').addEventListener('click', function () { markAllRead(); });
         refs.notif.querySelector('#ws-notif-close').addEventListener('click', function () { toggleNotif(false); });
+        refs.notif.querySelector('#ws-notif-settings').addEventListener('click', function () { toggleNotif(false); openNotifSettings(); });
         refs.notifList.addEventListener('click', function (e) {
             var a = e.target.closest('[data-notif]');
             if (!a) return;
@@ -817,6 +819,65 @@
     }
 
     // ----- themes -----
+    /* ---- Notification settings (F-03): which pushes reach this person, and quiet hours ---- */
+    var NOTIF_CATS = [['messages', 'Messages and mentions'], ['tasks', 'Tasks'], ['crm', 'CRM: leads, deals, invoices'], ['calendar', 'Meetings and events'],
+        ['projects', 'Projects and boards'], ['documents', 'Documents'], ['reminders', 'Reminders and follow-ups'], ['other', 'Everything else']];
+    async function openNotifSettings() {
+        var old = document.getElementById('ws-notif-prefs'); if (old) old.remove();
+        if (!state.sb || !state.uid) return;
+        var r = await state.sb.from('notification_prefs').select('*').eq('user_id', state.uid).maybeSingle();
+        var missing = !!(r.error && /PGRST205|42P01/.test(String(r.error.code || '')));
+        var browserTz = 'Asia/Kolkata';
+        try { browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || browserTz; } catch (e) { /* default */ }
+        var p = Object.assign({ push_enabled: true, muted_categories: [], quiet_enabled: false, quiet_start: '22:00', quiet_end: '07:00', timezone: browserTz, calls_in_quiet: true }, (r && r.data) || {});
+        var zones = ['Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'Australia/Sydney', 'UTC'];
+        if (zones.indexOf(p.timezone) < 0) zones.unshift(p.timezone);
+        if (zones.indexOf(browserTz) < 0) zones.unshift(browserTz);
+        var hhmm = function (t) { return String(t || '').slice(0, 5); };
+        var bd = document.createElement('div');
+        bd.className = 'ws-lite-backdrop'; bd.id = 'ws-notif-prefs';
+        bd.innerHTML = '<form class="ws-lite" role="dialog" aria-modal="true" aria-labelledby="ws-np-t">' +
+            '<div class="ws-lite-head"><b id="ws-np-t">Notification settings</b><button type="button" class="x" aria-label="Close"><span class="ic ic-x"></span></button></div>' +
+            '<div class="ws-lite-body ws-np">' +
+            (missing ? '<p class="ws-np-note bad">These settings need <code>supabase-notification-prefs-migration.sql</code>; an administrator can run it.</p>' : '') +
+            '<p class="ws-np-note">Every notification still appears here in the bell. These settings decide which of them also reach your phone or computer as a push.</p>' +
+            '<label class="ws-np-row"><input type="checkbox" name="push_enabled"' + (p.push_enabled ? ' checked' : '') + '> <b>Push notifications</b></label>' +
+            '<fieldset class="ws-np-cats"><legend>Send me pushes for</legend>' + NOTIF_CATS.map(function (c) {
+                return '<label class="ws-np-row"><input type="checkbox" name="cat" value="' + c[0] + '"' + ((p.muted_categories || []).indexOf(c[0]) < 0 ? ' checked' : '') + '> ' + esc(c[1]) + '</label>';
+            }).join('') + '</fieldset>' +
+            '<fieldset><legend>Quiet hours</legend>' +
+            '<label class="ws-np-row"><input type="checkbox" name="quiet_enabled"' + (p.quiet_enabled ? ' checked' : '') + '> Hold pushes between</label>' +
+            '<div class="ws-np-times"><input type="time" name="quiet_start" value="' + esc(hhmm(p.quiet_start)) + '" aria-label="Quiet from"> and <input type="time" name="quiet_end" value="' + esc(hhmm(p.quiet_end)) + '" aria-label="Quiet until">' +
+            ' <select name="timezone" aria-label="Time zone">' + zones.map(function (z) { return '<option' + (z === p.timezone ? ' selected' : '') + '>' + esc(z) + '</option>'; }).join('') + '</select></div>' +
+            '<label class="ws-np-row"><input type="checkbox" name="calls_in_quiet"' + (p.calls_in_quiet !== false ? ' checked' : '') + '> Calls still ring during quiet hours</label>' +
+            '<p class="ws-np-note">Reminders held by quiet hours are sent once they end. A window like 22:00–07:00 runs across midnight.</p></fieldset>' +
+            '<p class="ws-np-msg" role="status"></p>' +
+            '<div class="ws-np-foot"><button type="button" class="ws-btn" data-cancel>Cancel</button><button type="submit" class="ws-btn primary">Save</button></div>' +
+            '</div></form>';
+        document.body.appendChild(bd);
+        var root = document.documentElement, prevOverflow = root.style.overflow;
+        root.style.overflow = 'hidden';
+        var close = function () { bd.remove(); root.style.overflow = prevOverflow; document.removeEventListener('keydown', onKey, true); };
+        var onKey = function (e) { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+        document.addEventListener('keydown', onKey, true);
+        bd.addEventListener('click', function (e) { if (e.target === bd || e.target.closest('.x') || e.target.closest('[data-cancel]')) close(); });
+        var form = bd.querySelector('form');
+        form.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            var f = form.elements, msg = form.querySelector('.ws-np-msg');
+            var on = Array.prototype.slice.call(form.querySelectorAll('input[name=cat]:checked')).map(function (x) { return x.value; });
+            var row = { user_id: state.uid, push_enabled: f.push_enabled.checked,
+                muted_categories: NOTIF_CATS.map(function (c) { return c[0]; }).filter(function (c) { return on.indexOf(c) < 0; }),
+                quiet_enabled: f.quiet_enabled.checked, quiet_start: f.quiet_start.value || '22:00', quiet_end: f.quiet_end.value || '07:00',
+                timezone: f.timezone.value, calls_in_quiet: f.calls_in_quiet.checked };
+            var w = await state.sb.from('notification_prefs').upsert(row, { onConflict: 'user_id' });
+            if (w.error) { msg.textContent = 'Could not save: ' + (w.error.message || 'try again'); msg.className = 'ws-np-msg bad'; return; }
+            close();
+            toast('Notification settings saved', 'ok');
+        });
+        form.querySelector('input[name=push_enabled]').focus();
+    }
+
     function openThemes() {
         toggleMenu(false); closePop();
         var old = document.getElementById('ws-themes');
@@ -1207,7 +1268,7 @@
     window.WSShell = {
         mount: mount, setUser: setUser, setCrumb: setCrumb, toast: toast, refreshUnread: refreshUnread, setUnread: setUnread, setBadge: setBadge,
         setTabCount: setTabCount, closeDrawer: closeDrawer, openSlider: openSlider, closeSlider: closeSlider, sliderMessage: sliderMessage,
-        openThemes: openThemes, configureMenu: configureMenu, NAV: NAV, TABS: TABS, WALLPAPERS: WALLPAPERS,
+        openThemes: openThemes, openNotifSettings: openNotifSettings, configureMenu: configureMenu, NAV: NAV, TABS: TABS, WALLPAPERS: WALLPAPERS,
         _closeFrom: closeFrom, _fromSlider: fromSlider,
         get role() { return state.role; },
         get counts() { return state.counts; },

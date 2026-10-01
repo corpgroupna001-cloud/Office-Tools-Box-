@@ -55,3 +55,16 @@ test('when access goes or the record is deleted, the favourite drops out — its
   await svc(`delete from tasks where id = $1`, [t.id]);
   assert.deepEqual(await favs(C), [], 'deleted');
 });
+
+/* ---------------------------------------------- notification settings (F-03, migration 22) */
+test('notification settings: each person reads and writes only their own; bad values are refused', { skip }, async () => {
+  await q(A, `insert into notification_prefs (muted_categories, quiet_enabled, quiet_start, quiet_end, timezone) values ('{crm}', true, '22:00', '07:00', 'Asia/Kolkata')`);
+  assert.equal((await q(A, `select timezone from notification_prefs`))[0].timezone, 'Asia/Kolkata');
+  assert.equal((await q(C, `select * from notification_prefs`)).length, 0, 'nobody reads another person\'s settings');
+  await assert.rejects(q(C, `insert into notification_prefs (user_id) values ($1)`, [A]), /row-level security|duplicate/);
+  assert.equal((await q(C, `update notification_prefs set push_enabled = false where user_id = $1 returning user_id`, [A])).length, 0);
+  await assert.rejects(q(C, `insert into notification_prefs (timezone) values ('Mars/Olympus')`), /Unknown time zone/);
+  await assert.rejects(q(C, `insert into notification_prefs (muted_categories) values ('{gossip}')`), /notification_prefs_categories_ck/);
+  await q(C, `insert into notification_prefs (push_enabled) values (false)`);
+  assert.equal((await q(C, `select push_enabled from notification_prefs`))[0].push_enabled, false);
+});

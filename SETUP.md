@@ -831,6 +831,7 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 19 | `supabase-crm-summary-migration.sql` | CRM totals computed by the database, per currency, over every row the person may see: `crm_deal_summary`, `crm_lead_summary`, `crm_forecast_summary`. The dashboard and the forecast stop adding rupees to dollars and stop at no row cap. See [18. CRM totals and long lists](#18-crm-totals-and-long-lists) |
 | 20 | `supabase-task-completion-migration.sql` | *Task status summary is required* enforced by the database: such a task completes only with `tasks.result_summary` in the same update — from the Complete button, bulk Complete, a done column on a board, the editor or the API — and the summary is posted as the task's comment in the same transaction. Reopening clears it |
 | 21 | `supabase-favorites-migration.sql` | Favourite records: a star on task, deal, project and document pages; **Ctrl+K** lists them first. Personal, and never showing a record the person can no longer open. See [21. Favourites](#21-favourites) |
+| 22 | `supabase-notification-prefs-migration.sql` | Notification settings and quiet hours: which kinds of push reach each person, and when their phone stays quiet. In-app notifications are unchanged. See [22. Notification settings](#22-notification-settings) |
 
 **Ran migration 8 before 15 Sep 2026?** Run it again. Its first version made
 `external_ref`'s unique index partial, which `ON CONFLICT` cannot use, so every
@@ -1586,4 +1587,30 @@ rows. Starring a record is refused unless the person can see it, and
 `ws_my_favorites()` runs with the person's own access, so a record that was
 deleted, archived or is no longer theirs to see drops out without its title
 ever being returned.
+
+# 22. Notification settings
+
+The **⚙** in the bell panel opens **Notification settings**:
+
+- **Push notifications** on or off;
+- which kinds of push to receive — messages and mentions, tasks, CRM, meetings,
+  projects and boards, documents, reminders, everything else;
+- **quiet hours** in the person's time zone (a window like 22:00–07:00 runs
+  across midnight), and whether **calls still ring** during them.
+
+Only pushes follow these settings (`lib/notify-prefs.js`, applied in
+`api/push.js` and the reminder job): every notification still appears in the
+bell, unread. With nothing saved — everyone after the upgrade — every push is
+sent as before.
+
+**Policy for calls:** an incoming call is someone trying to reach you now, so
+it is not a category that can be muted and it rings during quiet hours unless
+*Calls still ring during quiet hours* is off. Switching push off stops call
+pushes too; WorkSuite open in a tab still rings. Reminders held back by quiet
+hours go out on the next reminder run after they end (the same day); muted
+ones do not.
+
+The push API's free-form `notify` now reaches only active colleagues who
+share a company with the sender (administrators: anyone), like the in-app
+notifications of section 16.
 

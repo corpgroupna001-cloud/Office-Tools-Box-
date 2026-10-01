@@ -1922,3 +1922,18 @@ body.ws-b24.ws-signed-out .ws-auth-form form > button[type="submit"] { min-heigh
     body.ws-b24.ws-signed-out .ws-auth-caption { display: none; }
     body.ws-b24.ws-signed-out .ws-auth-form { padding: 28px 22px; }
 }
+
+/* Notification settings dialog (F-03) */
+.ws-np fieldset { border: 1px solid var(--b24-line); border-radius: 10px; padding: 10px 14px 12px; margin: 12px 0 0; }
+.ws-np legend { padding: 0 6px; font-weight: 600; font-size: 13px; }
+.ws-np-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 14px; cursor: pointer; }
+.ws-np-row input { width: 18px; height: 18px; }
+.ws-np-cats { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); column-gap: 12px; }
+.ws-np-cats legend { grid-column: 1 / -1; }
+.ws-np-times { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 4px 0 6px 26px; font-size: 14px; }
+.ws-np-times input, .ws-np-times select { min-height: 34px; border: 1px solid var(--b24-line); border-radius: 8px; padding: 0 8px; background: var(--b24-surface); color: var(--b24-text); max-width: 100%; }
+.ws-np-note { margin: 0 0 8px; color: var(--b24-muted); font-size: 13px; }
+.ws-np-note.bad, .ws-np-msg.bad { color: #b91c1c; }
+.ws-np-msg { margin: 10px 0 0; font-size: 13px; }
+.ws-np-msg:empty { display: none; }
+.ws-np-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }

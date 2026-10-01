@@ -43,7 +43,7 @@ const PAGES = [
   ['/quotes', 'quotes'], ['/quotes?id=Q1', 'quote-record'], ['/crm/forecast', 'forecast'],
   ['/crm/settings?section=lost', 'crm-lost-reasons'], ['/crm/settings?section=forms', 'crm-web-forms'], ['/form?f=smoke0000000000000000000000000001', 'web-form'],
   ['/chat', 'messenger'], [`/call?id=${F.CALL}`, 'call'], ['/attendance', 'attendance'],
-  ['/wsm-admin', 'admin'], ['/wsm-admin?gate=1', 'admin-gate'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/crm', 'themes'], ['/crm', 'dialogs'], ['/crm', 'paging'], ['/tasks', 'task-complete'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
+  ['/wsm-admin', 'admin'], ['/wsm-admin?gate=1', 'admin-gate'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/crm', 'themes'], ['/crm', 'dialogs'], ['/crm', 'paging'], ['/tasks', 'task-complete'], ['/crm', 'notif-settings'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
 ];
 const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'leads-list', 'lead-record', 'lead-imported', 'deals', 'deals-list', 'deal-record', 'deal-imported', 'boards', 'board', 'projects',
   'project-record', 'tasks', 'task-record', 'task-new', 'task-people', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record', 'quotes', 'quote-record', 'forecast', 'crm-lost-reasons', 'crm-web-forms']);
@@ -300,6 +300,7 @@ async function visit(browser, route, name, [vpName, viewport]) {
     }
     if (name === 'task-people') { await page.evaluate(() => document.querySelector('[data-assignee]').click()); await new Promise(r => setTimeout(r, 300)); }
     if (name === 'themes') { await page.evaluate(() => window.WSShell.openThemes()); await new Promise(r => setTimeout(r, 400)); }
+    if (name === 'notif-settings') { await page.evaluate(() => window.WSShell.openNotifSettings()); await new Promise(r => setTimeout(r, 600)); }
     const info = await page.evaluate(() => {
       const w = window.innerWidth;
       const text = (document.querySelector('#ws-page') || document.body).innerText || '';
@@ -600,6 +601,18 @@ async function interact(page, name, result) {
   const wait = ms => new Promise(r => setTimeout(r, ms));
   if (name === 'dialogs') await dialogKeyboard(page, expect, wait);
   if (name === 'task-complete') await taskCompletion(page, expect, wait);
+  if (name === 'notif-settings') await expect('notification settings save the choices made (overnight quiet hours, a muted category)', async () => {
+    const posts = [];
+    const onReq = r => { if (r.url().includes('/rest/v1/notification_prefs') && r.method() === 'POST') posts.push(JSON.parse(r.postData() || '{}')); };
+    page.on('request', onReq);
+    await page.click('#ws-notif-prefs input[name=cat][value=crm]');
+    await page.click('#ws-notif-prefs input[name=quiet_enabled]');
+    await page.click('#ws-notif-prefs button[type=submit]'); await wait(600);
+    page.off('request', onReq);
+    const row = Array.isArray(posts[0]) ? posts[0][0] : posts[0];
+    if (!row) throw new Error('nothing saved');
+    return row.quiet_enabled === true && row.quiet_start === '22:00' && row.quiet_end === '07:00' && row.muted_categories.join() === 'crm' && row.push_enabled === true && !(await page.$('#ws-notif-prefs'));
+  });
   if (name === 'paging') {
     await expect('the people list holds everyone, not the first 1,000', () => page.evaluate(() => window.WSCrm.activePeople().length > 2500));
     await expect('fetchAll pages to the end, and says when it stopped at its cap', () => page.evaluate(async () => {
