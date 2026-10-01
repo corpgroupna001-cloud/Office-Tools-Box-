@@ -1657,6 +1657,15 @@ before and after (`before` / `after`).
 **Before migration 23** the server reads every punch as before, and the *Fix a
 punch* card stays hidden.
 
+Rollback: `drop policy attendance_logs_live_only on public.attendance_logs;`
+(signed-in reads then see replaced punches again), then
+`drop function public.ws_review_attendance_correction(uuid, boolean, text, text);`
+and `drop table public.attendance_corrections;`. Keep the
+`superseded_by` / `correction_id` columns and the correction punches: they
+are the record of what was approved. To undo one approval, set that punch's
+`superseded_by` back to null on the wrong punch and delete the correction
+punch, with the service key.
+
 # 24. Delivery retries
 
 Every punch's email and Bitrix group line is still tried the moment the punch
