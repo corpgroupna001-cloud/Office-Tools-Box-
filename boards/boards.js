@@ -551,7 +551,7 @@
             try {
                 const [c, t] = await Promise.all([
                     C.q(sb.from('board_columns').select('*').eq('board_id', id).order('position')),
-                    C.q(sb.from('tasks').select(TASK_SELECT).eq('board_id', id).is('archived_at', null).is('parent_task_id', null).order('position').limit(1000)),
+                    C.fetchAll(() => sb.from('tasks').select(TASK_SELECT).eq('board_id', id).is('archived_at', null).is('parent_task_id', null).order('position').order('id'), 5000).then(data => ({ data })),
                 ]);
                 bs.columns = c.data || []; bs.cards = t.data || [];
                 const ids = bs.cards.map(x => x.id);

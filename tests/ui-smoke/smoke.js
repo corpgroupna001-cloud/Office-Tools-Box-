@@ -37,13 +37,13 @@ const PAGES = [
   ['/documents', 'documents'], ['/documents?id=DOC1', 'document-record'],
   ['/documents/public?t=smokepublic0000000000000000000001', 'public-doc'], ['/documents/public?t=smokeoff00000000000000000000000001', 'public-doc-off'],
   ['/calendar', 'calendar'], ['/calendar?view=day', 'calendar-day'], ['/calendar?view=week', 'calendar-week'],
-  ['/calendar?view=month', 'calendar-month'], ['/calendar?view=schedule', 'calendar-schedule'], ['/employees', 'employees'],
+  ['/calendar?view=month', 'calendar-month'], ['/calendar?view=schedule', 'calendar-schedule'], ['/calendar?view=month', 'calendar-partial'], ['/employees', 'employees'],
   ['/employees?view=tiles', 'employees-tiles'], ['/employees/structure/', 'org-chart'], ['/employees?id=22222222-2222-4222-8222-222222222222', 'employee-record'],
   ['/invoices', 'invoices'], ['/invoices?id=I1', 'invoice-record'],
   ['/quotes', 'quotes'], ['/quotes?id=Q1', 'quote-record'], ['/crm/forecast', 'forecast'],
   ['/crm/settings?section=lost', 'crm-lost-reasons'], ['/crm/settings?section=forms', 'crm-web-forms'], ['/form?f=smoke0000000000000000000000000001', 'web-form'],
   ['/chat', 'messenger'], [`/call?id=${F.CALL}`, 'call'], ['/attendance', 'attendance'],
-  ['/wsm-admin', 'admin'], ['/wsm-admin?gate=1', 'admin-gate'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/crm', 'themes'], ['/crm', 'dialogs'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
+  ['/wsm-admin', 'admin'], ['/wsm-admin?gate=1', 'admin-gate'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/crm', 'themes'], ['/crm', 'dialogs'], ['/crm', 'paging'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
 ];
 const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'leads-list', 'lead-record', 'lead-imported', 'deals', 'deals-list', 'deal-record', 'deal-imported', 'boards', 'board', 'projects',
   'project-record', 'tasks', 'task-record', 'task-new', 'task-people', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record', 'quotes', 'quote-record', 'forecast', 'crm-lost-reasons', 'crm-web-forms']);
@@ -89,6 +89,7 @@ function filterFn(col, expr) {
   };
   return not ? r => !test(r) : test;
 }
+const MAX_ROWS = 1000;
 const SKIP_PARAMS = new Set(['select', 'order', 'limit', 'offset', 'on_conflict', 'columns', 'or', 'and']);
 const FK_OF = { calendar_events: 'event_id', documents: 'document_id', invoices: 'invoice_id', projects: 'project_id', tasks: 'task_id',
   conversations: 'conversation_id', crm_deals: 'deal_id', crm_contacts: 'contact_id', boards: 'board_id', calls: 'call_id' };
@@ -135,6 +136,8 @@ async function supabase(req, res, url) {
   if (!p.startsWith('/rest/v1/')) return send(res, 404, { message: 'not mocked' });
 
   const table = decodeURIComponent(p.slice('/rest/v1/'.length));
+  // A page can make a table fail, to check how it reports a source it could not load.
+  if (DB.__fail && DB.__fail[table]) return send(res, DB.__fail[table][0], DB.__fail[table][1]);
   const rows = DB[table] || (DB[table] = []);
   const filters = [...url.searchParams].filter(([k]) => !SKIP_PARAMS.has(k)).map(([k, v]) => filterFn(k, v));
   let matched = rows.filter(r => filters.every(f => f(r)));
@@ -143,8 +146,10 @@ async function supabase(req, res, url) {
   if (method === 'GET' || method === 'HEAD') {
     matched = orderRows(matched, url.searchParams.get('order'));
     const total = matched.length;
-    const limit = Number(url.searchParams.get('limit')) || 0;
-    const outRows = (limit ? matched.slice(0, limit) : matched).map(r => embed(r, url.searchParams.get('select'), table));
+    // Like PostgREST with Supabase's max-rows: never more than 1,000 rows in one response.
+    const offset = Number(url.searchParams.get('offset')) || 0;
+    const limit = Math.min(Number(url.searchParams.get('limit')) || MAX_ROWS, MAX_ROWS);
+    const outRows = matched.slice(offset, offset + limit).map(r => embed(r, url.searchParams.get('select'), table));
     const headers = { 'Content-Range': `0-${Math.max(0, outRows.length - 1)}/${total}` };
     if (method === 'HEAD') return send(res, 200, undefined, headers);
     if (single) return outRows.length === 1 ? send(res, 200, outRows[0], headers)
@@ -248,6 +253,13 @@ async function visit(browser, route, name, [vpName, viewport]) {
   }, key, JSON.stringify(F.session()), { wallpaper: process.env.SMOKE_WALLPAPER || '', theme: process.env.SMOKE_THEME || '', signedOut: name === 'signin' });
   const result = { route, name, viewport: vpName, errors, consoleErrors, problems: [], notes: [] };
   // A signed-in account still waiting for an administrator's approval.
+  // Far more people than one response holds: everything that lists them must page (PERF-01).
+  if (name === 'paging') {
+    for (let i = 0; i < 2500; i++) DB.profiles.push({ id: `p0000000-0000-4000-8000-${String(i).padStart(12, '0')}`, full_name: `Person ${String(i).padStart(4, '0')}`,
+      email: `p${i}@example.test`, company: 'Nova Sportsmart Private Limited', status: 'active', app_role: 'employee', created_at: '2026-01-01T00:00:00Z' });
+  }
+  // Two calendar sources fail (a server error and a permission refusal); the rest must still show.
+  if (name === 'calendar-partial') DB.__fail = { tasks: [500, { message: 'upstream timeout' }], leave_requests: [403, { code: '42501', message: 'permission denied for table leave_requests' }] };
   if (name === 'pending') DB.__access = { signed_in: true, access: 'pending', status: 'pending', email_verified: true, company: 'Nova Sportsmart Private Limited', full_name: 'Maya Manager' };
   try {
     await page.goto(ORIGIN + route, { waitUntil: 'load', timeout: 30000 });
@@ -297,6 +309,12 @@ async function visit(browser, route, name, [vpName, viewport]) {
     });
     // The call window is full-screen and the public web form is for visitors: neither has the shell.
     if (!info.shell && !['home', 'call', 'web-form', 'signin', 'pending', 'admin-gate', 'public-doc', 'public-doc-off'].includes(name)) result.problems.push('app shell did not mount');
+    if (name === 'calendar-partial') {
+      const t = await page.evaluate(() => document.body.innerText);
+      if (!/Some items are missing from this view/.test(t) || !/Tasks:/.test(t) || !/Leave:/.test(t)) result.problems.push('a failed calendar source was not reported');
+      if (!(await page.$('[data-cal-retry]'))) result.problems.push('no Retry for the failed sources');
+      if (!(await page.$('.cal-month .cal-ev, .cal-month [data-key]'))) result.notes.push('no items drawn on the partial calendar');
+    }
     if (name === 'public-doc' && !/Academy kit: 1,680/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('the public document did not render');
     if (name === 'public-doc-off' && !/no longer available/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('a link that is off did not say so');
     if (name === 'web-form' && !/Talk to our sales team/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('web form did not render');
@@ -515,6 +533,15 @@ async function interact(page, name, result) {
   const expect = async (label, fn) => { try { const ok = await fn(); if (!ok) result.problems.push(`interaction failed: ${label}`); } catch (e) { result.problems.push(`interaction threw: ${label}: ${e.message.split('\n')[0]}`); } };
   const wait = ms => new Promise(r => setTimeout(r, ms));
   if (name === 'dialogs') await dialogKeyboard(page, expect, wait);
+  if (name === 'paging') {
+    await expect('the people list holds everyone, not the first 1,000', () => page.evaluate(() => window.WSCrm.activePeople().length > 2500));
+    await expect('fetchAll pages to the end, and says when it stopped at its cap', () => page.evaluate(async () => {
+      const sb = window.WSCrm.ctx().sb;
+      const all = await window.WSCrm.fetchAll(() => sb.from('profiles').select('id').order('id'));
+      const capped = await window.WSCrm.fetchAll(() => sb.from('profiles').select('id').order('id'), 2000);
+      return all.length > 2500 && all.partial === false && new Set(all.map(r => r.id)).size === all.length && capped.length === 2000 && capped.partial === true;
+    }));
+  }
   if (name === 'contacts') {
     await expect('Create opens the new-contact page in a slider', async () => {
       await page.click('[data-create]');

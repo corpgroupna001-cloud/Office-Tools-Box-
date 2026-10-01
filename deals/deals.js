@@ -422,8 +422,8 @@
     async function loadKanban() {
         if (!page.board) return;
         try {
-            const { data } = await C.q(scoped(sb.from('crm_deals').select(SELECT)).order('position', { ascending: true }).order('updated_at', { ascending: false }).limit(1000));
-            const rows = data || [];
+            const rows = await C.fetchAll(() => scoped(sb.from('crm_deals').select(SELECT)).order('position', { ascending: true }).order('updated_at', { ascending: false }).order('id'), 5000);
+            C.capNotice(view.querySelector('.b24-board-area') || view, rows, 'deals');
             const columns = stagesFor(page.pipeline).map(s => {
                 const inCol = rows.filter(d => d.stage_id === s.id);
                 return { id: s.id, name: s.name, hex: stageHex(s), sum: L.money(inCol.reduce((a, d) => a + Number(d.value || 0), 0), (inCol[0] || {}).currency || 'INR', { whole: true }) };
@@ -480,8 +480,9 @@
     }
     /** Export to CSV / Excel: the filtered deals (this pipeline or all) with the list's columns, then every column of the import. */
     async function exportRows() {
-        const b = scoped(sb.from('crm_deals').select(LIST_SELECT)).order('updated_at', { ascending: false }).limit(5000);
-        const rows = (await C.q(b)).data || [];
+        // Every row, a page at a time: an export must not stop at PostgREST's first 1,000.
+        const rows = await C.fetchAll(() => scoped(sb.from('crm_deals').select(LIST_SELECT)).order('updated_at', { ascending: false }).order('id'), 50000);
+        if (rows.partial) C.toast(`Exported the first ${rows.length.toLocaleString('en-IN')} rows; narrow the filter for the rest`, 'warn');
         const columns = [
             { title: 'ID', value: r => B.sourceId(r) || (r.number == null ? '' : r.number) },
             { title: 'Deal', value: r => r.title }, { title: 'Pipeline', value: r => (pipelineOf(r.pipeline_id) || {}).name || B.src(r, 'Pipeline') },

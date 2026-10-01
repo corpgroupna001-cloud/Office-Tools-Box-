@@ -1062,7 +1062,14 @@
                 apiView({ mode: 'team_status' }),
                 teamAvatars ? null : (async () => {
                     // Photos and Employee IDs; before supabase-employee-id-migration.sql there are only photos.
-                    const r = await rootSb.from('profiles').select('id, avatar_url, employee_id').limit(2000);
+                    // A page of 1,000 at a time (PostgREST's limit), so the 1,001st person keeps their photo.
+                    const r = { data: [], error: null };
+                    for (let from = 0; from < 20000; from += 1000) {
+                        const pg = await rootSb.from('profiles').select('id, avatar_url, employee_id').order('id').range(from, from + 999);
+                        if (pg.error) { r.error = pg.error; break; }
+                        r.data.push(...(pg.data || []));
+                        if ((pg.data || []).length < 1000) break;
+                    }
                     if (!r.error) {
                         teamAvatars = new Map((r.data || []).filter(p => p.avatar_url).map(p => [p.id, p.avatar_url]));
                         teamIds = new Map((r.data || []).filter(p => p.employee_id).map(p => [p.id, p.employee_id]));

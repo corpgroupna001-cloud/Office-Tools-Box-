@@ -316,3 +316,26 @@ test('activity rows read as a sentence with the meaningful detail', () => {
   assert.equal(L.describeActivity({ action: 'invoice.payment_recorded', meta: { amount: 500, currency: 'INR', method: 'UPI' } }).detail.includes('via UPI'), true);
   assert.equal(L.describeActivity({ action: 'something.new', meta: {} }).verb, 'something new');
 });
+
+test('dealsByCurrency never adds one currency to another (BUG-04)', () => {
+  const s = L.dealsByCurrency([
+    { status: 'open', value: 100, currency: 'INR', probability: 50, stage_id: 'S1' },
+    { status: 'open', value: 100, currency: 'USD', probability: 20, stage_id: 'S1' },
+    { status: 'won', value: 70, currency: 'EUR' },
+    { status: 'open', value: 999, currency: 'INR', archived_at: '2026-09-01' },
+  ]);
+  const by = c => s.currencies.find(x => x.currency === c);
+  assert.equal(by('INR').open_value, 100, 'archived deals are left out');
+  assert.equal(by('USD').open_value, 100);
+  assert.equal(by('INR').weighted_value, 50);
+  assert.equal(by('EUR').won_value, 70, 'a won deal in a currency with no open deals keeps its own currency');
+  assert.equal(s.open_count, 2);
+  assert.deepEqual(s.stages.map(x => [x.currency, x.value]).sort(), [['INR', 100], ['USD', 100]]);
+  assert.ok(!s.currencies.some(c => c.open_value === 200), 'INR 100 + USD 100 is not 200 of anything');
+});
+
+test('moneyList shows each currency on its own, largest first, and nothing for zero', () => {
+  assert.equal(L.moneyList([{ value: 500, currency: 'USD' }, { value: 340000, currency: 'INR' }]), '₹3.4L · $500');
+  assert.equal(L.moneyList([{ value: 0, currency: 'INR' }]), '');
+  assert.equal(L.moneyList([{ value: 1200, currency: 'EUR' }], { full: true }), '€1,200.00');
+});

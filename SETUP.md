@@ -828,6 +828,7 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 16 | `supabase-access-control-migration.sql` | Who may use the data: new sign-ups wait for an invitation or an administrator's approval, and every request with a person's token needs an active account, its two-step code when they have an authenticator, and a session that has not ended — on every table, storage, Realtime and RPC. Private HR columns, server-only notifications, ending someone's sessions when they leave. **Run it again after re-running any of 1–15.** See [16. Access control](#16-access-control) |
 | 17 | `supabase-otp-limits-migration.sql` | Email codes issued and checked in one locked database call each (parallel guesses all count), durable rate limits for sign-up and the admin password, and sign-up / email verification that finish in one transaction. See [16. Access control](#16-access-control) |
 | 18 | `supabase-document-links-migration.sql` | Public document links without public copies: every view of a file is checked against the link (`/api/public-document`), links can expire, and the old public `published` bucket becomes private. See [17. Public document links](#17-public-document-links) |
+| 19 | `supabase-crm-summary-migration.sql` | CRM totals computed by the database, per currency, over every row the person may see: `crm_deal_summary`, `crm_lead_summary`, `crm_forecast_summary`. The dashboard and the forecast stop adding rupees to dollars and stop at no row cap. See [18. CRM totals and long lists](#18-crm-totals-and-long-lists) |
 
 **Ran migration 8 before 15 Sep 2026?** Run it again. Its first version made
 `external_ref`'s unique index partial, which `ON CONFLICT` cannot use, so every
@@ -1485,4 +1486,36 @@ it any more.
 
 Rollback: re-running migration 6 makes the bucket public again; nothing else
 depends on it.
+
+# 18. CRM totals and long lists
+
+**Currencies (BUG-04).** The CRM dashboard added every open deal's value
+together and labelled the sum with the first deal's currency (₹100 + $100
+showed as "₹200"); the quote and invoice counters summed only the first row's
+currency and dropped the rest. Now every money total is per currency:
+
+- the dashboard's value tiles, stage bars and top deals use one currency at a
+  time — a **Values in** picker appears when deals use more than one — and the
+  tiles list the other currencies next to it ("₹3.4L · also $500");
+- won/lost totals, the contact card, and the quote and invoice counters and
+  board columns show each currency on its own ("₹1.2L · $400").
+
+Nothing is converted between currencies: there are no exchange rates in WorkSuite.
+
+**Row caps (PERF-01).** PostgREST answers at most 1,000 rows per request, so
+lists and totals built from one request silently went short.
+
+| Where | Now |
+|---|---|
+| CRM dashboard | Totals from `crm_deal_summary` / `crm_lead_summary` (migration 19); counts are `count` queries; lists are small queries of their own |
+| Sales forecast | `crm_forecast_summary` (migration 19). Before it runs, the browser pages through the deals and says so if it stops at 10,000 |
+| Calendar | Every source is read in pages; a source that fails or reaches 5,000 items is named above the calendar, with **Retry** (UI-02) |
+| Task boards, calendar and Gantt | Paged up to 3,000 tasks; past that the board says "Showing the first 3,000 tasks" |
+| People (pickers, names, directory, org chart, home team list) | Everyone, paged |
+| Deals and invoices boards, workgroup boards | Paged up to 5,000, with a notice past that |
+| Lead, deal, contact and company exports | Paged up to 50,000 rows, with a warning past that |
+
+`npm run smoke:ui` now answers at most 1,000 rows per request, like the real
+API, and its `paging` page checks the people list and the paging helper
+against 2,500 extra people.
 

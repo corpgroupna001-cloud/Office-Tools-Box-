@@ -256,6 +256,26 @@ const RPC = {
   // The session gate's answer for Maya (supabase-access-control-migration.sql); a page can set DB.__access.
   ws_my_access: (_body, DB) => DB.__access || { signed_in: true, access: 'ok', status: 'active', email_verified: true, company: NOVA, full_name: 'Maya Manager', mfa_enrolled: false },
   ws_unread_counts: () => [{ direct_unread: 1, group_unread: 1, total: 2 }],
+  // CRM totals (supabase-crm-summary-migration.sql), computed from the fixture rows like the database would.
+  crm_deal_summary: (body, DB) => {
+    const live = (DB.crm_deals || []).filter(d => !d.archived_at && (!body.p_owner || d.owner_id === body.p_owner));
+    const closedIn = d => (!body.p_from || d.actual_close_date >= body.p_from) && (!body.p_to || d.actual_close_date <= body.p_to);
+    return require('../../ui/crm-logic.js').dealsByCurrency(live.filter(d => d.status === 'open' || closedIn(d)));
+  },
+  crm_forecast_summary: (body, DB) => {
+    const L = require('../../ui/crm-logic.js');
+    const deals = (DB.crm_deals || []).filter(d => !d.archived_at && (d.currency || 'INR') === body.p_currency && (!body.p_owner || d.owner_id === body.p_owner));
+    const fc = L.forecast(deals, body.p_months, { currency: body.p_currency });
+    const wl = L.winLoss(deals.filter(d => d.actual_close_date >= body.p_since), { currency: body.p_currency });
+    return { months: fc.months, overdue: fc.overdue, people: [],
+      win_loss: { won: wl.won, lost: wl.lost, won_value: wl.won_value, lost_value: wl.lost_value, avg_cycle_days: wl.avg_cycle_days, reasons: wl.reasons } };
+  },
+  crm_lead_summary: (body, DB) => {
+    const live = (DB.crm_leads || []).filter(l => !l.archived_at && (!body.p_owner || l.owner_id === body.p_owner));
+    const by_status = {}; live.forEach(l => { by_status[l.status] = (by_status[l.status] || 0) + 1; });
+    const created = live.filter(l => (!body.p_from || l.created_at >= body.p_from) && (!body.p_to || l.created_at < body.p_to));
+    return { by_status, total: live.length, created: created.length, created_converted: created.filter(l => l.status === 'converted' || l.converted_at).length };
+  },
   // A public link (/documents/public?t=…): a live native document, or nothing.
   ws_published_document: body => (body.p_token === 'smokepublic0000000000000000000001'
     ? { name: 'Price list', doc_kind: 'document', file: false, content: { html: '<h2>Price list</h2><p>Academy kit: <b>1,680</b></p>' }, published_at: '2026-09-20T09:00:00Z', expires_at: null }

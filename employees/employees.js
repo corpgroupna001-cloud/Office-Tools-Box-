@@ -33,9 +33,15 @@
 
     async function loadPeople() {
         try {
-            const { data, error } = await sb.from('profiles').select(FULL).order('full_name').limit(1000);
-            if (error) throw error;
-            people = (data || []).map(p => ({ ...p, name: nameOf(p) }));
+            // Everyone, a page of 1,000 at a time (PostgREST's limit), in a stable order (PERF-01).
+            const data = [];
+            for (let from = 0; from < 20000; from += 1000) {
+                const r = await sb.from('profiles').select(FULL).order('full_name').order('id').range(from, from + 999);
+                if (r.error) throw r.error;
+                data.push(...(r.data || []));
+                if ((r.data || []).length < 1000) break;
+            }
+            people = data.map(p => ({ ...p, name: nameOf(p) }));
         } catch (e) {
             console.warn('[employees] profiles', e);
             people = ctx.people.slice();

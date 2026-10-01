@@ -131,18 +131,18 @@
         try {
             const today = L.todayIST(), month = L.dateRange('month');
             const [open, draft, paid] = await Promise.all([
-                sb.from('invoices').select('status, due_date, balance, currency').in('status', ['sent', 'partially_paid']).limit(2000),
+                C.fetchAll(() => sb.from('invoices').select('id, status, due_date, balance, currency').in('status', ['sent', 'partially_paid']).order('id'), 20000).then(data => ({ data })),
                 sb.from('invoices').select('id', { count: 'exact', head: true }).eq('status', 'draft'),
-                sb.from('invoices').select('total, currency').eq('status', 'paid').gte('paid_at', `${month.from}T00:00:00+05:30`).limit(2000),
+                C.fetchAll(() => sb.from('invoices').select('id, total, currency').eq('status', 'paid').gte('paid_at', `${month.from}T00:00:00+05:30`).order('id'), 20000).then(data => ({ data })),
             ]);
             const rows = open.data || [];
-            const cur = (rows[0] || (paid.data || [])[0] || {}).currency || 'INR';
-            const sum = (list, k) => list.filter(r => (r.currency || 'INR') === cur).reduce((a, r) => a + Number(r[k] || 0), 0);
+            // Each currency on its own (BUG-04): "₹1.2L · $400", never one sum in the first row's currency.
+            const sumText = (list, k) => { const m = new Map(); list.forEach(r => { const c = r.currency || 'INR'; m.set(c, (m.get(c) || 0) + Number(r[k] || 0)); }); return L.moneyList([...m].map(([currency, value]) => ({ currency, value })), { full: true }) || L.money(0, 'INR'); };
             const overdue = rows.filter(r => r.due_date && r.due_date < today);
             el.innerHTML = `
-                <button type="button" class="b24-counter" data-counter="outstanding"><span class="n">${rows.length}</span>Awaiting payment · <b>${esc(L.money(sum(rows, 'balance'), cur))}</b></button>
-                <button type="button" class="b24-counter${overdue.length ? ' red' : ''}" data-counter="overdue"><span class="n">${overdue.length}</span>Overdue · <b>${esc(L.money(sum(overdue, 'balance'), cur))}</b></button>
-                <button type="button" class="b24-counter green" data-counter="paid"><span class="n">${(paid.data || []).length}</span>Paid this month · <b>${esc(L.money(sum(paid.data || [], 'total'), cur))}</b></button>
+                <button type="button" class="b24-counter" data-counter="outstanding"><span class="n">${rows.length}</span>Awaiting payment · <b>${esc(sumText(rows, 'balance'))}</b></button>
+                <button type="button" class="b24-counter${overdue.length ? ' red' : ''}" data-counter="overdue"><span class="n">${overdue.length}</span>Overdue · <b>${esc(sumText(overdue, 'balance'))}</b></button>
+                <button type="button" class="b24-counter green" data-counter="paid"><span class="n">${(paid.data || []).length}</span>Paid this month · <b>${esc(sumText(paid.data || [], 'total'))}</b></button>
                 <button type="button" class="b24-counter" data-counter="draft"><span class="n">${(!draft.error && draft.count) || 0}</span>Drafts</button>`;
         } catch (e) { el.innerHTML = ''; }
     }
@@ -227,10 +227,12 @@
     async function loadBoard() {
         if (!page.board) return;
         try {
-            const { data } = await C.q(scoped(sb.from('invoices').select(SELECT)).order('invoice_date', { ascending: false }).limit(1000));
-            const rows = data || [];
+            const rows = await C.fetchAll(() => scoped(sb.from('invoices').select(SELECT)).order('invoice_date', { ascending: false }).order('id'), 5000);
+            C.capNotice(view.querySelector('.b24-board-area') || view, rows, 'invoices');
+            // Column totals per currency, each in its own (BUG-04): never one currency's sum labelled as another's.
+            const perCurrency = list => { const m = new Map(); list.forEach(r => { const c = r.currency || 'INR'; m.set(c, (m.get(c) || 0) + Number(r.total || 0)); }); return [...m].map(([currency, value]) => ({ currency, value })); };
             page.board.update({
-                columns: BOARD.map(col => { const inCol = rows.filter(r => L.invoiceStatus(r) === col.id); const cur = (inCol[0] || {}).currency || 'INR'; return { ...col, sum: L.money(inCol.filter(r => (r.currency || 'INR') === cur).reduce((a, r) => a + Number(r.total || 0), 0), cur, { whole: true }) }; }),
+                columns: BOARD.map(col => { const inCol = rows.filter(r => L.invoiceStatus(r) === col.id); return { ...col, sum: L.moneyList(perCurrency(inCol)) || L.money(0, 'INR', { whole: true }) }; }),
                 cards: rows.map((r, i) => ({ id: r.id, columnId: L.invoiceStatus(r), position: i, inv: r })),
             });
         } catch (e) { C.errorState(view.querySelector('#kb'), e, loadBoard); }

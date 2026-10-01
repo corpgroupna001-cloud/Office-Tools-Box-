@@ -359,12 +359,29 @@
         await mustUpdate(b, o.all ? null : ids.length);
         C.toast(msg, 'ok'); WSShell.refreshUnread();
     }
+    // Boards, the calendar and the Gantt chart read the tasks in pages of 1,000
+    // (PostgREST's limit), in a stable order, up to BOARD_CAP; reaching the cap is
+    // said on the board (capNote) instead of tasks quietly going missing (PERF-01).
+    const BOARD_CAP = 3000;
     async function loadRows(extra) {
-        let b = scoped(sb.from('tasks').select(SELECT));
-        if (extra) b = extra(b);
-        const rows = (await C.q(b.order('due_date', { ascending: true, nullsFirst: false }).limit(600))).data || [];
+        const rows = [];
+        let partial = true;
+        for (let from = 0; from < BOARD_CAP; from += 1000) {
+            let b = scoped(sb.from('tasks').select(SELECT));
+            if (extra) b = extra(b);
+            const got = (await C.q(b.order('due_date', { ascending: true, nullsFirst: false }).order('id').range(from, from + 999))).data || [];
+            rows.push(...got);
+            if (got.length < 1000) { partial = false; break; }
+        }
         await resolveNames(rows);
+        rows.partial = partial;
         return rows;
+    }
+    function capNote(body, rows) {
+        let n = body.querySelector(':scope > .b24-cap-note');
+        if (!rows || !rows.partial) { if (n) n.remove(); return; }
+        if (!n) { n = document.createElement('div'); n.className = 'crm-notice b24-cap-note'; n.setAttribute('role', 'status'); body.prepend(n); }
+        n.innerHTML = `${C.icon('flag')}<div>Showing the first ${BOARD_CAP.toLocaleString('en-IN')} tasks. Narrow the filter or switch to the list to see the rest.</div>`;
     }
     function taskCard(t) {
         return `<div class="b24-kcard"><a class="t" href="/tasks/?id=${esc(t.id)}" data-open>${esc(t.title)}</a>${chipText(t) ? `<div class="org">${chipText(t)}</div>` : ''}<div class="meta">${t.assignee_id ? C.avatarHtml(t.assignee_id, 'sm') : ''}${C.dueHtml(t, today)}${t.priority === 'high' || t.priority === 'urgent' ? C.priorityBadge(t.priority) : ''}</div></div>`;
@@ -405,6 +422,7 @@
                 const rows = await loadRows(b => b.is('completed_at', null));
                 if (stale()) return;
                 page.board.update({ columns: DEADLINES, cards: rows.map((t, i) => ({ id: t.id, columnId: bucketOf(t), position: i, task: t })) });
+                capNote(body, rows);
             } catch (e) { if (!stale()) C.errorState(body, e, page.reloadView); }
         };
         page.reloadView();
@@ -441,6 +459,7 @@
                 if (stale()) return;
                 const mineRows = rows.filter(t => t.assignee_id === me.id || roleIds.assisting.includes(t.id) || page.role !== 'ongoing');
                 page.board.update({ columns: PLANNER, cards: mineRows.map((t, i) => { const x = plan.get(t.id); return { id: t.id, columnId: x ? x.stage : 'new', position: x ? Number(x.position) : i, task: t }; }) });
+                capNote(body, rows);
             } catch (e) { if (!stale()) C.errorState(body, e, page.reloadView); }
         };
         page.reloadView();
@@ -467,6 +486,7 @@
                     <div class="grid">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="dow">${d}</div>`).join('')}
                     ${days.map(d => { const list = byDay.get(d) || []; return `<div class="day${d.slice(0, 7) !== page.month ? ' other' : ''}${d === today ? ' today' : ''}"><span class="n">${Number(d.slice(8))}</span>
                         ${list.slice(0, 4).map(t => `<a class="chip ${isDone(t) ? 'done' : L.taskDueState(t, today)}" href="/tasks/?id=${esc(t.id)}" data-open title="${esc(t.title)}">${esc(t.title)}</a>`).join('')}${list.length > 4 ? `<span class="more">+${list.length - 4} more</span>` : ''}</div>`; }).join('')}</div></div>`;
+                capNote(body, rows);
                 body.querySelectorAll('[data-mon]').forEach(b => b.addEventListener('click', () => {
                     const k = Number(b.dataset.mon);
                     if (!k) page.month = today.slice(0, 7);
@@ -487,7 +507,8 @@
             const start = page.ganttStart, end = L.addDays(start, SPAN - 1);
             body.innerHTML = '<div class="b24-area pad"><div class="ws-empty">Loading…</div></div>';
             try {
-                const rows = (await loadRows(b => b.or(`due_date.gte.${start},start_date.gte.${start}`))).filter(t => (t.start_date || t.due_date) && (t.start_date || t.due_date) <= end);
+                const loaded = await loadRows(b => b.or(`due_date.gte.${start},start_date.gte.${start}`));
+                const rows = loaded.filter(t => (t.start_date || t.due_date) && (t.start_date || t.due_date) <= end);
                 if (stale()) return;
                 const days = Array.from({ length: SPAN }, (_, i) => L.addDays(start, i));
                 const off = d => L.daysBetween(start, d);
@@ -502,6 +523,7 @@
                         }).join('') || '<div class="ws-empty">No tasks with dates in these weeks.</div>'}
                         <span class="now" style="left:calc(var(--name-w) + ${off(today) * DAY + DAY / 2}px)"></span>
                     </div></div></div>`;
+                capNote(body, loaded);
                 body.querySelectorAll('[data-shift]').forEach(b => b.addEventListener('click', () => {
                     const k = Number(b.dataset.shift);
                     if (!k) { const dow = (new Date(today + 'T00:00:00Z').getUTCDay() + 6) % 7; page.ganttStart = L.addDays(today, -dow - 7); } else page.ganttStart = L.addDays(page.ganttStart, k);
@@ -550,6 +572,7 @@
                 const rows = await loadRows();
                 if (stale()) return;
                 page.board.update({ columns: lk.taskStatuses.map((s, i) => ({ id: s.key, name: s.label, hex: B.hex(s.color, i) })), cards: rows.map(t => ({ id: t.id, columnId: t.status, position: Number(t.position) || 0, task: t })) });
+                capNote(body, rows);
             } catch (e) { if (!stale()) C.errorState(body, e, page.reloadView); }
         };
         page.reloadView();

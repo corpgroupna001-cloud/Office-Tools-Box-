@@ -362,8 +362,10 @@
     /* ------------------------------------------------- import / export */
     /** Export to CSV / Excel (the ⚙ menu): the filtered contacts. */
     async function exportRows() {
-        const { data } = await C.q(scoped(sb.from('crm_contacts').select(SELECT)).order('full_name').limit(5000));
-        return { filename: 'contacts', rows: data || [], columns: [
+        // Every row, a page at a time: an export must not stop at PostgREST's first 1,000.
+        const rows = await C.fetchAll(() => scoped(sb.from('crm_contacts').select(SELECT)).order('full_name').order('id'), 50000);
+        if (rows.partial) C.toast(`Exported the first ${rows.length.toLocaleString('en-IN')} rows; narrow the filter for the rest`, 'warn');
+        return { filename: 'contacts', rows, columns: [
             { title: 'Contact', value: r => nameOf(r) }, { title: 'First name', value: r => r.first_name }, { title: 'Last name', value: r => r.last_name },
             { title: 'Job Title', value: r => r.job_title }, { title: 'Company', value: r => companyOf(r) },
             ...(typeField ? [{ title: 'Contact Type', value: r => typeOf(r) }] : []),
@@ -487,6 +489,7 @@
         const newTask = () => C.openTaskEditor({ defaults: { contact_id: id, title: '', assignee_id: c.owner_id || me.id }, onSaved: refresh });
         const newMeet = () => C.openEventEditor({ defaults: { contact_id: id, title: `Meeting with ${nameOf(c)}` }, onSaved: refresh });
         const pm = L.pipelineMetrics(deals);
+        const byCur = L.dealsByCurrency(deals);           // open value per currency, never one sum across them
 
         const menu = [
             { label: 'Log a call', icon: 'phone', onClick: () => logInteraction(c, 'call.logged', 'Log a call', refresh) },
@@ -530,7 +533,7 @@
                 { key: 'country', title: 'Country', type: 'text', value: c.country, save: save('country') },
             ] },
             { title: 'More', fields: [
-                { key: 'deals', title: 'Deals', edit: false, value: 1, display: () => `${pm.open_count} in progress · ${esc(L.money(pm.pipeline_value))} · ${pm.won_count} won` },
+                { key: 'deals', title: 'Deals', edit: false, value: 1, display: () => `${pm.open_count} in progress · ${esc(L.moneyList(byCur.currencies.map(c => ({ value: c.open_value, currency: c.currency })), { full: true }) || L.money(0))} · ${pm.won_count} won` },
                 ...(c.lead_id ? [{ key: 'lead', title: 'Converted from', edit: false, value: c.lead_id, display: () => C.entityChip('lead', c.lead_id, 'Open lead') }] : []),
                 { key: 'created', title: 'Created', edit: false, value: c.created_at, display: () => `${esc(L.fmtDateTime(c.created_at))} · ${C.personHtml(c.created_by)}` },
                 { key: 'updated', title: 'Modified', edit: false, value: c.updated_at, display: () => esc(L.fmtDateTime(c.updated_at)) },

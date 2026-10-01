@@ -81,6 +81,31 @@
         return 'Something went wrong. Please try again.';
     }
     function isMissingSchema(error) { const c = String(error && (error.code || '')); return c === '42P01' || c === 'PGRST205' || c === '42703'; }
+    /**
+     * Every row a query returns, a page of 1,000 at a time (PostgREST stops a
+     * single response there). `build` makes a fresh query each time; give it a
+     * unique last order column so pages do not overlap. The array's `.partial`
+     * is true when `cap` rows were reached — say so on screen (capNotice).
+     */
+    async function fetchAll(build, cap = 10000) {
+        const out = [];
+        for (let from = 0; from < cap; from += 1000) {
+            const r = await build().range(from, from + 999);
+            if (r.error) throw r.error;
+            out.push(...(r.data || []));
+            if ((r.data || []).length < 1000) { out.partial = false; return out; }
+        }
+        out.partial = true;
+        return out;
+    }
+    /** Show (or remove) "only the first N" at the top of host, for a list that reached its cap. */
+    function capNotice(host, rows, what) {
+        if (!host) return;
+        let n = host.querySelector(':scope > .crm-cap-note');
+        if (!rows || !rows.partial) { if (n) n.remove(); return; }
+        if (!n) { n = document.createElement('div'); n.className = 'crm-notice crm-cap-note'; n.setAttribute('role', 'status'); host.prepend(n); }
+        n.innerHTML = `${icon('flag')}<div>Showing the first ${rows.length.toLocaleString('en-IN')} ${esc(what || 'items')}. Narrow the filter to see the rest.</div>`;
+    }
     /** Await a supabase-js builder; throw an Error with a user-safe message. */
     async function q(builder) {
         const res = await builder;
@@ -135,9 +160,21 @@
     async function loadPeople(sb) {
         try {
             const cols = 'id, full_name, email, avatar_url, company, company2, department, job_title, status, last_seen_at, manager_id, employee_code, joining_date, is_wfh, phone, shift_id';
+            // Everyone, a page of 1,000 at a time (PostgREST's limit), in a stable order:
+            // pickers and names must not lose the people after the first thousand (PERF-01).
             // employee_id arrives with supabase-employee-id-migration.sql.
-            let { data, error } = await sb.from('profiles').select(cols + ', employee_id').order('full_name').limit(1000);
-            if (error && String(error.code) === '42703') ({ data, error } = await sb.from('profiles').select(cols).order('full_name').limit(1000));
+            const all = async select => {
+                const out = [];
+                for (let from = 0; from < 20000; from += 1000) {
+                    const r = await sb.from('profiles').select(select).order('full_name').order('id').range(from, from + 999);
+                    if (r.error) return { data: null, error: r.error };
+                    out.push(...(r.data || []));
+                    if ((r.data || []).length < 1000) break;
+                }
+                return { data: out, error: null };
+            };
+            let { data, error } = await all(cols + ', employee_id');
+            if (error && String(error.code) === '42703') ({ data, error } = await all(cols));
             if (error) throw error;
             state.people = (data || []).map(p => ({ ...p, name: p.full_name || (p.email || '').split('@')[0] || 'Unknown' }));
         } catch (e) {
@@ -1217,7 +1254,7 @@
 
     /* --------------------------------------------------------- public API */
     window.WSCrm = {
-        boot, ctx, client, lookups, q, friendly, isMissingSchema, migrationNoticeHtml,
+        boot, ctx, client, lookups, q, friendly, isMissingSchema, migrationNoticeHtml, fetchAll, capNotice,
         esc, h, $, $$, uid, debounce, param, setParam, toast, icon, nl2br, linkify,
         person, personName, personLabel, personText, personInline, activePeople, avatarHtml, personHtml, avatarsHtml, peopleOptions, peoplePicker, pickPeople, personField,
         badge, statusBadge, priorityBadge, dueHtml, tagsHtml, entityUrl, entityChip, ENTITY_META,
