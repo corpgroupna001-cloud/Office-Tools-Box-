@@ -253,6 +253,8 @@ function addBigData(d) {
 }
 
 const RPC = {
+  // The session gate's answer for Maya (supabase-access-control-migration.sql); a page can set DB.__access.
+  ws_my_access: (_body, DB) => DB.__access || { signed_in: true, access: 'ok', status: 'active', email_verified: true, company: NOVA, full_name: 'Maya Manager', mfa_enrolled: false },
   ws_unread_counts: () => [{ direct_unread: 1, group_unread: 1, total: 2 }],
   crm_log: () => null,
   crm_convert_lead: () => ({ contact_id: 'C1', deal_id: 'D1', existing_contact: true }),

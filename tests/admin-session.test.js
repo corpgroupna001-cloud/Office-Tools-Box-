@@ -6,23 +6,24 @@ const vm = require('node:vm');
 const sessions = require('../lib/admin-session');
 const env = { ADMIN_PASSWORD: 'test-admin-password', SUPABASE_SERVICE_ROLE_KEY: 'test-service-key', SUPABASE_URL: 'https://db.example.test' };
 
-function backend(config = env) {
+function backend(config = env, opts = {}) {
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../api/admin.js'), 'utf8'), {
-    module, process: { env: config }, console, URL, Date,
+    module, process: { env: config }, console: opts.console || console, URL, Date,
     setTimeout: cb => { cb(); },
     require(name) {
       if (name === '../lib/request-auth') return require('../lib/request-auth');
+      if (name === '../lib/service-rpc') return require('../lib/service-rpc');
       if (name === '../company-config') return require('../company-config');
       if (name === '../lib/admin-session') return sessions;
       if (name === '../lib/attendance') return require('../lib/attendance');
       if (name === '../lib/mailer' || name === '../lib/bitrix') return {};
       // The audit trail has its own tests; here it must not reach the network.
-      if (name === '../lib/admin-audit') return { auditWrap: res => res };
+      if (name === '../lib/admin-audit') return { auditWrap: res => res, recordSecurityEvent: async (...a) => { (opts.events || []).push(a[0]); return true; } };
       if (name === '../lib/employee-admin') return require('../lib/employee-admin');
       throw new Error(name);
     },
-    fetch: async () => new Response(JSON.stringify([]), { status: 200 }),
+    fetch: opts.fetch || (async () => new Response(JSON.stringify([]), { status: 200 })),
   });
   return async (body, cookie = '', headers = {}) => {
     const res = { code: 200, headers: {}, setHeader(k,v) { this.headers[k] = v; },
@@ -208,4 +209,67 @@ test('expired session during an admin request returns the page to login', async 
   assert.equal(page.context.adminAuthenticated, false);
   assert.equal(page.element('dashboard').classList.contains('hidden'), true);
   assert.match(page.element('gate-error').textContent, /session expired/);
+});
+
+/* ------------------------------------------------ admin password attempts (SEC-09) */
+
+/** A stand-in for the database limiter (ws_rate_hit / ws_rate_clear), shared like the real table. */
+function limiter() {
+  const hits = new Map();
+  const fetch = async (url, init = {}) => {
+    const fn = String(url).split('/rpc/')[1];
+    const args = init.body ? JSON.parse(init.body) : {};
+    if (fn === 'ws_rate_hit') {
+      const n = (hits.get(args.p_key) || 0) + 1;
+      hits.set(args.p_key, n);
+      return new Response(JSON.stringify({ allowed: n <= args.p_max, hits: n, retry_after: 600 }), { status: 200 });
+    }
+    if (fn === 'ws_rate_clear') { hits.delete(args.p_key); return new Response('', { status: 204 }); }
+    return new Response('[]', { status: 200 });
+  };
+  return { fetch, hits };
+}
+const from = ip => ({ 'x-forwarded-for': ip });
+
+test('ten wrong admin passwords from one address shut it out, even for the right password', async () => {
+  const db = limiter(), events = [];
+  for (let i = 0; i < 10; i++) {
+    const r = await backend(env, { fetch: db.fetch, events })({ action: 'login', password: 'guess-' + i }, '', from('203.0.113.5'));
+    assert.equal(r.code, 401);
+  }
+  const blocked = await backend(env, { fetch: db.fetch, events })({ action: 'login', password: env.ADMIN_PASSWORD }, '', from('203.0.113.5'));
+  assert.equal(blocked.code, 429);
+  assert.equal(blocked.headers['Set-Cookie'], undefined);
+  assert.ok(Number(blocked.headers['Retry-After']) > 0);
+  assert.deepEqual(events, ['admin_password_locked'], 'one audit row when the address is first shut out');
+  // Another address, and the cookie of an admin already signed in, are unaffected.
+  assert.equal((await backend(env, { fetch: db.fetch })({ action: 'login', password: env.ADMIN_PASSWORD }, '', from('203.0.113.6'))).code, 200);
+});
+
+test('parallel guesses are counted before any password is checked: at most ten are tried', async () => {
+  const db = limiter();
+  const call = backend(env, { fetch: db.fetch });
+  const results = await Promise.all(Array.from({ length: 20 }, (_, i) => call({ action: 'results', password: 'guess-' + i }, '', from('198.51.100.20'))));
+  const codes = results.map(r => r.code);
+  assert.equal(codes.filter(c => c === 401).length, 10);
+  assert.equal(codes.filter(c => c === 429).length, 10, 'every password-bearing action counts, not only login');
+});
+
+test('the right password clears its address\'s count', async () => {
+  const db = limiter();
+  for (let i = 0; i < 9; i++) await backend(env, { fetch: db.fetch })({ action: 'login', password: 'typo' }, '', from('192.0.2.44'));
+  assert.equal((await backend(env, { fetch: db.fetch })({ action: 'login', password: env.ADMIN_PASSWORD }, '', from('192.0.2.44'))).code, 200);
+  assert.equal(db.hits.has('admin-pw:ip:192.0.2.44'), false);
+});
+
+test('when the database limiter cannot be reached a per-instance count still holds, and no password is logged', async () => {
+  const lines = [];
+  const quiet = { ...console, warn: (...a) => lines.push(a.join(' ')) };
+  const down = async () => new Response(JSON.stringify({ message: 'down' }), { status: 503 });
+  const call = backend(env, { fetch: down, console: quiet });
+  const codes = [];
+  for (let i = 0; i < 12; i++) codes.push((await call({ action: 'login', password: 'secret-guess-' + i }, '', from('203.0.113.99'))).code);
+  assert.deepEqual(codes, [...Array(10).fill(401), 429, 429]);
+  assert.ok(lines.some(l => l.includes('admin_password_rejected')));
+  assert.equal(lines.some(l => l.includes('secret-guess')), false);
 });

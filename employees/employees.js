@@ -348,7 +348,7 @@
         const code = String(p.employee_id || '').trim();          // the Employee ID is how people are known here; the name comes second
         document.title = `${code ? code + ' · ' : ''}${name} · Employees · WorkSuite`;
         WSShell.setCrumb(code || name);
-        const reports = people.filter(x => x.manager_id === p.id && (x.status || 'active') !== 'inactive');
+        const reports = people.filter(x => x.manager_id === p.id && (x.status || 'active') === 'active');
         await loadShifts();
         if (mySeq !== navSeq) return;                        // navigated away while it loaded
         const shift =window.WSCompanies ? WSCompanies.resolveShift(p, shifts) : shifts.find(s => String(s.id) === String(p.shift_id));

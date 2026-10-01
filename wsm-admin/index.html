@@ -2182,6 +2182,7 @@
                 const strikes = e.quiz_violations || 0;
                 const wfhOn = !!e.is_wfh;
                 const left = (e.status || 'active') === 'inactive';
+                const pending = e.status === 'pending';
                 return `
                 <tr>
                     <td class="adm-stick-l mono font-black text-white whitespace-nowrap">${e.employee_id ? escapeHtml(e.employee_id) : '<span class="text-slate-500 font-medium" title="No Employee ID yet — set it with ✏️">—</span>'}</td>
@@ -2190,6 +2191,7 @@
                     <td class="text-slate-400 text-xs whitespace-nowrap" title="${e.created_at ? escapeHtml(formatDate(e.created_at)) : ''}">${formatDay(e.created_at)}</td>
                     <td class="text-xs whitespace-nowrap">${left
                         ? `<span class="mg-status bad" title="Cannot sign in${e.exit_date ? ' since ' + escapeHtml(formatDay(e.exit_date)) : ''}${e.exit_reason ? ' — ' + escapeHtml(e.exit_reason) : ''}">Left</span>`
+                        : pending ? '<span class="mg-status warn" title="Signed up without an invitation: sees nothing until approved">Waiting for approval</span>'
                         : '<span class="mg-status ok">Active</span>'}</td>
                     <td class="whitespace-nowrap">
                         <div class="adm-wfh">
@@ -2211,8 +2213,10 @@
                     <td class="text-slate-400 text-xs whitespace-nowrap" title="${e.last_test_at ? escapeHtml(formatDate(e.last_test_at)) : ''}">${e.last_test_at ? formatDay(e.last_test_at) : '—'}</td>
                     <td class="adm-stick-r adm-actions text-right whitespace-nowrap">
                         <button data-action="edit"   data-id="${e.id}" class="emp-action glass rounded-lg" title="Edit employee">✏️</button>
+                        ${pending ? `<button data-action="approve" data-id="${e.id}" class="emp-action glass rounded-lg" title="Approve — they can use WorkSuite from now on">✅</button>` : ''}
                         <button data-action="reset"  data-id="${e.id}" data-email="${escapeHtml(e.email || '')}" class="emp-action glass rounded-lg" title="Send password reset email">🔑</button>
-                        <button data-action="exit" data-id="${e.id}" class="glass rounded-lg" title="${left ? 'Bring this employee back' : 'Offboard — blocks login, keeps all history'}">${left ? '↩️' : '🚪'}</button>
+                        <button data-action="mfa" data-id="${e.id}" class="emp-action glass rounded-lg" title="Remove two-step verification (lost phone)">🔐</button>
+                        <button data-action="exit" data-id="${e.id}" class="glass rounded-lg" title="${left ? 'Bring this employee back' : pending ? 'Turn this sign-up away — blocks login, keeps the record' : 'Offboard — blocks login, keeps all history'}">${left ? '↩️' : '🚪'}</button>
                         <button data-action="delete" data-id="${e.id}" class="emp-action glass rounded-lg text-rose-300" title="Delete employee and all their history">🗑️</button>
                     </td>
                 </tr>`;
@@ -2228,6 +2232,8 @@
                     if (action === 'edit')   openEditEmployee(emp);
                     if (action === 'delete') openDeleteEmployee(emp);
                     if (action === 'reset')  resetPasswordFor(emp);
+                    if (action === 'approve') approveEmployee(emp);
+                    if (action === 'mfa')    resetMfaFor(emp);
                 });
             });
 
@@ -2386,6 +2392,41 @@
                 const data = await r.json();
                 if (!r.ok) throw new Error(data.error || 'Failed');
                 wsDialog.alert({ icon: '📧', success: true, title: 'Reset email sent', message: 'Password reset email sent to <b>' + escapeHtml(emp.email) + '</b>.' });
+            } catch (e) {
+                wsDialog.alert({ icon: '❌', danger: true, title: 'Failed', message: escapeHtml(e.message || 'Please try again.') });
+            }
+        }
+
+        // A sign-up without an invitation waits here (supabase-access-control-migration.sql).
+        async function approveEmployee(emp) {
+            const ok = await wsDialog.confirm({ icon: '✅', title: 'Approve this sign-up?',
+                message: `<b>${escapeHtml(emp.full_name || emp.email)}</b> (${escapeHtml(emp.email || '')}) signed up for <b>${escapeHtml(emp.company || 'no company')}</b>. Once approved they see that company's workspace.`, okText: 'Approve' });
+            if (!ok) return;
+            try {
+                const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'set_employee_status', id: emp.id, status: 'active' }) });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.error || 'Failed');
+                emp.status = 'active';
+                renderEmployees();
+                wsDialog.alert({ icon: '✅', success: true, title: 'Approved', message: escapeHtml(emp.full_name || emp.email) + ' can sign in now.' + (data.warning ? '<br><br>' + escapeHtml(data.warning) : '') });
+            } catch (e) {
+                wsDialog.alert({ icon: '❌', danger: true, title: 'Failed', message: escapeHtml(e.message || 'Please try again.') });
+            }
+        }
+
+        // Lost authenticator: remove it so they can sign in with the password, and end their sessions.
+        async function resetMfaFor(emp) {
+            const ok = await wsDialog.confirm({ icon: '🔐', danger: true, title: 'Remove two-step verification?',
+                message: `<b>${escapeHtml(emp.full_name || emp.email)}</b> will sign in with the password alone until they set up an authenticator again from Security. Do this only after confirming who is asking.`, okText: 'Remove' });
+            if (!ok) return;
+            try {
+                const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'reset_employee_mfa', id: emp.id }) });
+                const data = await r.json();
+                if (!r.ok) throw new Error(data.error || 'Failed');
+                wsDialog.alert({ icon: '🔐', success: true, title: data.removed ? 'Two-step verification removed' : 'Nothing to remove',
+                    message: data.removed ? `${data.removed} authenticator${data.removed === 1 ? '' : 's'} removed; their open sessions were ended.` : 'This person has no authenticator set up.' });
             } catch (e) {
                 wsDialog.alert({ icon: '❌', danger: true, title: 'Failed', message: escapeHtml(e.message || 'Please try again.') });
             }

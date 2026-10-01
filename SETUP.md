@@ -825,6 +825,8 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 13 | `supabase-task-summary-migration.sql` | `tasks.result_required`: Bitrix24's *Task status summary is required* on the new-task page |
 | 14 | `supabase-crm-roles-migration.sql` | Ready-made CRM roles, assigned to nobody: *Super admin* (every company), *Admin*, *Team lead*, *Sales executive*, *Accounts* and *Read only*. Add people in Admin → CRM permissions |
 | 15 | `supabase-company-structure-migration.sql` | The company structure as in Bitrix24: Corporate Group → Jobways Point LLP (9 departments, down to Interview Supports and Accountant), Genie Lamp Private Limited (10), SPORTSMART → Nova Sportsmart Private Limited (12), Navyug Raise A Player Foundation. Heads are set by Employee ID; missing people are skipped. Adds only what is missing, so it is safe to run again. Everyone signed in can now see the whole chart |
+| 16 | `supabase-access-control-migration.sql` | Who may use the data: new sign-ups wait for an invitation or an administrator's approval, and every request with a person's token needs an active account, its two-step code when they have an authenticator, and a session that has not ended — on every table, storage, Realtime and RPC. Private HR columns, server-only notifications, ending someone's sessions when they leave. **Run it again after re-running any of 1–15.** See [16. Access control](#16-access-control) |
+| 17 | `supabase-otp-limits-migration.sql` | Email codes issued and checked in one locked database call each (parallel guesses all count), durable rate limits for sign-up and the admin password, and sign-up / email verification that finish in one transaction. See [16. Access control](#16-access-control) |
 
 **Ran migration 8 before 15 Sep 2026?** Run it again. Its first version made
 `external_ref`'s unique index partial, which `ON CONFLICT` cannot use, so every
@@ -949,9 +951,10 @@ every new table, idempotent DDL, no destructive statements).
 
 ## 6. Environment variables
 
-No new required variables. Optional: `SMTP_TLS_STRICT=1` makes the mailer
-verify the SMTP server's certificate (set `SMTP_TLS_SERVERNAME` to the name on
-the certificate if it is not `SMTP_HOST`) — see [13. Security hardening](#13-security-hardening). The modules use the existing `SUPABASE_URL`,
+No new required variables. The mailer always verifies the SMTP server's
+certificate: set `SMTP_TLS_SERVERNAME` to the name on the certificate if it is
+not `SMTP_HOST`, and `SMTP_TLS_CA` for a private authority — see
+[16. Access control](#16-access-control). The modules use the existing `SUPABASE_URL`,
 `SUPABASE_ANON_KEY` (via `/api/config`) and, for push notifications, the
 existing `VAPID_*` keys behind `/api/push`. The service-role key is still
 used only by the serverless functions. Calls work without anything new; a
@@ -1316,11 +1319,8 @@ A review of the API and the database found holes that `supabase-security-hardeni
 | Admin password, mail key and cron secrets were compared with `===` | Constant-time comparison |
 | Malformed JSON crashed several functions with a 500 | 400 *Invalid JSON* |
 
-**SMTP certificate.** The mailer still skips certificate checks by default,
-because cPanel mail servers often present a certificate for the server's own
-name and turning it on blindly would stop all email. Once a test mail goes
-through with `SMTP_TLS_STRICT=1` (and `SMTP_TLS_SERVERNAME` if needed), keep
-it on: without it, someone on the network path could read `SMTP_PASS`.
+**SMTP certificate.** Since [16. Access control](#16-access-control) the
+certificate is always verified; `SMTP_TLS_STRICT` is no longer read.
 
 **Not changed:** the biometric device may still send its key as `?key=` in the
 URL, because the vendor's settings offer that shape. Prefer the header forms
@@ -1365,4 +1365,91 @@ policies.
   30 frames a second, pause in hidden tabs, and stay still when the device
   asks for reduced motion. Light/dark and the wallpaper follow the person
   to every browser they sign in on.
+
+# 16. Access control
+
+An outside review (October 2026) found that the database trusted any signed-in
+token: someone could sign up into any company, an offboarded employee's open
+session kept working, two-step verification was only checked by the pages,
+and anyone could read everyone's exit reason. Migrations 16 and 17, with the
+same deploy, close these.
+
+## What changes for people
+
+| Before | Now |
+|---|---|
+| Anyone with a mailbox could sign up into any company and read its tasks, CRM and directory | A sign-up for an address that was **invited** (Employees → Invite, or Admin → Add employee) to that company is active at once. Anyone else gets an account **waiting for approval**: it sees nothing and the sign-in page says so. Approve with ✅ in **Admin → Employees** (the Overview counts them under *Needs attention*), or turn them away with 🚪. A sign-up made straight through Supabase Auth also waits |
+| Offboarding banned the login, but an already-open session kept working for up to an hour | The database refuses an inactive account's token at once, and its sessions are ended (`ws_end_sessions`) |
+| Two-step verification was asked for by the pages only; the API and database accepted a password-only token | Every API endpoint and every database request needs `aal2` from anyone with an authenticator set up. Lost phone: **Admin → Employees → 🔐** removes their authenticator (and ends their sessions); they sign in with the password and can set up a new one |
+| Signing out on one device left that token usable until it expired | A token whose session was signed out or ended is refused |
+| `profiles.exit_date` / `exit_reason` were readable by every employee | Only the admin console (service key) and `ws_profile_private()` for workspace admins. Everything the directory, chat and org chart show is unchanged |
+| A browser could insert a notification for anyone, in any company | Notifications come only from the database's own triggers |
+| Email codes: 20 parallel wrong guesses counted as 1; resend limits could be raced | One locked database call per check: every guess counts (6 per code), one code a minute and 5 an hour per address, 30 sign-ups an hour per network address |
+| A failed profile update still answered "verified" and burnt the code | Verification and sign-up finish in one transaction or say they did not; the same code can then be entered again |
+| The admin password had only a 500 ms delay | 10 tries per address per 15 minutes (100 across all addresses), counted in the database before the password is checked; a lock-out is written to the audit log |
+| The mailer accepted any SMTP certificate unless `SMTP_TLS_STRICT=1` | Always verified (see below) |
+
+## Deploy
+
+1. Deploy the code.
+2. Supabase → SQL Editor: run `supabase-access-control-migration.sql` (16), then
+   `supabase-otp-limits-migration.sql` (17). Until 17 runs, sign-up and email
+   verification answer *unavailable*; the rest of WorkSuite keeps working.
+3. Check:
+   ```sql
+   select public.ws_access_control_status();
+   ```
+   `tables_gated` must equal `tables_with_rls`, `storage_gated`,
+   `private_columns_hidden`, `mfa_check` and `session_check` must be `true`,
+   and `pre_request` must be `public.ws_pre_request`. If `pre_request` is null,
+   the migration printed why (another pre-request function, or no permission);
+   the table and storage policies still apply.
+4. SMTP: send **Admin → Email monitoring → Send test**. If it fails with
+   *certificate is for another name*, find the name the host presents and set
+   `SMTP_TLS_SERVERNAME` in Vercel:
+   ```
+   openssl s_client -connect $SMTP_HOST:465 -servername $SMTP_HOST </dev/null 2>/dev/null \
+     | openssl x509 -noout -subject -ext subjectAltName
+   ```
+   A host with a private authority: put its CA certificate (PEM, or base64 of
+   it) in `SMTP_TLS_CA`. There is no switch that skips the check.
+5. Optional: Supabase → Authentication → Sign In / Providers → turn **off**
+   *Allow new users to sign up*. WorkSuite's own sign-up creates accounts with
+   the service key and keeps working; direct sign-ups (which only ever reach
+   *waiting for approval*) stop entirely.
+
+Everyone who could sign in before still can: existing accounts keep their
+status. Re-running migrations 1–15 later resets a few helper functions they
+define; run 16 (and 17) again afterwards.
+
+## Rollback
+
+Each step undoes one layer; the data is never touched.
+
+```sql
+-- the PostgREST pre-request gate
+alter role authenticator reset pgrst.db_pre_request; notify pgrst, 'reload config';
+-- the table and storage policies
+do $$ declare t record; begin
+  for t in select schemaname, tablename from pg_policies where policyname = 'ws_session_gate' loop
+    execute format('drop policy ws_session_gate on %I.%I', t.schemaname, t.tablename);
+  end loop; end $$;
+-- private HR columns readable again
+grant select on public.profiles to authenticated;
+-- let everyone waiting in
+update public.profiles set status = 'active' where status = 'pending';
+-- an admin address locked out by wrong passwords (it also clears itself after 15 minutes)
+delete from public.ws_rate_limits where key like 'admin-pw:%';
+```
+
+## Tests
+
+`tests/access-control-database.test.js` (pending, offboarded, aal1/aal2,
+ended sessions, private columns, invitations, every table gated, upgrade of a
+populated database), `tests/signup-otp.test.js` (the real sign-up and
+verification handlers against the database: parallel guesses and resends,
+expiry, double use, invitations, company binding, partial failures and
+retries), `tests/admin-session.test.js` (admin password limits) and
+`tests/mailer-tls.test.js` (valid, wrong-name and self-signed certificates on
+a local TLS server).
 

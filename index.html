@@ -593,8 +593,8 @@
                     close(); setBusy(false);
                     showDialog({
                         type: 'success',
-                        title: successTitle || 'Email verified! 🎉',
-                        message: successMessage || 'You are all set.',
+                        title: result.successTitle || successTitle || 'Email verified! 🎉',
+                        message: result.successMessage || successMessage || 'You are all set.',
                         buttonText: 'Continue',
                         onClose: () => { if (typeof onSuccess === 'function') onSuccess(); }
                     });
@@ -806,6 +806,34 @@
                 window.__WS_SB__ = rootSb;
                 return true;
             } catch { return false; }
+        }
+
+        // What the database says about this session (supabase-access-control-migration.sql):
+        // { access: 'ok' | 'pending' | 'inactive' | 'mfa_required' | 'session_ended' | 'no_profile',
+        //   status, email_verified, company, full_name }. null before that migration runs.
+        async function myAccess() {
+            try {
+                const { data, error } = await rootSb.rpc('ws_my_access');
+                return error || !data || typeof data !== 'object' ? null : data;
+            } catch { return null; }
+        }
+        // A pending or offboarded account cannot use WorkSuite: say why and sign this browser out.
+        // Returns true when it handled the session.
+        async function refuseAccess(access) {
+            const why = access && access.access;
+            if (!['pending', 'inactive', 'no_profile', 'session_ended'].includes(why)) return false;
+            try { await rootSb.auth.signOut({ scope: 'local' }); } catch {}
+            onLoggedOut();
+            if (why === 'pending') {
+                showDialog({ type: 'info', title: 'Waiting for approval',
+                    message: `Your account${access.company ? ' at ' + access.company : ''} has not been approved yet. An administrator needs to approve it before you can sign in. Try again once they have.` });
+            } else if (why === 'inactive') {
+                showDialog({ type: 'warning', title: 'Account not active',
+                    message: 'This account is no longer active. If you think that is a mistake, contact your administrator.' });
+            } else {
+                showDialog({ type: 'info', title: 'Signed out', message: 'Your session ended. Please sign in again.' });
+            }
+            return true;
         }
 
         function showAuthModal() {
@@ -1342,9 +1370,12 @@
                     showDialog({ type: 'error', title: f.title, message: f.message, buttonText: 'Try Again' });
                     return;
                 }
+                // Pending approval or offboarded: say so instead of an empty workspace.
+                const access = await myAccess();
+                if (await refuseAccess(access)) return;
                 // Gate: users who never completed the sign-up OTP must verify now.
-                let prof = null;
-                try {
+                let prof = access ? { email_verified: access.email_verified, company: access.company, full_name: access.full_name } : null;
+                if (!access) try {
                     const { data: p } = await rootSb.from('profiles')
                         .select('email_verified, company, full_name')
                         .eq('id', data.session.user.id).maybeSingle();
@@ -1526,8 +1557,11 @@
                             })
                         });
                         const j = await r.json().catch(() => ({}));
-                        if (r.ok) resetSignupForm();
-                        return { ok: r.ok, message: j.message || j.error };
+                        if (!r.ok) return { ok: false, message: j.message || j.error };
+                        resetSignupForm();
+                        if (j.status === 'pending') return { ok: true, successTitle: 'Account created — waiting for approval',
+                            successMessage: `Thanks, ${firstName}. Your email is verified. An administrator at ${company} now needs to approve your account; you can sign in once they have.` };
+                        return { ok: true };
                     },
                     onResend: async () => {
                         const r = await fetch('/api/signup-start', {
@@ -1586,6 +1620,7 @@
             if (!ok) { showAuthModal(); openInviteSignup(); return; }
             const { data: { session } } = await rootSb.auth.getSession();
             if (!session) { onLoggedOut(); openInviteSignup(); return; }
+            if (await refuseAccess(await myAccess())) return;
             // A sign-in that stopped before its two-step code: ask for the code, as every other page's guard expects.
             if (window.WSMfa) {
                 const mfa = await window.WSMfa.status(rootSb);

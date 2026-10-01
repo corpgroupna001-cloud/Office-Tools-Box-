@@ -32,11 +32,12 @@ test.before(async () => {
 });
 
 test('notification links are in-app paths or nothing', { skip }, async () => {
+  // Notifications are written by the database (triggers, ws_notify) — the service here.
   const urls = ['javascript:alert(1)', 'https://evil.test/x', '//evil.test', '/\\evil.test', '/deals/?id=1', '/'];
-  for (const u of urls) await q(A, `insert into notifications (user_id, actor_id, kind, title, url) values ($1, $2, 'mention', 't', $3)`, [C, A, u]);
+  for (const u of urls) await svc(`insert into notifications (user_id, actor_id, kind, title, url) values ($1, $2, 'mention', 't', $3)`, [C, A, u]);
   const got = (await q(C, `select url from notifications order by created_at, id`)).map(r => r.url);
   assert.deepEqual(got.sort(), [null, null, null, null, '/', '/deals/?id=1'].sort());
-  await q(A, `select public.ws_notify($1, 'x', 't', null, 'javascript:alert(2)')`, [C]);
+  await svc(`select public.ws_notify($1, 'x', 't', null, 'javascript:alert(2)')`, [C]);
   assert.equal((await q(C, `select count(*)::int n from notifications where url like 'javascript%'`))[0].n, 0);
 });
 

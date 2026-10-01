@@ -123,8 +123,8 @@ create trigger wfh_recordings_guard_review before insert or update on public.wfh
 -- ---------------------------------------------------------------------------
 revoke execute on function public.crm_log(text, text, uuid, text, jsonb, text, uuid, uuid, uuid, uuid) from public, anon;
 grant execute on function public.crm_log(text, text, uuid, text, jsonb, text, uuid, uuid, uuid, uuid) to authenticated;
-revoke execute on function public.ws_notify(uuid, text, text, text, text, text, uuid) from public, anon;
-grant execute on function public.ws_notify(uuid, text, text, text, text, text, uuid) to authenticated;
+-- ws_notify is for the database's own triggers only (migration 16, SEC-10).
+revoke execute on function public.ws_notify(uuid, text, text, text, text, text, uuid) from public, anon, authenticated;
 -- Only the invoice triggers number and total invoices.
 revoke execute on function public.next_invoice_number(text, date) from public, anon, authenticated;
 revoke execute on function public.invoice_recalc(uuid) from public, anon, authenticated;

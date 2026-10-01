@@ -14,7 +14,7 @@ const JOBWAYS = 'Jobways Point LLP';
 const USER_ID = '22222222-2222-4222-8222-222222222222';
 
 function backend(state = {}) {
-  const calls = [];
+  const calls = [], invites = [];
   const s = {
     user: { id: USER_ID }, userStatus: 200,
     profile: { id: USER_ID, full_name: 'Manager One', email: 'manager@nova.example', company: NOVA, company2: null, app_role: 'manager' },
@@ -28,6 +28,11 @@ function backend(state = {}) {
     if (p === '/auth/v1/user') return s.userStatus === 200 ? reply(200, s.user) : reply(s.userStatus, { msg: 'invalid' });
     if (p.startsWith('/rest/v1/profiles?id=')) return reply(200, s.profile ? [s.profile] : []);
     if (p.startsWith('/rest/v1/profiles?email=')) return reply(200, s.existing);
+    if (p === '/rest/v1/rpc/ws_invite_record') {
+      if (s.recordStatus) return reply(s.recordStatus, s.recordBody || { message: 'down' });
+      invites.push(JSON.parse(options.body));
+      return reply(200, '7b0c5d1e-0000-4000-8000-000000000001');
+    }
     return reply(404, { message: 'unexpected ' + p });
   };
   const mails = [], audits = [];
@@ -40,7 +45,7 @@ function backend(state = {}) {
     },
     recordMail: async (meta, result) => { audits.push({ meta, result }); if (state.auditThrows) throw new Error('audit down'); return true; },
   };
-  return { deps, calls, mails, audits };
+  return { deps, calls, mails, audits, invites };
 }
 
 const run = (b, body = { company: NOVA, emails: ['new.person@example.com'] }) => emailInvite(body, b.deps);
@@ -191,4 +196,28 @@ test('invitations are audited under their own category', async () => {
     if (saved.key === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = saved.key;
     global.fetch = saved.fetch;
   }
+});
+
+/* ============================ The invitation record ============================ */
+
+test('each invitation is recorded for its company and inviter before the email goes', async () => {
+  const b = backend();
+  const out = await run(b, { company: NOVA, emails: ['a@x.co', 'b@x.co'] });
+  assert.deepEqual(out.sent, ['a@x.co', 'b@x.co']);
+  assert.deepEqual(b.invites, [
+    { p_email: 'a@x.co', p_company: NOVA, p_invited_by: USER_ID },
+    { p_email: 'b@x.co', p_company: NOVA, p_invited_by: USER_ID },
+  ]);
+});
+
+test('an invitation that could not be recorded is not sent (it would not let them in)', async () => {
+  const b = backend({ recordStatus: 500 });
+  await rejectsWith(run(b), 502, /could not be saved/);
+  assert.equal(b.mails.length, 0);
+});
+
+test('before the access-control migration there is nothing to record, and invitations still go', async () => {
+  const b = backend({ recordStatus: 404, recordBody: { code: 'PGRST202', message: 'Could not find the function' } });
+  const out = await run(b);
+  assert.deepEqual(out.sent, ['new.person@example.com']);
 });

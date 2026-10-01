@@ -81,10 +81,11 @@ function harness({ now = '2026-09-10T12:00:00+05:30', db = {}, env: envOverride,
     process: { env: envOverride || env },
     require(name) {
       if (name === '../lib/request-auth') return require('../lib/request-auth');
+      if (name === '../lib/service-rpc') return require('../lib/service-rpc');
       if (name === '../company-config') return require('../company-config');
       if (name === '../lib/attendance') return attendance;
       if (name === '../lib/admin-session') return sessions;
-      if (name === '../lib/admin-audit') return { auditWrap: r => r };
+      if (name === '../lib/admin-audit') return { auditWrap: r => r, recordSecurityEvent: async () => true };
       if (name === '../lib/mailer') return mailer || { async sendMail(m) { mails.push(m); return { ok: true }; } };
       return {};
     },
@@ -538,7 +539,7 @@ test('without a session or the password the scheduler actions stay locked', asyn
   const module = { exports: {} };
   vm.runInNewContext(source, { module, console, URL, setTimeout: cb => cb(), fetch: async () => { throw new Error('no'); }, AbortSignal, Date,
     process: { env }, require: n => (n === '../lib/request-auth' ? require('../lib/request-auth') : n === '../company-config' ? require('../company-config') : n === '../lib/attendance' ? attendance
-      : n === '../lib/admin-session' ? sessions : n === '../lib/admin-audit' ? { auditWrap: r => r } : {}) });
+      : n === '../lib/admin-session' ? sessions : n === '../lib/admin-audit' ? { auditWrap: r => r, recordSecurityEvent: async () => true } : {}) });
   await module.exports({ method: 'POST', headers: { host: 'work-suite.example.test' }, body: { action: 'att_scheduler_run' } }, res);
   assert.equal(res.code, 401);
   assert.equal(h.calls.length, 0);

@@ -50,6 +50,7 @@ test('a new employee gets an account, a filled-in profile and an invite — and 
   assert.equal(out.employee.email, 'new.person@example.com', 'the login email is stored lowercased');
   assert.equal(out.employee.department, 'Operations');
   assert.equal(out.employee.email_verified, true, 'an admin adding a colleague is the verification');
+  assert.equal(out.employee.status, 'active', 'and the approval: new logins otherwise start pending');
 
   const created = sb.wrote('POST', '/auth/v1/admin/users')[0].body;
   assert.equal(created.email_confirm, true);
@@ -145,6 +146,60 @@ test('offboarding blocks the login and records the exit without deleting anythin
   assert.equal(out.warning, undefined);
   assert.equal(sb.wrote('PUT', '/auth/v1/admin/users')[0].body.ban_duration, '876000h');
   assert.equal(sb.wrote('DELETE', '/auth/v1/admin/users').length, 0, 'offboarding is not deletion');
+});
+
+test('offboarding ends every open session, so a token they still hold cannot be refreshed (SEC-03)', async () => {
+  const sb = supabase([
+    [on('PATCH', '/rest/v1/profiles'), (m, p, body) => [200, [{ id: 'x', ...body }]]],
+    [on('PUT', '/auth/v1/admin/users'), () => [200, {}]],
+    [on('POST', '/rest/v1/rpc/ws_end_sessions'), () => [200, 2]],
+  ]);
+  const id = '33333333-3333-4333-8333-333333333333';
+  const out = await people.setEmployeeStatus({ id, status: 'inactive' }, { url: URL_BASE, key: KEY, request: sb.request });
+  assert.deepEqual(sb.wrote('POST', '/rest/v1/rpc/ws_end_sessions').map(c => c.body), [{ p_user: id }]);
+  assert.equal(out.sessions_ended, 2);
+  assert.equal(out.warning, undefined);
+});
+
+test('sessions that could not be ended are reported, and the ban failing as well is reported too', async () => {
+  const sb = supabase([
+    [on('PATCH', '/rest/v1/profiles'), (m, p, body) => [200, [{ id: 'x', ...body }]]],
+    [on('PUT', '/auth/v1/admin/users'), () => [502, {}]],
+    [on('POST', '/rest/v1/rpc/ws_end_sessions'), () => [500, { message: 'down' }]],
+  ]);
+  const out = await people.setEmployeeStatus({ id: '33333333-3333-4333-8333-333333333333', status: 'inactive' },
+    { url: URL_BASE, key: KEY, request: sb.request });
+  assert.match(out.warning, /could not be blocked/);
+  assert.match(out.warning, /sessions could not be ended/);
+  assert.equal(out.employee.status, 'inactive', 'the status, which the database enforces, is saved regardless');
+});
+
+test('approving a pending sign-up is setting it active; no sessions are ended', async () => {
+  const sb = supabase([
+    [on('PATCH', '/rest/v1/profiles'), (m, p, body) => [200, [{ id: 'x', ...body }]]],
+    [on('PUT', '/auth/v1/admin/users'), () => [200, {}]],
+  ]);
+  const out = await people.setEmployeeStatus({ id: '33333333-3333-4333-8333-333333333333', status: 'active' },
+    { url: URL_BASE, key: KEY, request: sb.request });
+  assert.equal(out.employee.status, 'active');
+  assert.equal(sb.wrote('POST', '/rest/v1/rpc/ws_end_sessions').length, 0);
+});
+
+test('two-step recovery removes every authenticator and ends their sessions', async () => {
+  const id = '44444444-4444-4444-8444-444444444444';
+  const f1 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', f2 = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const sb = supabase([
+    [on('GET', `/auth/v1/admin/users/${id}/factors`), () => [200, [{ id: f1, status: 'verified' }, { id: f2, status: 'unverified' }]]],
+    [on('DELETE', '/factors/'), () => [200, {}]],
+    [on('POST', '/rest/v1/rpc/ws_end_sessions'), () => [200, 1]],
+  ]);
+  const out = await people.resetMfa({ id }, { url: URL_BASE, key: KEY, request: sb.request });
+  assert.deepEqual(out, { success: true, removed: 2 });
+  assert.deepEqual(sb.wrote('DELETE', '/factors/').map(c => c.path.split('/').pop()), [f1, f2]);
+  assert.equal(sb.wrote('POST', '/rest/v1/rpc/ws_end_sessions').length, 1);
+  await assert.rejects(people.resetMfa({ id: 'nope' }, { url: URL_BASE, key: KEY, request: sb.request }), /Invalid employee ID/);
+  const broken = supabase([[on('GET', '/factors'), () => [500, {}]]]);
+  await assert.rejects(people.resetMfa({ id }, { url: URL_BASE, key: KEY, request: broken.request }), /Could not read/);
 });
 
 test('reactivating lifts the ban and clears the exit details', async () => {

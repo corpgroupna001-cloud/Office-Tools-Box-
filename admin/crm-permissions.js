@@ -28,7 +28,7 @@
       canEdit: true,
       load: async () => {
         const d = await api('crm_perm_load');
-        return { ...d, people: (d.people || []).filter(p => (p.status || 'active') !== 'inactive').map(p => ({ id: p.id, name: p.full_name || p.email, employee_id: p.employee_id || '' })) };
+        return { ...d, people: (d.people || []).filter(p => (p.status || 'active') === 'active').map(p => ({ id: p.id, name: p.full_name || p.email, employee_id: p.employee_id || '' })) };
       },
       save: batch => api('crm_perm_save', { op: 'batch', ...batch }),
     });

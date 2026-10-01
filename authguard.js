@@ -60,13 +60,25 @@
                     if (aal && aal.nextLevel === 'aal2' && aal.currentLevel !== 'aal2') return toLogin();
                 }
             } catch { /* older client or offline check — the sign-in page asks again */ }
-            // Signed in — also bounce anyone who never finished email verification
-            // (unless their company's email is still "coming soon").
+            // Signed in — the database's own answer (supabase-access-control-migration.sql):
+            // pending approval, offboarded, a second step still owed or an ended session all go
+            // back to the home page, which says why. Then anyone who never finished email
+            // verification (unless their company's email is still "coming soon").
+            const COMING_SOON = ['Navyug Raise A Player Foundation', 'Raise a Player'];
+            let access = null;
+            try {
+                const { data, error } = await sb.rpc('ws_my_access');
+                if (!error && data && typeof data === 'object') access = data;
+            } catch { /* before the migration: the profile check below */ }
+            if (access) {
+                if (access.access !== 'ok') return toLogin();
+                if (access.email_verified === false && !COMING_SOON.includes(access.company)) return toLogin();
+                return;
+            }
             try {
                 const { data: p } = await sb.from('profiles')
                     .select('email_verified, company')
                     .eq('id', session.user.id).maybeSingle();
-                const COMING_SOON = ['Navyug Raise A Player Foundation', 'Raise a Player'];
                 if (p && p.email_verified === false && !COMING_SOON.includes(p.company)) {
                     return toLogin(); // home page will run them through the OTP step
                 }

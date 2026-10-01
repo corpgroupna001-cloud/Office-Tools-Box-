@@ -27,7 +27,7 @@ const CHROME = process.env.CHROME_PATH || [
 if (!CHROME) { console.error('No Chrome found. Set CHROME_PATH.'); process.exit(2); }
 
 const PAGES = [
-  ['/', 'home'], ['/', 'signin'], ['/crm', 'crm'], ['/crm/settings', 'crm-settings'], ['/companies', 'companies'],
+  ['/', 'home'], ['/', 'signin'], ['/', 'pending'], ['/crm', 'crm'], ['/crm/settings', 'crm-settings'], ['/companies', 'companies'],
   ['/contacts', 'contacts'], ['/contacts?id=C1', 'contact-record'],
   ['/leads', 'leads'], ['/leads?view=list', 'leads-list'], ['/leads?id=L1', 'lead-record'], ['/leads?id=L4', 'lead-imported'],
   ['/deals', 'deals'], ['/deals?view=list', 'deals-list'], ['/deals?id=D1', 'deal-record'], ['/deals?id=D4', 'deal-imported'],
@@ -246,6 +246,8 @@ async function visit(browser, route, name, [vpName, viewport]) {
     } catch (e) { /* ignore */ }
   }, key, JSON.stringify(F.session()), { wallpaper: process.env.SMOKE_WALLPAPER || '', theme: process.env.SMOKE_THEME || '', signedOut: name === 'signin' });
   const result = { route, name, viewport: vpName, errors, consoleErrors, problems: [], notes: [] };
+  // A signed-in account still waiting for an administrator's approval.
+  if (name === 'pending') DB.__access = { signed_in: true, access: 'pending', status: 'pending', email_verified: true, company: 'Nova Sportsmart Private Limited', full_name: 'Maya Manager' };
   try {
     await page.goto(ORIGIN + route, { waitUntil: 'load', timeout: 30000 });
     await new Promise(r => setTimeout(r, 2600));
@@ -293,12 +295,13 @@ async function visit(browser, route, name, [vpName, viewport]) {
       };
     });
     // The call window is full-screen and the public web form is for visitors: neither has the shell.
-    if (!info.shell && !['home', 'call', 'web-form', 'signin', 'admin-gate'].includes(name)) result.problems.push('app shell did not mount');
+    if (!info.shell && !['home', 'call', 'web-form', 'signin', 'pending', 'admin-gate'].includes(name)) result.problems.push('app shell did not mount');
     if (name === 'web-form' && !/Talk to our sales team/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('web form did not render');
     if (vpName === 'phone' && info.overflow > 1) result.problems.push(`horizontal overflow ${info.overflow}px: ${info.offenders.join(', ')}`);
     if (CRM_PAGES.has(name) && info.errorText) result.problems.push(`error state on screen: "${info.errorText.slice(0, 90)}"`);
-    if (info.signedOut && name !== 'signin') result.problems.push('ended on the sign-in screen');
-    if (name === 'signin' && !info.signedOut) result.problems.push('the sign-in screen did not show');
+    if (info.signedOut && name !== 'signin' && name !== 'pending') result.problems.push('ended on the sign-in screen');
+    if ((name === 'signin' || name === 'pending') && !info.signedOut) result.problems.push('the sign-in screen did not show');
+    if (name === 'pending' && !/Waiting for approval/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('a pending account was not told it waits for approval');
     // The fixtures keep a call ringing for Maya; outside Messenger and the call
     // window its card would cover the page being checked and photographed.
     if (name !== 'messenger' && name !== 'call') await page.evaluate(() => { const r = document.getElementById('wsc-root'); if (r) r.style.display = 'none'; });

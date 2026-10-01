@@ -29,6 +29,7 @@
 const webpush = require('web-push');
 const { iceServersFor } = require('../lib/ice-servers');
 const P = require('../lib/comms-push');
+const { verifyToken, accessError } = require('../lib/request-auth');
 
 function queryParam(req, name) {
   if (req.query && req.query[name] != null) return String(req.query[name]);
@@ -71,17 +72,10 @@ module.exports = async function handler(req, res) {
   // ---- Verify the caller's Supabase session token ----
   const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (!token) return res.status(401).json({ error: 'Missing Authorization token' });
-  let caller = null;
-  try {
-    const ur = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${token}` }
-    });
-    if (!ur.ok) return res.status(401).json({ error: 'Invalid session' });
-    caller = await ur.json();
-  } catch {
-    return res.status(401).json({ error: 'Auth check failed' });
-  }
-  if (!caller?.id) return res.status(401).json({ error: 'Invalid session' });
+  // Same rules as the database: a live session, the second step done, an active account.
+  const access = await verifyToken(token, { url: SUPABASE_URL, key: SERVICE_KEY, serviceKey: SERVICE_KEY, request: fetch });
+  if (access.reason) { const e = accessError(access.reason); return res.status(e.status).json(e.body); }
+  const caller = access.user;
 
   if (action === 'ice') {
     res.setHeader('Cache-Control', 'private, no-store');

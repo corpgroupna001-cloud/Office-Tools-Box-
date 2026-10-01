@@ -119,6 +119,8 @@
         if (codes.length) issues.push({ icon: 'fingerprint', text: `${codes.length} biometric code${codes.length > 1 ? 's' : ''} not bound to a person`, jump: 'roster', cls: 'warn' });
         if (T.no_shift) issues.push({ icon: 'clock', text: `${T.no_shift} ${T.no_shift > 1 ? 'people have' : 'person has'} no shift assigned`, jump: 'shifts', cls: 'warn' });
         if (T.mail_problem) issues.push({ icon: 'bell', text: `${T.mail_problem} punch email${T.mail_problem > 1 ? 's' : ''} did not send today`, jump: 'attendance', cls: 'bad' });
+        const waiting = emps.filter(e => e.status === 'pending').length;
+        if (waiting) issues.unshift({ icon: 'users', text: `${waiting} sign-up${waiting > 1 ? 's' : ''} waiting for approval`, jump: 'employees', cls: 'warn' });
         const noPhoto = emps.filter(e => !e.avatar_url).length;
         if (noPhoto) issues.push({ icon: 'camera', text: `${noPhoto} ${noPhoto > 1 ? 'profiles have' : 'profile has'} no photo`, jump: 'employees', cls: 'mute' });
         if (T.unmapped_codes && !codes.length) issues.push({ icon: 'fingerprint', text: `${T.unmapped_codes} unknown code${T.unmapped_codes > 1 ? 's' : ''} punched today`, jump: 'roster', cls: 'warn' });

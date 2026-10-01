@@ -228,7 +228,7 @@
         if (!ac !== !bc) return ac ? -1 : 1;
         return (ac && bc ? ac.localeCompare(bc, 'en', { numeric: true }) : 0) || String(a.name).localeCompare(String(b.name));
     }
-    function activePeople() { return state.people.filter(p => (p.status || 'active') !== 'inactive'); }
+    function activePeople() { return state.people.filter(p => (p.status || 'active') === 'active'); }   // not offboarded, not waiting for approval
     function avatarHtml(p, cls) {
         const who = typeof p === 'string' ? person(p) : p;
         const name = who ? (who.name || who.full_name || who.email || '?') : '?';

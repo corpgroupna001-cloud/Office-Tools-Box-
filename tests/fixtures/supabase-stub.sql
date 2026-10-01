@@ -38,6 +38,29 @@ $$;
 create or replace function auth.role() returns text language sql stable as $$
   select nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role'
 $$;
+-- Sessions, refresh tokens and authenticator apps, shaped like GoTrue's own
+-- tables (only the columns the migrations read). Not readable by the API roles.
+create table if not exists auth.sessions (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  aal        text,
+  created_at timestamptz not null default now()
+);
+create table if not exists auth.refresh_tokens (
+  id         bigserial primary key,
+  token      text,
+  user_id    varchar(255),
+  session_id uuid references auth.sessions(id) on delete cascade,
+  revoked    boolean default false
+);
+create table if not exists auth.mfa_factors (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references auth.users(id) on delete cascade,
+  friendly_name text,
+  factor_type   text not null default 'totp',
+  status        text not null default 'unverified',
+  created_at    timestamptz not null default now()
+);
 grant usage on schema auth to anon, authenticated, service_role;
 grant execute on all functions in schema auth to anon, authenticated, service_role;
 
