@@ -38,6 +38,7 @@ import android.webkit.WebViewClient;
 import android.webkit.CookieManager;
 import android.widget.Toast;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -70,6 +71,16 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** A runtime permission request waiting for Android's dialog to be free. */
+    private static final class PermissionAsk {
+        final String[] permissions;
+        final int code;
+        PermissionAsk(String[] permissions, int code) {
+            this.permissions = permissions;
+            this.code = code;
+        }
+    }
+
     private WebPolicy policy;
     private WebView web;
     private ValueCallback<Uri[]> pendingFiles;
@@ -80,6 +91,11 @@ public class MainActivity extends Activity {
     /* Location: every prompt that arrived while Android's dialog was up. */
     private final List<PendingGeo> pendingGeo = new ArrayList<>();
     private boolean locationPromptOpen;
+    /* Android shows one permission dialog at a time and cancels, at once, any
+       request made while one is open (the first launch asks for notifications
+       just as the page asks for location), so requests wait their turn. */
+    private final ArrayDeque<PermissionAsk> permissionQueue = new ArrayDeque<>();
+    private boolean permissionDialogOpen;
     /** Whether the main frame shows our own site; read on the JavaScript bridge's thread. */
     private volatile boolean trustedPage;
 
@@ -171,7 +187,7 @@ public class MainActivity extends Activity {
                 if (!locationPromptOpen) {
                     locationPromptOpen = true;
                     // Android 12+ ignores a request for precise location made without approximate.
-                    requestPermissions(new String[]{
+                    askAndroid(new String[]{
                         Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION }, REQ_LOCATION);
                 }
             }
@@ -236,8 +252,18 @@ public class MainActivity extends Activity {
     private void askToNotify() {
         if (Build.VERSION.SDK_INT >= 33
             && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{ Manifest.permission.POST_NOTIFICATIONS }, REQ_NOTIFY);
+            askAndroid(new String[]{ Manifest.permission.POST_NOTIFICATIONS }, REQ_NOTIFY);
         }
+    }
+
+    /** Ask Android now, or after the dialog that is already open closes. */
+    private void askAndroid(String[] permissions, int code) {
+        if (permissionDialogOpen) {
+            permissionQueue.add(new PermissionAsk(permissions, code));
+            return;
+        }
+        permissionDialogOpen = true;
+        requestPermissions(permissions, code);
     }
 
     /** Hand a link to another app; a phone with nothing to open it shows a message instead of crashing. */
@@ -299,13 +325,14 @@ public class MainActivity extends Activity {
         pendingMediaResources = wanted;
         if (!mediaPromptOpen) {
             mediaPromptOpen = true;
-            requestPermissions(missing, REQ_MEDIA);
+            askAndroid(missing, REQ_MEDIA);
         }
     }
 
     @Override
     public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(code, permissions, results);
+        permissionDialogOpen = false;
         // The outcome is read back from Android rather than from `results`: those are
         // empty when the dialog is dismissed, and a person may allow approximate location only.
         if (code == REQ_LOCATION) {
@@ -320,10 +347,14 @@ public class MainActivity extends Activity {
             String[] wanted = pendingMediaResources;
             pendingMedia = null;
             pendingMediaResources = null;
-            if (request == null) return;
-            if (missingFor(wanted).length == 0) request.grant(wanted);
-            else request.deny();
+            if (request != null) {
+                if (missingFor(wanted).length == 0) request.grant(wanted);
+                else request.deny();
+            }
         }
+        // The next request that was waiting for the dialog.
+        PermissionAsk next = permissionQueue.poll();
+        if (next != null) askAndroid(next.permissions, next.code);
     }
 
     @Override
@@ -363,6 +394,7 @@ public class MainActivity extends Activity {
         pendingMediaResources = null;
         for (PendingGeo g : pendingGeo) g.callback.invoke(g.origin, false, false);
         pendingGeo.clear();
+        permissionQueue.clear();
         if (pendingFiles != null) pendingFiles.onReceiveValue(null);
         pendingFiles = null;
         if (web != null) {
