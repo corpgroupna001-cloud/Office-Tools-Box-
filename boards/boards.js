@@ -536,6 +536,13 @@
                 columns, cards, emptyText: 'No cards', renderCard,
                 canDrag: t => !board.archived_at && (ctx.isManager || L.canEdit({ created_by: t.created_by, assignee_id: t.assignee_id }, me) || onProject),
                 onMove: async ({ card, toColumnId, position }) => {
+                    // A column that marks cards done completes them: a required status summary is asked for first (BUG-05).
+                    const col = bs.columns.find(c => c.id === toColumnId);
+                    const done = col && col.maps_to_status && lk.taskStatus[col.maps_to_status] && lk.taskStatus[col.maps_to_status].is_done;
+                    if (done && !card.completed_at) {
+                        if (!await C.completeTask(card, { board_column_id: toColumnId, position })) throw new Error('Not completed: a status summary is needed');
+                        WSShell.refreshUnread(); reload(true); return;
+                    }
                     const { data } = await C.q(sb.from('tasks').update({ board_column_id: toColumnId, position }).eq('id', card.id).select('id'));
                     if (!data || !data.length) throw new Error('You do not have permission to move this card.');
                     WSShell.refreshUnread();
@@ -667,8 +674,14 @@
                     ...(editable ? [{ label: 'Save', primary: true, onClick: async api => {
                         if (!f.validate()) return;
                         const v = f.get();
-                        const { data: upd } = await C.q(sb.from('tasks').update({ title: v.title.trim(), status: v.status, priority: v.priority, assignee_id: v.assignee_id || null, due_date: v.due_date || null, board_column_id: v.board_column_id, description: v.description || null }).eq('id', t.id).select('id'));
-                        if (!upd || !upd.length) throw new Error('You do not have permission to change this card.');
+                        const patch = { title: v.title.trim(), status: v.status, priority: v.priority, assignee_id: v.assignee_id || null, due_date: v.due_date || null, board_column_id: v.board_column_id, description: v.description || null };
+                        const done = lk.taskStatus[v.status] && lk.taskStatus[v.status].is_done;
+                        if (done && !t.completed_at) {
+                            if (!await C.completeTask(t, patch)) throw new Error('Completing this card needs a status summary. Write one, or choose another status.');
+                        } else {
+                            const { data: upd } = await C.q(sb.from('tasks').update(patch).eq('id', t.id).select('id'));
+                            if (!upd || !upd.length) throw new Error('You do not have permission to change this card.');
+                        }
                         if (v.assignee_id && v.assignee_id !== t.assignee_id) C.pushNotify({ to: v.assignee_id, title: 'Task assigned to you', body: v.title, url: `/tasks/?id=${t.id}`, tag: 'task' });
                         C.toast('Card saved', 'ok'); WSShell.refreshUnread(); api.close(); reload();
                     } }] : []),

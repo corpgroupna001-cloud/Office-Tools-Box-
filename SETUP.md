@@ -829,6 +829,7 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 17 | `supabase-otp-limits-migration.sql` | Email codes issued and checked in one locked database call each (parallel guesses all count), durable rate limits for sign-up and the admin password, and sign-up / email verification that finish in one transaction. See [16. Access control](#16-access-control) |
 | 18 | `supabase-document-links-migration.sql` | Public document links without public copies: every view of a file is checked against the link (`/api/public-document`), links can expire, and the old public `published` bucket becomes private. See [17. Public document links](#17-public-document-links) |
 | 19 | `supabase-crm-summary-migration.sql` | CRM totals computed by the database, per currency, over every row the person may see: `crm_deal_summary`, `crm_lead_summary`, `crm_forecast_summary`. The dashboard and the forecast stop adding rupees to dollars and stop at no row cap. See [18. CRM totals and long lists](#18-crm-totals-and-long-lists) |
+| 20 | `supabase-task-completion-migration.sql` | *Task status summary is required* enforced by the database: such a task completes only with `tasks.result_summary` in the same update — from the Complete button, bulk Complete, a done column on a board, the editor or the API — and the summary is posted as the task's comment in the same transaction. Reopening clears it |
 
 **Ran migration 8 before 15 Sep 2026?** Run it again. Its first version made
 `external_ref`'s unique index partial, which `ON CONFLICT` cannot use, so every
@@ -1351,6 +1352,11 @@ policies.
 
 # 15. Tasks, people pickers and wallpapers
 
+- **Task status summary** (migrations 13 and 20): completing a task that
+  requires one asks for the summary everywhere — the Complete button, bulk
+  Complete (one form with a field per task that needs it, up to 10), dragging
+  onto a done column, the task editor and a board card. The database refuses
+  any other completion of such a task, including a direct API call.
 - **New task** (`/tasks/?id=new`) follows Bitrix24's layout:
   - Task name; a description with attach, @mention and list tools; and a checklist.
   - *Task owner*, *Assignee* (**+** adds participants) and *Deadline* rows.

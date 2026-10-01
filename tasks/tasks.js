@@ -77,22 +77,12 @@
         if (expected && n < expected) C.toast(`${expected - n} task${expected - n > 1 ? 's were' : ' was'} skipped: no permission`, 'bad');
         return n;
     }
-    /** "Task status summary is required": ask what was done, and post it as the task's comment. Resolves false when cancelled. */
-    async function askSummary(t) {
-        const r = await sb.from('tasks').select('result_required').eq('id', t.id).maybeSingle();
-        if (r.error || !r.data || !r.data.result_required) return true;
-        const text = await C.formModal({ title: 'Task status summary', submitLabel: 'Complete task',
-            intro: `<div class="crm-info">${esc(t.title || 'This task')} needs a summary of what was done before it is completed.</div>`,
-            fields: [{ name: 'summary', label: 'Summary', type: 'textarea', rows: 5, required: true, full: true, placeholder: 'What was done, and the result' }],
-            onSubmit: v => String(v.summary || '').trim() });
-        if (!text || text === true) return false;
-        await C.q(sb.from('comments').insert({ entity_type: 'task', entity_id: t.id, body: `Task status summary:\n${text}`, mentions: [], author_id: me.id }));
-        return true;
-    }
+    // Completing goes through C.completeTask, which asks for the status summary a
+    // task requires and saves it in the same update the database checks (BUG-05).
     async function setDone(t, done, after) {
         try {
-            if (done && !await askSummary(t)) { if (after) after(); return; }
-            await mustUpdate(sb.from('tasks').update({ status: done ? DONE_KEY : OPEN_KEY }).eq('id', t.id));
+            if (done) { if (!await C.completeTask(t)) { if (after) after(); return; } }
+            else await mustUpdate(sb.from('tasks').update({ status: OPEN_KEY }).eq('id', t.id));
             C.toast(done ? 'Task completed' : 'Task reopened', 'ok');
             WSShell.refreshUnread();
             if (after) after();
@@ -339,7 +329,15 @@
                 return items;
             },
             bulk: [
-                { label: 'Complete', icon: 'check', run: async (ids, o) => bulkPatch(ids, o, { status: DONE_KEY }, 'Completed') },
+                { label: 'Complete', icon: 'check', run: async (ids, o) => {
+                    // Each task needing a status summary gets one; the rest complete together.
+                    const list = o.all ? (await C.fetchAll(() => scoped(sb.from('tasks').select('id')).is('completed_at', null).order('id'), 5000)).map(x => x.id) : ids;
+                    if (!list.length) return false;
+                    const out = await C.completeTasks(list);
+                    if (!out) return false;
+                    C.toast(out.skipped ? `${out.done} completed, ${out.skipped} skipped` : `${out.done} completed`, out.skipped ? 'warn' : 'ok');
+                    WSShell.refreshUnread();
+                } },
                 { label: 'Change responsible', icon: 'user', run: async (ids, o) => { const v = await B.pick('Change responsible', { type: 'people', label: 'Responsible', none: 'Not assigned' }, ''); if (v === undefined) return false; return bulkPatch(ids, o, { assignee_id: v || null }, 'Responsible changed'); } },
                 { label: 'Set deadline', icon: 'calendar', run: async (ids, o) => { const v = await B.pick('Set deadline', { type: 'date', label: 'Deadline' }, today); if (v === undefined) return false; return bulkPatch(ids, o, { due_date: v || null }, 'Deadline set'); } },
                 { label: 'Priority', icon: 'star', run: async (ids, o) => { const v = await B.pick('Set priority', { type: 'select', label: 'Priority', required: true, options: Object.entries(L.PRIORITY).map(([value, p]) => ({ value, label: p.label })) }, 'high'); if (!v) return false; return bulkPatch(ids, o, { priority: v }, 'Priority set'); } },
@@ -560,7 +558,10 @@
             onAddCard: colId => C.openTaskEditor({ defaults: { assignee_id: me.id, status: colId }, onSaved: async s => { if (s && s.status !== colId) await sb.from('tasks').update({ status: colId }).eq('id', s.id); page.reloadView(); } }),
             onMove: async m => {
                 const { card, toColumnId, columnCards } = m, renumber = renumberNeeded(m);
-                await mustUpdate(sb.from('tasks').update({ status: toColumnId, position: renumber ? slot(columnCards, card.id) : m.position }).eq('id', card.task.id));
+                const done = lk.taskStatus[toColumnId] && lk.taskStatus[toColumnId].is_done;
+                if (done && !card.task.completed_at) {
+                    if (!await C.completeTask(card.task, { status: toColumnId, position: renumber ? slot(columnCards, card.id) : m.position })) throw new Error('Not completed: a status summary is needed');
+                } else await mustUpdate(sb.from('tasks').update({ status: toColumnId, position: renumber ? slot(columnCards, card.id) : m.position }).eq('id', card.task.id));
                 // Best effort: tasks I cannot edit keep their old position.
                 if (renumber) await Promise.all(columnCards.filter(id => id !== card.id).map(id => sb.from('tasks').update({ position: slot(columnCards, id) }).eq('id', id).then(() => {}, () => {})));
                 WSShell.refreshUnread(); page.reloadView();

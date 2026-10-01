@@ -43,7 +43,7 @@ const PAGES = [
   ['/quotes', 'quotes'], ['/quotes?id=Q1', 'quote-record'], ['/crm/forecast', 'forecast'],
   ['/crm/settings?section=lost', 'crm-lost-reasons'], ['/crm/settings?section=forms', 'crm-web-forms'], ['/form?f=smoke0000000000000000000000000001', 'web-form'],
   ['/chat', 'messenger'], [`/call?id=${F.CALL}`, 'call'], ['/attendance', 'attendance'],
-  ['/wsm-admin', 'admin'], ['/wsm-admin?gate=1', 'admin-gate'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/crm', 'themes'], ['/crm', 'dialogs'], ['/crm', 'paging'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
+  ['/wsm-admin', 'admin'], ['/wsm-admin?gate=1', 'admin-gate'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/crm', 'themes'], ['/crm', 'dialogs'], ['/crm', 'paging'], ['/tasks', 'task-complete'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
 ];
 const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'leads-list', 'lead-record', 'lead-imported', 'deals', 'deals-list', 'deal-record', 'deal-imported', 'boards', 'board', 'projects',
   'project-record', 'tasks', 'task-record', 'task-new', 'task-people', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record', 'quotes', 'quote-record', 'forecast', 'crm-lost-reasons', 'crm-web-forms']);
@@ -253,6 +253,8 @@ async function visit(browser, route, name, [vpName, viewport]) {
   }, key, JSON.stringify(F.session()), { wallpaper: process.env.SMOKE_WALLPAPER || '', theme: process.env.SMOKE_THEME || '', signedOut: name === 'signin' });
   const result = { route, name, viewport: vpName, errors, consoleErrors, problems: [], notes: [] };
   // A signed-in account still waiting for an administrator's approval.
+  // T2 needs a status summary; the others do not (BUG-05).
+  if (name === 'task-complete') DB.tasks.forEach(t => { t.result_required = t.id === 'T2'; });
   // Far more people than one response holds: everything that lists them must page (PERF-01).
   if (name === 'paging') {
     for (let i = 0; i < 2500; i++) DB.profiles.push({ id: `p0000000-0000-4000-8000-${String(i).padStart(12, '0')}`, full_name: `Person ${String(i).padStart(4, '0')}`,
@@ -528,11 +530,60 @@ async function dialogKeyboard(page, expect, wait) {
   });
 }
 
+// Completing tasks from the browser (BUG-05): the summary a task requires is
+// asked for and sent in the same update, in single and bulk completion, and a
+// failed lookup refuses instead of completing.
+async function taskCompletion(page, expect, wait) {
+  const within = (p, what) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(`timed out: ${what}`)), 6000))]);
+  const patches = [];
+  page.on('request', r => { if (r.method() === 'PATCH' && r.url().includes('/rest/v1/tasks')) patches.push({ url: decodeURIComponent(r.url()), body: r.postData() }); });
+  const fillAndSubmit = async text => {
+    await page.waitForSelector('.crm-modal textarea', { timeout: 3000 });
+    for (const ta of await page.$$('.crm-modal textarea')) { await ta.click(); await page.keyboard.type(text); }
+    await page.evaluate(() => { const b = [...document.querySelectorAll('.crm-modal .foot button')].find(x => x.dataset.primary); b.click(); });
+  };
+  await expect('a single completion asks for the summary and sends it with the status', async () => {
+    const done = page.evaluate(() => window.WSCrm.completeTask({ id: 'T2' }));
+    await fillAndSubmit('Measurements received');
+    const ok = await within(done, 'single completion'); await wait(100);
+    const p = patches.find(x => x.url.includes('id=eq.T2'));
+    const body = p && JSON.parse(p.body);
+    return ok === true && body && body.status === 'completed' && body.result_summary === 'Measurements received';
+  });
+  await expect('cancelling the summary does not complete the task', async () => {
+    patches.length = 0;
+    const done = page.evaluate(() => window.WSCrm.completeTask({ id: 'T2' }));
+    await page.waitForSelector('.crm-modal textarea', { timeout: 3000 });
+    await page.evaluate(() => { const b = [...document.querySelectorAll('.crm-modal .foot button')].find(x => /Cancel/.test(x.textContent)); b.click(); });
+    return (await within(done, 'cancel')) === false && patches.length === 0;
+  });
+  await expect('bulk Complete: tasks without a summary rule go together, the one that needs a summary gets its own', async () => {
+    patches.length = 0;
+    const done = page.evaluate(() => window.WSCrm.completeTasks(['T1', 'T2', 'T3']));
+    await fillAndSubmit('Bluewave measured');
+    const out = await within(done, 'bulk completion'); await wait(100);
+    const bulk = patches.find(x => x.url.includes('id=in.(T1,T3)'));
+    const single = patches.find(x => x.url.includes('id=eq.T2'));
+    if (!bulk) throw new Error('no bulk update: ' + patches.map(x => x.url).join(' | '));
+    return out && out.done >= 1 && bulk.url.includes('result_required=eq.false') && single && JSON.parse(single.body).result_summary === 'Bluewave measured';
+  });
+  await expect('a failed lookup refuses to complete instead of skipping the summary', async () => {
+    patches.length = 0;
+    const r = await page.evaluate(async () => {
+      const C = window.WSCrm, sb = C.ctx().sb, from = sb.from.bind(sb);
+      sb.from = t => (t === 'tasks' ? { select: () => ({ in: async () => ({ data: null, error: { code: '503', message: 'Service unavailable' } }) }) } : from(t));
+      try { await C.completeTask({ id: 'T2' }); return 'completed'; } catch (e) { return 'refused'; } finally { sb.from = from; }
+    });
+    return r === 'refused' && patches.length === 0;
+  });
+}
+
 // A few interactions that exercise the shared runtime, not just the first paint.
 async function interact(page, name, result) {
   const expect = async (label, fn) => { try { const ok = await fn(); if (!ok) result.problems.push(`interaction failed: ${label}`); } catch (e) { result.problems.push(`interaction threw: ${label}: ${e.message.split('\n')[0]}`); } };
   const wait = ms => new Promise(r => setTimeout(r, ms));
   if (name === 'dialogs') await dialogKeyboard(page, expect, wait);
+  if (name === 'task-complete') await taskCompletion(page, expect, wait);
   if (name === 'paging') {
     await expect('the people list holds everyone, not the first 1,000', () => page.evaluate(() => window.WSCrm.activePeople().length > 2500));
     await expect('fetchAll pages to the end, and says when it stopped at its cap', () => page.evaluate(async () => {
