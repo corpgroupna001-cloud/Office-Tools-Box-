@@ -716,3 +716,44 @@ test('before migration 23 the console says which file to run', async () => {
   assert.equal(decide.code, 409);
   assert.match(decide.body.error, /supabase-attendance-corrections-migration\.sql/);
 });
+
+/* ============================ Delivery retries ============================ */
+
+const JID = 'd0000001-0000-4000-8000-000000000001';
+test('the console lists failed and given-up deliveries with whose punch they were about', async () => {
+  const h = harness({ db: {
+    profiles: [person('emp', DAY, { employee_id: 'NSP-001' })],
+    attendance_logs: [{ id: 7, user_id: 'emp', log_datetime: '2026-09-09T09:31:00+05:30', direction: 'IN', event_type: 'LOGIN' }],
+    delivery_jobs: [
+      { id: JID, idempotency_key: 'attendance:7:email', channel: 'email', kind: 'attendance.punch', source_table: 'attendance_logs', source_id: '7', status: 'dead', attempts: 1, max_attempts: 5, last_error: 'no_recipient: none' },
+      { id: 'd2', idempotency_key: 'attendance:8:bitrix', channel: 'bitrix', kind: 'attendance.punch', status: 'sent', attempts: 2, max_attempts: 5 },
+    ],
+    'rpc/ws_delivery_counts': { email: { dead: 1 }, bitrix: { sent: 1 } },
+  } });
+  const res = await h.call({ action: 'att_deliveries' });
+  assert.equal(res.code, 200, JSON.stringify(res.body));
+  assert.deepEqual(res.body.jobs.map(j => j.id), [JID], 'problems only, by default');
+  assert.deepEqual([res.body.jobs[0].full_name, res.body.jobs[0].punch], ['Person emp', 'LOGIN']);
+  assert.deepEqual(res.body.counts, { email: { dead: 1 }, bitrix: { sent: 1 } });
+  assert.equal((await h.call({ action: 'att_deliveries', status: 'sent' })).body.jobs[0].id, 'd2');
+  assert.equal((await h.call({ action: 'att_deliveries', status: 'nonsense' })).code, 400);
+});
+
+test('Send again goes through the database, which never re-sends a delivered message', async () => {
+  const state = { [JID]: 'dead' };
+  const h = harness({ db: { 'rpc/ws_delivery_retry': (a, reply) => {
+    if (state[a.p_id] === 'sent') return reply({ code: '22023', message: 'Already delivered: it is not sent again' }, 400);
+    state[a.p_id] = 'pending';
+    return reply({ id: a.p_id, status: 'pending' });
+  } } });
+  assert.equal((await h.call({ action: 'att_delivery_retry', id: 'x' })).code, 400);
+  const ok = await h.call({ action: 'att_delivery_retry', id: JID });
+  assert.deepEqual([ok.code, ok.body.job.status], [200, 'pending']);
+  state[JID] = 'sent';
+  const again = await h.call({ action: 'att_delivery_retry', id: JID });
+  assert.equal(again.code, 409);
+  assert.match(again.body.error, /not sent again/);
+  const before = harness({ db: {} });
+  assert.match((await before.call({ action: 'att_deliveries' })).body.error, /supabase-delivery-queue-migration\.sql/);
+  assert.equal((await before.call({ action: 'att_delivery_retry', id: JID })).code, 409);
+});

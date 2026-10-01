@@ -779,6 +779,36 @@
                     A test here goes through exactly the same path.
                 </p>
 
+                <!-- ---------- Delivery retries (supabase-delivery-queue-migration.sql): admin/attendance-tools.js ---------- -->
+                <div class="section-head mt-8 mb-3"><h3><span class="ic ic-refresh"></span>Delivery retries</h3><span class="sub">Emails and group messages that did not go out the first time</span></div>
+                <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
+                    <label for="dq-status" class="sr-only">Show</label>
+                    <select id="dq-status" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                        <option value="problems">Failed and given up</option>
+                        <option value="dead">Given up</option>
+                        <option value="failed">Will retry</option>
+                        <option value="pending">Waiting</option>
+                        <option value="sent">Delivered</option>
+                    </select>
+                    <button id="dq-refresh" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/10">Refresh</button>
+                    <div class="flex-1"></div>
+                    <span id="dq-counts" class="text-xs font-bold text-slate-400" aria-live="polite"></span>
+                </div>
+                <div class="glass rounded-2xl overflow-hidden mb-4">
+                    <div class="overflow-x-auto" style="max-height:360px;">
+                        <table class="w-full text-sm">
+                            <thead><tr><th>Message</th><th>Channel</th><th>Status</th><th>Attempts</th><th>Last error</th><th></th></tr></thead>
+                            <tbody id="dq-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <p class="text-slate-400 text-xs font-bold mb-2 max-w-3xl leading-relaxed">
+                    A punch's email or group line that fails is sent again by the attendance job (every 5 minutes): after 1, 5 and 15 minutes,
+                    then hourly, at most 5 times, and never once it is too old to be useful (12 hours for an email, 6 for a group line).
+                    One that cannot succeed &mdash; no email address, a rejected recipient, no sender &mdash; is given up at once and listed here.
+                    Fix the cause, then <b>Send again</b>. A message that went out is never sent twice.
+                </p>
+
                 <!-- ---------- Attendance days ---------- -->
                 <div class="section-head mt-8 mb-3"><h3><span class="ic ic-attend"></span>Attendance days</h3><span class="sub">Re-derive day, IN/OUT and Login/Break/Logout for stored punches</span></div>
                 <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">

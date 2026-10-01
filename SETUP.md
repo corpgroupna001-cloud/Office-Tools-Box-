@@ -833,6 +833,7 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 21 | `supabase-favorites-migration.sql` | Favourite records: a star on task, deal, project and document pages; **Ctrl+K** lists them first. Personal, and never showing a record the person can no longer open. See [21. Favourites](#21-favourites) |
 | 22 | `supabase-notification-prefs-migration.sql` | Notification settings and quiet hours: which kinds of push reach each person, and when their phone stays quiet. In-app notifications are unchanged. See [22. Notification settings](#22-notification-settings) |
 | 23 | `supabase-attendance-corrections-migration.sql` | Attendance correction requests (*Fix a punch*): an employee asks, their manager or an administrator decides once. Approving adds a punch and marks a wrong one as replaced; the device's own record is never edited. Also allows `source = 'correction'` on `attendance_logs`. See [23. Attendance corrections](#23-attendance-corrections) |
+| 24 | `supabase-delivery-queue-migration.sql` | Delivery retry queue: a punch's email or Bitrix line that did not go out is sent again by the attendance job with backoff, once per punch and channel; what cannot succeed is listed in **Admin → Attendance → Delivery retries**. Server only. See [24. Delivery retries](#24-delivery-retries) |
 
 **Ran migration 8 before 15 Sep 2026?** Run it again. Its first version made
 `external_ref`'s unique index partial, which `ON CONFLICT` cannot use, so every
@@ -1655,4 +1656,42 @@ before and after (`before` / `after`).
 
 **Before migration 23** the server reads every punch as before, and the *Fix a
 punch* card stays hidden.
+
+# 24. Delivery retries
+
+Every punch's email and Bitrix group line is still tried the moment the punch
+arrives. What does not go out — the mail server timed out, Bitrix was slow,
+the request ran out of time — is kept in `delivery_jobs` (migration 24) and
+sent again by the attendance job that already runs every 5 minutes (pg_cron
+`worksuite-shift-switch`; no new cron, no new function):
+
+- **Idempotent:** one job per punch and channel (`attendance:<punch id>:email`,
+  `…:bitrix`). A vendor replay, a second request or an overlapping run finds
+  the same job; a message that went out is never sent again. Leave
+  announcements go through the queue too (`leave:<id>:filed`), so a page that
+  asks twice posts once.
+- **Each channel on its own:** an email failing never holds up the group line,
+  and the other way round.
+- **Backoff:** 1, 5 and 15 minutes, then 1 hour, at most 5 attempts; an email
+  older than 12 hours or a group line older than 6 is not sent late.
+- **Permanent failures** — no address, a recipient the server rejects (5xx),
+  no mailbox or sender configured, a Bitrix permission error — are not
+  retried; they are listed as *Given up* in **Admin → Attendance → Delivery
+  retries**. Fix the cause and press **Send again** (three more attempts;
+  audited as *Sent a failed delivery again*). A delivered message cannot be
+  sent again from there.
+- A company with no Bitrix group has nothing to deliver to: a punch line is not
+  queued, and a leave announcement's job is closed as done with that note.
+- Jobs are claimed with `FOR UPDATE SKIP LOCKED` and a lease, so two runs
+  never send the same job; a run that dies mid-send gives the job back when
+  its lease ends.
+
+With migration 24 the attendance job's older Bitrix retry (step 1) stands
+aside, so nothing is retried twice. Punch failures from before the migration
+are not picked up by the queue; resend those from the admin tab if needed.
+Before migration 24 everything works as it did. Attendance sends no web
+pushes; the queue accepts a `push` channel for later use.
+
+Rollback: `drop table public.delivery_jobs cascade;` and the `ws_delivery_*`
+functions; the punches and their status columns are untouched.
 

@@ -43,7 +43,7 @@ const PAGES = [
   ['/quotes', 'quotes'], ['/quotes?id=Q1', 'quote-record'], ['/crm/forecast', 'forecast'],
   ['/crm/settings?section=lost', 'crm-lost-reasons'], ['/crm/settings?section=forms', 'crm-web-forms'], ['/form?f=smoke0000000000000000000000000001', 'web-form'],
   ['/chat', 'messenger'], [`/call?id=${F.CALL}`, 'call'], ['/attendance', 'attendance'],
-  ['/wsm-admin', 'admin'], ['/wsm-admin?gate=1', 'admin-gate'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/wsm-admin/leave', 'admin-leave'], ['/crm', 'themes'], ['/crm', 'dialogs'], ['/crm', 'paging'], ['/tasks', 'task-complete'], ['/crm', 'notif-settings'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
+  ['/wsm-admin', 'admin'], ['/wsm-admin?gate=1', 'admin-gate'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/wsm-admin/leave', 'admin-leave'], ['/wsm-admin/attendance', 'admin-deliveries'], ['/crm', 'themes'], ['/crm', 'dialogs'], ['/crm', 'paging'], ['/tasks', 'task-complete'], ['/crm', 'notif-settings'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
 ];
 const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'leads-list', 'lead-record', 'lead-imported', 'deals', 'deals-list', 'deal-record', 'deal-imported', 'boards', 'board', 'projects',
   'project-record', 'tasks', 'task-record', 'task-new', 'task-people', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record', 'quotes', 'quote-record', 'forecast', 'crm-lost-reasons', 'crm-web-forms']);
@@ -198,6 +198,25 @@ function adminApi(req, res) {
         { id: 'published_leftovers', group: 'Database', label: 'Old public file copies', state: 'degraded', detail: '3 file(s) left', fix: 'Remove them with the button below.' }];
       const n = st => checks.filter(c => c.state === st).length;
       return send(res, 200, { checks, summary: { ok: n('ok'), missing: n('missing'), degraded: n('degraded'), off: n('off') } });
+    }
+    // The delivery queue (migration 24): one given-up email, one delivered group line.
+    if (action === 'att_deliveries' || action === 'att_delivery_retry') {
+      DB.__jobs = DB.__jobs || [
+        { id: 'd0000001-0000-4000-8000-000000000001', channel: 'email', kind: 'attendance.punch', status: 'dead', attempts: 1, max_attempts: 5,
+          last_error: 'smtp_send_failed: 550 5.1.1 User unknown', full_name: 'Asha Verma', punch: 'LOGIN', punch_at: '2026-09-21T03:45:00Z', to: 'asha.verma@example.com' },
+        { id: 'd0000002-0000-4000-8000-000000000002', channel: 'bitrix', kind: 'attendance.punch', status: 'sent', attempts: 2, max_attempts: 5, sent_at: '2026-09-21T03:50:00Z', full_name: 'Asha Verma', punch: 'LOGIN' },
+      ];
+      const b = JSON.parse(raw || '{}');
+      if (action === 'att_delivery_retry') {
+        const j = DB.__jobs.find(x => x.id === b.id);
+        if (!j || j.status === 'sent') return send(res, 409, { error: 'Already delivered: it is not sent again' });
+        Object.assign(j, { status: 'pending', max_attempts: j.attempts + 3 });
+        return send(res, 200, { success: true, job: j });
+      }
+      const want = !b.status || b.status === 'problems' ? ['failed', 'dead'] : [b.status];
+      const counts = {};
+      DB.__jobs.forEach(j => { (counts[j.channel] = counts[j.channel] || {})[j.status] = ((counts[j.channel] || {})[j.status] || 0) + 1; });
+      return send(res, 200, { counts, jobs: DB.__jobs.filter(j => want.includes(j.status)) });
     }
     if (action === 'att_corrections') {
       const people = DB.profiles || [];
@@ -768,6 +787,14 @@ async function interact(page, name, result) {
     if (!/Punched out on the phone/.test(await text('fx-body'))) throw new Error('the new request is not listed');
     await page.click('#fx-team-body [data-fx-ok]'); await wait(700);
     return /Approved/.test(await text('fx-msg')) && await page.evaluate(() => document.getElementById('fx-team').style.display === 'none');
+  });
+  if (name === 'admin-deliveries') await expect('Delivery retries lists a message that was given up, and sends it again', async () => {
+    await page.waitForSelector('#dq-tbody [data-dq-retry]', { timeout: 3000 });
+    const t = () => page.evaluate(() => document.getElementById('dq-tbody').innerText + ' | ' + document.getElementById('dq-counts').innerText);
+    if (!/Asha Verma/.test(await t()) || !/550 5\.1\.1/.test(await t()) || !/1 given up/.test(await t()) || /Bitrix group/.test(await t())) throw new Error('listed: ' + await t());
+    await (await page.$('#dq-tbody')).screenshot({ path: path.join(OUT, 'admin-deliveries-desktop.png') });
+    await page.click('#dq-tbody [data-dq-retry]'); await wait(1200);
+    return /Nothing here/.test(await t()) && /1 waiting/.test(await t());
   });
   if (name === 'admin-leave') await expect('the console lists correction requests and approves one once', async () => {
     await page.waitForSelector('#ac-tbody [data-ac-ok]', { timeout: 3000 });

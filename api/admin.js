@@ -3144,6 +3144,52 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({ success: true, request: out.data });
       }
 
+      // ---- Delivery retries (supabase-delivery-queue-migration.sql) ----
+      // The queue of emails and group lines that did not go out the first
+      // time. Send again goes through ws_delivery_retry: only a failed or
+      // given-up job, never one that was delivered.
+      if (action === 'att_deliveries') {
+        const status = body.status === 'problems' || !body.status ? 'in.(failed,dead)'
+          : ['pending', 'sending', 'sent', 'failed', 'dead'].includes(body.status) ? `eq.${body.status}` : null;
+        if (!status) return res.status(400).json({ error: 'bad status' });
+        const db = { url: SUPABASE_URL, key: SERVICE_KEY, request: fetch };
+        const [r, counts] = await Promise.all([
+          sb(`delivery_jobs?select=id,idempotency_key,channel,kind,company,source_table,source_id,status,attempts,max_attempts,next_attempt_at,expires_at,last_error,last_attempt_at,sent_at,created_at,payload->>to,payload->>message&status=${status}&order=updated_at.desc&limit=200`),
+          rpc('ws_delivery_counts', {}, db),
+        ]);
+        if (!r.ok) {
+          const missing = r.status === 404 || /PGRST205|42P01/.test(await r.text());
+          return res.status(missing ? 409 : 502).json({ error: missing ? 'Run supabase-delivery-queue-migration.sql first' : 'Could not load the delivery queue' });
+        }
+        const jobs = await r.json();
+        // Who a punch's message was about, from the punch.
+        const logIds = [...new Set(jobs.filter(j => j.source_table === 'attendance_logs' && /^\d+$/.test(String(j.source_id))).map(j => j.source_id))];
+        const logs = logIds.length ? await sb(`attendance_logs?id=in.(${logIds.join(',')})&select=id,user_id,log_datetime,direction,event_type`).then(x => x.ok ? x.json() : []) : [];
+        const profiles = logs.length ? await loadProfiles() : [];
+        const byId = new Map(profiles.map(p => [p.id, p])), logById = new Map(logs.map(l => [String(l.id), l]));
+        return res.status(200).json({
+          counts: counts.ok ? counts.data : {},
+          jobs: jobs.map(j => {
+            const l = j.source_table === 'attendance_logs' ? logById.get(String(j.source_id)) : null;
+            const p = l ? byId.get(l.user_id) : null;
+            return { ...j, full_name: p ? p.full_name : null, employee_id: p ? p.employee_id || null : null,
+                     punch_at: l ? l.log_datetime : null, punch: l ? (l.event_type || l.direction) : null };
+          }),
+        });
+      }
+
+      if (action === 'att_delivery_retry') {
+        const id = String(body.id || '');
+        if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'id required' });
+        const out = await rpc('ws_delivery_retry', { p_id: id }, { url: SUPABASE_URL, key: SERVICE_KEY, request: fetch });
+        if (!out.ok) {
+          if (out.missing) return res.status(409).json({ error: 'Run supabase-delivery-queue-migration.sql first' });
+          const msg = out.error || 'Could not queue it again';
+          return res.status(/Already|No such/.test(msg) ? 409 : 502).json({ error: msg });
+        }
+        return res.status(200).json({ success: true, job: out.data });
+      }
+
       if (action === 'att_selfies') {
         const date   = body.date ? String(body.date).slice(0, 10) : null;
         const status = ['pending', 'approved', 'flagged'].includes(body.status) ? body.status : null;

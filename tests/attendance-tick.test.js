@@ -13,7 +13,8 @@ const COMPANY = 'Nova Sportsmart Private Limited';
 
 const DAY_SHIFT = { id: 1, name: 'Day', start_time: '09:30', end_time: '18:30', working_days: [1, 2, 3, 4, 5, 6], is_default: true };
 
-function harness({ now, logs, profiles, bitrixResult, shifts = [DAY_SHIFT], targets, maxRows = Infinity, scheduler, failClaim, failPage, bitrixDelay = 0 }) {
+function harness({ now, logs, profiles, bitrixResult, shifts = [DAY_SHIFT], targets, maxRows = Infinity, scheduler, failClaim, failPage, bitrixDelay = 0, queue, mailResult }) {
+  const mails = [];
   let clock = Date.parse(now);
   const db = { attendance_logs: logs, attendance_auto_logouts: [], shift_switch_posts: [],
                worksuite_scheduler: scheduler ? [{ id: 1, ...scheduler }] : [] };
@@ -48,10 +49,11 @@ function harness({ now, logs, profiles, bitrixResult, shifts = [DAY_SHIFT], targ
     require(name) {
       if (name === '../lib/request-auth') return require('../lib/request-auth');
       if (name === '../lib/attendance-live') return require('../lib/attendance-live');
+      if (name === '../lib/delivery') return require('../lib/delivery');
       if (name === '../company-config') return require('../company-config');
       if (name === 'crypto') return require('crypto');
       if (name === '../lib/attendance') return attendance;
-      if (name === '../lib/mailer') return { async sendMail() { return { ok: true }; } };
+      if (name === '../lib/mailer') return { async sendMail(m) { mails.push(m); return typeof mailResult === 'function' ? mailResult(m) : (mailResult || { ok: true }); } };
       if (name === '../lib/bitrix') return {
         isConfigured: () => true, senderFor: ({ enroll }) => ({ base: 'hook', enroll }),
         async sendAndLog(payload) {
@@ -68,6 +70,23 @@ function harness({ now, logs, profiles, bitrixResult, shifts = [DAY_SHIFT], targ
       if (table === 'profiles') return response(profiles.filter(p => matches(p, url)));
       if (table === 'shifts') return response(shifts);
       if (table === 'bitrix_targets') return response(targets || [{ company: COMPANY, enabled: true, dialog_id: 'chat100' }]);
+      // The delivery queue (migration 24): `queue` is its jobs; without it, not installed.
+      if (table === 'delivery_jobs' || table.startsWith('rpc/ws_delivery_')) {
+        if (!queue) return response({ code: table === 'delivery_jobs' ? 'PGRST205' : 'PGRST202', message: 'Could not find it in the schema cache' }, 404);
+        if (table === 'delivery_jobs') return response([]);
+        const a = JSON.parse(init.body);
+        if (table === 'rpc/ws_delivery_claim') {
+          const due = queue.filter(j => ['pending', 'failed'].includes(j.status) && !j.claimed).slice(0, a.p_limit);
+          due.forEach(j => { j.status = 'sending'; j.attempts++; j.claimed = true; });
+          return response(due.map(j => ({ ...j })));
+        }
+        if (table === 'rpc/ws_delivery_result') {
+          const j = queue.find(x => x.id === a.p_id);
+          Object.assign(j, { status: a.p_ok ? 'sent' : a.p_permanent ? 'dead' : 'failed', last_error: a.p_error });
+          return response({ ...j });
+        }
+        throw new Error(table);
+      }
       const rows = db[table];
       if (!rows) throw new Error(`Unexpected ${method} ${table}`);
       if (method === 'GET') {
@@ -91,7 +110,7 @@ function harness({ now, logs, profiles, bitrixResult, shifts = [DAY_SHIFT], targ
     },
   }, { filename: 'attendance-webhook.js' });
   return {
-    db, posts,
+    db, posts, mails,
     at(iso) { clock = Date.parse(iso); },
     async tick(job = 'attendance_tick', key = 'test-device', query = {}) {
       const res = { statusCode: 200, setHeader() {}, status(c) { this.statusCode = c; return this; }, json(b) { this.body = b; return this; }, end() { return this; } };
@@ -395,4 +414,40 @@ test('a repeat tap on the break-out does not stop the automatic logout being re-
   await h.tick();
   assert.equal(h.posts.length, 2);
   assert.equal(h.db.attendance_auto_logouts[0].bitrix_ok, true);
+});
+
+/* ============ The delivery retry queue (supabase-delivery-queue-migration.sql) ============ */
+
+const qjob = (id, channel, payload, extra = {}) => ({ id, idempotency_key: `attendance:1:${channel}`, channel, kind: 'attendance.punch',
+  source_table: 'attendance_logs', source_id: '1', payload, status: 'failed', attempts: 1, ...extra });
+
+test('with the queue, the job sends what is due, each channel on its own, and writes the outcome back to the punch', async () => {
+  const queue = [
+    qjob('q1', 'email', { company: COMPANY, to: 'e@x.test', subject: 'Login', html: '<p>Login</p>', text: 'Login' }),
+    qjob('q2', 'bitrix', { company: COMPANY, enroll: '00000008', message: 'Login 9:31 AM', kind: 'punch' }),
+  ];
+  const h = harness({ now: '2026-09-15T10:00:00+05:30', profiles: [person], queue,
+    logs: [punch(1, '09:31', 'IN', 'LOGIN', { email_status: 'failed', bitrix_status: 'failed', bitrix_attempts: 0, bitrix_at: '2026-09-15T09:32:00+05:30' })],
+    mailResult: { ok: false, reason: 'smtp_send_failed', detail: 'Connection timeout' } });
+  const res = await h.tick();
+  const d = res.body.attendance.deliveries;
+  assert.deepEqual([d.claimed, d.sent, d.failed], [2, 1, 1]);
+  assert.equal(h.mails.length, 1);
+  assert.deepEqual(h.posts.map(p => p.message), ['Login 9:31 AM'], 'the failing mail server did not stop the group line, and the old retry stood aside');
+  const row = h.db.attendance_logs[0];
+  assert.deepEqual([row.bitrix_status, row.bitrix_attempts], ['sent', 2]);
+  assert.equal(row.email_status, 'failed');
+  assert.match(row.email_error, /Connection timeout \(will retry\)/);
+  assert.equal(queue[0].status, 'failed');
+});
+
+test('a queued email that goes out marks the punch as emailed', async () => {
+  const queue = [qjob('q1', 'email', { company: COMPANY, to: 'e@x.test', subject: 'Login', html: '<p>x</p>', text: 'x' }, { status: 'pending', attempts: 0 })];
+  const h = harness({ now: '2026-09-15T10:00:00+05:30', profiles: [person], queue, logs: [punch(1, '09:31', 'IN', 'LOGIN', { email_status: 'pending' })] });
+  await h.tick();
+  assert.equal(h.db.attendance_logs[0].email_status, 'sent');
+  assert.ok(h.db.attendance_logs[0].emailed_at);
+  assert.equal(queue[0].status, 'sent');
+  await h.tick();
+  assert.equal(h.mails.length, 1, 'sent once');
 });
