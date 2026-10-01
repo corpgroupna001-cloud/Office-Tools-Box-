@@ -357,6 +357,15 @@
                             <div class="ws-card-head"><h3>Companies</h3><span class="sub">People per entity</span></div>
                             <ul class="ws-list" id="ov-companies"><li><div class="ws-empty">Loading…</div></li></ul>
                         </div>
+                        <div class="ws-card">
+                            <div class="ws-card-head"><h3>Console lock</h3></div>
+                            <label for="ov-idle-lock" class="text-sm font-bold" style="display:block;margin-bottom:6px">Lock after inactivity</label>
+                            <select id="ov-idle-lock" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none" style="width:100%">
+                                <option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option>
+                                <option value="60">1 hour</option><option value="120">2 hours</option><option value="240">4 hours</option>
+                            </select>
+                            <p class="sub" style="margin-top:8px">Applies to this browser. Locking signs this browser out of the console and of the WorkSuite account it was opened with. A password sign-in always ends after 12 hours.</p>
+                        </div>
                     </div>
                 </div>
             </div><!-- /#overview-panel -->
@@ -1427,6 +1436,10 @@
         }
 
         async function unlockAdmin() {
+            if (new URLSearchParams(location.search).has('locked')) {
+                const url = new URL(location.href); url.searchParams.delete('locked');
+                history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+            }
             gateSubmit.textContent = 'Loading dashboard…';
             document.getElementById('gate-lead').textContent = 'Loading the dashboard…';
             const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1460,24 +1473,16 @@
                 const data = await r.json();
                 gatePassword.value = '';
                 if (!r.ok) throw new Error(data.error || 'Incorrect password.');
+                window.WSAdminLock.clearLock();
                 await unlockAdmin();
             } catch (err) {
                 showAdminGate(err.message || 'Network error. Please try again.');
             }
         });
 
-        document.getElementById('logout-btn').addEventListener('click', async () => {
-            try {
-                const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'logout' }) });
-                if (!r.ok) throw new Error('Could not end your session. Please try Lock again.');
-                // Reload clears all in-memory reports and the server-cleared
-                // cookie ensures the dashboard stays locked on the next load.
-                location.reload();
-            } catch (err) {
-                if (window.WSShell) WSShell.toast(err.message || 'Could not lock. Please try again.', 'bad');
-            }
-        });
+        // Lock ends the password cookie and the account session in this browser,
+        // then reloads on the gate (admin/inactivity.js; the idle timeout uses it too).
+        document.getElementById('logout-btn').addEventListener('click', () => window.WSAdminLock.lock('manual'));
 
         // Wait until every admin module has installed its unlock listener.
         document.getElementById('gate-use-pw').addEventListener('click', () => {
@@ -1489,6 +1494,18 @@
             gateSubmit.disabled = true;
             gateSubmit.textContent = 'Checking session…';
             adminToken = await accountToken();
+            const lockedBy = new URLSearchParams(location.search).get('locked');
+            if (window.WSAdminLock.lockedState()) {
+                if (!window.WSAdminLock.mayUnlock(adminToken)) {
+                    // A lock whose logout did not reach the server: try again now.
+                    if (window.WSAdminLock.lockedState().incomplete) await window.WSAdminLock.endServerSession();
+                    adminToken = null;
+                    showAdminGate(lockedBy === 'idle' ? 'The console locked itself after a period of inactivity. Sign in again to open it.'
+                        : 'The console is locked. Sign in again to open it.');
+                    return;
+                }
+                window.WSAdminLock.clearLock();   // a new account sign-in since the lock
+            }
             try {
                 const r = await adminFetch({ method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action: 'session' }) });
@@ -1995,7 +2012,7 @@
         }
 
         function ciLoad(raw) {
-            const text = String(raw || '').replace(/^﻿/, '');     // exports often start with a byte-order mark
+            const text = String(raw || '').replace(/^\uFEFF/, '');     // exports often start with a byte-order mark
             const table = parseCsv(text, sniffDelimiter(text));
             const result = document.getElementById('ci-result');
             result.innerHTML = '';
@@ -3796,6 +3813,7 @@
     <script src="/admin/holidays.js"></script>
     <script src="/admin/overview.js"></script>
     <script src="/admin/management.js"></script>
+    <script src="/admin/inactivity.js"></script>
     <script src="/admin/console.js"></script>
     <script src="/admin/crm-records.js"></script>
     <script src="/ui/crm-perms.js"></script>

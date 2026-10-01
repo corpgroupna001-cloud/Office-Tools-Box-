@@ -113,23 +113,34 @@ function pageContext(jar) {
     return elements.get(id);
   }
   const request = backend();
+  jar.store = jar.store || {};
+  const search = jar.search || '';
   const context = {
     adminAuthenticated: false, allResults: [], renderAll() {},
-    window: { WSShell: { setUser() {}, toast() {} } },
-    location: { reload() { context.reloaded = true; } },
+    window: { WSShell: { setUser() {}, toast() {} }, addEventListener() {}, setTimeout: () => 0 },
+    location: { origin: 'https://work-suite.example.test', pathname: '/wsm-admin', search, hash: '',
+      get href() { return this.origin + this.pathname + this.search; },
+      reload() { context.reloaded = true; }, replace(u) { context.replaced = u; } },
+    history: { state: null, replaceState() {} },
+    localStorage: { getItem: k => (k in jar.store ? jar.store[k] : null), setItem: (k, v) => { jar.store[k] = String(v); }, removeItem: k => { delete jar.store[k]; } },
+    URL, URLSearchParams, atob, clearTimeout() {},
     CustomEvent: class { constructor(type) { this.type = type; } },
-    document: { getElementById: element, addEventListener: (event,fn) => handlers.set(event,fn),
-      dispatchEvent: event => calls.push(event.type) },
+    document: { readyState: 'loading', getElementById: element, addEventListener: (event,fn) => handlers.set(event,fn),
+      dispatchEvent: event => calls.push(event.type), querySelectorAll: () => [] },
     async fetch(url, options) {
       assert.equal(options.credentials, 'same-origin');
       const body = JSON.parse(options.body);
       calls.push(body.action);
+      if (jar.offline) throw new TypeError('Failed to fetch');
       const r = await request(body, jar.cookie || '');
       if (r.headers['Set-Cookie']) jar.cookie = r.headers['Set-Cookie'].split(';')[0];
       return new Response(JSON.stringify(r.body), { status: r.code });
     },
   };
   context.WSShell = context.window.WSShell;
+  // admin/inactivity.js owns Lock; it runs in the same page.
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../admin/inactivity.js'), 'utf8'),
+    { ...context, window: context.window, document: context.document });
   const html = fs.readFileSync(path.join(__dirname, '../wsm-admin/index.html'), 'utf8');
   const start = html.indexOf("        const gate = document.getElementById('gate');");
   const end = html.indexOf("        document.getElementById('refresh-btn').addEventListener", start);
@@ -155,11 +166,37 @@ test('admin page restores after refresh, dispatches unlock, and stays locked aft
   assert.ok(refreshed.calls.includes('admin-unlocked'));
   assert.equal(refreshed.calls.includes('login'), false, 'refresh does not resend a password');
   await refreshed.handlers.get('logout-btn:click')();
-  assert.equal(refreshed.context.reloaded, true);
+  assert.equal(refreshed.context.replaced, '/wsm-admin?locked=manual');
+  assert.equal(jar.cookie, 'ws_admin_session=', 'the server cleared the HttpOnly cookie');
+  jar.search = '?locked=manual';
   const locked = pageContext(jar);
   await locked.handlers.get('DOMContentLoaded')();
   assert.equal(locked.context.adminAuthenticated, false);
   assert.equal(locked.element('dashboard').classList.contains('hidden'), true);
+  assert.match(locked.element('gate-error').textContent, /locked/);
+  // Signing in with the password opens it again and lifts the lock mark.
+  locked.element('gate-password').value = env.ADMIN_PASSWORD;
+  await locked.handlers.get('gate-form:submit')({ preventDefault() {} });
+  assert.equal(locked.context.adminAuthenticated, true);
+  assert.equal(jar.store.wsAdminLocked, undefined);
+});
+
+test('a Lock whose logout never reached the server still keeps the console shut', async () => {
+  const jar = { cookie: 'ws_admin_session=' + sessions.createSession(env) };
+  const open = pageContext(jar);
+  await open.handlers.get('DOMContentLoaded')();
+  assert.equal(open.context.adminAuthenticated, true);
+  jar.offline = true;                                   // the network drops as Lock is pressed
+  await open.handlers.get('logout-btn:click')();
+  assert.equal(open.context.replaced, '/wsm-admin?locked=manual');
+  assert.match(jar.cookie, /^ws_admin_session=.+/, 'the cookie is still valid');
+  jar.offline = false;
+  const reloaded = pageContext(jar);
+  await reloaded.handlers.get('DOMContentLoaded')();
+  assert.equal(reloaded.context.adminAuthenticated, false, 'a leftover cookie does not reopen a locked console');
+  assert.equal(reloaded.calls.includes('session'), false);
+  assert.ok(reloaded.calls.includes('logout'), 'the page retries ending the cookie');
+  assert.equal(jar.cookie, 'ws_admin_session=');
 });
 
 test('expired session during an admin request returns the page to login', async () => {

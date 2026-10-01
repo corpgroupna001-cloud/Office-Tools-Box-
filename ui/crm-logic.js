@@ -545,11 +545,8 @@
     if (isAdmin(viewer)) return true;
     if (target.manager_id === viewer.id) return true;
     if (!isManager(viewer)) return false;
-    {
-      const mine = [viewer.company, viewer.company2].filter(Boolean);
-      return mine.includes(target.company) || !!(target.company2 && mine.includes(target.company2));
-    }
-    return false;
+    const mine = [viewer.company, viewer.company2].filter(Boolean);
+    return mine.includes(target.company) || !!(target.company2 && mine.includes(target.company2));
   }
 
   /* --------------------------------------------------------------- search */
@@ -680,7 +677,7 @@
   /** RFC 4180 CSV to rows of strings. Quoted fields may hold commas, doubled quotes and
       newlines. The delimiter is a comma, or a semicolon when the header row has no comma. */
   function csvParse(text) {
-    const s = String(text == null ? '' : text).replace(/^﻿/, '');
+    const s = String(text == null ? '' : text).replace(/^\uFEFF/, '');
     const head = s.split(/\r?\n/, 1)[0] || '';
     const delim = !head.includes(',') && head.includes(';') ? ';' : ',';
     const rows = [];

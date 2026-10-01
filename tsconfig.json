@@ -1,0 +1,20 @@
+{
+  // Scoped JSDoc type check (npm run typecheck). The app is plain JavaScript
+  // with no build step, so nothing is compiled: TypeScript only reads the
+  // files. A file opts in with `// @ts-check` on its first line; the rest are
+  // parsed for their exports but not reported on. Browser scripts are checked
+  // by tsconfig.browser.json.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "target": "es2022",
+    "module": "nodenext",
+    "lib": ["es2023"],
+    "types": ["node"],
+    "skipLibCheck": true
+  },
+  "include": ["api/**/*.js", "lib/**/*.js", "scripts/**/*.js", "company-config.js"]
+}
