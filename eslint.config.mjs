@@ -70,7 +70,7 @@ export default [
     languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: { ...globals.browser, ...SHARED } },
   },
   {
-    files: ['api/**/*.js', 'lib/**/*.js', 'tests/**/*.js', 'scripts/**/*.js', 'desktop/**/*.js', 'company-config.js'],
+    files: ['api/**/*.js', 'lib/**/*.js', 'tests/**/*.js', 'scripts/**/*.js', 'desktop/**/*.js', 'company-config.js', 'tailwind.config.js'],
     languageOptions: { sourceType: 'commonjs', globals: { ...globals.node } },
   },
   // Browser scripts the Node tests also load: they export through `module` when it exists.

@@ -1525,3 +1525,33 @@ lists and totals built from one request silently went short.
 API, and its `paging` page checks the people list and the paging helper
 against 2,500 extra people.
 
+# 19. Browser libraries and CSS are served by the site
+
+Pages used to load `@supabase/supabase-js@2` (whatever 2.x was newest that
+day), Chart.js, html2canvas and canvas-confetti from jsDelivr, and six pages
+compiled Tailwind in the browser from `cdn.tailwindcss.com`. Two deployments
+of the same code could run different library versions, and start-up depended
+on two third-party services.
+
+Now (DEP-03):
+
+- The libraries are pinned to exact versions in `package.json` and copied to
+  `ui/vendor/` by `npm run build` (supabase-js 2.117.2 — the release `@2`
+  served at the time of the change —, Chart.js 4.4.0, html2canvas 1.4.1,
+  canvas-confetti 1.9.2). The auth guard, notifications and presence load the
+  same local copy when a page has not.
+- `ui/tailwind.css` is Tailwind 3.4 compiled ahead of time from
+  `tailwind.config.js` and linked last in `<head>`, where the Play CDN used to
+  append its styles; screenshots of the sign-in, home and pending pages are
+  pixel-identical to the runtime CDN.
+- Only TensorFlow.js and BlazeFace (the selfie face check, loaded on demand,
+  about 1.4 MB, and fetching their model weights from the web anyway) stay on
+  jsDelivr, at exact versions with Subresource Integrity hashes.
+- Google Fonts stay as they were; without them the pages fall back to system fonts.
+
+**Upgrading a library:** change its exact version in `package.json`, `npm
+install`, `npm run build`, run the checks and commit `ui/vendor/`. `npm run
+check` fails if the committed copies do not match the pinned versions.
+`npm run smoke:ui` refuses every CDN request, so a page that starts depending
+on one fails there.
+

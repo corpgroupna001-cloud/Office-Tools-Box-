@@ -1,7 +1,7 @@
 // ============================================================
 // WorkSuite — Global notifications (messages, bell items, calls)
 // Include on any authenticated page AFTER supabase-js and presence.js:
-//   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+//   <script src="/ui/vendor/supabase-js.js"></script>
 //   <script src="/presence.js"></script>
 //   <script src="/notifications.js"></script>
 //

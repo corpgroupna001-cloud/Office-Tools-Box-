@@ -4,7 +4,10 @@
 //   - every local <script src> / <link href> in an HTML page points at a file
 //     that exists (absolute paths resolve from the repository root, as Vercel
 //     serves them);
-//   - external scripts come from an allowed CDN;
+//   - external scripts come from an allowed CDN at an exact version, and no
+//     page compiles Tailwind at run time;
+//   - the vendored libraries and ui/tailwind.css match what npm run build
+//     writes (scripts/build-assets.js --check);
 //   - vercel.json parses, every function it names exists, every /api rewrite
 //     lands on a real function, and the Hobby plan limits hold
 //     (12 functions, 2 crons);
@@ -46,7 +49,11 @@ function checkReference(page, ref, kind) {
   if (/^(data:|blob:|mailto:|tel:|#|javascript:)/i.test(ref)) return;
   if (/^(https?:)?\/\//i.test(ref)) {
     const url = new URL(ref, 'https://x.invalid');
-    if (kind === 'script' && !CDN_HOSTS.has(url.hostname) && url.hostname !== 'cdn.tailwindcss.com') problem(page, `script from an unexpected host: ${ref}`);
+    if (kind === 'script') {
+      if (url.hostname === 'cdn.tailwindcss.com') return problem(page, `runtime Tailwind (${ref}): link the prebuilt /ui/tailwind.css (npm run build)`);
+      if (!CDN_HOSTS.has(url.hostname)) return problem(page, `script from an unexpected host: ${ref}`);
+      if (!/@\d+\.\d+\.\d+(?:[-+][\w.]+)?(\/|$)/.test(url.pathname)) problem(page, `external script without an exact version: ${ref}`);
+    }
     return;
   }
   const clean = ref.split(/[?#]/)[0];
@@ -109,6 +116,13 @@ for (const f of fs.readdirSync(ROOT).filter(f => /^supabase-.*\.sql$/.test(f))) 
   if (NOT_MIGRATIONS.has(f)) continue;
   if (!loaded.has(f)) problem(f, 'is not run by tests/fixtures/load-db.js');
   if (CRM.includes(f) && !setup.includes(f)) problem(f, 'is not described in SETUP.md');
+}
+
+/* ------------------------------------------------------------ assets */
+try {
+  require('node:child_process').execFileSync(process.execPath, [path.join(__dirname, 'build-assets.js'), '--check'], { cwd: ROOT, stdio: ['ignore', 'ignore', 'pipe'] });
+} catch (e) {
+  problem('ui/vendor, ui/tailwind.css', String((e.stderr && e.stderr.toString()) || e.message).trim());
 }
 
 /* ------------------------------------------------------------ report */

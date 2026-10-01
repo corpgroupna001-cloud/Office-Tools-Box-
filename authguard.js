@@ -24,7 +24,7 @@
         return new Promise((resolve) => {
             if (window.supabase && window.supabase.createClient) return resolve(true);
             const s = document.createElement('script');
-            s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+            s.src = '/ui/vendor/supabase-js.js';
             s.onload = () => resolve(true);
             s.onerror = () => resolve(false);
             document.head.appendChild(s);

@@ -5,7 +5,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WorkSuite Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/design-system.css">
@@ -37,6 +36,7 @@
     </style>
     <link rel="stylesheet" href="/ui/corporate.css">
     <link rel="stylesheet" href="/ui/b24.css">
+    <link rel="stylesheet" href="/ui/tailwind.css"><!-- prebuilt Tailwind (npm run build), last like the Play CDN's style was -->
 </head>
 <body data-ws-page="home" class="ws-app ws-corporate ws-b24">
 
@@ -433,7 +433,7 @@
             }
         });
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/ui/vendor/supabase-js.js"></script>
     <script src="/mfa.js"></script>
     <script src="/presence.js"></script>
     <script src="/notifications.js"></script>

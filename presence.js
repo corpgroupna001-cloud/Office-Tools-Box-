@@ -1,7 +1,7 @@
 // ============================================================
 // WorkSuite — Site-wide presence heartbeat
 // Include on any authenticated page:
-//   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+//   <script src="/ui/vendor/supabase-js.js"></script>
 //   <script src="/presence.js"></script>
 // Updates profiles.last_seen_at every 30s while the tab is visible.
 // A user is treated as ONLINE if their last_seen_at is within 60s.

@@ -240,7 +240,9 @@ async function visit(browser, route, name, [vpName, viewport]) {
     const u = r.url();
     if (u.startsWith(ORIGIN)) return r.continue();
     if (/fonts\.(googleapis|gstatic)\.com/.test(u)) return r.respond({ status: 200, contentType: 'text/css', body: '' });
-    if (/cdn\.jsdelivr\.net|cdn\.tailwindcss\.com|cdnjs\.cloudflare\.com/.test(u)) return r.continue();
+    // Pages must start without any CDN (DEP-03): their libraries and CSS are served from the site.
+    if (process.env.SMOKE_ALLOW_CDN === '1' && /cdn\.tailwindcss\.com/.test(u)) return r.continue();   // comparison runs only
+    if (/cdn\.jsdelivr\.net|cdn\.tailwindcss\.com|cdnjs\.cloudflare\.com|unpkg\.com/.test(u)) { cdnHits.push(u); return r.respond({ status: 404, body: '' }); }
     return r.respond({ status: 204, body: '' });
   });
   const key = `sb-${new URL(ORIGIN).hostname.split('.')[0]}-auth-token`;
@@ -252,6 +254,7 @@ async function visit(browser, route, name, [vpName, viewport]) {
     } catch (e) { /* ignore */ }
   }, key, JSON.stringify(F.session()), { wallpaper: process.env.SMOKE_WALLPAPER || '', theme: process.env.SMOKE_THEME || '', signedOut: name === 'signin' });
   const result = { route, name, viewport: vpName, errors, consoleErrors, problems: [], notes: [] };
+  const cdnHits = [];
   // A signed-in account still waiting for an administrator's approval.
   // T2 needs a status summary; the others do not (BUG-05).
   if (name === 'task-complete') DB.tasks.forEach(t => { t.result_required = t.id === 'T2'; });
@@ -282,6 +285,7 @@ async function visit(browser, route, name, [vpName, viewport]) {
         return fm && fm.contains(el2) ? 'ok' : 'success dialog covered by ' + (el2 && (el2.id || el2.className));
       });
       if (onTop !== 'ok') result.problems.push('sign-in dialog hidden: ' + onTop);
+      await new Promise(r => setTimeout(r, 1200));                     // let the dialog finish its entrance before the picture
     }
     if (name === 'task-people') { await page.evaluate(() => document.querySelector('[data-assignee]').click()); await new Promise(r => setTimeout(r, 300)); }
     if (name === 'themes') { await page.evaluate(() => window.WSShell.openThemes()); await new Promise(r => setTimeout(r, 400)); }
@@ -320,6 +324,7 @@ async function visit(browser, route, name, [vpName, viewport]) {
     if (name === 'public-doc' && !/Academy kit: 1,680/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('the public document did not render');
     if (name === 'public-doc-off' && !/no longer available/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('a link that is off did not say so');
     if (name === 'web-form' && !/Talk to our sales team/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('web form did not render');
+    if (cdnHits.length) result.problems.push(`loaded from a CDN at start-up: ${[...new Set(cdnHits)].join(', ')}`);
     if (vpName === 'phone' && info.overflow > 1) result.problems.push(`horizontal overflow ${info.overflow}px: ${info.offenders.join(', ')}`);
     if (CRM_PAGES.has(name) && info.errorText) result.problems.push(`error state on screen: "${info.errorText.slice(0, 90)}"`);
     if (info.signedOut && name !== 'signin' && name !== 'pending') result.problems.push('ended on the sign-in screen');

@@ -1,0 +1,4 @@
+/* Input for ui/tailwind.css (npm run build). The same layers the Play CDN injected. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

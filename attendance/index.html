@@ -6,7 +6,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Attendance · WorkSuite</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/design-system.css">
@@ -211,6 +210,7 @@
     </style>
     <link rel="stylesheet" href="/ui/corporate.css">
     <link rel="stylesheet" href="/ui/b24.css">
+    <link rel="stylesheet" href="/ui/tailwind.css"><!-- prebuilt Tailwind (npm run build), last like the Play CDN's style was -->
 </head>
 <body data-ws-page="attendance" class="ws-app ws-corporate ws-b24">
     <div class="container">
@@ -398,7 +398,7 @@
 
     <script src="/ui/shell.js"></script>
     <script>WSShell.mount({ active: location.hash === '#leave' || location.hash === '#holidays' ? 'leave' : 'attendance', crumb: 'My Attendance' });</script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="/ui/vendor/supabase-js.js"></script>
     <script src="/presence.js"></script>
     <script>
     (async function () {
@@ -1322,9 +1322,11 @@
         // check did not run. Blocking attendance entirely because a CDN is
         // unreachable would be a worse failure than an unverified photo — the
         // admin review queue shows which punches were unchecked.
-        function loadScript(src) {
+        // On demand, pinned and integrity-checked: a changed file is refused, not run.
+        function loadScript(src, integrity) {
             return new Promise((res, rej) => {
                 const s = document.createElement('script');
+                if (integrity) { s.integrity = integrity; s.crossOrigin = 'anonymous'; }
                 s.src = src; s.onload = res; s.onerror = () => rej(new Error('load failed'));
                 document.head.appendChild(s);
             });
@@ -1340,8 +1342,9 @@
                 } catch { /* fall through to BlazeFace */ }
             }
             try {
-                if (!window.tf) await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
-                if (!window.blazeface) await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.0/dist/blazeface.min.js');
+                // Large and only needed for a selfie (their model weights come from the web anyway), so these stay on the CDN.
+                if (!window.tf) await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js', 'sha384-xc4sZTUOM2obsQR75Be0zGbt7Gb6mOVFJN4yBm30Xn0YQLDWIY+yrtFmLmIank6w');
+                if (!window.blazeface) await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/blazeface@0.1.0/dist/blazeface.min.js', 'sha384-n43NK0E8fxjNTd7pmr1x52SVpz18mtyRYMDiUneK7UdBX76jx5Z1pyYv9vqWdsAX');
                 blazeModel = await window.blazeface.load();
                 faceMethod = 'blazeface';
             } catch {

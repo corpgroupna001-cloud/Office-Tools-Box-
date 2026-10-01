@@ -9,4 +9,5 @@ types/
 eslint.config.mjs
 tsconfig.json
 tsconfig.browser.json
+tailwind.config.js
 .nvmrc
