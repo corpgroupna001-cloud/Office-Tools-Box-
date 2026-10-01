@@ -301,7 +301,7 @@ const RPC = {
   },
   // A public link (/documents/public?t=…): a live native document, or nothing.
   ws_published_document: body => (body.p_token === 'smokepublic0000000000000000000001'
-    ? { name: 'Price list', doc_kind: 'document', file: false, content: { html: '<h2>Price list</h2><p>Academy kit: <b>1,680</b></p>' }, published_at: '2026-09-20T09:00:00Z', expires_at: null }
+    ? { name: 'Price list', doc_kind: 'document', file: false, content: { html: '<h2>Price list</h2><p>Academy kit: <b>1,680</b></p>' }, published_at: '2026-09-20T09:00:00Z', expires_at: new Date(Date.now() + 7 * 86400000).toISOString() }
     : null),
   crm_log: () => null,
   crm_convert_lead: () => ({ contact_id: 'C1', deal_id: 'D1', existing_contact: true }),

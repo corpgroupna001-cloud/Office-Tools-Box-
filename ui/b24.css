@@ -1120,6 +1120,11 @@ body.ws-b24 #view.b24-legacy-panel { background: var(--ws-bg); border-radius: va
 .dv-drop span { padding: 20px 28px; border-radius: 14px; border: 2px dashed #2fc6f6; background: var(--b24-surface); color: var(--b24-text); font-weight: 600; box-shadow: var(--b24-shadow-pop); }
 .dv-link { display: flex; gap: 8px; }
 .dv-link input { flex: 1; min-width: 0; }
+.dv-exp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.dv-exp { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+.dv-exp select, .dv-exp input { margin-left: 4px; min-height: 34px; border-radius: 8px; border: 1px solid var(--ws-border); background: var(--ws-surface-2); color: var(--ws-text); padding: 0 8px; font: inherit; }
+.dv-exp-msg { margin: 8px 0 0; font-size: 12.5px; font-weight: 600; color: var(--ws-success-text); min-height: 1em; }
+.dv-exp-msg.bad, .dv-exp-gone { color: var(--ws-danger-text); }
 .dv-banner { margin: 0 0 10px; }
 .dv-conflict { margin: 0 0 10px; }
 .dv-conflict .crm-notice { align-items: center; flex-wrap: wrap; }

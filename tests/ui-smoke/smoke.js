@@ -345,6 +345,7 @@ async function visit(browser, route, name, [vpName, viewport]) {
       if (!(await page.$('.cal-month .cal-ev, .cal-month [data-key]'))) result.notes.push('no items drawn on the partial calendar');
     }
     if (name === 'public-doc' && !/Academy kit: 1,680/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('the public document did not render');
+    if (name === 'public-doc' && !/This link works until/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('a link that expires did not say until when');
     if (name === 'public-doc-off' && !/no longer available/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('a link that is off did not say so');
     if (name === 'web-form' && !/Talk to our sales team/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('web form did not render');
     if (cdnHits.length) result.problems.push(`loaded from a CDN at start-up: ${[...new Set(cdnHits)].join(', ')}`);
@@ -775,6 +776,33 @@ async function interact(page, name, result) {
     await page.click('#ws-dialog-ok'); await wait(800);
     const t = await page.evaluate(() => document.getElementById('ac-tbody').innerText + ' | ' + document.getElementById('ac-counts').innerText);
     return /0 pending/.test(t) || /No correction requests/.test(t);
+  });
+  if (name === 'documents') await expect('a public link can be given an expiry, changed back to never, and refuses a past day', async () => {
+    const patches = [];
+    const onReq = r => { if (r.url().includes('/rest/v1/documents') && r.method() === 'PATCH') patches.push(JSON.parse(r.postData() || '{}')); };
+    page.on('request', onReq);
+    try {
+      await page.click('[data-pub="DOC1"]');
+      await page.waitForSelector('[data-exp-save]', { timeout: 3000 });
+      const line = () => page.evaluate(() => document.querySelector('[data-exp-line]').innerText);
+      if (!/never expires/.test(await line())) throw new Error('new link: ' + await line());
+      await page.select('[data-exp]', '7');
+      await page.click('[data-exp-save]'); await wait(500);
+      const set = patches.find(b => 'published_expires_at' in b && b.published_expires_at);
+      const days = set ? (Date.parse(set.published_expires_at) - Date.now()) / 86400000 : 0;
+      if (!(days > 6.9 && days <= 7)) throw new Error('saved ' + JSON.stringify(set));
+      if (!/works until/.test(await line())) throw new Error('after saving: ' + await line());
+      await (await page.$('.crm-modal .panel')).screenshot({ path: path.join(OUT, 'documents-expiry-desktop.png') });
+      await page.select('[data-exp]', 'date');
+      await page.$eval('[data-exp-date]', e => { e.value = '2020-01-01'; });
+      const before = patches.length;
+      await page.click('[data-exp-save]'); await wait(300);
+      if (patches.length !== before || !/future/.test(await page.evaluate(() => document.querySelector('[data-exp-msg]').innerText))) throw new Error('a past day was not refused');
+      await page.select('[data-exp]', '');
+      await page.click('[data-exp-save]'); await wait(500);
+      const last = patches[patches.length - 1];
+      return last.published_expires_at === null && /never expires/.test(await line());
+    } finally { page.off('request', onReq); }
   });
   if (name === 'admin') await expect('Setup health lists what is missing and offers the clean-up', async () => {
     await wait(600);

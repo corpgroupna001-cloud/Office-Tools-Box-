@@ -348,36 +348,100 @@
     // hands out a short-lived signed URL (supabase-document-links-migration.sql).
     // Turning it off is clearing the token: nothing is copied, so nothing is left behind.
     const publicUrl = token => `${location.origin}/documents/public?t=${encodeURIComponent(token)}`;
-    async function publish(d) {
+    // Expiry (F-05): documents.published_expires_at, checked by the database on every
+    // view. Before that migration the dialog simply has no expiry choice.
+    let expirySupported = null;
+    const istDay = t => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(t));
+    const EXPIRY = [['', 'Never'], ['1', 'In 1 day'], ['7', 'In 7 days'], ['30', 'In 30 days'], ['date', 'On a date…']];
+    function expiryField(label) {
+        const min = istDay(Date.now() + 86400000);
+        return `<div class="dv-exp"><label>${esc(label)} <select data-exp>${EXPIRY.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>
+                <input type="date" data-exp-date min="${min}" value="${istDay(Date.now() + 7 * 86400000)}" aria-label="Last day the link works" hidden></div>`;
+    }
+    function wireExpiry(body) {
+        const sel = body.querySelector('[data-exp]'), date = body.querySelector('[data-exp-date]');
+        if (sel) sel.addEventListener('change', () => { date.hidden = sel.value !== 'date'; if (!date.hidden) date.focus(); });
+    }
+    /** The expiry the dialog asks for: an ISO time, null for never, or undefined when there is no choice. */
+    function chosenExpiry(body) {
+        const sel = body.querySelector('[data-exp]');
+        if (!sel) return undefined;
+        if (!sel.value) return null;
+        if (sel.value !== 'date') return new Date(Date.now() + Number(sel.value) * 86400000).toISOString();
+        const day = body.querySelector('[data-exp-date]').value;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('Pick the last day the link should work.');
+        const at = new Date(`${day}T23:59:59+05:30`);               // to the end of that day, India time
+        if (at.getTime() <= Date.now()) throw new Error('Pick a day in the future.');
+        return at.toISOString();
+    }
+    async function loadExpiry(d) {
+        if (expirySupported === false) return;
+        const r = await sb.from('documents').select('published_expires_at').eq('id', d.id).maybeSingle();
+        expirySupported = !r.error;
+        if (!r.error) d.published_expires_at = r.data ? r.data.published_expires_at : null;
+    }
+    async function publish(d, expiresAt) {
         const token = D.newToken(), at = new Date().toISOString();
-        await C.q(sb.from('documents').update({ published_token: token, published_at: at }).eq('id', d.id));
+        const extra = expiresAt !== undefined && expirySupported ? { published_expires_at: expiresAt } : {};
+        await C.q(sb.from('documents').update({ published_token: token, published_at: at, ...extra }).eq('id', d.id));
         d.published_token = token; d.published_at = at;
+        if ('published_expires_at' in extra) d.published_expires_at = expiresAt;
+    }
+    async function setExpiry(d, expiresAt) {
+        const r = await C.q(sb.from('documents').update({ published_expires_at: expiresAt }).eq('id', d.id).select('id, published_expires_at'));
+        const row = (r.data || [])[0];
+        if (!row) throw new Error('The expiry could not be changed. Only people who can edit this item can do that.');
+        d.published_expires_at = row.published_expires_at;
     }
     async function unpublish(d) {
         const r = await C.q(sb.from('documents').update({ published_token: null, published_at: null }).eq('id', d.id).select('id, published_token'));
         const row = (r.data || [])[0];
         if (!row || row.published_token) throw new Error('The link could not be turned off. Only people who can edit this item can do that.');
-        d.published_token = null; d.published_at = null;
+        d.published_token = null; d.published_at = null; d.published_expires_at = null;
     }
-    function publishDoc(d, after) {
+    function expiryLine(d) {
+        if (!expirySupported) return '';
+        const at = d.published_expires_at;
+        if (!at) return 'It never expires.';
+        return new Date(at).getTime() <= Date.now()
+            ? `<b class="dv-exp-gone">It expired on ${esc(L.fmtDateTime(at))}</b>: it no longer opens. Choose a new expiry to turn it back on, or turn it off.`
+            : `It works until ${esc(L.fmtDateTime(at))}.`;
+    }
+    async function publishDoc(d, after) {
+        try { await loadExpiry(d); } catch { expirySupported = false; }
         const what = isNative(d) ? `this ${D.KINDS[d.doc_kind].label.toLowerCase()}` : 'this file';
         const body = document.createElement('div');
         body.innerHTML = d.published_token
             ? `<p style="margin:0 0 12px">Anyone with this link can view ${what} without signing in. Turning the link off stops it working straight away.</p>
                <div class="dv-link"><input type="text" readonly value="${esc(publicUrl(d.published_token))}" aria-label="Public link"><button type="button" class="ws-btn" data-copy>Copy</button></div>
-               <p class="muted" style="font-size:12.5px;margin:10px 0 0">On since ${esc(L.fmtDateTime(d.published_at))}. ${isNative(d) ? 'Viewers always see the latest saved version.' : 'Each view is checked against the link, so turning it off works within a minute even for someone who has the page open (a video already playing can run up to 15 minutes).'}</p>`
-            : `<p style="margin:0">Create a link that lets anyone view ${what} without signing in, for example to send it to a customer. You can turn it off at any time.</p>`;
+               <p class="muted" style="font-size:12.5px;margin:10px 0 0" data-exp-line>On since ${esc(L.fmtDateTime(d.published_at))}. ${expiryLine(d)} ${isNative(d) ? 'Viewers always see the latest saved version.' : 'Each view is checked against the link, so turning it off works within a minute even for someone who has the page open (a video already playing can run up to 15 minutes).'}</p>
+               ${expirySupported ? `<div class="dv-exp-row">${expiryField('Change expiry:')}<button type="button" class="ws-btn" data-exp-save>Save expiry</button></div><p class="dv-exp-msg" role="status" data-exp-msg></p>` : ''}`
+            : `<p style="margin:0">Create a link that lets anyone view ${what} without signing in, for example to send it to a customer. You can turn it off at any time.</p>
+               ${expirySupported ? `<div class="dv-exp-row">${expiryField('The link expires:')}</div>` : ''}`;
+        wireExpiry(body);
         const m = C.modal({
             title: 'Public link', body,
             actions: d.published_token
                 // A failure stays in the dialog (the modal shows the error); success is only claimed after the row says so.
                 ? [{ label: 'Turn the link off', danger: true, onClick: async api => { await unpublish(d); api.close(); C.toast('Public link turned off', 'ok'); if (after) after(); } }, { label: 'Done', primary: true, close: true }]
-                : [{ label: 'Cancel', close: true }, { label: 'Create public link', primary: true, onClick: async api => { await publish(d); api.close(); if (after) after(); publishDoc(d, after); } }],
+                : [{ label: 'Cancel', close: true }, { label: 'Create public link', primary: true, onClick: async api => { const exp = chosenExpiry(body); await publish(d, exp); api.close(); if (after) after(); publishDoc(d, after); } }],
         });
         const cp = body.querySelector('[data-copy]');
         if (cp) cp.addEventListener('click', async () => {
             const input = body.querySelector('input');
             try { await navigator.clipboard.writeText(input.value); C.toast('Link copied', 'ok'); } catch (e) { input.select(); document.execCommand('copy'); C.toast('Link copied', 'ok'); }
+        });
+        const save = body.querySelector('[data-exp-save]');
+        if (save) save.addEventListener('click', async () => {
+            const out = body.querySelector('[data-exp-msg]');
+            save.disabled = true; out.textContent = ''; out.classList.remove('bad');
+            try {
+                await setExpiry(d, chosenExpiry(body));
+                body.querySelector('[data-exp-line]').innerHTML = `On since ${esc(L.fmtDateTime(d.published_at))}. ${expiryLine(d)}`;
+                out.textContent = d.published_expires_at ? 'Saved. The link stops working after that.' : 'Saved. The link no longer expires.';
+                if (after) after();
+            } catch (e) { out.textContent = e.message; out.classList.add('bad'); }
+            finally { save.disabled = false; }
         });
         return m;
     }

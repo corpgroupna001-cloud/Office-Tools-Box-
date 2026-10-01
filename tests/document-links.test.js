@@ -82,6 +82,11 @@ test('expiring links: the database ends them on time; a past date is refused; a 
   finally { await db.exec(`set session_replication_role = origin`); }
   assert.equal((await svc(`select public.ws_published_file($1) f`, [f.token]))[0].f, null, 'expired');
   assert.equal((await anon(`select public.ws_published_document($1) d`, [f.token]))[0].d, null);
+  // The owner gives the same link a new expiry (the dialog's "Change expiry"): it opens again, then never expires.
+  await q(A, `update documents set published_expires_at = now() + interval '7 days' where id = $1`, [f.id]);
+  assert.ok(json((await svc(`select public.ws_published_file($1) f`, [f.token]))[0].f), 'an expired link with a new expiry works again');
+  await q(A, `update documents set published_expires_at = null where id = $1`, [f.id]);
+  assert.ok(json((await svc(`select public.ws_published_file($1) f`, [f.token]))[0].f));
   const t2 = token();
   await q(A, `update documents set published_token = $1 where id = $2`, [t2, f.id]);
   assert.equal((await svc(`select published_expires_at from documents where id = $1`, [f.id]))[0].published_expires_at, null, 'a new link does not inherit the old expiry');

@@ -1485,7 +1485,12 @@ it any more.
   requests), so a viewer with the page already open can finish that long at
   most. Responses are `Cache-Control: no-store`.
 - Links can **expire**: `documents.published_expires_at`, checked by the
-  database on every view; a past date is refused.
+  database on every view; a past date is refused. In **Public link** the
+  owner picks *Never*, *In 1 / 7 / 30 days* or *On a date…* (to the end of
+  that day, India time) when creating the link, and sees and changes it while
+  the link is on — an expired link gets a new expiry to work again. A new link
+  never inherits an old expiry. The public page says until when the link works;
+  after that it shows *This link is no longer available*.
 - The `published` bucket is now **private**, so the old direct copy URLs stop
   working as soon as the migration runs. Remove the copies themselves from
   **Admin → Overview → Setup health → Remove leftover public copies**
