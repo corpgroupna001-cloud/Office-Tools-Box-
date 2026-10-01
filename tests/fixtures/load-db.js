@@ -1,9 +1,11 @@
 // Builds an in-process Postgres (PGlite) with the Supabase stand-in and every
 // WorkSuite migration applied in deployment order, for the database tests.
 //
-// PGlite is a dev-only dependency. When it is not installed the loader
-// returns null and the database tests skip themselves, so `npm test` still
-// runs everywhere.
+// PGlite is a dev-only dependency, and the database tests are required: when
+// it is missing, or a listed migration file is missing, they FAIL (QUAL-03) —
+// a damaged checkout must not pass by skipping its database tests. For a
+// machine that cannot install it, WS_SKIP_DB_TESTS=1 skips them on purpose,
+// and every skipped test says so.
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -71,8 +73,27 @@ function sqlOf(file) {
   return sql;
 }
 
-function pglite() {
-  try { return require('@electric-sql/pglite').PGlite; } catch { return null; }
+/**
+ * The PGlite class. Throws when it is not installed, unless WS_SKIP_DB_TESTS=1
+ * asks to skip the database tests (then null, and the tests skip, saying why).
+ */
+function pglite(load = () => require('@electric-sql/pglite').PGlite, env = process.env) {
+  try { return load(); }
+  catch (e) {
+    if (env.WS_SKIP_DB_TESTS === '1') {
+      if (!pglite.warned) { pglite.warned = true; console.warn('WS_SKIP_DB_TESTS=1: the database tests are SKIPPED (PGlite is not installed).'); }
+      return null;
+    }
+    const err = new Error('The database tests need @electric-sql/pglite: run `npm ci`. (WS_SKIP_DB_TESTS=1 skips them on purpose.)');
+    err.cause = e;
+    throw err;
+  }
+}
+
+/** Every listed migration must exist: a missing file is an error, not a quiet gap in the schema. */
+function checkFiles(files, root = ROOT) {
+  const missing = files.filter(f => !fs.existsSync(path.join(root, f)));
+  if (missing.length) throw new Error(`Migration file(s) listed in tests/fixtures/load-db.js are missing: ${missing.join(', ')}`);
 }
 
 /**
@@ -84,10 +105,10 @@ function pglite() {
 async function freshDb(opts = {}) {
   const PGlite = pglite();
   if (!PGlite) return null;
+  checkFiles([...BASE, ...CRM]);
   const db = new PGlite();
   await db.exec(fs.readFileSync(path.join(__dirname, 'supabase-stub.sql'), 'utf8'));
   const run = async file => {
-    if (!fs.existsSync(path.join(ROOT, file))) return;
     try { await db.exec(sqlOf(file)); }
     catch (e) { const err = new Error(`${file}: ${e.message}`); err.file = file; err.cause = e; throw err; }
   };
@@ -122,4 +143,4 @@ async function makeUser(db, { email, name, company, role = 'employee', manager_i
   return id;
 }
 
-module.exports = { freshDb, as, makeUser, sqlOf, BASE, CRM, pglite };
+module.exports = { freshDb, as, makeUser, sqlOf, BASE, CRM, pglite, checkFiles };

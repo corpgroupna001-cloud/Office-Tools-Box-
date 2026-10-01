@@ -719,7 +719,8 @@ async function interact(page, name, result) {
 (async () => {
   await new Promise(r => server.listen(0, 'localhost', r));
   ORIGIN = `http://localhost:${server.address().port}`;
-  const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ['--no-first-run', '--no-default-browser-check',
+  // CI runners (Ubuntu 24.04) block the user namespaces Chrome's sandbox needs; a throwaway runner may skip it.
+  const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: [...(process.env.CI ? ['--no-sandbox'] : []), '--no-first-run', '--no-default-browser-check',
     // A fake camera and microphone, already allowed, so the call page renders as it would for a person.
     '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   const results = [];

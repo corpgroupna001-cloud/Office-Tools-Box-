@@ -11,3 +11,4 @@ tsconfig.json
 tsconfig.browser.json
 tailwind.config.js
 .nvmrc
+.env.example

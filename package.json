@@ -8,10 +8,12 @@
     "smoke:ui": "node tests/ui-smoke/smoke.js",
     "test:calls": "node tests/ui-smoke/calls-webrtc.js",
     "build": "node scripts/build-assets.js",
+    "dev": "node scripts/dev-server.js",
     "check": "node scripts/check-static.js",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.browser.json",
-    "verify": "npm run check && npm run lint && npm run typecheck && npm test"
+    "verify": "npm run check && npm run lint && npm run typecheck && npm test",
+    "test:all": "npm run verify && npm run smoke:ui && npm run test:calls"
   },
   "dependencies": {
     "nodemailer": "^10.0.13",

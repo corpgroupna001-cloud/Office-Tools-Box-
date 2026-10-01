@@ -5,7 +5,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { freshDb, as, makeUser, pglite } = require('./fixtures/load-db');
 
-const skip = pglite() ? false : 'PGlite is not installed (npm i -D @electric-sql/pglite)';
+const skip = pglite() ? false : 'WS_SKIP_DB_TESTS=1: database tests skipped on purpose';
 const NOVA = 'Nova Sportsmart Private Limited';
 const GENIE = 'Genie Lamp Private Limited';
 

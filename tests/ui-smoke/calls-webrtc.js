@@ -452,7 +452,8 @@ async function callWindowChecks(browser) {
   const origin = ORIGIN = `http://localhost:${server.address().port}`;
   const browser = await puppeteer.launch({
     executablePath: CHROME, headless: true,
-    args: ['--no-first-run', '--no-default-browser-check', '--use-fake-ui-for-media-stream',
+    // CI runners (Ubuntu 24.04) block the user namespaces Chrome's sandbox needs.
+    args: [...(process.env.CI ? ['--no-sandbox'] : []), '--no-first-run', '--no-default-browser-check', '--use-fake-ui-for-media-stream',
       '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'],
   });
   let results = [];

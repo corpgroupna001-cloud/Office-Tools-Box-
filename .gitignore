@@ -11,3 +11,9 @@ __cdn
 
 # Browser smoke-test screenshots (npm run smoke:ui)
 tests/ui-smoke/out/
+
+# Real environment files hold secrets: never commit them. The placeholder
+# template is the one exception.
+.env
+.env.*
+!.env.example
