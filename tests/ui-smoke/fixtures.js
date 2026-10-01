@@ -256,6 +256,12 @@ const RPC = {
   // The session gate's answer for Maya (supabase-access-control-migration.sql); a page can set DB.__access.
   ws_my_access: (_body, DB) => DB.__access || { signed_in: true, access: 'ok', status: 'active', email_verified: true, company: NOVA, full_name: 'Maya Manager', mfa_enrolled: false },
   ws_unread_counts: () => [{ direct_unread: 1, group_unread: 1, total: 2 }],
+  // Favourites (supabase-favorites-migration.sql): the starred rows that still exist.
+  ws_my_favorites: (_b, DB) => (DB.user_favorites || []).map(f => {
+    const table = { task: 'tasks', deal: 'crm_deals', project: 'projects', document: 'documents' }[f.entity_type];
+    const row = (DB[table] || []).find(x => x.id === f.entity_id && !x.archived_at);
+    return row ? { entity_type: f.entity_type, entity_id: f.entity_id, title: row.title || row.name, url: `/${f.entity_type === 'deal' ? 'deals' : f.entity_type + 's'}/?id=${f.entity_id}` } : null;
+  }).filter(Boolean),
   // CRM totals (supabase-crm-summary-migration.sql), computed from the fixture rows like the database would.
   crm_deal_summary: (body, DB) => {
     const live = (DB.crm_deals || []).filter(d => !d.archived_at && (!body.p_owner || d.owner_id === body.p_owner));

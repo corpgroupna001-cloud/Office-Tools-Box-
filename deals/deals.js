@@ -830,9 +830,9 @@
         WSCard.mount(view.querySelector('#card'), {
             title: d.title, number: B.sourceId(d) || d.number, canEdit: edit, onRename: edit ? save('title') : null,
             // The pipeline beside the title; its caret moves the deal to another pipeline.
-            titleAfter: pipeline.name ? (edit && !d.archived_at && lk.pipelines.length > 1
+            titleAfter: C.favoriteHtml('deal', d.id) + (pipeline.name ? (edit && !d.archived_at && lk.pipelines.length > 1
                 ? `<button type="button" class="b24-pipe" data-card-act="pipeline" aria-haspopup="menu" title="Move to another pipeline">${esc(pipeline.name)} <span class="caret" aria-hidden="true">▾</span></button>`
-                : `<span class="b24-pipe">${esc(pipeline.name)}</span>`) : '',
+                : `<span class="b24-pipe">${esc(pipeline.name)}</span>`) : ''),
             handlers: { pipeline: el => C.menu(el, lk.pipelines.map(p => ({ label: p.name + (p.id === d.pipeline_id ? '  ✓' : ''), icon: 'board', onClick: () => changePipeline(d, p, refresh) }))) },
             finalLabel: 'Close deal',
             subtitle: [C.statusBadge(L.DEAL_STATUS, d.status), d.archived_at ? C.badge('mute', 'Archived') : ''].filter(Boolean).join(' '),

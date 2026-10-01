@@ -931,7 +931,7 @@
             <div class="b24-titlebar wb-titlebar dv-edbar">
                 <a class="b24-btn-glass" href="${esc(back)}" data-nav>${C.icon('arrow')}<span>${esc(d.folder_id ? folderName(d.folder_id) : 'Documents')}</span></a>
                 ${ico(d)}
-                <h1 class="b24-title" data-name>${esc(d.name)}</h1>
+                <h1 class="b24-title" data-name>${esc(d.name)}</h1>${C.favoriteHtml('document', d.id)}
                 ${canEdit(d) ? `<button type="button" class="b24-btn-glass round" data-rename aria-label="Rename" title="Rename">${C.icon('edit')}</button>` : ''}
                 <span class="wb-status" data-status>${d.archived_at ? 'In the Recycle bin' : editable ? 'All changes saved' : 'View only'}</span>
                 <span class="grow"></span>
@@ -1015,7 +1015,7 @@
             <div class="crm-record-head">
                 ${ico(d, true)}
                 <div class="titles">
-                    <h1>${esc(d.name)}</h1>
+                    <h1>${esc(d.name)}${C.favoriteHtml('document', d.id)}</h1>
                     <div class="meta">
                         <span>${esc(typeText(d))} · ${esc(L.fmtBytes(d.size_bytes))}</span>
                         ${d.archived_at ? C.badge('mute', 'In the Recycle bin') : ''}

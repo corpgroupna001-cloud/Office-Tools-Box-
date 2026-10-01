@@ -54,6 +54,7 @@ const CRM = [
   'supabase-document-links-migration.sql',
   'supabase-crm-summary-migration.sql',
   'supabase-task-completion-migration.sql',
+  'supabase-favorites-migration.sql',
 ];
 
 // Files that end by scheduling a job with pg_cron + pg_net, which only exist on

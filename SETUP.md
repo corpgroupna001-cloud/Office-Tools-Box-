@@ -830,6 +830,7 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 18 | `supabase-document-links-migration.sql` | Public document links without public copies: every view of a file is checked against the link (`/api/public-document`), links can expire, and the old public `published` bucket becomes private. See [17. Public document links](#17-public-document-links) |
 | 19 | `supabase-crm-summary-migration.sql` | CRM totals computed by the database, per currency, over every row the person may see: `crm_deal_summary`, `crm_lead_summary`, `crm_forecast_summary`. The dashboard and the forecast stop adding rupees to dollars and stop at no row cap. See [18. CRM totals and long lists](#18-crm-totals-and-long-lists) |
 | 20 | `supabase-task-completion-migration.sql` | *Task status summary is required* enforced by the database: such a task completes only with `tasks.result_summary` in the same update — from the Complete button, bulk Complete, a done column on a board, the editor or the API — and the summary is posted as the task's comment in the same transaction. Reopening clears it |
+| 21 | `supabase-favorites-migration.sql` | Favourite records: a star on task, deal, project and document pages; **Ctrl+K** lists them first. Personal, and never showing a record the person can no longer open. See [21. Favourites](#21-favourites) |
 
 **Ran migration 8 before 15 Sep 2026?** Run it again. Its first version made
 `external_ref`'s unique index partial, which `ON CONFLICT` cannot use, so every
@@ -1571,4 +1572,18 @@ on one fails there.
 
 Each gap says what to do. Checking sends no mail or push and changes no row.
 It is the admin API action `setup_health`, so only administrators reach it.
+
+# 21. Favourites
+
+A **☆** next to the title of a task, deal, project or document adds it to the
+person's favourites (Enter or Space on the focused star works the same; it
+is a normal button on phones too). **Ctrl+K** (⌘K) lists favourites first,
+and matches them as you type.
+
+Migration 21 (`supabase-favorites-migration.sql`) adds `user_favorites`, one
+row per person and record. Each person reads and changes only their own
+rows. Starring a record is refused unless the person can see it, and
+`ws_my_favorites()` runs with the person's own access, so a record that was
+deleted, archived or is no longer theirs to see drops out without its title
+ever being returned.
 

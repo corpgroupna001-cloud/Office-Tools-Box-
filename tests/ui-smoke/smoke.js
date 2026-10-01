@@ -708,6 +708,18 @@ async function interact(page, name, result) {
     await wait(150);
     return page.evaluate(() => !['html', 'body'].some(t => /hidden|clip/.test(getComputedStyle(document.querySelector(t)).overflowY)));
   });
+  if (name === 'task-record') await expect('the star adds the task to favourites, and Ctrl+K lists it first', async () => {
+    const star = await page.waitForSelector('[data-ws-fav="task:T1"]', { timeout: 3000 });
+    const pressed = () => page.evaluate(() => document.querySelector('[data-ws-fav="task:T1"]').getAttribute('aria-pressed'));
+    if (await pressed() !== 'false') throw new Error('starts as ' + await pressed());
+    await star.focus(); await page.keyboard.press('Enter'); await wait(600);          // by keyboard
+    if (await pressed() !== 'true') throw new Error('after Enter: ' + await pressed());
+    await page.keyboard.down('Control'); await page.keyboard.press('k'); await page.keyboard.up('Control'); await wait(900);
+    const t = (await page.evaluate(() => (document.querySelector('#ws-cmdk-results') || {}).textContent || '')).replace(/\s+/g, ' ');
+    await page.keyboard.press('Escape');
+    if (!(/Favourites/.test(t) && t.indexOf('Send revised proposal to Acme') > -1 && t.indexOf('Favourites') < t.indexOf('Go to'))) throw new Error('palette: ' + t.slice(0, 160).replace(/\n/g, ' | '));
+    return true;
+  });
   if (name === 'admin') await expect('Setup health lists what is missing and offers the clean-up', async () => {
     await wait(600);
     const t = await page.evaluate(() => (document.getElementById('ov-health') || {}).innerText || '');

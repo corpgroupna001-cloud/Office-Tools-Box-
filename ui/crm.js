@@ -1181,6 +1181,62 @@
         });
     }
 
+    /* ------------------------------------------------ favourites (F-02) */
+    // A star on task, deal, project and document pages; the command palette
+    // lists the favourites (supabase-favorites-migration.sql). One handler
+    // serves every star on the page, so the markup is all a page adds.
+    let favSet = null;                      // Set('type:id') once loaded
+    const favKey = (type, id) => `${type}:${id}`;
+    async function loadFavorites() {
+        if (favSet) return favSet;
+        const sb = await client();
+        const r = await sb.from('user_favorites').select('entity_type, entity_id');
+        favSet = new Set(r.error ? [] : (r.data || []).map(f => favKey(f.entity_type, f.entity_id)));
+        return favSet;
+    }
+    /** The star button for a record header. */
+    function favoriteHtml(type, id) {
+        return `<button type="button" class="crm-fav" data-ws-fav="${esc(type)}:${esc(id)}" aria-pressed="false" aria-label="Add to favourites" title="Add to favourites">${icon('star')}</button>`;
+    }
+    function paintFavorites(root) {
+        if (!favSet) return;
+        (root || document).querySelectorAll('[data-ws-fav]').forEach(b => {
+            const on = favSet.has(b.dataset.wsFav);
+            b.setAttribute('aria-pressed', String(on));
+            b.classList.toggle('on', on);
+            b.title = b.ariaLabel = on ? 'Remove from favourites' : 'Add to favourites';
+            b.setAttribute('aria-label', b.title);
+        });
+    }
+    async function syncFavorites(root) { try { await loadFavorites(); paintFavorites(root); } catch (e) { /* stars stay off */ } }
+    async function toggleFavorite(type, id) {
+        const sb = await client();
+        await loadFavorites();
+        const k = favKey(type, id), on = favSet.has(k);
+        const r = on
+            ? await sb.from('user_favorites').delete().eq('entity_type', type).eq('entity_id', id)
+            : await sb.from('user_favorites').insert({ entity_type: type, entity_id: id });
+        if (r.error) throw new Error(isMissingSchema(r.error) ? 'Favourites need supabase-favorites-migration.sql' : friendly(r.error));
+        if (on) favSet.delete(k); else favSet.add(k);
+        paintFavorites();
+        toast(on ? 'Removed from favourites' : 'Added to favourites — find it with Ctrl+K', 'ok');
+        return !on;
+    }
+    // Stars appear whenever a page renders a record: paint them as they arrive.
+    let favPaint = 0;
+    new MutationObserver(() => {
+        if (favPaint || !document.querySelector('[data-ws-fav]')) return;
+        favPaint = setTimeout(() => { favPaint = 0; syncFavorites(); }, 50);
+    }).observe(document.documentElement, { childList: true, subtree: true });
+    document.addEventListener('click', e => {
+        const b = e.target && e.target.closest ? e.target.closest('[data-ws-fav]') : null;
+        if (!b) return;
+        e.preventDefault();
+        const [type, id] = b.dataset.wsFav.split(':');
+        b.disabled = true;
+        toggleFavorite(type, id).catch(err => toast(err.message, 'bad')).finally(() => { b.disabled = false; });
+    });
+
     /* ------------------------------------------------ completing tasks */
     // "Task status summary is required" (BUG-05). The database refuses to
     // complete such a task unless the same update carries result_summary
@@ -1352,6 +1408,7 @@
     /* --------------------------------------------------------- public API */
     window.WSCrm = {
         boot, ctx, client, lookups, q, friendly, isMissingSchema, migrationNoticeHtml, fetchAll, capNotice, completeTask, completeTasks,
+        favoriteHtml, syncFavorites, toggleFavorite,
         esc, h, $, $$, uid, debounce, param, setParam, toast, icon, nl2br, linkify,
         person, personName, personLabel, personText, personInline, activePeople, avatarHtml, personHtml, avatarsHtml, peopleOptions, peoplePicker, pickPeople, personField,
         badge, statusBadge, priorityBadge, dueHtml, tagsHtml, entityUrl, entityChip, ENTITY_META,

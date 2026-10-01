@@ -896,7 +896,7 @@
 
         view.innerHTML = `
             <div class="b24-card-head">
-                <h1 class="b24-card-title"><span class="t" style="${done ? 'text-decoration:line-through;opacity:.7' : ''}">${esc(t.title)}</span>${cols.full && t.number != null ? `<span class="num">#${esc(t.number)}</span>` : ''}</h1>
+                <h1 class="b24-card-title"><span class="t" style="${done ? 'text-decoration:line-through;opacity:.7' : ''}">${esc(t.title)}</span>${cols.full && t.number != null ? `<span class="num">#${esc(t.number)}</span>` : ''}${C.favoriteHtml('task', t.id)}</h1>
                 <div class="sub">${parent ? `Subtask of <a href="/tasks/?id=${esc(parent.id)}" style="color:inherit">${esc(parent.title)}</a> · ` : ''}${C.statusBadge(STATUS, t.status)} ${C.priorityBadge(t.priority)} ${t.due_date ? C.dueHtml(t, today) : ''} ${linked.map(([k, i, n]) => C.entityChip(k, i, n)).join(' ')}</div>
                 <div class="acts">
                     ${WSShell.inSlider ? '' : `<a class="b24-btn-card" href="/tasks/" data-nav>${C.icon('arrow')}<span>All tasks</span></a>`}

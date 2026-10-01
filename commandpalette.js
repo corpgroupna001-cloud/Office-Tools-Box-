@@ -9,6 +9,8 @@
 //   - Records — contacts, leads, deals, projects, tasks, documents — looked
 //     up on the server as you type (debounced). Row Level Security decides
 //     what comes back, so nobody sees a record they could not open.
+//   - Favourites — starred tasks, deals, projects and documents, first
+//     (ws_my_favorites: only records the person can still open)
 //   - Quick actions (new contact / lead / deal / task, sign out)
 // ============================================================
 (function () {
@@ -26,6 +28,7 @@
     let recordsFor = '';     // the query the records belong to
     let searchSeq = 0;
     let schemaMissing = false;
+    let favorites = [];      // [{ entity_type, entity_id, title, url }] — only records the person can still open
 
     // Fallback navigation when the shell is not on the page.
     const FALLBACK_NAV = [
@@ -193,6 +196,27 @@
             });
         }
 
+        // 1b) Favourites: first when nothing is typed, and matched like everything else
+        const FAV_ICON = { task: 'tasks', deal: 'deal', project: 'folder', document: 'doc' };
+        const FAV_LABEL = { task: 'Task', deal: 'Deal', project: 'Project', document: 'Document' };
+        favorites.forEach(f => {
+            const s = q ? score(q, f.title || '') : 1000;
+            if (q && !s) return;
+            list.push({
+                group: 'Favourites',
+                score: q ? s + 10 : 1000,
+                key: `fav:${f.entity_type}:${f.entity_id}`,
+                render: () => `
+                    <div class="item-icon"><span class="ic ic-${FAV_ICON[f.entity_type] || 'star'}"></span></div>
+                    <div class="item-body">
+                        <div class="item-title">${esc(f.title || '(untitled)')}</div>
+                        <div class="item-sub">★ ${esc(FAV_LABEL[f.entity_type] || 'Record')}</div>
+                    </div>
+                    <div class="item-shortcut">Open</div>`,
+                action: () => { location.href = f.url; }
+            });
+        });
+
         // 2) Navigation — always show
         navItems().forEach(it => {
             const s = Math.max(score(q, it.title), score(q, NAV_TAGS[it.key] || ''), score(q, 'go to ' + it.title));
@@ -353,6 +377,8 @@
         activeIndex = 0;
         render();
         setTimeout(() => input.focus(), 30);
+        // Favourites, fresh each time it opens (a star added a moment ago shows).
+        if (sb) sb.rpc('ws_my_favorites').then(r => { favorites = r && !r.error && Array.isArray(r.data) ? r.data : []; if (opened) render(); }, () => {});
     }
     function close() {
         if (!opened) return;
