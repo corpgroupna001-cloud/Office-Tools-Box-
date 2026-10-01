@@ -545,6 +545,27 @@ module.exports = async function handler(req, res) {
       } catch (e) { return res.status(e.status || 502).json({ error: e.message || 'Request failed' }); }
     }
 
+    // Files left in the retired public "published" bucket (supabase-document-links-migration.sql):
+    // no longer reachable, removed here through the Storage API. { apply: true } deletes.
+    if (action === 'published_cleanup') {
+      const db = { url: SUPABASE_URL, key: SERVICE_KEY, request: fetch };
+      const list = await rpc('ws_published_leftovers', { p_limit: 500 }, db);
+      if (!list.ok) return res.status(list.missing ? 409 : 502).json({ error: list.missing ? 'Run supabase-document-links-migration.sql first' : 'Could not list the leftover copies' });
+      const names = Array.isArray(list.data) ? list.data.filter(n => typeof n === 'string') : [];
+      if (body.apply !== true) return res.status(200).json({ leftovers: names.length, more: names.length === 500 });
+      let removed = 0;
+      for (let i = 0; i < names.length; i += 100) {
+        const r = await fetch(`${SUPABASE_URL}/storage/v1/object/published`, {
+          method: 'DELETE', headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prefixes: names.slice(i, i + 100) }),
+        });
+        if (!r.ok) return res.status(502).json({ error: 'Storage refused the delete', removed });
+        const gone = await r.json().catch(() => []);
+        removed += Array.isArray(gone) ? gone.length : 0;
+      }
+      return res.status(200).json({ removed, more: names.length === 500 });
+    }
+
     if (action === 'set_wfh') {
       const id = String(body.id || '');
       const is_wfh = body.is_wfh === true;

@@ -256,6 +256,10 @@ const RPC = {
   // The session gate's answer for Maya (supabase-access-control-migration.sql); a page can set DB.__access.
   ws_my_access: (_body, DB) => DB.__access || { signed_in: true, access: 'ok', status: 'active', email_verified: true, company: NOVA, full_name: 'Maya Manager', mfa_enrolled: false },
   ws_unread_counts: () => [{ direct_unread: 1, group_unread: 1, total: 2 }],
+  // A public link (/documents/public?t=…): a live native document, or nothing.
+  ws_published_document: body => (body.p_token === 'smokepublic0000000000000000000001'
+    ? { name: 'Price list', doc_kind: 'document', file: false, content: { html: '<h2>Price list</h2><p>Academy kit: <b>1,680</b></p>' }, published_at: '2026-09-20T09:00:00Z', expires_at: null }
+    : null),
   crm_log: () => null,
   crm_convert_lead: () => ({ contact_id: 'C1', deal_id: 'D1', existing_contact: true }),
   invoice_duplicate: () => 'I1',

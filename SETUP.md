@@ -827,6 +827,7 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 15 | `supabase-company-structure-migration.sql` | The company structure as in Bitrix24: Corporate Group → Jobways Point LLP (9 departments, down to Interview Supports and Accountant), Genie Lamp Private Limited (10), SPORTSMART → Nova Sportsmart Private Limited (12), Navyug Raise A Player Foundation. Heads are set by Employee ID; missing people are skipped. Adds only what is missing, so it is safe to run again. Everyone signed in can now see the whole chart |
 | 16 | `supabase-access-control-migration.sql` | Who may use the data: new sign-ups wait for an invitation or an administrator's approval, and every request with a person's token needs an active account, its two-step code when they have an authenticator, and a session that has not ended — on every table, storage, Realtime and RPC. Private HR columns, server-only notifications, ending someone's sessions when they leave. **Run it again after re-running any of 1–15.** See [16. Access control](#16-access-control) |
 | 17 | `supabase-otp-limits-migration.sql` | Email codes issued and checked in one locked database call each (parallel guesses all count), durable rate limits for sign-up and the admin password, and sign-up / email verification that finish in one transaction. See [16. Access control](#16-access-control) |
+| 18 | `supabase-document-links-migration.sql` | Public document links without public copies: every view of a file is checked against the link (`/api/public-document`), links can expire, and the old public `published` bucket becomes private. See [17. Public document links](#17-public-document-links) |
 
 **Ran migration 8 before 15 Sep 2026?** Run it again. Its first version made
 `external_ref`'s unique index partial, which `ON CONFLICT` cannot use, so every
@@ -1452,4 +1453,36 @@ expiry, double use, invitations, company binding, partial failures and
 retries), `tests/admin-session.test.js` (admin password limits) and
 `tests/mailer-tls.test.js` (valid, wrong-name and self-signed certificates on
 a local TLS server).
+
+# 17. Public document links
+
+**Before:** making a file's link public copied the file into the public
+`published` bucket, and turning the link off deleted that copy from the
+browser. When the delete failed, the link was reported as off while the copy
+stayed downloadable at its permanent public address, and nobody could delete
+it any more.
+
+**Now** (migration 18, with the same deploy) there are no copies:
+
+- A public link is a token on the document row. The public page asks
+  `ws_published_document` for what to show; for a file it uses
+  `/api/public-document?t=…` (a rewrite to `/api/linkpreview?fn=document`, so
+  no new function), which looks the token up **on every request** and
+  redirects to a signed URL of the stored file.
+- **Revocation window:** turning a link off, letting it expire, or deleting the
+  document refuses the very next request. A signed URL already handed out
+  lives **60 seconds** (15 minutes for audio and video, which stream in many
+  requests), so a viewer with the page already open can finish that long at
+  most. Responses are `Cache-Control: no-store`.
+- Links can **expire**: `documents.published_expires_at`, checked by the
+  database on every view; a past date is refused.
+- The `published` bucket is now **private**, so the old direct copy URLs stop
+  working as soon as the migration runs. Remove the copies themselves from
+  **Admin → Overview → Setup health → Remove leftover public copies**
+  (action `published_cleanup`), which deletes them through the Storage API.
+- Native documents, spreadsheets and presentations worked this way already
+  (the content comes from the database on each view).
+
+Rollback: re-running migration 6 makes the bucket public again; nothing else
+depends on it.
 

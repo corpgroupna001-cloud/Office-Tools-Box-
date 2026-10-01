@@ -33,6 +33,10 @@
       "destination": "/api/push?fn=ice"
     },
     {
+      "source": "/api/public-document",
+      "destination": "/api/linkpreview?fn=document"
+    },
+    {
       "source": "/messenger",
       "destination": "/chat/index.html"
     },

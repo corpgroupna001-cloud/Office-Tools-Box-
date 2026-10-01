@@ -35,6 +35,7 @@ const PAGES = [
   ['/projects', 'projects'], ['/projects?id=P1', 'project-record'],
   ['/tasks', 'tasks'], ['/tasks?id=T1', 'task-record'], ['/tasks?id=new', 'task-new'], ['/tasks?id=new', 'task-people'],
   ['/documents', 'documents'], ['/documents?id=DOC1', 'document-record'],
+  ['/documents/public?t=smokepublic0000000000000000000001', 'public-doc'], ['/documents/public?t=smokeoff00000000000000000000000001', 'public-doc-off'],
   ['/calendar', 'calendar'], ['/calendar?view=day', 'calendar-day'], ['/calendar?view=week', 'calendar-week'],
   ['/calendar?view=month', 'calendar-month'], ['/calendar?view=schedule', 'calendar-schedule'], ['/employees', 'employees'],
   ['/employees?view=tiles', 'employees-tiles'], ['/employees/structure/', 'org-chart'], ['/employees?id=22222222-2222-4222-8222-222222222222', 'employee-record'],
@@ -42,7 +43,7 @@ const PAGES = [
   ['/quotes', 'quotes'], ['/quotes?id=Q1', 'quote-record'], ['/crm/forecast', 'forecast'],
   ['/crm/settings?section=lost', 'crm-lost-reasons'], ['/crm/settings?section=forms', 'crm-web-forms'], ['/form?f=smoke0000000000000000000000000001', 'web-form'],
   ['/chat', 'messenger'], [`/call?id=${F.CALL}`, 'call'], ['/attendance', 'attendance'],
-  ['/wsm-admin', 'admin'], ['/wsm-admin?gate=1', 'admin-gate'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/crm', 'themes'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
+  ['/wsm-admin', 'admin'], ['/wsm-admin?gate=1', 'admin-gate'], ['/wsm-admin/employees', 'admin-employees'], ['/wsm-admin?tab=attendance', 'admin-legacy-tab'], ['/crm', 'themes'], ['/crm', 'dialogs'], ['/typingtest', 'typing'], ['/mcqquiz', 'quiz'], ['/signature', 'signature'], ['/recordings', 'recordings'],
 ];
 const CRM_PAGES = new Set(['crm', 'crm-settings', 'companies', 'contacts', 'contact-record', 'leads', 'leads-list', 'lead-record', 'lead-imported', 'deals', 'deals-list', 'deal-record', 'deal-imported', 'boards', 'board', 'projects',
   'project-record', 'tasks', 'task-record', 'task-new', 'task-people', 'documents', 'document-record', 'calendar', 'calendar-day', 'calendar-week', 'calendar-month', 'calendar-schedule', 'employees', 'employees-tiles', 'org-chart', 'employee-record', 'invoices', 'invoice-record', 'quotes', 'quote-record', 'forecast', 'crm-lost-reasons', 'crm-web-forms']);
@@ -295,7 +296,9 @@ async function visit(browser, route, name, [vpName, viewport]) {
       };
     });
     // The call window is full-screen and the public web form is for visitors: neither has the shell.
-    if (!info.shell && !['home', 'call', 'web-form', 'signin', 'pending', 'admin-gate'].includes(name)) result.problems.push('app shell did not mount');
+    if (!info.shell && !['home', 'call', 'web-form', 'signin', 'pending', 'admin-gate', 'public-doc', 'public-doc-off'].includes(name)) result.problems.push('app shell did not mount');
+    if (name === 'public-doc' && !/Academy kit: 1,680/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('the public document did not render');
+    if (name === 'public-doc-off' && !/no longer available/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('a link that is off did not say so');
     if (name === 'web-form' && !/Talk to our sales team/.test(await page.evaluate(() => document.body.innerText))) result.problems.push('web form did not render');
     if (vpName === 'phone' && info.overflow > 1) result.problems.push(`horizontal overflow ${info.overflow}px: ${info.offenders.join(', ')}`);
     if (CRM_PAGES.has(name) && info.errorText) result.problems.push(`error state on screen: "${info.errorText.slice(0, 90)}"`);
@@ -439,10 +442,79 @@ async function messengerScroll(page, vpName, result) {
   await expect('the floating date fades once scrolling stops', () => page.evaluate(() => !document.getElementById('mx-floatday').classList.contains('show')));
 }
 
+// dialogs.js with the keyboard only (UI-01): the answer must be the button that
+// has focus, never "OK" because Enter was pressed somewhere.
+async function dialogKeyboard(page, expect, wait) {
+  // Ask a question; the page keeps the answer in window.__answers.
+  const ask = (kind, opts) => page.evaluate((k, o) => { window.__answers = window.__answers || []; window.wsDialog[k](o).then(v => window.__answers.push(v)); }, kind, opts);
+  const answers = () => page.evaluate(() => window.__answers.splice(0));
+  const focused = () => page.evaluate(() => document.activeElement && document.activeElement.id);
+  await expect('a destructive confirm opens with focus on Cancel, and Enter there cancels', async () => {
+    await ask('confirm', { title: 'Delete for good?', message: 'x', okText: 'Delete', danger: true }); await wait(80);
+    const f = await focused();
+    await page.keyboard.press('Enter'); await wait(80);
+    const a = await answers();
+    return f === 'ws-dialog-cancel' && a.length === 1 && a[0] === false;
+  });
+  await expect('Tab and Shift+Tab stay on the dialog buttons; Enter answers for the focused one', async () => {
+    await ask('confirm', { title: 'Send?', message: 'x' }); await wait(80);
+    const start = await focused();                                   // not destructive: the main button
+    await page.keyboard.press('Tab'); const t1 = await focused();
+    await page.keyboard.press('Tab'); const t2 = await focused();
+    await page.keyboard.down('Shift'); await page.keyboard.press('Tab'); await page.keyboard.up('Shift'); const t3 = await focused();
+    await page.keyboard.press('Enter'); await wait(80);
+    const a = await answers();
+    return start === 'ws-dialog-ok' && t1 === 'ws-dialog-cancel' && t2 === 'ws-dialog-ok' && t3 === 'ws-dialog-cancel' && a[0] === false;
+  });
+  await expect('Escape cancels, Space on OK confirms', async () => {
+    await ask('confirm', { title: 'Q1', message: 'x' }); await wait(80); await page.keyboard.press('Escape'); await wait(80);
+    await ask('confirm', { title: 'Q2', message: 'x' }); await wait(80); await page.keyboard.press('Space'); await wait(80);
+    const a = await answers();
+    return a.length === 2 && a[0] === false && a[1] === true;
+  });
+  await expect('the dialog is announced as modal and the page behind is out of reach', async () => {
+    await ask('confirm', { title: 'Archive?', message: 'Moves it.' }); await wait(80);
+    const r = await page.evaluate(() => {
+      const card = document.getElementById('ws-dialog-card');
+      const behind = [...document.body.children].filter(el => el.id !== 'ws-dialog-overlay');
+      return { role: card.getAttribute('role'), modal: card.getAttribute('aria-modal'), label: document.getElementById(card.getAttribute('aria-labelledby')).textContent,
+               inert: behind.length > 0 && behind.every(el => el.hasAttribute('inert')) };
+    });
+    await page.keyboard.press('Escape'); await wait(80); await answers();
+    const freed = await page.evaluate(() => ![...document.body.children].some(el => el.hasAttribute('inert')));
+    return r.role === 'alertdialog' && r.modal === 'true' && r.label === 'Archive?' && r.inert && freed;
+  });
+  await expect('focus goes back where it was', async () => {
+    await page.evaluate(() => { const b = document.createElement('button'); b.id = 'smoke-origin'; b.textContent = 'origin'; document.body.appendChild(b); b.focus(); });
+    await ask('alert', { title: 'Saved', message: 'x' }); await wait(80);
+    await page.keyboard.press('Enter'); await wait(80);
+    const back = await focused();
+    const a = await answers();
+    await page.evaluate(() => document.getElementById('smoke-origin').remove());
+    if (back !== 'smoke-origin') throw new Error(`focus is on ${back}`);
+    return a.length === 1 && a[0] == null;              // an alert answers nothing (undefined arrives as null)
+  });
+  await expect('a second dialog waits for the first; each answer reaches its own question', async () => {
+    await page.evaluate(() => {
+      window.__answers = [];
+      window.wsDialog.confirm({ title: 'First', message: '1' }).then(v => window.__answers.push(['first', v]));
+      window.wsDialog.confirm({ title: 'Second', message: '2', danger: true }).then(v => window.__answers.push(['second', v]));
+    });
+    await wait(80);
+    const t1 = await page.evaluate(() => document.getElementById('ws-dialog-title').textContent);
+    await page.keyboard.press('Enter'); await wait(80);                 // OK on the first
+    const t2 = await page.evaluate(() => document.getElementById('ws-dialog-title').textContent);
+    await page.keyboard.press('Enter'); await wait(80);                 // Cancel (destructive) on the second
+    const a = await answers();
+    return t1 === 'First' && t2 === 'Second' && JSON.stringify(a) === JSON.stringify([['first', true], ['second', false]]);
+  });
+}
+
 // A few interactions that exercise the shared runtime, not just the first paint.
 async function interact(page, name, result) {
   const expect = async (label, fn) => { try { const ok = await fn(); if (!ok) result.problems.push(`interaction failed: ${label}`); } catch (e) { result.problems.push(`interaction threw: ${label}: ${e.message.split('\n')[0]}`); } };
   const wait = ms => new Promise(r => setTimeout(r, ms));
+  if (name === 'dialogs') await dialogKeyboard(page, expect, wait);
   if (name === 'contacts') {
     await expect('Create opens the new-contact page in a slider', async () => {
       await page.click('[data-create]');

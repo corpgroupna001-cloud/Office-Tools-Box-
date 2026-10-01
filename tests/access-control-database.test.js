@@ -7,14 +7,13 @@
 // Skips itself when the dev dependency is missing: npm i -D @electric-sql/pglite
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { freshDb, as, makeUser, sqlOf, pglite } = require('./fixtures/load-db');
+const { freshDb, as, makeUser, sqlOf, pglite, CRM } = require('./fixtures/load-db');
 
 const skip = pglite() ? false : 'PGlite is not installed (npm i -D @electric-sql/pglite)';
 const NOVA = 'Nova Sportsmart Private Limited';
 const JOBWAYS = 'Jobways Point LLP';
 const DENIED = /permission denied/;
 const GATE = 'supabase-access-control-migration.sql';
-const OTP = 'supabase-otp-limits-migration.sql';
 
 let db, A, C, M, X;      // A, C Nova employees; M Nova manager; X workspace admin
 
@@ -216,12 +215,14 @@ test('private HR columns: nobody reads them with their own token; the directory 
 
 /* --------------------------------------------------------- upgrade */
 test('upgrading a database that already has people and records keeps everyone working', { skip }, async () => {
-  const old = await freshDb({ without: [GATE, OTP] });
+  // A database as it was before migration 16, then 16 and everything after it, twice.
+  const later = CRM.slice(CRM.indexOf(GATE));
+  const old = await freshDb({ without: later });
   const P = await makeUser(old, { email: 'priya@nova.test', name: 'Priya', company: NOVA });
   const Q = await makeUser(old, { email: 'quinn@nova.test', name: 'Quinn', company: NOVA });
   await old.query(`update profiles set status = 'inactive' where id = $1`, [Q]);
   const t = (await as(old, P, () => old.query(`insert into tasks (title) values ('Before the upgrade') returning id`))).rows[0].id;
-  for (const f of [GATE, OTP, GATE, OTP]) await old.exec(sqlOf(f));               // in order, then again: idempotent
+  for (const f of [...later, ...later]) await old.exec(sqlOf(f));                // in order, then again: idempotent
   const statuses = (await old.query(`select id, status from profiles where id in ($1, $2)`, [P, Q])).rows;
   assert.equal(statuses.find(r => r.id === P).status, 'active', 'existing people keep their status');
   assert.equal(statuses.find(r => r.id === Q).status, 'inactive');
