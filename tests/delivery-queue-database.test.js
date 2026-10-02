@@ -35,6 +35,20 @@ test('a message is queued once per key; asking again finds the first job', { ski
   assert.notEqual(bx.id, a.id, 'each channel is its own job');
 });
 
+test('scheduled Bitrix settings keep existing punches on and scheduled messages off, behind RLS', { skip }, async () => {
+  const [row] = await svc('select punch_enabled, auto_login, auto_logout from bitrix_targets limit 1');
+  assert.deepEqual(row, { punch_enabled: true, auto_login: false, auto_logout: false });
+  await as(db, U, async () => {
+    assert.equal((await svc('select * from bitrix_targets')).length, 0);
+    await assert.rejects(() => svc(`insert into bitrix_targets (company, auto_login) values ('unauthorised', true)`));
+  });
+  await svc(`insert into bitrix_log (kind, company, ok) values ('scheduled_login', 'Nova', true), ('scheduled_logout', 'Nova', true)`);
+  const key = `bitrix:shift:${U}:2026-10-02:1:login`;
+  const a = await enqueue(key, { channel: 'bitrix' });
+  const b = await enqueue(key, { channel: 'bitrix' });
+  assert.equal(a.id, b.id, 'repeated scheduler ticks share one delivery');
+});
+
 test('one sender per job; transient failures back off and give up as dead, kept for review', { skip }, async () => {
   const j = await enqueue('attendance:8:email');
   const first = await claim();

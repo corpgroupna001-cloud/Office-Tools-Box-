@@ -834,6 +834,7 @@ changed. Do **not** run `supabase-full-reset.sql` — this is an upgrade.
 | 22 | `supabase-notification-prefs-migration.sql` | Notification settings and quiet hours: which kinds of push reach each person, and when their phone stays quiet. In-app notifications are unchanged. See [22. Notification settings](#22-notification-settings) |
 | 23 | `supabase-attendance-corrections-migration.sql` | Attendance correction requests (*Fix a punch*): an employee asks, their manager or an administrator decides once. Approving adds a punch and marks a wrong one as replaced; the device's own record is never edited. Also allows `source = 'correction'` on `attendance_logs`. See [23. Attendance corrections](#23-attendance-corrections) |
 | 24 | `supabase-delivery-queue-migration.sql` | Delivery retry queue: a punch's email or Bitrix line that did not go out is sent again by the attendance job with backoff, once per punch and channel; what cannot succeed is listed in **Admin → Attendance → Delivery retries**. Server only. See [24. Delivery retries](#24-delivery-retries) |
+| 25 | `supabase-bitrix-automation-migration.sql` | Per-company controls for punch messages and scheduled shift login/logout notices in **Admin → Bitrix24**. Requires migration 24 and the attendance scheduler. |
 
 **Ran migration 8 before 15 Sep 2026?** Run it again. Its first version made
 `external_ref`'s unique index partial, which `ON CONFLICT` cannot use, so every
@@ -1704,3 +1705,35 @@ pushes; the queue accepts a `push` channel for later use.
 Rollback: `drop table public.delivery_jobs cascade;` and the `ws_delivery_*`
 functions; the punches and their status columns are untouched.
 
+# 25. Automatic Bitrix24 login/logout messages
+
+Run `supabase-bitrix-automation-migration.sql` after migration 24, then open
+**Admin → Bitrix24 → Auto login / logout messages**. Each company's group has
+three independent controls: **Punch IN/OUT**, **Shift login**, and **Shift logout**.
+Existing punch messages remain enabled; scheduled notices start disabled.
+The group's **On** switch pauses all its messages while preserving the choices.
+
+Scheduled notices use employees' assigned shifts (or existing company defaults),
+including second-company shifts and overnight ends, in India time. They skip
+inactive accounts, missing biometric IDs, non-working days, holidays, and shift
+start dates covered by approved leave (including half-day leave). They clearly
+say **scheduled shift start/end**, and never insert a punch or change payroll.
+With both triggers enabled, the group receives timetable notices and actual
+punch messages separately. Existing attendance-based auto-logouts and dual-shift
+switch messages continue to report attendance independently.
+
+The existing five-minute attendance scheduler queues each employee/shift/day/event
+once through the delivery queue. Notices catch up for at most one hour after
+the scheduled time and expire after that hour. Existing queue retries apply;
+pausing scheduled messages or deactivating an employee cancels pending delivery
+at its next attempt. A last-run indicator appears above the controls; **Admin →
+Attendance → Delivery retries** lists pending and failed deliveries, while the
+Bitrix delivery log labels successful scheduled logins and logouts.
+
+Apply the migration, deploy the code, verify scheduler health, map a group and
+explicitly enable the desired scheduled controls. No new Vercel cron or external
+credentials are needed. If the migration is missing, the new controls are disabled
+and the existing mapping and punch behavior continue to work.
+
+Rollback: turn off **Shift login** and **Shift logout** for each company. Keep the
+columns and queue history so existing deployments and audit records remain valid.

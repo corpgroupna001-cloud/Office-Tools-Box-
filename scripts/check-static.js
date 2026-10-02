@@ -108,10 +108,18 @@ if (vercel) {
   }
   for (const r of vercel.rewrites || []) {
     const dest = String(r.destination || '').split('?')[0];
+    if (vercel.cleanUrls && dest.startsWith('/') && /\.html$/.test(dest)) {
+      problem('vercel.json', `rewrite ${r.source} → ${dest} must omit .html when cleanUrls is enabled`);
+    }
     if (dest.startsWith('/api/')) {
       if (!fs.existsSync(path.join(ROOT, dest.slice(1) + '.js'))) problem('vercel.json', `rewrite ${r.source} → missing function ${dest}`);
-    } else if (!dest.includes(':') && !fs.existsSync(path.join(ROOT, dest))) {
-      problem('vercel.json', `rewrite ${r.source} → missing file ${dest}`);
+    } else if (dest.startsWith('/') && !dest.includes(':')) {
+      const file = path.join(ROOT, dest);
+      const candidates = [file, path.join(file, 'index.html')];
+      if (vercel.cleanUrls) candidates.push(file + '.html');
+      if (!candidates.some(f => fs.existsSync(f) && fs.statSync(f).isFile())) {
+        problem('vercel.json', `rewrite ${r.source} → missing file ${dest}`);
+      }
     }
   }
 }

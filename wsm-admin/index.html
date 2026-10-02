@@ -1143,11 +1143,18 @@
                     <span class="text-slate-400 text-xs font-bold">Changes save as you make them.</span>
                 </div>
                 <div id="bx-notice"></div>
+                <div class="glass rounded-2xl p-4 mb-4">
+                    <h4 class="text-white font-black mb-2">Auto login / logout messages</h4>
+                    <p class="text-slate-300 text-sm mb-3">Choose both triggers below: <b>Punch IN/OUT</b> reports recorded attendance; <b>Shift login</b> and <b>Shift logout</b> announce scheduled times. Enabling both sends both types of message.</p>
+                    <p class="text-slate-400 text-xs font-bold mb-3">Schedules use each employee's assigned shifts and working days (IST), including overnight and second shifts. Inactive employees, holidays and days with approved leave are skipped. Scheduled notices are labeled and do not create attendance records. Delivery normally runs every five minutes, with a one-hour catch-up window.</p>
+                    <div id="bx-automation-status" role="status" class="text-slate-300 text-sm">Checking automatic messages…</div>
+                    <p class="text-slate-400 text-xs font-bold mt-3"><a href="/wsm-admin/shifts" class="text-blue-300">Manage shifts</a> · <a href="/wsm-admin/attendance" class="text-blue-300">Scheduler and delivery retries</a></p>
+                </div>
                 <div class="glass rounded-2xl overflow-hidden">
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm">
                             <thead>
-                                <tr><th>Company</th><th>Bitrix group</th><th>Posted by</th><th class="text-center">On</th><th></th></tr>
+                                <tr><th>Company</th><th>Bitrix group</th><th>Posted by</th><th class="text-center">On</th><th>Automatic messages</th><th></th></tr>
                             </thead>
                             <tbody id="bx-body"></tbody>
                         </table>

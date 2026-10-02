@@ -868,6 +868,7 @@ const SELFIE_REPEAT_WINDOW_MS = 60 * 1000;
  * ------------------------------------------------------------------------- */
 function bitrixStatusOf(out) {
   if (!out) return 'failed';
+  if (out.skipped) return 'skipped';
   if (out.ok) return 'sent';
   if (out.reason === 'no_group') return 'no_group';
   if (out.reason === 'deadline') return 'deferred';
@@ -876,7 +877,7 @@ function bitrixStatusOf(out) {
 async function markBitrix({ SUPABASE_URL, H, id, out, attempts }) {
   if (!id) return;
   const patch = { bitrix_status: bitrixStatusOf(out), bitrix_at: new Date().toISOString(),
-                  bitrix_error: out && !out.ok ? `${out.reason || 'error'}: ${out.detail || ''}`.slice(0, 400) : null };
+                  bitrix_error: out && (!out.ok || out.skipped) ? `${out.reason || 'error'}: ${out.detail || ''}`.slice(0, 400) : null };
   if (attempts != null) patch.bitrix_attempts = attempts;
   try {
     await fetch(`${SUPABASE_URL}/rest/v1/attendance_logs?id=eq.${encodeURIComponent(id)}`, {
@@ -1017,6 +1018,17 @@ async function runAttendanceTick({ SUPABASE_URL, SERVICE_KEY, startedAt = Date.n
   const queue = await sb('delivery_jobs?select=id&limit=0')
     .then(async r => (r.ok ? 'ready' : isMissingSchema(r.status, await r.text()) ? 'missing' : 'unknown'))
     .catch(() => 'unknown');
+
+  const scheduledTargets = [...bx.targets.values()].filter(t => t.enabled && (t.auto_login || t.auto_logout));
+  if (scheduledTargets.length) {
+    if (queue === 'ready') {
+      report.scheduled = await require('../lib/bitrix-automation').queueScheduled({
+        sb, targets: scheduledTargets, db: { url: SUPABASE_URL, key: SERVICE_KEY, request: fetch },
+        now: now.getTime(), deadlineAt: startedAt + 8000,
+      });
+      report.notes.push(...report.scheduled.notes);
+    } else report.notes.push('scheduled messages failed: delivery queue unavailable');
+  }
 
   // ---- 1. Send again what Bitrix did not take ----
   const since = new Date(now.getTime() - RETRY_WINDOW_MS).toISOString();
@@ -1167,7 +1179,7 @@ async function runAttendanceTick({ SUPABASE_URL, SERVICE_KEY, startedAt = Date.n
     report.deliveries = await delivery.runDue({ url: SUPABASE_URL, key: SERVICE_KEY, request: fetch }, {
       email: payload => sendMail(payload),
       bitrix: payload => postPunchToGroup({ SUPABASE_URL, H, bx, company: payload.company, enroll: payload.enroll,
-                                            message: payload.message, kind: payload.kind || 'punch' }),
+                                            userId: payload.user_id, message: payload.message, kind: payload.kind || 'punch' }),
     }, {
       deadlineAt: startedAt + TICK_BUDGET_MS - PER_PERSON_MS, now: () => Date.now(),
       onResult: (job, outcome) => writeBackDelivery({ SUPABASE_URL, H, job, outcome }),
@@ -1193,7 +1205,7 @@ async function loadBitrixContext({ SUPABASE_URL, H, profiles, byCode }) {
   const ctx = { targets: new Map(), enrollsByCompany: new Map(), configured: bitrix.isConfigured() };
   if (!ctx.configured) return ctx;
   try {
-    const tRes = await fetch(`${SUPABASE_URL}/rest/v1/bitrix_targets?select=company,dialog_id,enabled`, { headers: H });
+    const tRes = await fetch(`${SUPABASE_URL}/rest/v1/bitrix_targets?select=*`, { headers: H });
     const targets = tRes.ok ? await tRes.json() : [];
     targets.forEach(t => ctx.targets.set(t.company, t));
   } catch { /* no mapping = nothing posts, which the log will show */ }
@@ -1208,10 +1220,25 @@ async function loadBitrixContext({ SUPABASE_URL, H, profiles, byCode }) {
   return ctx;
 }
 
-async function postPunchToGroup({ SUPABASE_URL, H, bx, company, enroll, message, kind = 'punch', skipReason }) {
+async function postPunchToGroup({ SUPABASE_URL, H, bx, company, enroll, message, kind = 'punch', skipReason, userId }) {
   if (!bx || !bx.configured || !company || !message) return { ok: false, reason: 'no_group' };
   const t = bx.targets.get(company);
+  const scheduled = kind === 'scheduled_login' || kind === 'scheduled_logout';
+  if (scheduled) {
+    if (!t || !t.enabled || !t.dialog_id || !t[kind === 'scheduled_login' ? 'auto_login' : 'auto_logout']) {
+      return { ok: false, reason: 'schedule_cancelled', detail: 'Scheduled messages are disabled for this company.' };
+    }
+    // Recheck on delivery/retry: a queued notice must not announce someone
+    // after their account has been deactivated or moved to another company.
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(userId || '')}&select=status,company,company2`, { headers: H });
+    if (!r.ok) return { ok: false, reason: 'network', detail: 'Could not check employee status.' };
+    const p = (await r.json())[0];
+    if (!p || p.status !== 'active' || ![p.company, p.company2].includes(company)) {
+      return { ok: false, reason: 'schedule_cancelled', detail: 'Employee is no longer active in this company.' };
+    }
+  }
   if (!t || !t.enabled || !t.dialog_id) return { ok: false, reason: 'no_group' };
+  if (kind === 'punch' && t.punch_enabled === false) return { ok: true, skipped: true, reason: 'punch_messages_disabled' };
   if (skipReason) {
     const out = { ok: false, reason: skipReason,
       detail: 'Punch stored, but the request deadline was reached before Bitrix delivery could start.' };

@@ -71,6 +71,13 @@ function harness({ now = '2026-09-10T12:00:00+05:30', db = {}, env: envOverride,
       hit.forEach(r => Object.assign(r, JSON.parse(init.body)));
       return reply(hit);
     }
+    if (method === 'POST' && table === 'bitrix_targets') {
+      const data = JSON.parse(init.body);
+      let row = rows.find(r => r.company === data.company);
+      if (!row) { row = {}; rows.push(row); }
+      Object.assign(row, data);
+      return reply([row]);
+    }
     throw new Error(`${method} ${table}`);
   };
   const module = { exports: {} };
@@ -105,6 +112,25 @@ function harness({ now = '2026-09-10T12:00:00+05:30', db = {}, env: envOverride,
     },
   };
 }
+
+test('Bitrix automation settings require an admin, booleans and installed queue; pausing preserves choices', async () => {
+  const h = harness({ db: { bitrix_targets: [{ company: COMPANY, punch_enabled: true, auto_login: false, auto_logout: false }], delivery_jobs: [] } });
+  const body = { action: 'bitrix_save', company: COMPANY, dialog_id: 'chat100', enabled: true,
+    punch_enabled: true, auto_login: true, auto_logout: true };
+  assert.equal((await h.call({ ...body, password: 'wrong' })).code, 401);
+  assert.equal((await h.call({ ...body, auto_login: 'true' })).code, 400);
+  const saved = await h.call(body);
+  assert.equal(saved.code, 200);
+  assert.equal(saved.body.target.auto_login, true);
+  assert.equal(saved.body.target.punch_enabled, true);
+  const paused = await h.call({ ...body, enabled: false });
+  assert.equal(paused.code, 200);
+  assert.equal(paused.body.target.enabled, false);
+  assert.equal(paused.body.target.auto_logout, true);
+  const missing = harness({ db: { bitrix_targets: [] } });
+  assert.equal((await missing.call(body)).code, 409);
+  assert.equal((await harness().call(body)).code, 409);
+});
 
 /** Punches labelled by the lib itself - what ingest stores. */
 function stored(rows, shift) {
