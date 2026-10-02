@@ -6,7 +6,7 @@
 //     serves them);
 //   - external scripts come from an allowed CDN at an exact version, and no
 //     page compiles Tailwind at run time;
-//   - the vendored libraries and ui/tailwind.css match what npm run build
+//   - the vendored libraries and ui/tailwind.css match what npm run build:assets
 //     writes (scripts/build-assets.js --check);
 //   - vercel.json parses, every function it names exists, every /api rewrite
 //     lands on a real function, and the Hobby plan limits hold
@@ -50,7 +50,7 @@ function checkReference(page, ref, kind) {
   if (/^(https?:)?\/\//i.test(ref)) {
     const url = new URL(ref, 'https://x.invalid');
     if (kind === 'script') {
-      if (url.hostname === 'cdn.tailwindcss.com') return problem(page, `runtime Tailwind (${ref}): link the prebuilt /ui/tailwind.css (npm run build)`);
+      if (url.hostname === 'cdn.tailwindcss.com') return problem(page, `runtime Tailwind (${ref}): link the prebuilt /ui/tailwind.css (npm run build:assets)`);
       if (!CDN_HOSTS.has(url.hostname)) return problem(page, `script from an unexpected host: ${ref}`);
       if (!/@\d+\.\d+\.\d+(?:[-+][\w.]+)?(\/|$)/.test(url.pathname)) problem(page, `external script without an exact version: ${ref}`);
     }
@@ -80,6 +80,15 @@ for (const file of files.filter(f => f.endsWith('.js')).map(rel)) {
     if (file.startsWith('tests/') || file.startsWith('scripts/')) continue;
     checkReference(file, m[1], 'script');
   }
+}
+
+/* ------------------------------------------------------------ deploy build */
+// Vercel runs `npm run build` (or `vercel-build`) on every deploy when one is
+// defined, after .vercelignore has removed scripts/. Nothing needs building
+// there - ui/vendor and ui/tailwind.css are committed - so neither may exist.
+const pkgScripts = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).scripts || {};
+for (const name of ['build', 'vercel-build']) {
+  if (pkgScripts[name]) problem('package.json', `a "${name}" script runs on every Vercel deploy, where scripts/ is not uploaded; the assets are committed, so call it "build:assets"`);
 }
 
 /* ------------------------------------------------------------ vercel.json */

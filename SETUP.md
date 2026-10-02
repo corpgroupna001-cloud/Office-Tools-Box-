@@ -1545,7 +1545,7 @@ on two third-party services.
 Now (DEP-03):
 
 - The libraries are pinned to exact versions in `package.json` and copied to
-  `ui/vendor/` by `npm run build` (supabase-js 2.117.2 — the release `@2`
+  `ui/vendor/` by `npm run build:assets` (supabase-js 2.117.2 — the release `@2`
   served at the time of the change —, Chart.js 4.4.0, html2canvas 1.4.1,
   canvas-confetti 1.9.2). The auth guard, notifications and presence load the
   same local copy when a page has not.
@@ -1559,7 +1559,7 @@ Now (DEP-03):
 - Google Fonts stay as they were; without them the pages fall back to system fonts.
 
 **Upgrading a library:** change its exact version in `package.json`, `npm
-install`, `npm run build`, run the checks and commit `ui/vendor/`. `npm run
+install`, `npm run build:assets`, run the checks and commit `ui/vendor/`. `npm run
 check` fails if the committed copies do not match the pinned versions.
 `npm run smoke:ui` refuses every CDN request, so a page that starts depending
 on one fails there.
