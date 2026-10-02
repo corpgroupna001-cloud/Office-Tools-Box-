@@ -27,6 +27,7 @@ const CHROME = process.env.CHROME_PATH || [
 if (!CHROME) { console.error('No Chrome found. Set CHROME_PATH.'); process.exit(2); }
 
 const PAGES = [
+  ['/wsm-admin/bitrix', 'admin-bitrix'],
   ['/', 'home'], ['/', 'signin'], ['/', 'pending'], ['/crm', 'crm'], ['/crm/settings', 'crm-settings'], ['/companies', 'companies'],
   ['/contacts', 'contacts'], ['/contacts?id=C1', 'contact-record'],
   ['/leads', 'leads'], ['/leads?view=list', 'leads-list'], ['/leads?id=L1', 'lead-record'], ['/leads?id=L4', 'lead-imported'],
@@ -191,6 +192,17 @@ function adminApi(req, res) {
     const emps = ADMIN_PEOPLE.map(({ status, status_emp, ...e }) => ({ ...e, status: status_emp }));
     if (action === 'employees') return send(res, 200, { ...base, employees: emps });
     if (action === 'shift_list') return send(res, 200, { ...base, employees: emps });
+    if (action === 'bitrix_status' || action === 'bitrix_save') {
+      DB.__bitrix = DB.__bitrix || { company: 'Sportsmart Retail Private Limited', dialog_id: 'chat100', enabled: true,
+        punch_enabled: true, auto_login: false, auto_logout: false };
+      if (action === 'bitrix_save') {
+        Object.assign(DB.__bitrix, JSON.parse(raw));
+        return send(res, 200, { success: true, target: DB.__bitrix });
+      }
+      return send(res, 200, { configured: true, mode: 'company', connection: { ok: true, name: 'WorkSuite', portal: 'example.bitrix24.in' },
+        targets: [DB.__bitrix], headcount: { 'Sportsmart Retail Private Limited': 12 }, groups: [{ dialog_id: 'chat100', name: 'Working hours' }] });
+    }
+    if (action === 'att_scheduler_status') return send(res, 200, { scheduler: { last_run_at: new Date().toISOString(), last_ok: true, last_result: {} } });
     if (action === 'setup_health') {
       const H = require('../../lib/setup-health');
       const checks = [...H.configChecks({ SUPABASE_URL: 'x', SUPABASE_ANON_KEY: 'x', SUPABASE_SERVICE_ROLE_KEY: 'x', ADMIN_PASSWORD: 'short', SMTP_HOST: 'x', SMTP_PASS: 'x', MAIL_API_KEY: 'x', SMTP_USER_1: 'x' }),
@@ -787,6 +799,21 @@ async function interact(page, name, result) {
     if (!/Punched out on the phone/.test(await text('fx-body'))) throw new Error('the new request is not listed');
     await page.click('#fx-team-body [data-fx-ok]'); await wait(700);
     return /Approved/.test(await text('fx-msg')) && await page.evaluate(() => document.getElementById('fx-team').style.display === 'none');
+  });
+  if (name === 'admin-bitrix') await expect('both trigger controls save, persist after refresh and pause together', async () => {
+    const login = '#bx-body [data-field="auto_login"]';
+    await page.waitForSelector(login, { timeout: 3000 });
+    await page.click(login);
+    await page.waitForFunction(() => document.querySelector('#bx-body [data-field="auto_login"]').checked && !document.querySelector('#bx-body [data-field="auto_login"]').disabled);
+    await page.click('#bx-body [data-field="auto_logout"]');
+    await wait(400);
+    await page.reload({ waitUntil: 'networkidle0' });
+    await page.waitForSelector(login, { timeout: 3000 });
+    const checks = await page.$$eval('#bx-body .bx-automation', els => els.map(el => el.checked));
+    if (!checks.every(Boolean) || checks.length !== 3) throw new Error('both triggers did not persist');
+    await page.click('#bx-body .bx-enabled');
+    await wait(400);
+    return page.$$eval('#bx-body .bx-automation', els => els.every(el => el.checked && el.disabled));
   });
   if (name === 'admin-deliveries') await expect('Delivery retries lists a message that was given up, and sends it again', async () => {
     await page.waitForSelector('#dq-tbody [data-dq-retry]', { timeout: 3000 });

@@ -16,7 +16,7 @@ const DAY_SHIFT = { id: 1, name: 'Day', start_time: '09:30', end_time: '18:30', 
 function harness({ now, logs, profiles, bitrixResult, shifts = [DAY_SHIFT], targets, maxRows = Infinity, scheduler, failClaim, failPage, bitrixDelay = 0, queue, mailResult }) {
   const mails = [];
   let clock = Date.parse(now);
-  const db = { attendance_logs: logs, attendance_auto_logouts: [], shift_switch_posts: [],
+  const db = { attendance_logs: logs, attendance_auto_logouts: [], shift_switch_posts: [], holidays: [], leave_requests: [],
                worksuite_scheduler: scheduler ? [{ id: 1, ...scheduler }] : [] };
   const posts = [];
   const response = (data, status = 200) => new Response(JSON.stringify(data), { status });
@@ -50,6 +50,7 @@ function harness({ now, logs, profiles, bitrixResult, shifts = [DAY_SHIFT], targ
       if (name === '../lib/request-auth') return require('../lib/request-auth');
       if (name === '../lib/attendance-live') return require('../lib/attendance-live');
       if (name === '../lib/delivery') return require('../lib/delivery');
+      if (name === '../lib/bitrix-automation') return { queueScheduled: opts => require('../lib/bitrix-automation').queueScheduled({ ...opts, clock: () => clock }) };
       if (name === '../company-config') return require('../company-config');
       if (name === 'crypto') return require('crypto');
       if (name === '../lib/attendance') return attendance;
@@ -75,6 +76,14 @@ function harness({ now, logs, profiles, bitrixResult, shifts = [DAY_SHIFT], targ
         if (!queue) return response({ code: table === 'delivery_jobs' ? 'PGRST205' : 'PGRST202', message: 'Could not find it in the schema cache' }, 404);
         if (table === 'delivery_jobs') return response([]);
         const a = JSON.parse(init.body);
+        if (table === 'rpc/ws_delivery_enqueue') {
+          const existing = queue.find(j => j.idempotency_key === a.p_key);
+          if (existing) return response({ ...existing, created: false });
+          const job = { id: `scheduled-${queue.length}`, idempotency_key: a.p_key, payload: a.p_payload,
+            kind: a.p_kind, channel: a.p_channel, company: a.p_company, status: 'pending', attempts: 0 };
+          queue.push(job);
+          return response({ ...job, created: true });
+        }
         if (table === 'rpc/ws_delivery_claim') {
           const due = queue.filter(j => ['pending', 'failed'].includes(j.status) && !j.claimed).slice(0, a.p_limit);
           due.forEach(j => { j.status = 'sending'; j.attempts++; j.claimed = true; });
@@ -450,4 +459,40 @@ test('a queued email that goes out marks the punch as emailed', async () => {
   assert.equal(queue[0].status, 'sent');
   await h.tick();
   assert.equal(h.mails.length, 1, 'sent once');
+});
+
+test('scheduler sends login and logout notices once and leaves attendance untouched', async () => {
+  const queue = [];
+  const targets = [{ company: COMPANY, enabled: true, dialog_id: 'chat100', punch_enabled: true, auto_login: true, auto_logout: true }];
+  const h = harness({ now: '2026-09-15T09:35:00+05:30', profiles: [{ ...person, status: 'active', shift_id: 1 }], targets, queue, logs: [] });
+  const first = await h.tick();
+  assert.equal(first.body.attendance.scheduled.queued, 1);
+  assert.equal(h.posts[0].kind, 'scheduled_login');
+  assert.equal(queue[0].status, 'sent');
+  await h.tick();
+  assert.equal(h.posts.length, 1, 'repeated ticks do not post again');
+  h.at('2026-09-15T18:35:00+05:30');
+  await h.tick();
+  assert.deepEqual(h.posts.map(p => p.kind), ['scheduled_login', 'scheduled_logout']);
+  assert.equal(h.db.attendance_logs.length, 0);
+  assert.equal(h.db.attendance_auto_logouts.length, 0);
+});
+
+test('paused schedules and inactive employees cancel queued scheduled messages; punch control is independent', async () => {
+  for (const inactive of [false, true]) {
+    const queue = [qjob('s1', 'bitrix', { company: COMPANY, enroll: person.employee_code, user_id: person.id,
+      kind: 'scheduled_login', message: 'Scheduled login' })];
+    const targets = [{ company: COMPANY, enabled: true, dialog_id: 'chat100', auto_login: inactive, punch_enabled: false }];
+    const h = harness({ now: '2026-09-15T12:00:00+05:30', profiles: [{ ...person, status: inactive ? 'inactive' : 'active' }], targets, queue, logs: [] });
+    await h.tick();
+    assert.equal(h.posts.length, 0);
+    assert.equal(queue[0].status, 'dead');
+    assert.match(queue[0].last_error, /schedule_cancelled/);
+  }
+  const queue = [qjob('p1', 'bitrix', { company: COMPANY, enroll: person.employee_code, kind: 'punch', message: 'Login' })];
+  const h = harness({ now: '2026-09-15T12:00:00+05:30', profiles: [person], logs: [punch(1, '09:31', 'IN', 'LOGIN')], queue,
+    targets: [{ company: COMPANY, enabled: true, dialog_id: 'chat100', punch_enabled: false }] });
+  await h.tick();
+  assert.equal(h.posts.length, 0);
+  assert.equal(h.db.attendance_logs[0].bitrix_status, 'skipped', 'paused punch messages must not be reported as sent');
 });

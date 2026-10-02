@@ -50,6 +50,10 @@
         punch: { label: 'Punch',  chip: 'info' },
         leave: { label: 'Leave',  chip: 'warn' },
         test:  { label: 'Test',   chip: '' },
+        scheduled_login: { label: 'Scheduled login', chip: 'info' },
+        scheduled_logout: { label: 'Scheduled logout', chip: 'info' },
+        auto_logout: { label: 'Attendance auto logout', chip: 'warn' },
+        shift_switch: { label: 'Shift switch', chip: 'info' },
     };
 
     /* The stored reason is a machine token - ours ('no_dialog') or Bitrix's
@@ -135,14 +139,33 @@
     async function loadBitrix() {
         if (!adminAuthenticated) return;
         const body = document.getElementById('bx-body');
-        body.innerHTML = '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold animate-pulse">Checking the connection…</td></tr>';
+        body.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-400 font-bold animate-pulse">Checking the connection…</td></tr>';
         try {
             bxData = await api('bitrix_status');
             renderBitrix();
         } catch (e) {
             document.getElementById('bx-conn').innerHTML =
                 `<div class="ws-chip bad">Could not reach the admin API</div>`;
-            body.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-rose-300 font-bold">${esc(e.message)}</td></tr>`;
+            body.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-rose-300 font-bold">${esc(e.message)}</td></tr>`;
+        }
+    }
+
+    async function loadAutomationStatus() {
+        const el = document.getElementById('bx-automation-status');
+        if (!adminAuthenticated || !el) return;
+        try {
+            const d = await api('att_scheduler_status');
+            const s = d.scheduler;
+            const elapsed = s && s.last_run_at ? Date.now() - Date.parse(s.last_run_at) : Infinity;
+            const healthy = elapsed >= 0 && elapsed < 15 * 60000 && s.last_ok === true;
+            const label = healthy ? 'Scheduler running' : 'Scheduler needs attention';
+            const detail = s && s.last_run_at ? `Last run ${stamp(s.last_run_at)}.` : 'No scheduled run recorded yet.';
+            const notes = s && s.last_result && s.last_result.attendance && s.last_result.attendance.notes || [];
+            el.innerHTML = `<span class="ws-chip ${healthy ? 'ok' : 'warn'}">${label}</span> ${esc(detail)}` +
+                (notes.length ? `<p class="mt-2">${notes.map(esc).join(' · ')}</p>` : '') +
+                (!healthy ? '<p class="mt-2">Open Scheduler and delivery retries below to check setup.</p>' : '');
+        } catch (e) {
+            el.textContent = `Could not check the scheduler: ${e.message}`;
         }
     }
 
@@ -189,6 +212,9 @@
         const rows = d.targets || [];
         const byCompany = d.groups_by_company || {};
         document.getElementById('bx-body').innerHTML = rows.length ? rows.map(t => {
+            const ready = typeof t.punch_enabled === 'boolean';
+            const options = [['punch_enabled', 'Punch IN/OUT', t.punch_enabled !== false],
+                ['auto_login', 'Shift login', t.auto_login === true], ['auto_logout', 'Shift logout', t.auto_logout === true]];
             const head = (d.headcount || {})[t.company] || 0;
             // The chats this company's own people can post to; every chat
             // anyone can see when nobody in the company has a hook yet.
@@ -213,12 +239,16 @@
                     <input type="checkbox" class="bx-enabled w-4 h-4" ${t.enabled ? 'checked' : ''}
                            ${t.dialog_id ? '' : 'disabled'} title="Pause without losing the mapping">
                 </td>
+                <td>
+                    ${options.map(([field, label, checked]) => `<label class="flex items-center gap-2 text-xs font-bold mb-2 whitespace-nowrap"><input type="checkbox" class="bx-automation w-4 h-4" data-field="${field}" ${checked ? 'checked' : ''} ${ready && t.dialog_id && t.enabled ? '' : 'disabled'}>${label}</label>`).join('')}
+                    ${ready ? '' : '<span class="text-amber-300 text-xs">Update database in Setup health to enable controls.</span>'}
+                </td>
                 <td class="text-right">
                     <button type="button" class="bx-test glass px-3 py-1.5 rounded-lg text-xs font-black text-slate-300"
                             ${t.dialog_id ? '' : 'disabled style="opacity:.3"'}>Send test</button>
                 </td>
             </tr>`;
-        }).join('') : '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-bold">No companies found.</td></tr>';
+        }).join('') : '<tr><td colspan="6" class="p-8 text-center text-slate-400 font-bold">No companies found.</td></tr>';
     }
 
     async function loadLogs() {
@@ -382,14 +412,21 @@
         }
         const dialog  = raw;
         const enabled = tr.querySelector('.bx-enabled').checked;
+        const target = (bxData.targets || []).find(x => x.company === company);
+        const automation = {};
+        if (target && typeof target.punch_enabled === 'boolean') {
+            tr.querySelectorAll('.bx-automation').forEach(el => { automation[el.dataset.field] = el.checked; });
+        }
+        tr.querySelectorAll('input,select,button').forEach(el => { el.disabled = true; });
         try {
-            const out = await api('bitrix_save', { company, dialog_id: dialog, enabled });
+            const out = await api('bitrix_save', { company, dialog_id: dialog, enabled, ...automation });
             const t = (bxData.targets || []).find(x => x.company === company);
             if (t && out.target) Object.assign(t, out.target);
             renderBitrix();
             notice(null, '');
             flash(document.querySelector(`#bx-body tr[data-company="${CSS.escape(company)}"]`) || tr, true);
         } catch (e) {
+            renderBitrix();
             flash(tr, false);
             notice(false, 'Could not save that mapping', e.message);
         }
@@ -606,7 +643,7 @@
 
     document.getElementById('bx-body').addEventListener('change', ev => {
         const tr = ev.target.closest('tr[data-company]');
-        if (tr && (ev.target.classList.contains('bx-dialog') || ev.target.classList.contains('bx-enabled'))) save(tr);
+        if (tr && (ev.target.classList.contains('bx-dialog') || ev.target.classList.contains('bx-enabled') || ev.target.classList.contains('bx-automation'))) save(tr);
     });
     document.getElementById('bx-body').addEventListener('click', async ev => {
         const btn = ev.target.closest('.bx-test');
@@ -632,7 +669,7 @@
             if (bxLogs) loadLogs();
         }
     });
-    document.getElementById('bx-reload').addEventListener('click', () => { loadBitrix(); loadHooks(); });
+    document.getElementById('bx-reload').addEventListener('click', () => { loadBitrix(); loadHooks(); loadAutomationStatus(); });
     document.getElementById('bx-log-reload').addEventListener('click', () => loadLogs());
     document.getElementById('bx-log-fails').addEventListener('change', () => loadLogs());
     document.getElementById('bx-log-limit').addEventListener('change', () => loadLogs());
@@ -648,6 +685,7 @@
             const tab = btn.dataset.tab;
             document.getElementById('bitrix-panel').classList.toggle('hidden', tab !== 'bitrix');
             if (tab !== 'bitrix') return;
+            loadAutomationStatus();
             // Status first: the log renders group NAMES by looking them up in
             // bxData.groups, and falls back to the raw id when it is not there.
             if (!bxData) loadBitrix().then(loadLogs);

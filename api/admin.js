@@ -1838,6 +1838,20 @@ module.exports = async function handler(req, res) {
       if (action === 'bitrix_save') {
         const company = String(body.company || '').trim();
         if (!company) return res.status(400).json({ error: 'company required' });
+        const automation = {};
+        for (const field of ['punch_enabled', 'auto_login', 'auto_logout']) {
+          if (!(field in body)) continue;
+          if (typeof body[field] !== 'boolean') return res.status(400).json({ error: `${field} must be true or false` });
+          automation[field] = body[field];
+        }
+        if (Object.keys(automation).length) {
+          const probe = await sb('bitrix_targets?select=punch_enabled,auto_login,auto_logout&limit=0');
+          if (!probe.ok) return res.status(409).json({ error: 'Automation settings unavailable', detail: 'Check Setup health and apply supabase-bitrix-automation-migration.sql.' });
+        }
+        if ((automation.auto_login || automation.auto_logout) && body.enabled !== false && body.dialog_id) {
+          const queue = await sb('delivery_jobs?select=id&limit=0');
+          if (!queue.ok) return res.status(409).json({ error: 'Delivery queue unavailable', detail: 'Apply supabase-delivery-queue-migration.sql before enabling scheduled messages.' });
+        }
         const raw = String(body.dialog_id || '').trim();
         // Blank clears the mapping, which is how a company is switched off.
         if (raw && !/^(sg|chat)?\d+$/i.test(raw)) {
@@ -1852,6 +1866,7 @@ module.exports = async function handler(req, res) {
             company, dialog_id: dialog,
             label: body.label ? String(body.label).slice(0, 120) : null,
             enabled: body.enabled !== false,
+            ...automation,
             updated_at: new Date().toISOString(), updated_by: 'admin',
           }),
         });
@@ -3165,13 +3180,13 @@ module.exports = async function handler(req, res) {
         // Who a punch's message was about, from the punch.
         const logIds = [...new Set(jobs.filter(j => j.source_table === 'attendance_logs' && /^\d+$/.test(String(j.source_id))).map(j => j.source_id))];
         const logs = logIds.length ? await sb(`attendance_logs?id=in.(${logIds.join(',')})&select=id,user_id,log_datetime,direction,event_type`).then(x => x.ok ? x.json() : []) : [];
-        const profiles = logs.length ? await loadProfiles() : [];
+        const profiles = logs.length || jobs.some(j => j.source_table === 'profiles') ? await loadProfiles() : [];
         const byId = new Map(profiles.map(p => [p.id, p])), logById = new Map(logs.map(l => [String(l.id), l]));
         return res.status(200).json({
           counts: counts.ok ? counts.data : {},
           jobs: jobs.map(j => {
             const l = j.source_table === 'attendance_logs' ? logById.get(String(j.source_id)) : null;
-            const p = l ? byId.get(l.user_id) : null;
+            const p = l ? byId.get(l.user_id) : j.source_table === 'profiles' ? byId.get(j.source_id) : null;
             return { ...j, full_name: p ? p.full_name : null, employee_id: p ? p.employee_id || null : null,
                      punch_at: l ? l.log_datetime : null, punch: l ? (l.event_type || l.direction) : null };
           }),

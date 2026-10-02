@@ -38,15 +38,15 @@
     },
     {
       "source": "/messenger",
-      "destination": "/chat/index.html"
+      "destination": "/chat"
     },
     {
       "source": "/messenger/",
-      "destination": "/chat/index.html"
+      "destination": "/chat"
     },
     {
       "source": "/wsm-admin/:path*",
-      "destination": "/wsm-admin/index.html"
+      "destination": "/wsm-admin"
     }
   ],
   "redirects": [

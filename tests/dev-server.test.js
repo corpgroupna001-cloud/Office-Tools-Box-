@@ -38,15 +38,33 @@ test('/api handlers run with Vercel helpers and the environment', async () => {
 });
 
 test('vercel.json rewrites (with their query) and redirects apply', async () => {
-  const admin = await fetch(base + '/wsm-admin/employees');
-  assert.equal(admin.status, 200, ':path* rewrite to the admin page');
-  assert.match(await admin.text(), /Administration/);
+  for (const route of ['/wsm-admin', '/wsm-admin/employees', '/wsm-admin/employees/', '/wsm-admin/attendance', '/wsm-admin/bitrix']) {
+    const admin = await fetch(base + route);
+    assert.equal(admin.status, 200, `direct navigation or refresh: ${route}`);
+    assert.match(await admin.text(), /Administration/);
+  }
+  for (const route of ['/messenger', '/messenger/']) {
+    const messenger = await fetch(base + route);
+    assert.equal(messenger.status, 200, route);
+    assert.match(await messenger.text(), /<title>.*Messenger/);
+  }
   const red = await fetch(base + '/admin', { redirect: 'manual' });
   assert.equal(red.status, 307);
   assert.equal(red.headers.get('location'), '/wsm-admin');
   // /api/ice → /api/push?fn=ice: reaches push.js, which wants a signed-in caller.
   const ice = await fetch(base + '/api/ice');
   assert.ok([401, 500].includes(ice.status), `push handler answered ${ice.status}`);
+});
+
+test('clean URL rewrites target deployed HTML routes without file extensions', () => {
+  const config = JSON.parse(fs.readFileSync(path.join(__dirname, '../vercel.json'), 'utf8'));
+  assert.equal(config.cleanUrls, true);
+  for (const route of ['/wsm-admin/employees', '/wsm-admin/attendance', '/messenger']) {
+    const rewritten = dev.applyRules(config.rewrites, route);
+    assert.ok(rewritten, route);
+    assert.doesNotMatch(rewritten.dest, /\.html(?:\?|$)/, 'Vercel removes HTML extensions before rewrites');
+    assert.ok(fs.statSync(path.join(__dirname, '..', rewritten.dest, 'index.html')).isFile());
+  }
 });
 
 test('.env.local fills only what the shell has not set', () => {
