@@ -197,6 +197,61 @@
         });
     });
 
+    /* ---- delivery retries (supabase-delivery-queue-migration.sql) ------ */
+    let dq = null;
+    const DQ_STATUS = {
+        dead: '<span class="text-rose-300 font-black">Given up</span>',
+        failed: '<span class="text-amber-300 font-black">Will retry</span>',
+        pending: '<span class="text-slate-300 font-black">Waiting</span>',
+        sending: '<span class="text-slate-300 font-black">Sending</span>',
+        sent: '<span class="text-emerald-300 font-black">Delivered</span>',
+    };
+    const DQ_CHANNEL = { email: 'Email', bitrix: 'Bitrix group', push: 'Push' };
+    const when = iso => (iso ? IST_T.format(new Date(iso)).replace(',', '') : '');
+
+    async function loadDeliveries() {
+        if (!adminAuthenticated) return;
+        const tb = $('dq-tbody');
+        tb.innerHTML = '<tr><td colspan="6" class="p-6 text-center text-slate-400 font-bold">Loading…</td></tr>';
+        try {
+            dq = await api('att_deliveries', { status: $('dq-status').value });
+        } catch (e) {
+            dq = null; $('dq-counts').textContent = '';
+            tb.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-rose-300 font-bold">${esc(e.message)}</td></tr>`;
+            return;
+        }
+        const total = st => Object.values(dq.counts || {}).reduce((n, c) => n + (Number(c[st]) || 0), 0);
+        $('dq-counts').textContent = `${total('dead')} given up · ${total('failed')} will retry · ${total('pending') + total('sending')} waiting · ${total('sent')} delivered (7 days)`;
+        const what = j => j.full_name
+            ? `${esc(j.full_name)}${j.punch ? ` <span class="text-slate-400">· ${esc(j.punch)} ${esc(when(j.punch_at))}</span>` : ''}`
+            : esc(j.kind === 'attendance.leave' ? 'Leave request announcement' : j.kind);
+        tb.innerHTML = (dq.jobs || []).length ? dq.jobs.map(j => `
+            <tr data-dq="${esc(j.id)}">
+                <td class="text-slate-200 font-bold">${what(j)}<div class="text-slate-400 text-xs font-medium">${esc(j.to || (j.message ? String(j.message).slice(0, 70) : '') || j.company || '')}</div></td>
+                <td class="text-slate-300 font-bold">${esc(DQ_CHANNEL[j.channel] || j.channel)}</td>
+                <td>${DQ_STATUS[j.status] || esc(j.status)}${j.status === 'failed' && j.next_attempt_at ? `<div class="text-slate-400 text-xs font-bold">next ${esc(when(j.next_attempt_at))}</div>` : ''}${j.status === 'sent' && j.sent_at ? `<div class="text-slate-400 text-xs font-bold">${esc(when(j.sent_at))}</div>` : ''}</td>
+                <td class="text-slate-300 font-bold">${Number(j.attempts) || 0} of ${Number(j.max_attempts) || 0}</td>
+                <td class="text-slate-400 text-xs font-medium" style="max-width:280px;">${esc(String(j.last_error || '—').slice(0, 220))}</td>
+                <td>${j.status === 'dead' || j.status === 'failed' ? '<button type="button" data-dq-retry class="glass px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-white/10">Send again</button>' : ''}</td>
+            </tr>`).join('')
+            : '<tr><td colspan="6" class="p-6 text-center text-slate-400 font-bold">Nothing here: every message went out.</td></tr>';
+    }
+    $('dq-tbody').addEventListener('click', async ev => {
+        const b = ev.target.closest('[data-dq-retry]');
+        if (!b) return;
+        b.disabled = true;
+        try {
+            await api('att_delivery_retry', { id: b.closest('[data-dq]').dataset.dq });
+            b.textContent = 'Queued';
+            setTimeout(loadDeliveries, 600);
+        } catch (e) {
+            b.disabled = false;
+            wsDialog.alert({ icon: '⚠️', danger: true, title: 'Could not send it again', message: esc(e.message) });
+        }
+    });
+    $('dq-refresh').addEventListener('click', loadDeliveries);
+    $('dq-status').addEventListener('change', loadDeliveries);
+
     /* ---- wiring ------------------------------------------------------- */
     let loaded = false;
     document.querySelectorAll('.admin-tab').forEach(btn => {
@@ -206,6 +261,7 @@
             if (!$('recompute-from').value) $('recompute-from').value = daysAgo(14);
             if (!$('recompute-to').value) $('recompute-to').value = istToday();
             loadMail();
+            loadDeliveries();
         });
     });
 })();

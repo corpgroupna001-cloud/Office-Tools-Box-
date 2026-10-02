@@ -640,6 +640,8 @@ body.ws-app .lv-in, body.ws-app .toolbar input[type="month"] { color-scheme: inh
 body.ws-app .lv-lab { color: var(--ws-text-muted); letter-spacing: 0.06em; font-size: 10.5px; font-weight: 700; }
 body.ws-app .lv-btn, body.ws-app .sheet-actions button.primary { background: var(--ws-primary); border-radius: 7px; font-weight: 700; }
 body.ws-app .lv-btn:hover:not(:disabled) { background: var(--ws-primary-2); }
+body.ws-app .lv-btn.ghost, body.ws-app .lv-btn.ghost:hover:not(:disabled) { background: var(--ws-surface-2); color: var(--ws-text); border: 1px solid var(--ws-border); }
+body.ws-app .lv-btn.danger, body.ws-app .lv-btn.danger:hover:not(:disabled) { background: #be123c; color: #fff; }
 body.ws-app .prompt { background: var(--ws-info-bg); border-color: color-mix(in srgb, var(--ws-info-text) 30%, transparent); }
 body.ws-app .prompt.done { background: var(--ws-success-bg); border-color: color-mix(in srgb, var(--ws-success-text) 30%, transparent); }
 body.ws-app .prompt.warn { background: var(--ws-warning-bg); border-color: color-mix(in srgb, var(--ws-warning-text) 30%, transparent); }

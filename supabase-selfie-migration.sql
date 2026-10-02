@@ -23,7 +23,7 @@ alter table public.attendance_logs
 
 alter table public.attendance_logs drop constraint if exists attendance_logs_source_ck;
 alter table public.attendance_logs add constraint attendance_logs_source_ck
-  check (source in ('biometric', 'selfie'));
+  check (source in ('biometric', 'selfie', 'correction'));   -- 'correction': migration 23, kept here so re-running this file never breaks
 
 alter table public.attendance_logs drop constraint if exists attendance_logs_event_ck;
 alter table public.attendance_logs add constraint attendance_logs_event_ck

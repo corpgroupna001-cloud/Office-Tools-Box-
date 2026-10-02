@@ -5,7 +5,7 @@
 //                      package.json, copied from node_modules
 //   ui/tailwind.css    Tailwind compiled ahead of time (tailwind.config.js)
 //
-//   npm run build            writes them
+//   npm run build:assets            writes them
 //   node scripts/build-assets.js --check
 //                            exits 1 when a committed file differs from what
 //                            the build would write (npm run check runs this)
@@ -69,7 +69,7 @@ for (const [dest, text] of Object.entries(files)) {
   else { fs.mkdirSync(path.dirname(full), { recursive: true }); fs.writeFileSync(full, text); console.log('wrote', dest, `(${Math.round(text.length / 1024)} KB)`); }
 }
 if (check && stale.length) {
-  console.error(`out of date (run npm run build): ${stale.join(', ')}`);
+  console.error(`out of date (run npm run build:assets): ${stale.join(', ')}`);
   process.exit(1);
 }
 if (check) console.log(`assets up to date: ${Object.keys(files).length} files`);

@@ -51,6 +51,7 @@ function backend() {
     require(name) {
       if (name === '../lib/request-auth') return require('../lib/request-auth');
       if (name === '../lib/service-rpc') return require('../lib/service-rpc');
+      if (name === '../lib/attendance-live') return require('../lib/attendance-live');
       if (name === '../lib/admin-session') return sessions;
       if (name === '../lib/admin-audit') return { auditWrap: r => r, recordSecurityEvent: async () => true };
       if (name === '../lib/crm-import' || name === '../company-config') return require(name);

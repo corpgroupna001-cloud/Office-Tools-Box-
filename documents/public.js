@@ -25,6 +25,11 @@
         if (!d) return msg('This link is no longer available', 'The owner may have turned it off, or the document was deleted.');
         document.title = `${d.name} · WorkSuite`;
         document.getElementById('name').textContent = d.name;
+        // A link that expires says until when (F-05); once it has, the database stops returning it.
+        if (d.expires_at) {
+            const foot = document.querySelector('.pub-foot');
+            if (foot) foot.textContent += ` This link works until ${new Date(d.expires_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })} (India time).`;
+        }
         if (d.doc_kind && d.doc_kind !== 'file') {
             main.innerHTML = `<div class="pub-card k-${esc(d.doc_kind)}">${D.renderStatic(d.doc_kind, d.content)}</div>`;
             return;

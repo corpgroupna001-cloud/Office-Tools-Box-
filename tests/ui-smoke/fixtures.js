@@ -49,6 +49,13 @@ function db(opts = {}) {
     leave_types: [{ id: 1, code: 'CL', name: 'Casual Leave', is_paid: true, active: true, sort_order: 1 }],
     holidays: [{ id: 1, holiday_date: ist(6), name: 'Company offsite', company: NOVA, is_optional: false }],
     leave_requests: [{ id: 1, user_id: U2, leave_type_id: 1, start_date: ist(2), end_date: ist(3), day_part: 'full', status: 'approved', reason: 'Family event', created_at: at(-5) }],
+    // Fix a punch (supabase-attendance-corrections-migration.sql): one of Maya's, decided; one of her team's, waiting.
+    attendance_corrections: [
+      { id: 'c0000001-0000-4000-8000-000000000001', user_id: ME, company: NOVA, kind: 'missing', direction: 'OUT', requested_at: at(-1, '18:40'), work_date: ist(-1), log_id: null,
+        reason: 'Left through the side gate', status: 'approved', reviewed_by: null, reviewer_label: 'Admin console (password)', reviewed_at: at(-1, '20:00'), review_note: 'Seen on camera', created_at: at(-1, '19:00') },
+      { id: 'c0000002-0000-4000-8000-000000000002', user_id: U2, company: NOVA, kind: 'missing', direction: 'IN', requested_at: at(-2, '09:31'), work_date: ist(-2), log_id: null,
+        reason: 'Device was offline in the morning', status: 'pending', reviewed_by: null, reviewer_label: null, reviewed_at: null, review_note: null, created_at: at(-1, '11:00') },
+    ],
     attendance_logs: [{ id: 1, user_id: ME, employee_code: 'NS001', direction: 'IN', event_type: null, source: 'biometric', log_datetime: at(0, '09:28'), log_date: ist(0), log_time: '09:28:00', device_sn: 'R1', email_status: 'sent' }],
     crm_lead_statuses: [
       { key: 'new', label: 'New', sort_order: 1, is_closed: false, is_converted: false, color: 'pending' },
@@ -256,6 +263,16 @@ const RPC = {
   // The session gate's answer for Maya (supabase-access-control-migration.sql); a page can set DB.__access.
   ws_my_access: (_body, DB) => DB.__access || { signed_in: true, access: 'ok', status: 'active', email_verified: true, company: NOVA, full_name: 'Maya Manager', mfa_enrolled: false },
   ws_unread_counts: () => [{ direct_unread: 1, group_unread: 1, total: 2 }],
+  // A decision on a correction, as ws_review_attendance_correction makes it: once, adding the punch on approval.
+  ws_review_attendance_correction: (b, DB) => {
+    const c = (DB.attendance_corrections || []).find(x => x.id === b.p_id);
+    if (!c) throw new Error('No such correction request');
+    if (c.status !== 'pending') throw new Error('This request was already ' + c.status);
+    c.status = b.p_approve ? 'approved' : 'rejected';
+    c.reviewed_by = ME; c.reviewed_at = new Date().toISOString(); c.review_note = b.p_note || null;
+    if (b.p_approve) DB.attendance_logs.push({ id: DB.attendance_logs.length + 100, user_id: c.user_id, direction: c.direction, source: 'correction', log_datetime: c.requested_at, log_date: c.work_date, correction_id: c.id });
+    return c;
+  },
   // Favourites (supabase-favorites-migration.sql): the starred rows that still exist.
   ws_my_favorites: (_b, DB) => (DB.user_favorites || []).map(f => {
     const table = { task: 'tasks', deal: 'crm_deals', project: 'projects', document: 'documents' }[f.entity_type];
@@ -284,7 +301,7 @@ const RPC = {
   },
   // A public link (/documents/public?t=…): a live native document, or nothing.
   ws_published_document: body => (body.p_token === 'smokepublic0000000000000000000001'
-    ? { name: 'Price list', doc_kind: 'document', file: false, content: { html: '<h2>Price list</h2><p>Academy kit: <b>1,680</b></p>' }, published_at: '2026-09-20T09:00:00Z', expires_at: null }
+    ? { name: 'Price list', doc_kind: 'document', file: false, content: { html: '<h2>Price list</h2><p>Academy kit: <b>1,680</b></p>' }, published_at: '2026-09-20T09:00:00Z', expires_at: new Date(Date.now() + 7 * 86400000).toISOString() }
     : null),
   crm_log: () => null,
   crm_convert_lead: () => ({ contact_id: 'C1', deal_id: 'D1', existing_contact: true }),

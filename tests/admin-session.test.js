@@ -14,6 +14,7 @@ function backend(config = env, opts = {}) {
     require(name) {
       if (name === '../lib/request-auth') return require('../lib/request-auth');
       if (name === '../lib/service-rpc') return require('../lib/service-rpc');
+      if (name === '../lib/attendance-live') return require('../lib/attendance-live');
       if (name === '../company-config') return require('../company-config');
       if (name === '../lib/admin-session') return sessions;
       if (name === '../lib/attendance') return require('../lib/attendance');

@@ -35,3 +35,31 @@ test('employees, deactivated admins and strangers are refused', async () => {
 test('the account never counts as the password for the login action', async () => {
   assert.equal((await call('tok-admin', 'login')).code, 401);
 });
+
+test('an administrator signed in with their own account cannot decide their own correction; others carry their name', async () => {
+  const before = global.fetch, rpcs = [];
+  global.fetch = async (url, opts) => {
+    const u = String(url);
+    if (u.includes('/attendance_corrections?id=eq.c0000001')) return { ok: true, json: async () => [{ user_id: 'u-admin' }] };
+    if (u.includes('/attendance_corrections?id=eq.c0000002')) return { ok: true, json: async () => [{ user_id: 'u-emp' }] };
+    if (u.includes('/rpc/ws_review_attendance_correction')) {
+      rpcs.push(JSON.parse(opts.body));
+      return { ok: true, status: 200, text: async () => JSON.stringify({ id: 'c0000002', status: 'approved' }) };
+    }
+    return before(url, opts);
+  };
+  try {
+    const decide = async id => {
+      const res = { code: 200, headers: {}, setHeader(k, v) { this.headers[k] = v; }, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; }, end() { return this; } };
+      await handler({ method: 'POST', headers: { host: 'x', authorization: 'Bearer tok-admin' }, body: { action: 'att_correction_decide', id, status: 'approved' } }, res);
+      return res;
+    };
+    const own = await decide('c0000001-0000-4000-8000-000000000001');
+    assert.equal(own.code, 403);
+    assert.match(own.body.error, /own correction/);
+    assert.equal(rpcs.length, 0, 'the database is never asked');
+    const other = await decide('c0000002-0000-4000-8000-000000000002');
+    assert.equal(other.code, 200, JSON.stringify(other.body));
+    assert.equal(rpcs[0].p_reviewer_label, 'Admin console (u-admin)');
+  } finally { global.fetch = before; }
+});

@@ -779,6 +779,36 @@
                     A test here goes through exactly the same path.
                 </p>
 
+                <!-- ---------- Delivery retries (supabase-delivery-queue-migration.sql): admin/attendance-tools.js ---------- -->
+                <div class="section-head mt-8 mb-3"><h3><span class="ic ic-refresh"></span>Delivery retries</h3><span class="sub">Emails and group messages that did not go out the first time</span></div>
+                <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
+                    <label for="dq-status" class="sr-only">Show</label>
+                    <select id="dq-status" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                        <option value="problems">Failed and given up</option>
+                        <option value="dead">Given up</option>
+                        <option value="failed">Will retry</option>
+                        <option value="pending">Waiting</option>
+                        <option value="sent">Delivered</option>
+                    </select>
+                    <button id="dq-refresh" type="button" class="glass px-4 py-2 rounded-xl text-sm font-bold hover:bg-white/10">Refresh</button>
+                    <div class="flex-1"></div>
+                    <span id="dq-counts" class="text-xs font-bold text-slate-400" aria-live="polite"></span>
+                </div>
+                <div class="glass rounded-2xl overflow-hidden mb-4">
+                    <div class="overflow-x-auto" style="max-height:360px;">
+                        <table class="w-full text-sm">
+                            <thead><tr><th>Message</th><th>Channel</th><th>Status</th><th>Attempts</th><th>Last error</th><th></th></tr></thead>
+                            <tbody id="dq-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <p class="text-slate-400 text-xs font-bold mb-2 max-w-3xl leading-relaxed">
+                    A punch's email or group line that fails is sent again by the attendance job (every 5 minutes): after 1, 5 and 15 minutes,
+                    then hourly, at most 5 times, and never once it is too old to be useful (12 hours for an email, 6 for a group line).
+                    One that cannot succeed &mdash; no email address, a rejected recipient, no sender &mdash; is given up at once and listed here.
+                    Fix the cause, then <b>Send again</b>. A message that went out is never sent twice.
+                </p>
+
                 <!-- ---------- Attendance days ---------- -->
                 <div class="section-head mt-8 mb-3"><h3><span class="ic ic-attend"></span>Attendance days</h3><span class="sub">Re-derive day, IN/OUT and Login/Break/Logout for stored punches</span></div>
                 <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
@@ -890,6 +920,29 @@
                         <table class="w-full text-sm">
                             <thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th>Reason</th><th>Status</th><th></th></tr></thead>
                             <tbody id="lv-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Attendance correction requests: owned by admin/corrections.js. -->
+                <div class="section-head mb-3"><h3><span class="ic ic-clock"></span>Attendance corrections</h3><span class="sub">A forgotten or wrong punch. Approving adds the right punch; the device's own record is kept</span></div>
+                <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-center">
+                    <label for="ac-status" class="sr-only">Show</label>
+                    <select id="ac-status" class="glass px-4 py-2 rounded-xl text-sm font-bold focus:outline-none">
+                        <option value="pending">Pending</option>
+                        <option value="">All</option>
+                        <option value="approved">Approved</option>
+                        <option value="rejected">Rejected</option>
+                    </select>
+                    <button id="ac-refresh" type="button" class="btn-primary text-white font-black px-5 py-2 rounded-xl text-sm">Refresh</button>
+                    <div class="flex-1"></div>
+                    <span id="ac-counts" class="text-xs font-bold text-slate-400" aria-live="polite"></span>
+                </div>
+                <div class="glass rounded-2xl overflow-hidden mb-8">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead><tr><th>Employee</th><th>Asked for</th><th>Instead of</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+                            <tbody id="ac-tbody"></tbody>
                         </table>
                     </div>
                 </div>
@@ -3260,8 +3313,8 @@
             };
             document.getElementById('att-feed-tbody').innerHTML = attFeed.length
                 ? attFeed.map(l => `
-                    <tr>
-                        <td class="text-white font-black">${escapeHtml(l.pretty_time || '—')}</td>
+                    <tr${l.superseded_by ? ' class="opacity-60"' : ''}>
+                        <td class="text-white font-black">${l.superseded_by ? `<s>${escapeHtml(l.pretty_time || '—')}</s><br><span class="text-amber-300 text-xs font-bold">Replaced by an approved correction</span>` : escapeHtml(l.pretty_time || '—')}</td>
                         <td class="font-bold text-white">${empNameHtml(l.employee_id, l.full_name || l.employee_code)}<br>
                             <span class="text-slate-400 text-xs font-medium">${l.employee_code ? 'Biometric ID ' + escapeHtml(l.employee_code) : ''}</span></td>
                         <td>${l.direction === 'IN'
@@ -3856,6 +3909,7 @@
     <script src="/admin/roster.js"></script>
     <script src="/admin/attendance-tools.js"></script>
     <script src="/admin/holidays.js"></script>
+    <script src="/admin/corrections.js"></script>
     <script src="/admin/overview.js"></script>
     <script src="/admin/management.js"></script>
     <script src="/admin/inactivity.js"></script>

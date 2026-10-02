@@ -17,7 +17,7 @@ const SHARED = Object.fromEntries([
   'WSAdminRouter', 'WSMfa', 'wsDialog', 'wsCmdK', 'wsIsOnlineByLastSeen', 'wsRenderOnlineDot',
   'WSAdminResetInactivityTimer', 'WSAdminLock', 'WSFavorites', 'WSNotifPrefs', 'WSCallMesh',
   // Admin console helpers defined by wsm-admin/index.html for admin/*.js.
-  'escapeHtml', 'adminFetch', 'adminAuthenticated',
+  'escapeHtml', 'adminFetch', 'adminAuthenticated', 'empNameHtml',
   // Page helpers the home page defines for its own inline blocks.
   'showToast', 'showDialog', 'showOtpModal', 'switchAuthTab',
   // Libraries loaded from <script src>.

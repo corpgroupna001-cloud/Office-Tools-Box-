@@ -44,6 +44,8 @@ function harness(options = {}) {
       BIOMETRIC_API_KEY: 'test-device' } },
     require(name) {
       if (name === '../lib/request-auth') return require('../lib/request-auth');
+      if (name === '../lib/attendance-live') return require('../lib/attendance-live');
+      if (name === '../lib/delivery') return require('../lib/delivery');
       if (name === '../company-config') return require('../company-config');
       if (name === 'crypto') return require('crypto');
       if (name === '../lib/attendance') return attendance;
@@ -76,6 +78,17 @@ function harness(options = {}) {
         ]);
       }
       if (table === 'rpc/record_enrolments') return response(null);
+      // The delivery queue (migration 24): options.queue collects what is queued; without it, not installed.
+      if (table === 'rpc/ws_delivery_enqueue') {
+        if (!options.queue) return new Response(JSON.stringify({ code: 'PGRST202', message: 'Could not find the function' }), { status: 404 });
+        const a = JSON.parse(init.body);
+        const old = options.queue.find(j => j.idempotency_key === a.p_key);
+        if (old) return response({ ...old, created: false });
+        const j = { id: 'job' + (options.queue.length + 1), idempotency_key: a.p_key, channel: a.p_channel, payload: a.p_payload,
+          attempts: a.p_attempts, status: a.p_dead ? 'dead' : a.p_attempts ? 'failed' : 'pending', last_error: a.p_error, expires_at: a.p_expires_at };
+        options.queue.push(j);
+        return response({ ...j, created: true });
+      }
       if (url.pathname === '/auth/v1/user') return response({ id: profile.id });
       if (table === 'attendance_logs') {
         if (method === 'GET') return response(rows.filter(row => matches(row, url)));
@@ -322,4 +335,51 @@ test('moving someone from nights to days does not rewrite the nights they alread
   await h.send(one('2026-09-17', '08:55:00'));
   assert.deepEqual(h.rows.slice(0, 4).map(r => [r.log_date, r.direction, r.event_type].join(' ')), before);
   assert.deepEqual([h.rows[4].log_date, h.rows[4].event_type], ['2026-09-17', 'LOGIN']);
+});
+
+/* ============ The delivery retry queue (supabase-delivery-queue-migration.sql) ============ */
+
+test('a punch email or group line that failed is queued once per punch and channel, with what was sent', async () => {
+  const queue = [];
+  const h = harness({ queue, mailResult: { ok: false, reason: 'smtp_send_failed', detail: 'Greeting never received' },
+    bitrixResult: { ok: false, reason: 'timeout', detail: 'no answer in 3000 ms' } });
+  const res = await h.send();
+  assert.equal(res.statusCode, 200);
+  const keys = queue.map(j => j.idempotency_key).sort();
+  assert.equal(keys.length, 12, 'six punches, two channels');
+  assert.deepEqual(keys.filter(k => k === 'attendance:1:email' || k === 'attendance:1:bitrix'), ['attendance:1:bitrix', 'attendance:1:email']);
+  const mail = queue.find(j => j.idempotency_key === 'attendance:1:email');
+  assert.deepEqual([mail.status, mail.attempts, mail.payload.to], ['failed', 1, 'employee@example.test']);
+  assert.equal(mail.payload.subject, h.emails[0].subject, 'the retry sends the same email');
+  assert.match(mail.last_error, /Greeting never received/);
+  const line = queue.find(j => j.idempotency_key === 'attendance:1:bitrix');
+  assert.equal(line.payload.message, h.posts[0].message);
+  assert.ok(Date.parse(line.expires_at) - Date.parse(h.rows[0].log_datetime) === 6 * 3600 * 1000, 'a group line goes stale after 6 hours');
+  // The vendor sends the same batch again: nothing new is stored, nothing new is queued.
+  await h.send();
+  assert.equal(queue.length, 12);
+});
+
+test('what went out is not queued; nor is a line for a company without a group', async () => {
+  const queue = [];
+  const h = harness({ queue, noGroup: true });
+  await h.send();
+  assert.equal(queue.length, 0);
+});
+
+test('punches the request had no time for are queued to be sent by the attendance job', async () => {
+  const queue = [];
+  const h = harness({ queue, expireAfterInsert: true });
+  const res = await h.send();
+  assert.equal(res.body.deferred, 6);
+  assert.equal(queue.length, 12);
+  assert.ok(queue.every(j => j.status === 'pending' && j.attempts === 0), 'never tried, so due straight away');
+});
+
+test('a WFH selfie whose email failed is queued too', async () => {
+  const queue = [];
+  const h = harness({ queue, profile: { is_wfh: true }, mailResult: { ok: false, reason: 'smtp_send_failed', detail: 'ECONNRESET' } });
+  h.at('2026-09-08T09:31:00+05:30');
+  assert.equal((await h.selfie('LOGIN')).statusCode, 200);
+  assert.deepEqual(queue.map(j => [j.idempotency_key, j.status]), [[`attendance:${h.rows[0].id}:email`, 'failed']]);
 });
