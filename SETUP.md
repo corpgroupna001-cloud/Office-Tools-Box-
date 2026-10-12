@@ -646,6 +646,19 @@ on the company name, so nothing is lost.
 
 ### Attendance → Bitrix24: delivery and shift-end logouts
 
+**The two portals.** Besides the per-person `BITRIX_HOOK_<enroll>` hooks, two
+portal-wide inbound webhooks are reserved in `.env.example`, neither of them
+keyed by an enroll number:
+
+| Name | Portal |
+|---|---|
+| `BITRIX_WEBHOOK_URL_QA` | QA — point it at a throwaway group while testing |
+| `BITRIX_WEBHOOK_URL_EBS` | EBS |
+
+Each value is the whole webhook URL (`https://<portal>.bitrix24.com/rest/<user_id>/<secret>/`),
+which is itself the credential: set it in **Vercel → Settings → Environment
+Variables**, never in a page or a commit, and redeploy.
+
 Run `supabase-attendance-scheduler-migration.sql` (next section). It carries
 everything `supabase-attendance-bitrix-migration.sql` adds, so that file is
 optional now; running it as well does no harm. Every punch then records whether
