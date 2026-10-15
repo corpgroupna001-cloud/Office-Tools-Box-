@@ -50,6 +50,7 @@ function backend() {
     module: mod, process: { env }, console, URL, Date, Promise, setTimeout: cb => cb(), fetch: fakeFetch,
     require(name) {
       if (name === '../lib/request-auth') return require('../lib/request-auth');
+      if (name === '../lib/query') return require('../lib/query');
       if (name === '../lib/service-rpc') return require('../lib/service-rpc');
       if (name === '../lib/attendance-live') return require('../lib/attendance-live');
       if (name === '../lib/admin-session') return sessions;

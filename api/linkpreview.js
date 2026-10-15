@@ -14,6 +14,7 @@
 const http = require('http');
 const https = require('https');
 const net = require('net');
+const { queryParam } = require('../lib/query');
 const { sessionUser, publicLookup, isPublicAddress, clientIp } = require('../lib/request-auth');
 const { rpc } = require('../lib/service-rpc');
 
@@ -108,7 +109,7 @@ const MEDIA_SIGNED_SECONDS = 15 * 60;
 async function publicDocument(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Referrer-Policy', 'no-referrer');
-  const token = String(req.query.t || '');
+  const token = queryParam(req, 't');
   if (!/^[a-z0-9]{24,64}$/i.test(token)) return res.status(404).json({ error: 'not_found' });
   const db = { url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY, request: fetch };
   if (!db.url || !db.key) return res.status(500).json({ error: 'Supabase server config missing' });
@@ -133,13 +134,13 @@ async function publicDocument(req, res) {
   } catch { signed = null; }
   if (!signed) return res.status(502).json({ error: 'sign_failed' });
   const target = new URL(signed.startsWith('http') ? signed : `${db.url}/storage/v1${signed.startsWith('/') ? '' : '/'}${signed}`);
-  if (req.query.download === '1') target.searchParams.set('download', String(f.name || 'file'));
+  if (queryParam(req, 'download') === '1') target.searchParams.set('download', String(f.name || 'file'));
   res.setHeader('Location', target.href);
   return res.status(302).end();
 }
 
 module.exports = async function handler(req, res) {
-  if (String((req.query && req.query.fn) || '') === 'document') {
+  if (queryParam(req, 'fn') === 'document') {
     if (req.method !== 'GET' && req.method !== 'HEAD') return res.status(405).json({ error: 'Method not allowed' });
     return publicDocument(req, res);
   }
@@ -148,7 +149,7 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const raw = String(req.query.url || '');
+  const raw = queryParam(req, 'url');
   let url;
   try { url = new URL(raw); } catch { return res.status(400).json({ error: 'invalid url' }); }
   if (!/^https?:$/.test(url.protocol)) return res.status(400).json({ error: 'http/https only' });

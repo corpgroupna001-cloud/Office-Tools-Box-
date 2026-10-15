@@ -8,6 +8,7 @@
 //     skips the Friday check)
 
 const { safeEqual } = require('../lib/request-auth');
+const { queryParam } = require('../lib/query');
 const webpush = require('web-push');
 const { runAndPush } = require('../lib/crm-reminders');
 
@@ -34,7 +35,7 @@ module.exports = async function handler(req, res) {
     url: SUPABASE_URL, key: SERVICE_KEY, webpush,
     vapid: { publicKey: VAPID_PUBLIC_KEY, privateKey: VAPID_PRIVATE_KEY, subject: VAPID_SUBJECT },
   });
-  if (String(req.query?.job || '') === 'crm') {
+  if (queryParam(req, 'job') === 'crm') {
     return res.status(200).json({ success: true, crm: await crmReminders() });
   }
 
@@ -54,7 +55,7 @@ module.exports = async function handler(req, res) {
   // ---- Friday (IST) guard — ?force=1 with admin key overrides ----
   const istNow = new Date(Date.now() + 5.5 * 3600 * 1000);
   const isFriday = istNow.getUTCDay() === 5;
-  const force = keyOk && String(req.query?.force || '') === '1';
+  const force = keyOk && queryParam(req, 'force') === '1';
   if (!isFriday && !force) {
     return res.status(200).json({ success: true, skipped: 'not_friday_ist', crm });
   }
@@ -64,7 +65,7 @@ module.exports = async function handler(req, res) {
   //   'videos' — morning cron (9 AM IST): upload your WFH device videos
   //   'typing' — evening cron (7 PM IST): finish your Friday typing test
   // Override with ?mode=videos|typing when triggering manually.
-  const qMode = String(req.query?.mode || '');
+  const qMode = queryParam(req, 'mode');
   const mode = ['videos', 'typing'].includes(qMode)
     ? qMode
     : (istNow.getUTCHours() >= 16 ? 'typing' : 'videos');

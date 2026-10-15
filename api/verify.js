@@ -27,6 +27,7 @@
 // ============================================================
 
 const crypto = require('crypto');
+const { queryParam } = require('../lib/query');
 const { readJson, sessionAccess, accessError } = require('../lib/request-auth');
 const { rpc } = require('../lib/service-rpc');
 
@@ -52,7 +53,7 @@ module.exports = async function handler(req, res) {
 
   // Which half? The rewrite supplies ?fn=, but fall back to the payload shape
   // so a direct POST to /api/verify still does the right thing.
-  const fn = String(req.query?.fn || '')
+  const fn = queryParam(req, 'fn')
     || (parsed && parsed.code !== undefined ? 'check' : 'send');
 
   return fn === 'check' ? verifyCode(req, res, parsed, user) : sendCode(req, res, parsed, user);

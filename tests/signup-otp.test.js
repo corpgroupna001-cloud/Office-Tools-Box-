@@ -97,6 +97,7 @@ function handler(file, state) {
     require(name) {
       if (name === 'crypto') return require('crypto');
       if (name === '../lib/request-auth') return require('../lib/request-auth');
+      if (name === '../lib/query') return require('../lib/query');
       if (name === '../lib/service-rpc') return require('../lib/service-rpc');
       if (name === './signup-start') return require('../api/signup-start');
       throw new Error('unexpected require ' + name);
