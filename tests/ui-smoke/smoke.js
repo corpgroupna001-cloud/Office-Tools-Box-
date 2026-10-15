@@ -681,7 +681,12 @@ async function interact(page, name, result) {
     await expect('the message chevron leaves the workspace menu alone', async () => {
       const more = await page.$('.mx-more');
       if (!more) return true;                        // no messages in this fixture
-      await more.click();
+      // Dispatched from the page, not a pointer click: chat.css hides the
+      // chevron under (hover: none), and headless Chrome on the Linux CI
+      // runner reports no hover even at desktop size, so a pointer click has
+      // nothing to land on. The same click event still reaches both
+      // Messenger's handler and the shell's, which is what this checks.
+      await more.evaluate(el => el.click());
       await wait(250);
       // The button carries data-act="menu" for Messenger's own menu; the shell
       // used to catch it and open Configure menu over the whole workspace.
