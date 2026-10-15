@@ -1220,7 +1220,28 @@ async function loadBitrixContext({ SUPABASE_URL, H, profiles, byCode }) {
   return ctx;
 }
 
-async function postPunchToGroup({ SUPABASE_URL, H, bx, company, enroll, message, kind = 'punch', skipReason, userId }) {
+/**
+ * Every Bitrix outcome is printed once, so Vercel → Logs shows WHY a line did
+ * or did not reach the group. Without this a failure lived only in bitrix_log
+ * (and the admin screen), and the runtime logs showed a clean 200.
+ * Never prints the message text or a webhook URL - only tokens and ids.
+ */
+async function postPunchToGroup(args) {
+  const out = await postPunchToGroupInner(args);
+  try {
+    const { bx, company, enroll, kind = 'punch' } = args || {};
+    const t = bx && bx.targets ? bx.targets.get(company) : null;
+    const line = `[bitrix] ${out && out.ok ? (out.skipped ? 'skipped' : 'sent') : 'failed'} kind=${kind} company=${company || '-'}`
+      + ` enroll=${enroll || '-'} dialog=${(t && t.dialog_id) || '-'} via=${(out && out.via) || '-'}`
+      + (out && (!out.ok || out.skipped) ? ` reason=${out.reason || '-'} detail=${bitrix.redact(String(out.detail || '')).slice(0, 200)}` : '')
+      + (!bx || !bx.configured ? ' (no BITRIX_HOOK_* / BITRIX_WEBHOOK_URL visible to this deployment)' : '')
+      + (bx && bx.configured && !t ? ` (no bitrix_targets row for this company; ${bx.targets.size} rows loaded)` : '');
+    (out && out.ok ? console.log : console.warn)(line);
+  } catch { /* logging must never break delivery */ }
+  return out;
+}
+
+async function postPunchToGroupInner({ SUPABASE_URL, H, bx, company, enroll, message, kind = 'punch', skipReason, userId }) {
   if (!bx || !bx.configured || !company || !message) return { ok: false, reason: 'no_group' };
   const t = bx.targets.get(company);
   const scheduled = kind === 'scheduled_login' || kind === 'scheduled_logout';
@@ -1254,8 +1275,11 @@ async function postPunchToGroup({ SUPABASE_URL, H, bx, company, enroll, message,
   try {
     // Shorter timeout than the library default: this runs inside the punch
     // handler's deadline, next to the email.
-    return await bitrix.sendAndLog({ SUPABASE_URL, H, kind, company, dialogId: t.dialog_id,
-                                     message, base: sender.base, timeoutMs: 3000 });
+    const out = await bitrix.sendAndLog({ SUPABASE_URL, H, kind, company, dialogId: t.dialog_id,
+                                          message, base: sender.base, timeoutMs: 3000 });
+    // Which hook carried it (own / colleague / any + whose enroll number):
+    // a colleague's hook from another portal is a classic cause of failures.
+    return out && typeof out === 'object' ? { ...out, via: `${sender.via}:${sender.enroll || '-'}` } : out;
   } catch (e) {
     console.error('[attendance] bitrix post threw', String(e && e.message || e));
     return { ok: false, reason: 'network', detail: String(e && e.message || e).slice(0, 200) };
