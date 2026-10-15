@@ -1,0 +1,9 @@
+[
+  {
+    "advisory": "GHSA-vfj7-8cjw-p6xm",
+    "dir": ".",
+    "package": "braces <= 3.0.3 (via tailwindcss 3.4.19 -> chokidar / micromatch)",
+    "reason": "No fixed braces release exists; the only fix is the Tailwind 4 major upgrade. Tailwind is a devDependency run by scripts/build-assets.js on our own config globs; it is not part of any deployed function or page, so the deeply-nested-pattern DoS is not reachable.",
+    "review_by": "2027-01-15"
+  }
+]

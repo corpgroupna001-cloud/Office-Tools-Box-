@@ -30,7 +30,9 @@ jobs:
       # check (references, pinned/vendored assets, vercel.json limits, migrations),
       # lint, typecheck, then npm test. Database tests fail if PGlite is missing.
       - run: npm run verify
-      - run: npm audit --audit-level=high
+      # High/critical advisories fail the build, except dated, reasoned entries in
+      # scripts/audit-allowlist.json (advisories with no fixed release).
+      - run: node scripts/audit.js --level high
 
   browser:
     name: Browser smoke tests and WebRTC calls
@@ -68,8 +70,7 @@ jobs:
         working-directory: desktop
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-      - run: npm audit --audit-level=high
-        working-directory: desktop
+      - run: node scripts/audit.js --level high --dir desktop
 
   android:
     name: Android build and unit tests
