@@ -58,8 +58,10 @@ function harness(options = {}) {
       if (name === '../lib/bitrix') return {
         isConfigured: () => true,
         senderFor: ({ enroll }) => ({ base: 'test-hook', enroll }),
+        sendersFor: ({ enroll }) => options.senders || [{ base: 'test-hook', via: 'own', enroll }], isSenderRefusal: require('../lib/bitrix').isSenderRefusal,
         async sendAndLog(payload) {
           posts.push(payload);
+          if (typeof options.bitrixResult === 'function') return options.bitrixResult(payload);
           return options.bitrixResult || { ok: true, result: posts.length };
         },
         async logAttempt(payload) { audit.push(payload); },
@@ -383,4 +385,33 @@ test('a WFH selfie whose email failed is queued too', async () => {
   h.at('2026-09-08T09:31:00+05:30');
   assert.equal((await h.selfie('LOGIN')).statusCode, 200);
   assert.deepEqual(queue.map(j => [j.idempotency_key, j.status]), [[`attendance:${h.rows[0].id}:email`, 'failed']]);
+});
+
+const SENDERS = [{ base: 'own-hook', via: 'own', enroll: '00000008' },
+                 { base: 'mate-hook', via: 'colleague', enroll: '00000002' },
+                 { base: 'other-hook', via: 'any', enroll: '00000101' }];
+
+test('a hook Bitrix refuses (not in the group, revoked) hands the line to the next sender', async () => {
+  const h = harness({ senders: SENDERS,
+    bitrixResult: p => p.base === 'own-hook' ? { ok: false, reason: 'ACCESS_ERROR', detail: 'You do not have access to this chat' } : { ok: true, result: 1 } });
+  const res = await h.send(punches.slice(0, 1));
+  assert.equal(res.body.bitrix_sent, 1);
+  assert.equal(res.body.bitrix_failed, 0);
+  assert.deepEqual(h.posts.map(p => p.base), ['own-hook', 'mate-hook']);
+});
+
+test('every sender refused: at most three tries, then reported as failed', async () => {
+  const h = harness({ senders: [...SENDERS, { base: 'fourth', via: 'any', enroll: '9' }],
+    bitrixResult: () => ({ ok: false, reason: 'invalid_token', detail: 'Unable to authorize user' }) });
+  const res = await h.send(punches.slice(0, 1));
+  assert.equal(res.body.bitrix_failed, 1);
+  assert.deepEqual(h.posts.map(p => p.base), ['own-hook', 'mate-hook', 'other-hook']);
+});
+
+test('a timeout or a bad group is not retried through other hooks', async () => {
+  for (const out of [{ ok: false, reason: 'timeout', detail: 'aborted' }, { ok: false, reason: 'bad_dialog', detail: 'x' }]) {
+    const h = harness({ senders: SENDERS, bitrixResult: () => out });
+    await h.send(punches.slice(0, 1));
+    assert.deepEqual(h.posts.map(p => p.base), ['own-hook'], out.reason);
+  }
 });
