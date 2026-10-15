@@ -82,6 +82,7 @@ async function signedInEmployee(res, token, SUPABASE_URL, SERVICE_KEY) {
 const EMAIL_DEADLINE_MS = 7500;
 const EMAIL_CONCURRENCY = 4;
 const BITRIX_CONCURRENCY = 4;
+const MAX_BITRIX_SENDERS = 3;   // own hook + up to two others when Bitrix refuses a hook
 const MAX_RECORDS = 500;
 
 // BACKFILL GUARD: the vendor's "Manual Data Export" can replay any date range.
@@ -1234,6 +1235,7 @@ async function postPunchToGroup(args) {
     const t = bx && bx.targets ? bx.targets.get(company) : null;
     const line = `[bitrix] ${out && out.ok ? (out.skipped ? 'skipped' : 'sent') : 'failed'} kind=${kind} company=${company || '-'}`
       + ` enroll=${enroll || '-'} dialog=${(t && t.dialog_id) || '-'} via=${(out && out.via) || '-'}`
+      + (out && out.tried ? ` tried=${out.tried}` : '')
       + (out && (!out.ok || out.skipped) ? ` reason=${out.reason || '-'} detail=${bitrix.redact(String(out.detail || '')).slice(0, 200)}` : '')
       + (!bx || !bx.configured ? ' (no BITRIX_HOOK_* / BITRIX_WEBHOOK_URL visible to this deployment)' : '')
       + (bx && bx.configured && !t ? ` (no bitrix_targets row for this company; ${bx.targets.size} rows loaded)` : '');
@@ -1267,24 +1269,38 @@ async function postPunchToGroupInner({ SUPABASE_URL, H, bx, company, enroll, mes
     await bitrix.logAttempt({ SUPABASE_URL, H, kind, company, dialogId: t.dialog_id, message, out });
     return out;
   }
-  const sender = bitrix.senderFor({ enroll, companyEnrolls: bx.enrollsByCompany.get(company) || [] });
-  if (!sender.base) {
+  const senders = bitrix.sendersFor({ enroll, companyEnrolls: bx.enrollsByCompany.get(company) || [] })
+    .slice(0, MAX_BITRIX_SENDERS);
+  if (!senders.length) {
     const out = { ok: false, reason: 'not_configured', detail: 'No BITRIX_HOOK_<enroll> set for anyone.' };
     await bitrix.logAttempt({ SUPABASE_URL, H, kind, company, dialogId: t.dialog_id, message, out });
     return out;
   }
-  try {
-    // Shorter timeout than the library default: this runs inside the punch
-    // handler's deadline, next to the email.
-    const out = await bitrix.sendAndLog({ SUPABASE_URL, H, kind, company, dialogId: t.dialog_id,
-                                          message, base: sender.base, timeoutMs: 3000 });
-    // Which hook carried it (own / colleague / any + whose enroll number):
-    // a colleague's hook from another portal is a classic cause of failures.
-    return out && typeof out === 'object' ? { ...out, via: `${sender.via}:${sender.enroll || '-'}` } : out;
-  } catch (e) {
-    console.error('[attendance] bitrix post threw', String(e && e.message || e));
-    return { ok: false, reason: 'network', detail: String(e && e.message || e).slice(0, 200) };
+  // The person's own hook first. If Bitrix refuses THAT HOOK - they are not
+  // in the group chat, the hook was revoked / expired / lacks the im scope,
+  // or it is on another portal - the line goes out through the next one, so
+  // a single bad webhook no longer silences the group for that person.
+  // Each attempt is written to bitrix_log; `via` / `tried` say who carried it.
+  let out = null;
+  const tried = [];
+  for (const sender of senders) {
+    const via = `${sender.via}:${sender.enroll || '-'}`;
+    try {
+      // Shorter timeout than the library default: this runs inside the punch
+      // handler's deadline, next to the email.
+      out = await bitrix.sendAndLog({ SUPABASE_URL, H, kind, company, dialogId: t.dialog_id,
+                                      message, base: sender.base, timeoutMs: 3000 });
+    } catch (e) {
+      console.error('[attendance] bitrix post threw', String(e && e.message || e));
+      out = { ok: false, reason: 'network', detail: String(e && e.message || e).slice(0, 200) };
+    }
+    out = out && typeof out === 'object' ? { ...out, via } : { ok: false, reason: 'error', via };
+    if (out.ok) break;
+    tried.push(`${via}=${out.reason || 'error'}`);
+    if (!bitrix.isSenderRefusal(out)) break;      // the group or Bitrix itself is the problem: another hook will not help
   }
+  if (tried.length > 1 || (out.ok && tried.length)) out.tried = tried.join(' ');
+  return out;
 }
 
 /**

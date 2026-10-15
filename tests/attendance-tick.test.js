@@ -58,6 +58,7 @@ function harness({ now, logs, profiles, bitrixResult, shifts = [DAY_SHIFT], targ
       if (name === '../lib/mailer') return { async sendMail(m) { mails.push(m); return typeof mailResult === 'function' ? mailResult(m) : (mailResult || { ok: true }); } };
       if (name === '../lib/bitrix') return {
         isConfigured: () => true, senderFor: ({ enroll }) => ({ base: 'hook', enroll }),
+        sendersFor: ({ enroll }) => [{ base: 'hook', via: 'own', enroll }], isSenderRefusal: require('../lib/bitrix').isSenderRefusal,
         async sendAndLog(payload) {
           posts.push(payload);
           if (bitrixDelay) await new Promise(r => setTimeout(r, bitrixDelay));
