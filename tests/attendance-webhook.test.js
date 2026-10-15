@@ -44,6 +44,7 @@ function harness(options = {}) {
       BIOMETRIC_API_KEY: 'test-device' } },
     require(name) {
       if (name === '../lib/request-auth') return require('../lib/request-auth');
+      if (name === '../lib/query') return require('../lib/query');
       if (name === '../lib/attendance-live') return require('../lib/attendance-live');
       if (name === '../lib/delivery') return require('../lib/delivery');
       if (name === '../company-config') return require('../company-config');

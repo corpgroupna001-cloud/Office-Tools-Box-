@@ -28,14 +28,10 @@
 'use strict';
 const webpush = require('web-push');
 const { iceServersFor } = require('../lib/ice-servers');
+const { queryParam } = require('../lib/query');   // reads req.url, never Vercel's url.parse()-backed req.query
 const P = require('../lib/comms-push');
 const { verifyToken, accessError } = require('../lib/request-auth');
 const { loadPrefs, pushDecision } = require('../lib/notify-prefs');
-
-function queryParam(req, name) {
-  if (req.query && req.query[name] != null) return String(req.query[name]);
-  try { return new URL(req.url || '/', 'http://localhost').searchParams.get(name) || ''; } catch { return ''; }
-}
 
 function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;

@@ -48,6 +48,7 @@ const { resolveShift } = require('../company-config');
 const crypto = require('crypto');
 const { sendMail } = require('../lib/mailer');
 const bitrix = require('../lib/bitrix');
+const { queryParam } = require('../lib/query');
 const {
   parseDeviceDateTime, istParts, normalizeDirection,
   matchProfileByName, buildPunchEmail,
@@ -248,7 +249,7 @@ module.exports = async function handler(req, res) {
   const supplied = bearer
     || String(req.headers['x-api-key'] || '')
     || String(req.headers['x-worksuite-attendance-key'] || '')
-    || String(req.query?.key || '');
+    || queryParam(req, 'key');
 
   if (!API_KEY) return res.status(500).json({ error: 'BIOMETRIC_API_KEY not configured on server.' });
 
@@ -258,7 +259,7 @@ module.exports = async function handler(req, res) {
   // old instructions did, and a job left with the placeholder 401'd forever.
   // CRON_SECRET and the device key still work. Nothing else accepts these.
   const CRON_SECRET = process.env.CRON_SECRET || '';
-  const JOB = String(req.query && req.query.job || '');
+  const JOB = queryParam(req, 'job');
   const isJob = JOB === 'shift_switch' || JOB === 'attendance_tick';
   const isDevice = safeEqual(supplied, API_KEY);
   const isJobCall = isJob && !!supplied && !isDevice && (
@@ -306,7 +307,7 @@ module.exports = async function handler(req, res) {
     // scheduler that never calls look alive.
     const problems = [out.shift_switch && out.shift_switch.error, out.attendance && out.attendance.error]
       .filter(Boolean).concat(((out.attendance && out.attendance.notes) || []).filter(n => /supabase-|failed/.test(n)));
-    if (String(req.query.manual || '') !== '1') {
+    if (queryParam(req, 'manual') !== '1') {
       await recordHeartbeat({ SUPABASE_URL, SERVICE_KEY, job: JOB, ok: !problems.length, out });
     }
     return res.status(200).json({ ok: true, ...out });
