@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.browser.json",
     "verify": "npm run check && npm run lint && npm run typecheck && npm test",
-    "test:all": "npm run verify && npm run smoke:ui && npm run test:calls"
+    "test:all": "npm run verify && npm run smoke:ui && npm run test:calls",
+    "audit:deps": "node scripts/audit.js --level high && node scripts/audit.js --level high --dir desktop"
   },
   "dependencies": {
     "nodemailer": "^10.0.13",
