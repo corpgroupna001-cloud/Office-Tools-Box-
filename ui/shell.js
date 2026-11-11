@@ -119,6 +119,7 @@
     // WorkSuite's own wallpapers (ui/b24.css draws them). "live" ones also
     // animate on a canvas (ui/live-wallpaper.js, loaded only when chosen).
     var WALLPAPERS = [
+        { key: 'prism',    title: 'Prism' },
         { key: 'northern', title: 'Northern lights', live: true },
         { key: 'starfall', title: 'Starfall', live: true },
         { key: 'ocean',    title: 'Ocean', live: true },
@@ -217,7 +218,11 @@
                 if (row.key === 'menu' && row.value && JSON.stringify(normaliseMenu(row.value)) !== JSON.stringify(state.menu)) {
                     state.menu = normaliseMenu(row.value); store(MENU_KEY, state.menu); renderMenu();
                 }
-                if (row.key === 'theme' && row.value && row.value.wallpaper && row.value.wallpaper !== currentWallpaper()) applyWallpaper(row.value.wallpaper, false);
+                if (row.key === 'theme' && row.value && row.value.wallpaper) {
+                    var synced = fromOldDefault(row.value.wallpaper, row.value.v === 2 ? '2' : null);
+                    if (row.value.v === 2) store(WALL_PICKED_KEY, '2');
+                    if (synced !== currentWallpaper()) applyWallpaper(synced, false);
+                }
                 // The brightness follows the person to every browser, like the wallpaper.
                 if (row.key === 'theme' && row.value && (row.value.mode === 'light' || row.value.mode === 'dark') && window.WSTheme && row.value.mode !== WSTheme.current()) WSTheme.set(row.value.mode);
             });
@@ -225,9 +230,14 @@
     }
 
     // ----- wallpaper -----
+    // 'azure' was the default before the glass redesign, and was stored even
+    // when nobody chose it. Until someone picks a wallpaper themselves
+    // (WALL_PICKED_KEY), a stored or synced 'azure' means the new default.
+    var WALL_PICKED_KEY = 'ws-wall-v';
+    function fromOldDefault(w, picked) { return w === 'azure' && picked !== '2' ? 'prism' : w; }
     function currentWallpaper() {
-        var w = load(WALL_KEY);
-        return WALLPAPERS.some(function (x) { return x.key === w; }) ? w : 'azure';
+        var w = fromOldDefault(load(WALL_KEY), load(WALL_PICKED_KEY));
+        return WALLPAPERS.some(function (x) { return x.key === w; }) ? w : 'prism';
     }
     var liveLoading = null;
     function startLive(key) {
@@ -244,7 +254,10 @@
         document.documentElement.setAttribute('data-wallpaper', key);
         store(WALL_KEY, key);
         if (document.body) startLive(key);
-        if (persist !== false) saveSetting('theme', { wallpaper: key, mode: window.WSTheme ? WSTheme.current() : 'light' });
+        if (persist !== false) {
+            store(WALL_PICKED_KEY, '2');
+            saveSetting('theme', { wallpaper: key, mode: window.WSTheme ? WSTheme.current() : 'light', v: 2 });
+        }
     }
 
     // ----- markup -----
@@ -314,6 +327,13 @@
             css.rel = 'stylesheet';
             css.href = '/ui/b24.css';
             document.head.appendChild(css);
+        }
+        // ui/glass.css is the visual layer and has to come after everything else.
+        if (!document.querySelector('link[href$="/ui/glass.css"]')) {
+            var glass = document.createElement('link');
+            glass.rel = 'stylesheet';
+            glass.href = '/ui/glass.css';
+            document.head.appendChild(glass);
         }
         applyWallpaper(currentWallpaper(), false);
         state.menu = normaliseMenu(load(MENU_KEY, true));
@@ -917,7 +937,7 @@
             if (m && window.WSTheme) {
                 WSTheme.set(m.dataset.mode);
                 bd.querySelectorAll('[data-mode]').forEach(function (b) { b.classList.toggle('primary', b === m); });
-                saveSetting('theme', { wallpaper: currentWallpaper(), mode: m.dataset.mode });
+                saveSetting('theme', { wallpaper: currentWallpaper(), mode: m.dataset.mode, v: load(WALL_PICKED_KEY) === '2' ? 2 : 1 });
             }
         });
         (bd.querySelector('.ws-theme-card.on') || bd.querySelector('.ws-theme-card')).focus();
