@@ -14,7 +14,8 @@
  * the toggle and remembered per browser.
  *
  * The CSS agrees: :root carries the light tokens and only
- * :root[data-theme="dark"] switches them. There is deliberately no
+ * :root[data-theme="dark"] switches them - in design-system.css and in
+ * ui/glass.css, the glass layer that every workspace page loads last. There is deliberately no
  * prefers-color-scheme rule in either file. If one of them ever starts
  * following the OS, the other has to change in the same commit, or the
  * toggle's icon and the theme actually on screen will disagree.
@@ -43,7 +44,12 @@
     // Runs at parse time, before the body exists. This is the anti-flash step.
     apply(read());
     // The workspace wallpaper (ui/b24.css, chosen in the shell's Themes panel), for the same reason.
-    try { var wall = localStorage.getItem('ws-wallpaper'); if (wall && /^[a-z]+$/.test(wall)) root.setAttribute('data-wallpaper', wall); }
+    // 'azure' nobody picked is the pre-glass default: show Prism instead (ui/shell.js fromOldDefault).
+    try {
+        var wall = localStorage.getItem('ws-wallpaper');
+        if (wall === 'azure' && localStorage.getItem('ws-wall-v') !== '2') wall = 'prism';
+        if (wall && /^[a-z]+$/.test(wall)) root.setAttribute('data-wallpaper', wall);
+    }
     catch (e) { /* the default wallpaper is fine */ }
 
     // "No stored choice" means light. Keep this in step with the CSS - see

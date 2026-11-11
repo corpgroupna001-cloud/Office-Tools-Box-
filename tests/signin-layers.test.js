@@ -7,7 +7,7 @@ const path = require('node:path');
 const read = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
 
 test('nothing raises #auth-modal above the sign-in dialogs', () => {
-  for (const f of ['ui/b24.css', 'ui/corporate.css', 'ui/app.css', 'index.html']) {
+  for (const f of ['ui/b24.css', 'ui/corporate.css', 'ui/app.css', 'ui/glass.css', 'index.html']) {
     const css = read(f);
     for (const m of css.matchAll(/#auth-modal[^{]*\{([^}]*)\}/g)) {
       const z = /z-index:\s*(\d+)/.exec(m[1]);

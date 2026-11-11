@@ -9,20 +9,16 @@
 /* ============================================================
    TOKENS
 
-   Light is the default and dark is the explicit alternative -
-   the reverse of how this file started. That is not a coincidence
-   of ordering: an admin console is looked at in an office, next to
-   spreadsheets and email, and the surrounding software is white.
+   The base palette every page starts from. Light is the default
+   and dark is the explicit alternative (theme.js).
 
-   The palette is deliberately dull. Colour here means something -
-   green is present, amber is late, red is absent, blue is the one
-   thing you can click. Nothing is coloured to be attractive,
-   because every decorative colour is one an employee has to learn
-   to ignore before they can read a status.
-
-   Radii are small (6-16px, previously 10-32px) and shadows are
-   nearly absent. Large radii and deep shadows read as consumer
-   app; hairline borders and tight corners read as a tool.
+   These are the plain, opaque fallbacks. Inside the workspace,
+   ui/glass.css (loaded last) retunes them for the glass design:
+   a luminous wallpaper, frosted translucent panes, larger radii,
+   layered depth and an indigo-violet accent. Colour still carries
+   meaning there - green present, amber late, red absent - and the
+   accent is the thing you can click; the glass is the room the
+   data sits in, never decoration competing with a status.
    ============================================================ */
 :root {
     color-scheme: light;
@@ -47,8 +43,8 @@
     --ws-warning:     #b45309;
     --ws-danger:      #dc2626;
 
-    /* Kept as tokens because pages reference them, but flattened to
-       solids. A gradient button competes with the data next to it. */
+    /* Solid fallbacks; ui/glass.css gives the primary one its
+       indigo-violet gradient inside the workspace. */
     --ws-grad-primary:  #2563eb;
     --ws-grad-cool:     #0891b2;
     --ws-grad-warm:     #ea580c;
@@ -82,8 +78,8 @@
     --ws-danger-bg:    #fef2f2;
     --ws-info-bg:      #eff6ff;
 
-    /* Page glow is gone in both themes. It was the single biggest
-       source of "looks like a side project". */
+    /* Unused here: the light behind the workspace comes from the
+       wallpaper (ui/b24.css, ui/glass.css), not from page glows. */
     --ws-bg-glow-1:    transparent;
     --ws-bg-glow-2:    transparent;
 
@@ -96,8 +92,8 @@
 
    Not an inversion. Pure white text on pure black vibrates, so
    text tops out around #e8edf4 and surfaces lift off the ground
-   rather than the ground darkening around them - the same
-   relationship the light theme has, viewed from the other side.
+   rather than the ground darkening around them. ui/glass.css
+   turns these surfaces into dark glass over a deep wallpaper.
 
    Applied only by explicit choice. theme.js writes data-theme on
    <html> before first paint, so there is no flash. There is no
