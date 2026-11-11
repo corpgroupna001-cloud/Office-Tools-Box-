@@ -50,7 +50,7 @@ const { sendMail } = require('../lib/mailer');
 const bitrix = require('../lib/bitrix');
 const { queryParam } = require('../lib/query');
 const {
-  parseDeviceDateTime, istParts, normalizeDirection,
+  parseDeviceDateTime, istParts, normalizeDirection, canonicalCode,
   matchProfileByName, buildPunchEmail,
   evaluateShift, timeToMinutes,
   istToday, monthDates, buildMonth, classifyDay,
@@ -80,6 +80,28 @@ async function signedInEmployee(res, token, SUPABASE_URL, SERVICE_KEY) {
 // leave unsent emails as 'pending'. Bitrix has its own independent queue;
 // a slow SMTP send must never use up the time available to post a punch.
 const EMAIL_DEADLINE_MS = 7500;
+// When the email and the group line go out after the answer (see
+// backgroundRunner), they may take this long: under the function's 60 s
+// maxDuration (vercel.json), with room for the queue writes.
+const BACKGROUND_DEADLINE_MS = 40000;
+
+/*
+ * Lets work carry on after the response, on Vercel. The Realtime cloud gives
+ * up on a request that takes too long ("The operation has timed out" in its
+ * Error Logs) and does not send that punch again. Waiting for SMTP and Bitrix
+ * before answering made every punch on a slow night time out. So the punch is
+ * stored, the cloud is answered, and the notifications follow.
+ *
+ * This is what @vercel/functions' waitUntil() does, without the dependency.
+ * Anywhere it is unavailable (the dev server, the tests) the result is null
+ * and the handler sends everything before answering, as it always did.
+ */
+function backgroundRunner() {
+  try {
+    const ctx = globalThis[Symbol.for('@vercel/request-context')]?.get?.();
+    return ctx && typeof ctx.waitUntil === 'function' ? p => ctx.waitUntil(p) : null;
+  } catch { return null; }
+}
 const EMAIL_CONCURRENCY = 4;
 const BITRIX_CONCURRENCY = 4;
 const MAX_BITRIX_SENDERS = 3;   // own hook + up to two others when Bitrix refuses a hook
@@ -389,6 +411,14 @@ module.exports = async function handler(req, res) {
     const byCode = new Map(
       profiles.filter(p => p.employee_code).map(p => [String(p.employee_code).trim(), p])
     );
+    // The same IDs without their leading zeros: the reader sends "00000008",
+    // a profile typed or imported by hand often says "8" (canonicalCode).
+    const byCanon = new Map();
+    for (const p of profiles) {
+      if (!p.employee_code) continue;
+      const c = canonicalCode(p.employee_code);
+      byCanon.set(c, byCanon.has(c) ? null : p);   // null: two people share it, match neither
+    }
 
     // ---- 2. Normalise every record, resolving who it belongs to ----
     const rows = [];
@@ -446,6 +476,37 @@ module.exports = async function handler(req, res) {
       // remember the code on that profile so it only ever happens once.
       let profile = byCode.get(employeeCode) || null;
       let matchReason = profile ? 'employee_code' : null;
+
+      // Same ID, written differently ("8" on the profile, "00000008" from the
+      // reader). Match it, then store the reader's form on the profile so the
+      // admin screens, the recompute and BITRIX_HOOK_<enroll> all agree with
+      // the punches from now on. Punches parked as unmapped under this code
+      // are adopted, as binding it in Admin -> Biometric would do.
+      if (!profile) {
+        const p = byCanon.get(canonicalCode(employeeCode)) || null;
+        if (p) {
+          profile = p;
+          matchReason = 'employee_code_format';
+          const was = p.employee_code;
+          byCode.set(employeeCode, p);   // the rest of this batch matches directly
+          const fix = await fetch(
+            `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(p.id)}`,
+            { method: 'PATCH', headers: { ...H, Prefer: 'return=minimal' }, body: JSON.stringify({ employee_code: employeeCode }) }
+          ).catch(() => null);
+          if (fix && fix.ok) {
+            p.employee_code = employeeCode;
+            autoLinked.push({ employee_code: employeeCode, name: p.full_name, was });
+            await fetch(
+              `${SUPABASE_URL}/rest/v1/attendance_logs?employee_code=eq.${encodeURIComponent(employeeCode)}&user_id=is.null`,
+              { method: 'PATCH', headers: { ...H, Prefer: 'return=minimal' },
+                body: JSON.stringify({ user_id: p.id, email_status: 'skipped',
+                  email_error: 'Matched after the fact (Biometric ID written differently) - historical punch, not emailed.' }) }
+            ).catch(() => {});
+          } else {
+            console.error('[attendance] could not store the reader\'s form of a Biometric ID', p.id, was, '->', employeeCode);
+          }
+        }
+      }
 
       if (!profile && employeeName) {
         const m = matchProfileByName(employeeName, profiles);
@@ -731,88 +792,111 @@ module.exports = async function handler(req, res) {
     // could not recover it because the punch was already stored.
     let emailed = 0, failed = 0, deferred = 0;
     let bitrixSent = 0, bitrixFailed = 0, bitrixSkipped = 0, bitrixDeferred = 0;
-    const deadlineAt = startedAt + EMAIL_DEADLINE_MS;
+    const background = backgroundRunner();
+    const deadlineAt = startedAt + (background ? BACKGROUND_DEADLINE_MS : EMAIL_DEADLINE_MS);
 
-    // Group mapping and, for people with no hook of their own yet, the
-    // enroll numbers of colleagues whose hook can carry their line instead.
-    const bx = await loadBitrixContext({ SUPABASE_URL, H, profiles, byCode });
+    const notifyAll = async () => {
+      // Group mapping and, for people with no hook of their own yet, the
+      // enroll numbers of colleagues whose hook can carry their line instead.
+      const bx = await loadBitrixContext({ SUPABASE_URL, H, profiles, byCode });
 
-    // Repeat taps are marked as not announced in the Bitrix column too.
-    await Promise.all(inserted.filter(row => { const m = metaByKey.get(keyOf(row)); return m && m.duplicate; })
-      .map(row => fetch(`${SUPABASE_URL}/rest/v1/attendance_logs?id=eq.${row.id}`, {
-        method: 'PATCH', headers: { ...H, Prefer: 'return=minimal' },
-        body: JSON.stringify({ bitrix_status: 'skipped', bitrix_error: 'repeat tap: not announced' }),
-      }).catch(() => {})));
+      // Repeat taps are marked as not announced in the Bitrix column too.
+      await Promise.all(inserted.filter(row => { const m = metaByKey.get(keyOf(row)); return m && m.duplicate; })
+        .map(row => fetch(`${SUPABASE_URL}/rest/v1/attendance_logs?id=eq.${row.id}`, {
+          method: 'PATCH', headers: { ...H, Prefer: 'return=minimal' },
+          body: JSON.stringify({ bitrix_status: 'skipped', bitrix_error: 'repeat tap: not announced' }),
+        }).catch(() => {})));
 
-    const notifications = toNotify.map(({ row, meta }) => {
-      const p = meta.profile;
-      const shift = dayShiftOf(p, row.log_date, meta.dayStartedAt || meta.when);
+      const notifications = toNotify.map(({ row, meta }) => {
+        const p = meta.profile;
+        const shift = dayShiftOf(p, row.log_date, meta.dayStartedAt || meta.when);
 
-      // Only annotate a boundary we can actually stand behind:
-      //  - lateness, only on the day's FIRST punch (a 2pm return from lunch
-      //    is not "4 hours late for a 9:30 shift");
-      //  - leaving early, only on a Logout, so a lunch-break exit isn't
-      //    reported as going home early.
-      const shiftEval = shift ? evaluateShift({
-        shift,
-        firstIn:  (row.direction === 'IN'  && meta.isFirstOfDay)       ? meta.when : null,
-        lastOut:  (row.direction === 'OUT' && row.event_type === 'LOGOUT') ? meta.when : null,
-        date: meta.when,
-      }) : null;
+        // Only annotate a boundary we can actually stand behind:
+        //  - lateness, only on the day's FIRST punch (a 2pm return from lunch
+        //    is not "4 hours late for a 9:30 shift");
+        //  - leaving early, only on a Logout, so a lunch-break exit isn't
+        //    reported as going home early.
+        const shiftEval = shift ? evaluateShift({
+          shift,
+          firstIn:  (row.direction === 'IN'  && meta.isFirstOfDay)       ? meta.when : null,
+          lastOut:  (row.direction === 'OUT' && row.event_type === 'LOGOUT') ? meta.when : null,
+          date: meta.when,
+        }) : null;
 
-      return { row, meta, shiftEval };
-    });
-
-    const postBitrix = async ({ row, meta, shiftEval }, skipReason) => {
-      const p = meta.profile;
-      const company = companyFor(p, meta.when);
-      const message = buildPunchChatLine({
-        fullName: p.full_name, eventType: row.event_type, direction: row.direction,
-        when: meta.when, shift: shiftEval, source: row.source,
-        note: [meta.missingLogin ? 'login not punched' : null, meta.syncedLate ? 'synced late' : null].filter(Boolean).join(' · ') || null,
+        return { row, meta, shiftEval };
       });
-      const out = await postPunchToGroup({ SUPABASE_URL, H, bx, company, enroll: row.employee_code, message, skipReason });
-      if (out.reason === 'no_group') bitrixSkipped++;
-      else if (out.reason === 'deadline') bitrixDeferred++;
-      else if (out.ok) bitrixSent++;
-      else bitrixFailed++;
-      await markBitrix({ SUPABASE_URL, H, id: row.id, out });
-      await queuePunchDelivery({ SUPABASE_URL, SERVICE_KEY, row, channel: 'bitrix', company, out,
-        payload: { company, enroll: row.employee_code, message, kind: 'punch' } });
+
+      const postBitrix = async ({ row, meta, shiftEval }, skipReason) => {
+        const p = meta.profile;
+        const company = companyFor(p, meta.when);
+        const message = buildPunchChatLine({
+          fullName: p.full_name, eventType: row.event_type, direction: row.direction,
+          when: meta.when, shift: shiftEval, source: row.source,
+          note: [meta.missingLogin ? 'login not punched' : null, meta.syncedLate ? 'synced late' : null].filter(Boolean).join(' · ') || null,
+        });
+        const out = await postPunchToGroup({ SUPABASE_URL, H, bx, company, enroll: row.employee_code, message, skipReason });
+        if (out.reason === 'no_group') bitrixSkipped++;
+        else if (out.reason === 'deadline') bitrixDeferred++;
+        else if (out.ok) bitrixSent++;
+        else bitrixFailed++;
+        await markBitrix({ SUPABASE_URL, H, id: row.id, out });
+        await queuePunchDelivery({ SUPABASE_URL, SERVICE_KEY, row, channel: 'bitrix', company, out,
+          payload: { company, enroll: row.employee_code, message, kind: 'punch' } });
+      };
+
+      await Promise.all([
+        runBounded(notifications, BITRIX_CONCURRENCY, deadlineAt,
+          item => postBitrix(item),
+          item => postBitrix(item, 'deadline')),
+        runBounded(notifications, EMAIL_CONCURRENCY, deadlineAt,
+          async ({ row, meta, shiftEval }) => {
+            const p = meta.profile;
+            const mail = punchMail(row, meta, shiftEval);
+            const result = await sendMail(mail);
+            if (result.ok) emailed++; else failed++;
+            await queuePunchDelivery({ SUPABASE_URL, SERVICE_KEY, row, channel: 'email', company: p.company, out: result, payload: mail });
+
+            await fetch(`${SUPABASE_URL}/rest/v1/attendance_logs?id=eq.${row.id}`, {
+              method: 'PATCH',
+              headers: { ...H, Prefer: 'return=minimal' },
+              body: JSON.stringify({
+                email_status: result.ok ? 'sent' : 'failed',
+                emailed_at:   result.ok ? new Date().toISOString() : null,
+                email_error:  result.ok ? null : `${result.reason}: ${result.detail}`.slice(0, 400),
+              }),
+            }).catch(() => {});
+          },
+          // Not tried in time: left 'pending', and queued so the attendance job sends it (or resend from the admin tab).
+          async ({ row, meta, shiftEval }) => {
+            deferred++;
+            await queuePunchDelivery({ SUPABASE_URL, SERVICE_KEY, row, channel: 'email', company: meta.profile.company, out: null, payload: punchMail(row, meta, shiftEval) });
+          }
+        ),
+      ]);
     };
 
-    await Promise.all([
-      runBounded(notifications, BITRIX_CONCURRENCY, deadlineAt,
-        item => postBitrix(item),
-        item => postBitrix(item, 'deadline')),
-      runBounded(notifications, EMAIL_CONCURRENCY, deadlineAt,
-        async ({ row, meta, shiftEval }) => {
-          const p = meta.profile;
-          const mail = punchMail(row, meta, shiftEval);
-          const result = await sendMail(mail);
-          if (result.ok) emailed++; else failed++;
-          await queuePunchDelivery({ SUPABASE_URL, SERVICE_KEY, row, channel: 'email', company: p.company, out: result, payload: mail });
-
-          await fetch(`${SUPABASE_URL}/rest/v1/attendance_logs?id=eq.${row.id}`, {
-            method: 'PATCH',
-            headers: { ...H, Prefer: 'return=minimal' },
-            body: JSON.stringify({
-              email_status: result.ok ? 'sent' : 'failed',
-              emailed_at:   result.ok ? new Date().toISOString() : null,
-              email_error:  result.ok ? null : `${result.reason}: ${result.detail}`.slice(0, 400),
-            }),
-          }).catch(() => {});
-        },
-        // Not tried in time: left 'pending', and queued so the attendance job sends it (or resend from the admin tab).
-        async ({ row, meta, shiftEval }) => {
-          deferred++;
-          await queuePunchDelivery({ SUPABASE_URL, SERVICE_KEY, row, channel: 'email', company: meta.profile.company, out: null, payload: punchMail(row, meta, shiftEval) });
-        }
-      ),
-    ]);
+    const stored = {
+      success: true,
+      received: records.length,
+      stored: inserted.length,
+      duplicates,
+      unmapped: inserted.filter(r => r.email_status === 'unmapped').length,
+      backfill_skipped: inserted.filter(r => r.email_status === 'skipped').length,
+      relabelled,
+      auto_linked: autoLinked,
+      rejected,
+    };
 
     // Always 200 once the punches are safely stored: the vendor logs a failure
-    // for any non-2xx, and a mail problem is ours to retry, not theirs.
+    // for any non-2xx, and a mail problem is ours to retry, not theirs. On
+    // Vercel the answer goes now and the notifications follow (backgroundRunner).
+    if (background && toNotify.length) {
+      background(notifyAll().then(
+        () => console.log(`[attendance] notified in background: emailed=${emailed} failed=${failed} deferred=${deferred} bitrix_sent=${bitrixSent} bitrix_failed=${bitrixFailed} ms=${Date.now() - startedAt}`),
+        e => console.error('[attendance] background notify threw', String(e && e.message || e))));
+      return res.status(200).json({ ...stored, notifying: toNotify.length, ms: Date.now() - startedAt });
+    }
+    await notifyAll();
     return res.status(200).json({
       success: true,
       received: records.length,

@@ -272,3 +272,13 @@ test('a night worker on a day shift: the arrival reads as a Login once the next 
   const day = A.classifyDay({ date: '2026-09-14', shift: GENERAL, punches: A.assignDays(['Mon 18:25', 'Mon 22:00', 'Mon 22:30'].map(t => punch(t)), opts), now: at('Tue 12:00') });
   assert.equal(day.firstIn, at('Mon 18:25'));
 });
+
+test('Biometric IDs compare without leading zeros, and only numeric ones', () => {
+  const { canonicalCode } = require('../lib/attendance');
+  assert.equal(canonicalCode('00000008'), '8');
+  assert.equal(canonicalCode(' 8 '), '8');
+  assert.equal(canonicalCode(8), '8');
+  assert.equal(canonicalCode('0000'), '0');
+  assert.notEqual(canonicalCode('80'), canonicalCode('8'));
+  assert.equal(canonicalCode('cg-007'), 'CG-007', 'non-numeric: trimmed and case-insensitive, zeros kept');
+});
