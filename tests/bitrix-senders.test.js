@@ -47,3 +47,16 @@ test('refusals about the webhook are retried elsewhere; outages and bad groups a
   }
   assert.equal(bitrix.isSenderRefusal({ ok: true }), false);
 });
+
+test('a hook named without the leading zeros serves the padded reader ID, and the reverse', () => {
+  withEnv({ BITRIX_HOOK_8: hook(8) }, () => {
+    assert.equal(bitrix.senderFor({ enroll: '00000008' }).via, 'own');
+    assert.equal(bitrix.sendersFor({ enroll: '00000008' })[0].base, hook(8));
+  });
+  withEnv({ BITRIX_HOOK_00000008: hook(8) }, () => {
+    assert.equal(bitrix.senderFor({ enroll: '8' }).via, 'own');
+  });
+  withEnv({ BITRIX_HOOK_80: hook(80) }, () => {
+    assert.notEqual(bitrix.senderFor({ enroll: '8' }).via, 'own', '80 is not 8');
+  });
+});

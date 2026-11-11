@@ -19,6 +19,8 @@ const punches = ['09:30', '11:00', '11:15', '13:00', '13:30', '18:30'].map(time 
 const matches = (row, url) => [...url.searchParams].every(([k, v]) => {
   if (['select', 'order', 'limit', 'offset', 'on_conflict'].includes(k)) return true;
   if (v === 'not.is.null') return row[k] != null;
+  if (v === 'is.null') return row[k] == null;
+  if (v.startsWith('neq.')) return String(row[k]) !== decodeURIComponent(v.slice(4));
   if (v.startsWith('eq.')) return String(row[k]) === decodeURIComponent(v.slice(3));
   if (v.startsWith('gte.')) return new Date(row[k]) >= new Date(v.slice(4));
   if (v.startsWith('lte.')) return new Date(row[k]) <= new Date(v.slice(4));
@@ -27,7 +29,7 @@ const matches = (row, url) => [...url.searchParams].every(([k, v]) => {
 
 function harness(options = {}) {
   let now = options.now ? Date.parse(options.now) : NOW;
-  const rows = [], emails = [], posts = [], audit = [], releases = [];
+  const rows = [...(options.rows || [])], emails = [], posts = [], audit = [], releases = [], profilePatches = [];
   const profile = { id: 'employee-1', full_name: 'Test Employee', email: 'employee@example.test',
     company: COMPANY, employee_code: '00000008', shift_id: 1, ...options.profile };
   const shifts = [{ id: 1, start_time: '09:30', end_time: '18:30',
@@ -36,6 +38,7 @@ function harness(options = {}) {
   const module = { exports: {} };
   const sandbox = {
     module, console, setTimeout, clearTimeout, AbortController, Map, Set,
+    ...(options.waitUntil ? { [Symbol.for('@vercel/request-context')]: { get: () => ({ waitUntil: options.waitUntil }) } } : {}),
     Date: class extends Date {
       constructor(...args) { super(...(args.length ? args : [now])); }
       static now() { return now; }
@@ -72,7 +75,15 @@ function harness(options = {}) {
       const url = new URL(rawUrl);
       const table = url.pathname.replace('/rest/v1/', '');
       const method = init.method || 'GET';
-      if (table === 'profiles') return response([profile]);
+      if (table === 'profiles') {
+        const all = [profile, ...(options.extraProfiles || [])];
+        if (method === 'PATCH') {
+          const patch = JSON.parse(init.body);
+          all.filter(p => matches(p, url)).forEach(p => { Object.assign(p, patch); profilePatches.push({ id: p.id, ...patch }); });
+          return response(null);
+        }
+        return response(all);
+      }
       if (table === 'shifts') return response(shifts);
       if (table === 'bitrix_targets') {
         return response(options.noGroup ? [] : [
@@ -106,7 +117,7 @@ function harness(options = {}) {
           if (options.holdMailStatus && patch.email_status) {
             await new Promise(resolve => releases.push(resolve));
           }
-          Object.assign(rows.find(row => String(row.id) === url.searchParams.get('id').slice(3)), patch);
+          rows.filter(row => matches(row, url)).forEach(row => Object.assign(row, patch));
           return response(null);
         }
       }
@@ -115,7 +126,7 @@ function harness(options = {}) {
   };
   vm.runInNewContext(source, sandbox, { filename: 'attendance-webhook.js' });
   return {
-    rows, emails, posts, audit, profile,
+    rows, emails, posts, audit, profile, profilePatches,
     release() { releases.splice(0).forEach(resolve => resolve()); },
     expire() { now += 8000; },
     at(iso) { now = Date.parse(iso); },
@@ -414,4 +425,75 @@ test('a timeout or a bad group is not retried through other hooks', async () => 
     await h.send(punches.slice(0, 1));
     assert.deepEqual(h.posts.map(p => p.base), ['own-hook'], out.reason);
   }
+});
+
+// The reader sends its enrolment number zero-padded; the profile often holds
+// it as typed or imported ("8"). Matched as text, every punch was unmapped:
+// stored, but no email and no Login in the group.
+test('a Biometric ID saved without its leading zeros still gets the email and the Bitrix Login', async () => {
+  const h = harness({ profile: { employee_code: '8' } });
+  const res = await h.send(punches.slice(0, 1));
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.unmapped, 0);
+  assert.equal(h.rows[0].user_id, 'employee-1');
+  assert.equal(h.rows[0].event_type, 'LOGIN');
+  assert.equal(h.emails.length, 1, 'the punch email went out');
+  assert.equal(h.posts.length, 1, 'the Login line went to the group');
+  assert.match(h.posts[0].message, /Login/);
+  // The profile now carries the reader's form, so everything keyed on it agrees.
+  assert.equal(h.profile.employee_code, '00000008');
+  assert.deepEqual(JSON.parse(JSON.stringify(res.body.auto_linked)), [{ employee_code: '00000008', name: 'Test Employee', was: '8' }]);
+});
+
+test('the reverse also matches: a padded profile, an unpadded reader', async () => {
+  const h = harness();   // profile 00000008
+  const res = await h.send([{ ...punches[0], employee_code: '8' }]);
+  assert.equal(res.body.unmapped, 0);
+  assert.equal(h.emails.length, 1);
+  assert.equal(h.posts.length, 1);
+});
+
+test('punches parked as unmapped under the padded ID are adopted once it matches', async () => {
+  const orphan = { id: 900, employee_code: '00000008', user_id: null, email_status: 'unmapped',
+    log_datetime: '2026-09-05T09:30:00.000Z', log_date: '2026-09-05', device_sn: 'TEST-READER' };
+  const h = harness({ profile: { employee_code: '8' }, rows: [orphan] });
+  await h.send(punches.slice(0, 1));
+  assert.equal(orphan.user_id, 'employee-1');
+  assert.equal(orphan.email_status, 'skipped', 'history is adopted, not emailed now');
+});
+
+test('two people whose IDs differ only by leading zeros match neither', async () => {
+  const h = harness({ profile: { employee_code: '8' },
+    extraProfiles: [{ id: 'employee-2', full_name: 'Other Person', email: 'o@example.test', company: COMPANY, employee_code: '008', shift_id: 1 }] });
+  const res = await h.send(punches.slice(0, 1));
+  assert.equal(res.body.unmapped, 1);
+  assert.equal(h.emails.length, 0);
+  assert.equal(h.profilePatches.length, 0, 'nobody is guessed at');
+});
+
+// The Realtime cloud gives up on a slow answer ("The operation has timed out")
+// and never resends. On Vercel the punch is stored and answered at once; the
+// email and the group line follow under waitUntil.
+test('on Vercel the cloud is answered once punches are stored, before slow SMTP finishes', async () => {
+  const later = [];
+  const h = harness({ holdMail: true, waitUntil: p => later.push(p) });
+  const res = await h.send(punches.slice(0, 1));
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.stored, 1);
+  assert.equal(res.body.notifying, 1);
+  assert.equal(later.length, 1, 'the notifications were handed to waitUntil');
+  await flush(); await flush();
+  assert.equal(h.posts.length, 1, 'the Login line still goes out');
+  h.release();
+  await later[0];
+  assert.equal(h.emails.length, 1);
+  assert.equal(h.rows[0].email_status, 'sent');
+});
+
+test('nothing to notify: no background work is started', async () => {
+  const later = [];
+  const h = harness({ waitUntil: p => later.push(p), profile: { employee_code: '999' } });
+  const res = await h.send(punches.slice(0, 1));
+  assert.equal(res.body.unmapped, 1);
+  assert.equal(later.length, 0);
 });
